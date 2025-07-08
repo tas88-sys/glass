@@ -48,11 +48,11 @@ async function createSTT({ apiKey, language = 'en', callbacks = {}, usePortkey =
           turn_detection: {
             type: 'server_vad',
             threshold: 0.5,
-            prefix_padding_ms: 50,
-            silence_duration_ms: 25,
+            prefix_padding_ms: 200,
+            silence_duration_ms: 100,
           },
           input_audio_noise_reduction: {
-            type: 'near_field'
+            type: 'far_field'
           }
         }
       };
