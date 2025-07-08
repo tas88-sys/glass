@@ -596,6 +596,42 @@ export class AskView extends LitElement {
             color: rgba(255, 255, 255, 0.5);
             font-size: 14px;
         }
+
+        /* ────────────────[ GLASS BYPASS ]─────────────── */
+        :host-context(body.has-glass) .ask-container,
+        :host-context(body.has-glass) .response-header,
+        :host-context(body.has-glass) .response-icon,
+        :host-context(body.has-glass) .copy-button,
+        :host-context(body.has-glass) .close-button,
+        :host-context(body.has-glass) .line-copy-button,
+        :host-context(body.has-glass) .text-input-container,
+        :host-context(body.has-glass) .response-container pre,
+        :host-context(body.has-glass) .response-container p code,
+        :host-context(body.has-glass) .response-container pre code {
+            background: transparent !important;
+            border: none !important;
+            outline: none !important;
+            box-shadow: none !important;
+            filter: none !important;
+            backdrop-filter: none !important;
+        }
+
+        :host-context(body.has-glass) .ask-container::before {
+            display: none !important;
+        }
+
+        :host-context(body.has-glass) .copy-button:hover,
+        :host-context(body.has-glass) .close-button:hover,
+        :host-context(body.has-glass) .line-copy-button,
+        :host-context(body.has-glass) .line-copy-button:hover,
+        :host-context(body.has-glass) .response-line:hover {
+            background: transparent !important;
+        }
+
+        :host-context(body.has-glass) .response-container::-webkit-scrollbar-track,
+        :host-context(body.has-glass) .response-container::-webkit-scrollbar-thumb {
+            background: transparent !important;
+        }
     `;
 
     constructor() {
@@ -627,6 +663,8 @@ export class AskView extends LitElement {
         this.handleEscKey = this.handleEscKey.bind(this);
         this.handleDocumentClick = this.handleDocumentClick.bind(this);
         this.handleWindowBlur = this.handleWindowBlur.bind(this);
+
+        this.handleScroll = this.handleScroll.bind(this);
 
         this.loadLibraries();
 
@@ -709,9 +747,10 @@ export class AskView extends LitElement {
 
     handleWindowBlur() {
         if (!this.currentResponse && !this.isLoading && !this.isStreaming) {
-            const askWindow = window.require('electron').remote.getCurrentWindow();
-            if (!askWindow.isFocused()) {
-                this.closeIfNoContent();
+            // If there's no active content, ask the main process to close this window.
+            if (window.require) {
+                const { ipcRenderer } = window.require('electron');
+                ipcRenderer.invoke('close-ask-window-if-empty');
             }
         }
     }
@@ -799,13 +838,10 @@ export class AskView extends LitElement {
             this.processAssistantQuestion(question);
         };
 
-
-
         if (window.require) {
             const { ipcRenderer } = window.require('electron');
             ipcRenderer.on('ask-global-send', this.handleGlobalSendRequest);
             ipcRenderer.on('toggle-text-input', this.handleToggleTextInput);
-            ipcRenderer.on('clear-ask-content', this.clearResponseContent);
             ipcRenderer.on('receive-question-from-assistant', this.handleQuestionFromAssistant);
             ipcRenderer.on('hide-text-input', () => {
                 console.log('📤 Hide text input signal received');
@@ -829,17 +865,15 @@ export class AskView extends LitElement {
             ipcRenderer.on('window-blur', this.handleWindowBlur);
             ipcRenderer.on('window-did-show', () => {
                 if (!this.currentResponse && !this.isLoading && !this.isStreaming) {
-                    setTimeout(() => {
-                        const textInput = this.shadowRoot?.getElementById('textInput');
-                        if (textInput) {
-                            textInput.focus();
-                        }
-                    }, 100);
+                    this.focusTextInput();
                 }
             });
 
             ipcRenderer.on('ask-response-chunk', this.handleStreamChunk);
             ipcRenderer.on('ask-response-stream-end', this.handleStreamEnd);
+
+            ipcRenderer.on('scroll-response-up', () => this.handleScroll('up'));
+            ipcRenderer.on('scroll-response-down', () => this.handleScroll('down'));
             console.log('✅ AskView: IPC 이벤트 리스너 등록 완료');
         }
     }
@@ -871,7 +905,6 @@ export class AskView extends LitElement {
             const { ipcRenderer } = window.require('electron');
             ipcRenderer.removeListener('ask-global-send', this.handleGlobalSendRequest);
             ipcRenderer.removeListener('toggle-text-input', this.handleToggleTextInput);
-            ipcRenderer.removeListener('clear-ask-content', this.clearResponseContent);
             ipcRenderer.removeListener('clear-ask-response', () => {});
             ipcRenderer.removeListener('hide-text-input', () => {});
             ipcRenderer.removeListener('window-hide-animation', () => {});
@@ -879,7 +912,22 @@ export class AskView extends LitElement {
 
             ipcRenderer.removeListener('ask-response-chunk', this.handleStreamChunk);
             ipcRenderer.removeListener('ask-response-stream-end', this.handleStreamEnd);
+
+            ipcRenderer.removeListener('scroll-response-up', () => this.handleScroll('up'));
+            ipcRenderer.removeListener('scroll-response-down', () => this.handleScroll('down'));
             console.log('✅ AskView: IPC 이벤트 리스너 제거 완료');
+        }
+    }
+    
+    handleScroll(direction) {
+        const scrollableElement = this.shadowRoot.querySelector('#responseContainer');
+        if (scrollableElement) {
+            const scrollAmount = 100; // 한 번에 스크롤할 양 (px)
+            if (direction === 'up') {
+                scrollableElement.scrollTop -= scrollAmount;
+            } else {
+                scrollableElement.scrollTop += scrollAmount;
+            }
         }
     }
 
@@ -1060,8 +1108,6 @@ export class AskView extends LitElement {
         }, 1500);
     }
 
-
-
     renderMarkdown(content) {
         if (!content) return '';
 
@@ -1131,13 +1177,16 @@ export class AskView extends LitElement {
         this.requestUpdate();
         this.renderContent();
 
-        window.pickleGlass.sendMessage(question).catch(error => {
-            console.error('Error processing assistant question:', error);
-            this.isLoading = false;
-            this.isStreaming = false;
-            this.currentResponse = `Error: ${error.message}`;
-            this.renderContent();
-        });
+        if (window.require) {
+            const { ipcRenderer } = window.require('electron');
+            ipcRenderer.invoke('ask:sendMessage', question).catch(error => {
+                console.error('Error processing assistant question:', error);
+                this.isLoading = false;
+                this.isStreaming = false;
+                this.currentResponse = `Error: ${error.message}`;
+                this.renderContent();
+            });
+        }
     }
 
     async handleCopy() {
@@ -1227,16 +1276,24 @@ export class AskView extends LitElement {
         this.requestUpdate();
         this.renderContent();
 
-        window.pickleGlass.sendMessage(text).catch(error => {
-            console.error('Error sending text:', error);
-            this.isLoading = false;
-            this.isStreaming = false;
-            this.currentResponse = `Error: ${error.message}`;
-            this.renderContent();
-        });
+        if (window.require) {
+            const { ipcRenderer } = window.require('electron');
+            ipcRenderer.invoke('ask:sendMessage', text).catch(error => {
+                console.error('Error sending text:', error);
+                this.isLoading = false;
+                this.isStreaming = false;
+                this.currentResponse = `Error: ${error.message}`;
+                this.renderContent();
+            });
+        }
     }
 
     handleTextKeydown(e) {
+        // Fix for IME composition issue: Ignore Enter key presses while composing.
+        if (e.isComposing) {
+            return;
+        }
+
         const isPlainEnter = e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey;
         const isModifierEnter = e.key === 'Enter' && (e.metaKey || e.ctrlKey);
 
@@ -1255,6 +1312,19 @@ export class AskView extends LitElement {
         if (changedProperties.has('showTextInput') || changedProperties.has('isLoading')) {
             this.adjustWindowHeightThrottled();
         }
+
+        if (changedProperties.has('showTextInput') && this.showTextInput) {
+            this.focusTextInput();
+        }
+    }
+
+    focusTextInput(){
+        requestAnimationFrame(() => {
+            const textInput = this.shadowRoot?.getElementById('textInput');
+            if (textInput){
+                textInput.focus();
+            }
+        });
     }
 
     firstUpdated() {
@@ -1378,9 +1448,9 @@ export class AskView extends LitElement {
             const responseHeight = responseEl.scrollHeight;
             const inputHeight    = (inputEl && !inputEl.classList.contains('hidden')) ? inputEl.offsetHeight : 0;
 
-            const idealHeight = headerHeight + responseHeight + inputHeight + 20; // padding
+            const idealHeight = headerHeight + responseHeight + inputHeight;
 
-            const targetHeight = Math.min(700, Math.max(200, idealHeight));
+            const targetHeight = Math.min(700, idealHeight);
 
             const { ipcRenderer } = window.require('electron');
             ipcRenderer.invoke('adjust-window-height', targetHeight);

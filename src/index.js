@@ -11,153 +11,247 @@ if (require('electron-squirrel-startup')) {
     process.exit(0);
 }
 
-const { app, BrowserWindow, shell, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, dialog, desktopCapturer, session } = require('electron');
 const { createWindows } = require('./electron/windowManager.js');
-const { setupLiveSummaryIpcHandlers, stopMacOSAudioCapture } = require('./features/listen/liveSummaryService.js');
+const ListenService = require('./features/listen/listenService');
+const { initializeFirebase } = require('./common/services/firebaseClient');
 const databaseInitializer = require('./common/services/databaseInitializer');
-const dataService = require('./common/services/dataService');
+const authService = require('./common/services/authService');
 const path = require('node:path');
-const { Deeplink } = require('electron-deeplink');
 const express = require('express');
 const fetch = require('node-fetch');
 const { autoUpdater } = require('electron-updater');
+const { EventEmitter } = require('events');
+const askService = require('./features/ask/askService');
+const settingsService = require('./features/settings/settingsService');
+const sessionRepository = require('./common/repositories/session');
+const ModelStateService = require('./common/services/modelStateService');
 
+const eventBridge = new EventEmitter();
 let WEB_PORT = 3000;
 
-const openaiSessionRef = { current: null };
-let deeplink = null; // Initialize as null
-let pendingDeepLinkUrl = null; // Store any deep link that arrives before initialization
+const listenService = new ListenService();
+// Make listenService globally accessible so other modules (e.g., windowManager, askService) can reuse the same instance
+global.listenService = listenService;
 
-function createMainWindows() {
-    createWindows();
+//////// after_modelStateService ////////
+const modelStateService = new ModelStateService(authService);
+global.modelStateService = modelStateService;
+//////// after_modelStateService ////////
 
-    const { windowPool } = require('./electron/windowManager');
-    const headerWindow = windowPool.get('header');
-    
-    // Initialize deeplink after windows are created
-    if (!deeplink && headerWindow) {
-        try {
-            deeplink = new Deeplink({
-                app,
-                mainWindow: headerWindow,     
-                protocol: 'pickleglass',
-                isDev: !app.isPackaged,
-                debugLogging: true
-            });
-            
-            deeplink.on('received', (url) => {
-                console.log('[deeplink] received:', url);
-                handleCustomUrl(url);
-            });
-            
-            console.log('[deeplink] Initialized with main window');
-            
-            // Handle any pending deep link
-            if (pendingDeepLinkUrl) {
-                console.log('[deeplink] Processing pending deep link:', pendingDeepLinkUrl);
-                handleCustomUrl(pendingDeepLinkUrl);
-                pendingDeepLinkUrl = null;
+// Native deep link handling - cross-platform compatible
+let pendingDeepLinkUrl = null;
+
+function setupProtocolHandling() {
+    // Protocol registration - must be done before app is ready
+    try {
+        if (!app.isDefaultProtocolClient('pickleglass')) {
+            const success = app.setAsDefaultProtocolClient('pickleglass');
+            if (success) {
+                console.log('[Protocol] Successfully set as default protocol client for pickleglass://');
+            } else {
+                console.warn('[Protocol] Failed to set as default protocol client - this may affect deep linking');
             }
-        } catch (error) {
-            console.error('[deeplink] Failed to initialize deep link:', error);
-            deeplink = null;
+        } else {
+            console.log('[Protocol] Already registered as default protocol client for pickleglass://');
         }
+    } catch (error) {
+        console.error('[Protocol] Error during protocol registration:', error);
     }
-}
 
-app.whenReady().then(async () => {
-    const gotTheLock = app.requestSingleInstanceLock();
-    if (!gotTheLock) {
-        app.quit();
-        return;
-    } else {
-        app.on('second-instance', (event, commandLine, workingDirectory) => {
-            const { windowPool } = require('./electron/windowManager');
-            if (windowPool) {
-                const header = windowPool.get('header');
-                if (header) {
-                    if (header.isMinimized()) header.restore();
-                    header.focus();
-                    return;
+    // Handle protocol URLs on Windows/Linux
+    app.on('second-instance', (event, commandLine, workingDirectory) => {
+        console.log('[Protocol] Second instance command line:', commandLine);
+        
+        focusMainWindow();
+        
+        let protocolUrl = null;
+        
+        // Search through all command line arguments for a valid protocol URL
+        for (const arg of commandLine) {
+            if (arg && typeof arg === 'string' && arg.startsWith('pickleglass://')) {
+                // Clean up the URL by removing problematic characters
+                const cleanUrl = arg.replace(/[\\₩]/g, '');
+                
+                // Additional validation for Windows
+                if (process.platform === 'win32') {
+                    // On Windows, ensure the URL doesn't contain file path indicators
+                    if (!cleanUrl.includes(':') || cleanUrl.indexOf('://') === cleanUrl.lastIndexOf(':')) {
+                        protocolUrl = cleanUrl;
+                        break;
+                    }
+                } else {
+                    protocolUrl = cleanUrl;
+                    break;
                 }
             }
-            
-            const windows = BrowserWindow.getAllWindows();
-            if (windows.length > 0) {
-                const mainWindow = windows[0];
-                if (mainWindow.isMinimized()) mainWindow.restore();
-                mainWindow.focus();
-            }
-        });
-    }
+        }
+        
+        if (protocolUrl) {
+            console.log('[Protocol] Valid URL found from second instance:', protocolUrl);
+            handleCustomUrl(protocolUrl);
+        } else {
+            console.log('[Protocol] No valid protocol URL found in command line arguments');
+            console.log('[Protocol] Command line args:', commandLine);
+        }
+    });
 
-    const dbInitSuccess = await databaseInitializer.initialize();
-    if (!dbInitSuccess) {
-        console.error('>>> [index.js] Database initialization failed - some features may not work');
-    } else {
-        console.log('>>> [index.js] Database initialized successfully');
-    }
+    // Handle protocol URLs on macOS
+    app.on('open-url', (event, url) => {
+        event.preventDefault();
+        console.log('[Protocol] Received URL via open-url:', url);
+        
+        if (!url || !url.startsWith('pickleglass://')) {
+            console.warn('[Protocol] Invalid URL format:', url);
+            return;
+        }
 
-    WEB_PORT = await startWebStack();
-    console.log('Web front-end listening on', WEB_PORT);
+        if (app.isReady()) {
+            handleCustomUrl(url);
+        } else {
+            pendingDeepLinkUrl = url;
+            console.log('[Protocol] App not ready, storing URL for later');
+        }
+    });
+}
+
+function focusMainWindow() {
+    const { windowPool } = require('./electron/windowManager');
+    if (windowPool) {
+        const header = windowPool.get('header');
+        if (header && !header.isDestroyed()) {
+            if (header.isMinimized()) header.restore();
+            header.focus();
+            return true;
+        }
+    }
     
-    setupLiveSummaryIpcHandlers(openaiSessionRef);
-    setupGeneralIpcHandlers();
+    // Fallback: focus any available window
+    const windows = BrowserWindow.getAllWindows();
+    if (windows.length > 0) {
+        const mainWindow = windows[0];
+        if (!mainWindow.isDestroyed()) {
+            if (mainWindow.isMinimized()) mainWindow.restore();
+            mainWindow.focus();
+            return true;
+        }
+    }
+    
+    return false;
+}
 
-    createMainWindows();
+if (process.platform === 'win32') {
+    for (const arg of process.argv) {
+        if (arg && typeof arg === 'string' && arg.startsWith('pickleglass://')) {
+            // Clean up the URL by removing problematic characters (korean characters issue...)
+            const cleanUrl = arg.replace(/[\\₩]/g, '');
+            
+            if (!cleanUrl.includes(':') || cleanUrl.indexOf('://') === cleanUrl.lastIndexOf(':')) {
+                console.log('[Protocol] Found protocol URL in initial arguments:', cleanUrl);
+                pendingDeepLinkUrl = cleanUrl;
+                break;
+            }
+        }
+    }
+    
+    console.log('[Protocol] Initial process.argv:', process.argv);
+}
+
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+    app.quit();
+    process.exit(0);
+}
+
+// setup protocol after single instance lock
+setupProtocolHandling();
+
+app.whenReady().then(async () => {
+
+    // Setup native loopback audio capture for Windows
+    session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+        desktopCapturer.getSources({ types: ['screen'] }).then((sources) => {
+            // Grant access to the first screen found with loopback audio
+            callback({ video: sources[0], audio: 'loopback' });
+        }).catch((error) => {
+            console.error('Failed to get desktop capturer sources:', error);
+            callback({});
+        });
+    });
+
+    // Initialize core services
+    initializeFirebase();
+    
+    try {
+        await databaseInitializer.initialize();
+        console.log('>>> [index.js] Database initialized successfully');
+        
+        // Clean up zombie sessions from previous runs first
+        sessionRepository.endAllActiveSessions();
+
+        authService.initialize();
+
+        //////// after_modelStateService ////////
+        modelStateService.initialize();
+        //////// after_modelStateService ////////
+
+        listenService.setupIpcHandlers();
+        askService.initialize();
+        settingsService.initialize();
+        setupGeneralIpcHandlers();
+
+        // Start web server and create windows ONLY after all initializations are successful
+        WEB_PORT = await startWebStack();
+        console.log('Web front-end listening on', WEB_PORT);
+        
+        createWindows();
+
+    } catch (err) {
+        console.error('>>> [index.js] Database initialization failed - some features may not work', err);
+        // Optionally, show an error dialog to the user
+        dialog.showErrorBox(
+            'Application Error',
+            'A critical error occurred during startup. Some features might be disabled. Please restart the application.'
+        );
+    }
 
     initAutoUpdater();
+
+    // Process any pending deep link after everything is initialized
+    if (pendingDeepLinkUrl) {
+        console.log('[Protocol] Processing pending URL:', pendingDeepLinkUrl);
+        handleCustomUrl(pendingDeepLinkUrl);
+        pendingDeepLinkUrl = null;
+    }
 });
 
 app.on('window-all-closed', () => {
-    stopMacOSAudioCapture();
+    listenService.stopMacOSAudioCapture();
     if (process.platform !== 'darwin') {
         app.quit();
     }
 });
 
-app.on('before-quit', () => {
-    stopMacOSAudioCapture();
+app.on('before-quit', async () => {
+    console.log('[Shutdown] App is about to quit.');
+    listenService.stopMacOSAudioCapture();
+    await sessionRepository.endAllActiveSessions();
     databaseInitializer.close();
 });
 
 app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-        createMainWindows();
+        createWindows();
     }
 });
-
-// Add macOS native deep link handling as fallback
-app.on('open-url', (event, url) => {
-    event.preventDefault();
-    console.log('[app] open-url received:', url);
-    
-    if (!deeplink) {
-        // Store the URL if deeplink isn't ready yet
-        pendingDeepLinkUrl = url;
-        console.log('[app] Deep link stored for later processing');
-    } else {
-        handleCustomUrl(url);
-    }
-});
-
-// Ensure app can handle the protocol
-app.setAsDefaultProtocolClient('pickleglass');
 
 function setupGeneralIpcHandlers() {
-    ipcMain.handle('open-external', async (event, url) => {
-        try {
-            await shell.openExternal(url);
-            return { success: true };
-        } catch (error) {
-            console.error('Error opening external URL:', error);
-            return { success: false, error: error.message };
-        }
-    });
+    const userRepository = require('./common/repositories/user');
+    const presetRepository = require('./common/repositories/preset');
 
-    ipcMain.handle('save-api-key', async (event, apiKey) => {
+    ipcMain.handle('save-api-key', (event, apiKey) => {
         try {
-            await dataService.saveApiKey(apiKey);
+            userRepository.saveApiKey(apiKey, authService.getCurrentUserId());
             BrowserWindow.getAllWindows().forEach(win => {
                 win.webContents.send('api-key-updated');
             });
@@ -168,21 +262,12 @@ function setupGeneralIpcHandlers() {
         }
     });
 
-    ipcMain.handle('check-api-key', async () => {
-        return await dataService.checkApiKey();
+    ipcMain.handle('get-user-presets', () => {
+        return presetRepository.getPresets(authService.getCurrentUserId());
     });
 
-    ipcMain.handle('get-user-presets', async () => {
-        return await dataService.getUserPresets();
-    });
-
-    ipcMain.handle('get-preset-templates', async () => {
-        return await dataService.getPresetTemplates();
-    });
-
-    ipcMain.on('set-current-user', (event, uid) => {
-        console.log(`[IPC] set-current-user: ${uid}`);
-        dataService.setCurrentUser(uid);
+    ipcMain.handle('get-preset-templates', () => {
+        return presetRepository.getPresetTemplates();
     });
 
     ipcMain.handle('start-firebase-auth', async () => {
@@ -197,68 +282,143 @@ function setupGeneralIpcHandlers() {
         }
     });
 
-    ipcMain.on('firebase-auth-success', async (event, firebaseUser) => {
-        console.log('[IPC] firebase-auth-success:', firebaseUser.uid);
-        try {
-            await dataService.findOrCreateUser(firebaseUser);
-            dataService.setCurrentUser(firebaseUser.uid);
-            
-            BrowserWindow.getAllWindows().forEach(win => {
-                if (win !== event.sender.getOwnerBrowserWindow()) {
-                    win.webContents.send('user-changed', firebaseUser);
-                }
-            });
-        } catch (error) {
-            console.error('[IPC] Failed to handle firebase-auth-success:', error);
-        }
-    });
-
-    ipcMain.handle('get-api-url', () => {
-        return process.env.pickleglass_API_URL || 'http://localhost:9001';
-    });
-
     ipcMain.handle('get-web-url', () => {
         return process.env.pickleglass_WEB_URL || 'http://localhost:3000';
     });
 
-    ipcMain.on('get-api-url-sync', (event) => {
-        event.returnValue = process.env.pickleglass_API_URL || 'http://localhost:9001';
+    ipcMain.handle('get-current-user', () => {
+        return authService.getCurrentUser();
     });
 
-    ipcMain.handle('get-database-status', async () => {
-        return await databaseInitializer.getStatus();
-    });
+    // --- Web UI Data Handlers (New) ---
+    setupWebDataHandlers();
+}
 
-    ipcMain.handle('reset-database', async () => {
-        return await databaseInitializer.reset();
-    });
+function setupWebDataHandlers() {
+    const sessionRepository = require('./common/repositories/session');
+    const sttRepository = require('./features/listen/stt/repositories');
+    const summaryRepository = require('./features/listen/summary/repositories');
+    const askRepository = require('./features/ask/repositories');
+    const userRepository = require('./common/repositories/user');
+    const presetRepository = require('./common/repositories/preset');
 
-    ipcMain.handle('get-current-user', async () => {
+    const handleRequest = (channel, responseChannel, payload) => {
+        let result;
+        const currentUserId = authService.getCurrentUserId();
         try {
-            const user = await dataService.sqliteClient.getUser(dataService.currentUserId);
-            if (user) {
-            return {
-                    id: user.uid,
-                    name: user.display_name,
-                    isAuthenticated: user.uid !== 'default_user'
-            };
-            }
-            throw new Error('User not found in DataService');
-        } catch (error) {
-            console.error('Failed to get current user via DataService:', error);
-            return {
-                id: 'default_user',
-                name: 'Default User',
-                isAuthenticated: false
-            };
-        }
-    });
+            switch (channel) {
+                // SESSION
+                case 'get-sessions':
+                    result = sessionRepository.getAllByUserId(currentUserId);
+                    break;
+                case 'get-session-details':
+                    const session = sessionRepository.getById(payload);
+                    if (!session) {
+                        result = null;
+                        break;
+                    }
+                    const transcripts = sttRepository.getAllTranscriptsBySessionId(payload);
+                    const ai_messages = askRepository.getAllAiMessagesBySessionId(payload);
+                    const summary = summaryRepository.getSummaryBySessionId(payload);
+                    result = { session, transcripts, ai_messages, summary };
+                    break;
+                case 'delete-session':
+                    result = sessionRepository.deleteWithRelatedData(payload);
+                    break;
+                case 'create-session':
+                    const id = sessionRepository.create(currentUserId, 'ask');
+                    if (payload.title) {
+                        sessionRepository.updateTitle(id, payload.title);
+                    }
+                    result = { id };
+                    break;
+                
+                // USER
+                case 'get-user-profile':
+                    result = userRepository.getById(currentUserId);
+                    break;
+                case 'update-user-profile':
+                    result = userRepository.update({ uid: currentUserId, ...payload });
+                    break;
+                case 'find-or-create-user':
+                    result = userRepository.findOrCreate(payload);
+                    break;
+                case 'save-api-key':
+                    result = userRepository.saveApiKey(payload, currentUserId);
+                    break;
+                case 'check-api-key-status':
+                    const user = userRepository.getById(currentUserId);
+                    result = { hasApiKey: !!user?.api_key && user.api_key.length > 0 };
+                    break;
+                case 'delete-account':
+                    result = userRepository.deleteById(currentUserId);
+                    break;
 
+                // PRESET
+                case 'get-presets':
+                    result = presetRepository.getPresets(currentUserId);
+                    break;
+                case 'create-preset':
+                    result = presetRepository.create({ ...payload, uid: currentUserId });
+                    settingsService.notifyPresetUpdate('created', result.id, payload.title);
+                    break;
+                case 'update-preset':
+                    result = presetRepository.update(payload.id, payload.data, currentUserId);
+                    settingsService.notifyPresetUpdate('updated', payload.id, payload.data.title);
+                    break;
+                case 'delete-preset':
+                    result = presetRepository.delete(payload, currentUserId);
+                    settingsService.notifyPresetUpdate('deleted', payload);
+                    break;
+                
+                // BATCH
+                case 'get-batch-data':
+                    const includes = payload ? payload.split(',').map(item => item.trim()) : ['profile', 'presets', 'sessions'];
+                    const batchResult = {};
+            
+                    if (includes.includes('profile')) {
+                        batchResult.profile = userRepository.getById(currentUserId);
+                    }
+                    if (includes.includes('presets')) {
+                        batchResult.presets = presetRepository.getPresets(currentUserId);
+                    }
+                    if (includes.includes('sessions')) {
+                        batchResult.sessions = sessionRepository.getAllByUserId(currentUserId);
+                    }
+                    result = batchResult;
+                    break;
+
+                default:
+                    throw new Error(`Unknown web data channel: ${channel}`);
+            }
+            eventBridge.emit(responseChannel, { success: true, data: result });
+        } catch (error) {
+            console.error(`Error handling web data request for ${channel}:`, error);
+            eventBridge.emit(responseChannel, { success: false, error: error.message });
+        }
+    };
+    
+    eventBridge.on('web-data-request', handleRequest);
 }
 
 async function handleCustomUrl(url) {
     try {
         console.log('[Custom URL] Processing URL:', url);
+        
+        // Validate and clean URL
+        if (!url || typeof url !== 'string' || !url.startsWith('pickleglass://')) {
+            console.error('[Custom URL] Invalid URL format:', url);
+            return;
+        }
+        
+        // Clean up URL by removing problematic characters
+        const cleanUrl = url.replace(/[\\₩]/g, '');
+        
+        // Additional validation
+        if (cleanUrl !== url) {
+            console.log('[Custom URL] Cleaned URL from:', url, 'to:', cleanUrl);
+            url = cleanUrl;
+        }
         
         const urlObj = new URL(url);
         const action = urlObj.hostname;
@@ -293,18 +453,12 @@ async function handleCustomUrl(url) {
 }
 
 async function handleFirebaseAuthCallback(params) {
+    const userRepository = require('./common/repositories/user');
     const { token: idToken } = params;
 
     if (!idToken) {
         console.error('[Auth] Firebase auth callback is missing ID token.');
-        const { windowPool } = require('./electron/windowManager');
-        const header = windowPool.get('header');
-        if (header) {
-            header.webContents.send('login-successful', {
-                error: 'authentication_failed',
-                message: 'ID token not provided in deep link.'
-            });
-        }
+        // No need to send IPC, the UI won't transition without a successful auth state change.
         return;
     }
 
@@ -320,8 +474,6 @@ async function handleFirebaseAuthCallback(params) {
 
         const data = await response.json();
 
-
-
         if (!response.ok || !data.success) {
             throw new Error(data.error || 'Failed to exchange token.');
         }
@@ -336,71 +488,32 @@ async function handleFirebaseAuthCallback(params) {
             photoURL: user.picture
         };
 
-        await dataService.findOrCreateUser(firebaseUser);
-        dataService.setCurrentUser(user.uid);
+        // 1. Sync user data to local DB
+        userRepository.findOrCreate(firebaseUser);
         console.log('[Auth] User data synced with local DB.');
 
-        // if (firebaseUser.email && idToken) {
-        //     try {
-        //         const { getVirtualKeyByEmail, setApiKey } = require('./electron/windowManager');
-        //         console.log('[Auth] Fetching virtual key for:', firebaseUser.email);
-        //         const vKey = await getVirtualKeyByEmail(firebaseUser.email, idToken);
-        //         console.log('[Auth] Virtual key fetched successfully');
-                
-        //         await setApiKey(vKey);
-        //         console.log('[Auth] Virtual key saved successfully');
-                
-        //         const { setCurrentFirebaseUser } = require('./electron/windowManager');
-        //         setCurrentFirebaseUser(firebaseUser);
-                
-        //         const { windowPool } = require('./electron/windowManager');
-        //         windowPool.forEach(win => {
-        //             if (win && !win.isDestroyed()) {
-        //                 win.webContents.send('api-key-updated');
-        //                 win.webContents.send('firebase-user-updated', firebaseUser);
-        //             }
-        //         });
-        //     } catch (error) {
-        //         console.error('[Auth] Virtual key fetch failed:', error);
-        //     }
-        // }
+        // 2. Sign in using the authService in the main process
+        await authService.signInWithCustomToken(customToken);
+        console.log('[Auth] Main process sign-in initiated. Waiting for onAuthStateChanged...');
 
+        // 3. Focus the app window
         const { windowPool } = require('./electron/windowManager');
         const header = windowPool.get('header');
-
         if (header) {
             if (header.isMinimized()) header.restore();
             header.focus();
-            
-            console.log('[Auth] Sending custom token to renderer for sign-in.');
-            header.webContents.send('login-successful', { 
-                customToken: customToken, 
-                user: firebaseUser,
-                success: true 
-            });
-
-            BrowserWindow.getAllWindows().forEach(win => {
-                if (win !== header) {
-                    win.webContents.send('user-changed', firebaseUser);
-                }
-            });
-
-            console.log('[Auth] Firebase authentication completed successfully');
-
         } else {
-            console.error('[Auth] Header window not found after getting custom token.');
+            console.error('[Auth] Header window not found after auth callback.');
         }
         
     } catch (error) {
-        console.error('[Auth] Error during custom token exchange:', error);
-        
+        console.error('[Auth] Error during custom token exchange or sign-in:', error);
+        // The UI will not change, and the user can try again.
+        // Optionally, send a generic error event to the renderer.
         const { windowPool } = require('./electron/windowManager');
         const header = windowPool.get('header');
         if (header) {
-            header.webContents.send('login-successful', { 
-                error: 'authentication_failed',
-                message: error.message 
-            });
+            header.webContents.send('auth-failed', { message: error.message });
         }
     }
 }
@@ -462,7 +575,7 @@ async function startWebStack() {
   });
 
   const createBackendApp = require('../pickleglass_web/backend_node');
-  const nodeApi = createBackendApp();
+  const nodeApi = createBackendApp(eventBridge);
 
   const staticDir = app.isPackaged
     ? path.join(process.resourcesPath, 'out')

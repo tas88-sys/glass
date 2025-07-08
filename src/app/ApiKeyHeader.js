@@ -1,14 +1,19 @@
-import { html, css, LitElement } from '../assets/lit-core-2.7.4.min.js';
+import { html, css, LitElement } from "../assets/lit-core-2.7.4.min.js"
 
 export class ApiKeyHeader extends LitElement {
-    static properties = {
-        apiKey: { type: String },
-        isLoading: { type: Boolean },
-        errorMessage: { type: String },
-        selectedProvider: { type: String },
-    };
+  //////// after_modelStateService ////////
+  static properties = {
+    llmApiKey: { type: String },
+    sttApiKey: { type: String },
+    llmProvider: { type: String },
+    sttProvider: { type: String },
+    isLoading: { type: Boolean },
+    errorMessage: { type: String },
+    providers: { type: Object, state: true },
+  }
+  //////// after_modelStateService ////////
 
-    static styles = css`
+  static styles = css`
         :host {
             display: block;
             transform: translate3d(0, 0, 0);
@@ -45,7 +50,7 @@ export class ApiKeyHeader extends LitElement {
         }
 
         .container {
-            width: 285px;
+            width: 350px;
             min-height: 260px;
             padding: 18px 20px;
             background: rgba(0, 0, 0, 0.3);
@@ -153,28 +158,22 @@ export class ApiKeyHeader extends LitElement {
             outline: none;
         }
 
-        .provider-select {
+        .providers-container { display: flex; gap: 12px; width: 100%; }
+        .provider-column { flex: 1; display: flex; flex-direction: column; align-items: center; }
+        .provider-label { color: rgba(255, 255, 255, 0.7); font-size: 11px; font-weight: 500; margin-bottom: 6px; }
+        .api-input, .provider-select {
             width: 100%;
             height: 34px;
+            text-align: center;
             background: rgba(255, 255, 255, 0.1);
             border-radius: 10px;
             border: 1px solid rgba(255, 255, 255, 0.2);
             padding: 0 10px;
             color: white;
             font-size: 12px;
-            font-weight: 400;
             margin-bottom: 6px;
-            text-align: center;
-            cursor: pointer;
-            -webkit-appearance: none;
-            -moz-appearance: none;
-            appearance: none;
-            background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20width%3D%2714%27%20height%3D%278%27%20viewBox%3D%270%200%2014%208%27%20xmlns%3D%27http%3A//www.w3.org/2000/svg%27%3E%3Cpath%20d%3D%27M1%201l6%206%206-6%27%20stroke%3D%27%23ffffff%27%20stroke-width%3D%271.5%27%20fill%3D%27none%27%20fill-rule%3D%27evenodd%27/%3E%3C/svg%3E');
-            background-repeat: no-repeat;
-            background-position: right 10px center;
-            background-size: 12px;
-            padding-right: 30px;
         }
+        .provider-select option { background: #1a1a1a; color: white; }
 
         .provider-select:hover {
             background-color: rgba(255, 255, 255, 0.15);
@@ -187,11 +186,6 @@ export class ApiKeyHeader extends LitElement {
             border-color: rgba(255, 255, 255, 0.4);
         }
 
-        .provider-select option {
-            background: #1a1a1a;
-            color: white;
-            padding: 5px;
-        }
 
         .action-button {
             width: 100%;
@@ -239,360 +233,319 @@ export class ApiKeyHeader extends LitElement {
             font-weight: 500; /* Medium */
             margin: 10px 0;
         }
+
         
-        .provider-label {
-            color: rgba(255, 255, 255, 0.7);
-            font-size: 11px;
-            font-weight: 400;
-            margin-bottom: 4px;
-            width: 100%;
-            text-align: left;
-        }
-    `;
-
-    constructor() {
-        super();
-        this.dragState = null;
-        this.wasJustDragged = false;
-        this.apiKey = '';
-        this.isLoading = false;
-        this.errorMessage = '';
-        this.validatedApiKey = null;
-        this.selectedProvider = 'openai';
-
-        this.handleMouseMove = this.handleMouseMove.bind(this);
-        this.handleMouseUp = this.handleMouseUp.bind(this);
-        this.handleKeyPress = this.handleKeyPress.bind(this);
-        this.handleSubmit = this.handleSubmit.bind(this);
-        this.handleInput = this.handleInput.bind(this);
-        this.handleAnimationEnd = this.handleAnimationEnd.bind(this);
-        this.handleUsePicklesKey = this.handleUsePicklesKey.bind(this);
-        this.handleProviderChange = this.handleProviderChange.bind(this);
-    }
-
-    reset() {
-        this.apiKey = '';
-        this.isLoading = false;
-        this.errorMessage = '';
-        this.validatedApiKey = null;
-        this.selectedProvider = 'openai';
-        this.requestUpdate();
-    }
-
-    async handleMouseDown(e) {
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'SELECT') {
-            return;
+        /* ────────────────[ GLASS BYPASS ]─────────────── */
+        :host-context(body.has-glass) .container,
+        :host-context(body.has-glass) .api-input,
+        :host-context(body.has-glass) .provider-select,
+        :host-context(body.has-glass) .action-button,
+        :host-context(body.has-glass) .close-button {
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            filter: none !important;
+            backdrop-filter: none !important;
         }
 
-        e.preventDefault();
-
-        const { ipcRenderer } = window.require('electron');
-        const initialPosition = await ipcRenderer.invoke('get-header-position');
-
-        this.dragState = {
-            initialMouseX: e.screenX,
-            initialMouseY: e.screenY,
-            initialWindowX: initialPosition.x,
-            initialWindowY: initialPosition.y,
-            moved: false,
-        };
-
-        window.addEventListener('mousemove', this.handleMouseMove);
-        window.addEventListener('mouseup', this.handleMouseUp, { once: true });
-    }
-
-    handleMouseMove(e) {
-        if (!this.dragState) return;
-
-        const deltaX = Math.abs(e.screenX - this.dragState.initialMouseX);
-        const deltaY = Math.abs(e.screenY - this.dragState.initialMouseY);
-
-        if (deltaX > 3 || deltaY > 3) {
-            this.dragState.moved = true;
+        :host-context(body.has-glass) .container::after,
+        :host-context(body.has-glass) .action-button::after {
+            display: none !important;
         }
 
-        const newWindowX = this.dragState.initialWindowX + (e.screenX - this.dragState.initialMouseX);
-        const newWindowY = this.dragState.initialWindowY + (e.screenY - this.dragState.initialMouseY);
+        :host-context(body.has-glass) .action-button:hover,
+        :host-context(body.has-glass) .provider-select:hover,
+        :host-context(body.has-glass) .close-button:hover {
+            background: transparent !important;
+        }
+    `
 
-        const { ipcRenderer } = window.require('electron');
-        ipcRenderer.invoke('move-header-to', newWindowX, newWindowY);
-    }
+  constructor() {
+    super()
+    this.dragState = null
+    this.wasJustDragged = false
+    this.isLoading = false
+    this.errorMessage = ""
+    //////// after_modelStateService ////////
+    this.llmApiKey = "";
+    this.sttApiKey = "";
+    this.llmProvider = "openai";
+    this.sttProvider = "openai";
+    this.providers = { llm: [], stt: [] }; // 초기화
+    this.loadProviderConfig();
+    //////// after_modelStateService ////////
 
-    handleMouseUp(e) {
-        if (!this.dragState) return;
+    this.handleMouseMove = this.handleMouseMove.bind(this)
+    this.handleMouseUp = this.handleMouseUp.bind(this)
+    this.handleKeyPress = this.handleKeyPress.bind(this)
+    this.handleSubmit = this.handleSubmit.bind(this)
+    this.handleInput = this.handleInput.bind(this)
+    this.handleAnimationEnd = this.handleAnimationEnd.bind(this)
+    this.handleUsePicklesKey = this.handleUsePicklesKey.bind(this)
+    this.handleProviderChange = this.handleProviderChange.bind(this)
+  }
 
-        const wasDragged = this.dragState.moved;
+  reset() {
+    this.apiKey = ""
+    this.isLoading = false
+    this.errorMessage = ""
+    this.validatedApiKey = null
+    this.selectedProvider = "openai"
+    this.requestUpdate()
+  }
 
-        window.removeEventListener('mousemove', this.handleMouseMove);
-        this.dragState = null;
+  async loadProviderConfig() {
+    if (!window.require) return;
+    const { ipcRenderer } = window.require('electron');
+    const config = await ipcRenderer.invoke('model:get-provider-config');
+    
+    const llmProviders = [];
+    const sttProviders = [];
 
-        if (wasDragged) {
-            this.wasJustDragged = true;
-            setTimeout(() => {
-                this.wasJustDragged = false;
-            }, 200);
+    for (const id in config) {
+        // 'openai-glass' 같은 가상 Provider는 UI에 표시하지 않음
+        if (id.includes('-glass')) continue;
+
+        if (config[id].llmModels.length > 0) {
+            llmProviders.push({ id, name: config[id].name });
+        }
+        if (config[id].sttModels.length > 0) {
+            sttProviders.push({ id, name: config[id].name });
         }
     }
-
-    handleInput(e) {
-        this.apiKey = e.target.value;
-        this.errorMessage = '';
-        console.log('Input changed:', this.apiKey?.length || 0, 'chars');
-
-        this.requestUpdate();
-        this.updateComplete.then(() => {
-            const inputField = this.shadowRoot?.querySelector('.apikey-input');
-            if (inputField && this.isInputFocused) {
-                inputField.focus();
-            }
-        });
-    }
-
-    handleProviderChange(e) {
-        this.selectedProvider = e.target.value;
-        this.errorMessage = '';
-        console.log('Provider changed to:', this.selectedProvider);
-        this.requestUpdate();
-    }
-
-    handlePaste(e) {
-        e.preventDefault();
-        this.errorMessage = '';
-        const clipboardText = (e.clipboardData || window.clipboardData).getData('text');
-        console.log('Paste event detected:', clipboardText?.substring(0, 10) + '...');
-
-        if (clipboardText) {
-            this.apiKey = clipboardText.trim();
-
-            const inputElement = e.target;
-            inputElement.value = this.apiKey;
-        }
-
-        this.requestUpdate();
-        this.updateComplete.then(() => {
-            const inputField = this.shadowRoot?.querySelector('.apikey-input');
-            if (inputField) {
-                inputField.focus();
-                inputField.setSelectionRange(inputField.value.length, inputField.value.length);
-            }
-        });
-    }
-
-    handleKeyPress(e) {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            this.handleSubmit();
-        }
-    }
-
-    async handleSubmit() {
-        if (this.wasJustDragged || this.isLoading || !this.apiKey.trim()) {
-            console.log('Submit blocked:', {
-                wasJustDragged: this.wasJustDragged,
-                isLoading: this.isLoading,
-                hasApiKey: !!this.apiKey.trim(),
-            });
-            return;
-        }
-
-        console.log('Starting API key validation...');
-        this.isLoading = true;
-        this.errorMessage = '';
-        this.requestUpdate();
-
-        const apiKey = this.apiKey.trim();
-        let isValid = false;
-        try {
-            const isValid = await this.validateApiKey(this.apiKey.trim(), this.selectedProvider);
-            
-            if (isValid) {
-                console.log('API key valid - starting slide out animation');
-                    this.startSlideOutAnimation();
-                    this.validatedApiKey = this.apiKey.trim();
-                this.validatedProvider = this.selectedProvider;
-            } else {
-                this.errorMessage = 'Invalid API key - please check and try again';
-                console.log('API key validation failed');
-            }
-        } catch (error) {
-            console.error('API key validation error:', error);
-            this.errorMessage = 'Validation error - please try again';
-        } finally {
-            this.isLoading = false;
-            this.requestUpdate();
-        }
-    }
-
-    async validateApiKey(apiKey, provider = 'openai') {
-        if (!apiKey || apiKey.length < 15) return false;
-        
-        if (provider === 'openai') {
-            if (!apiKey.match(/^[A-Za-z0-9_-]+$/)) return false;
-            
-            try {
-                console.log('Validating OpenAI API key...');
-
-                const response = await fetch('https://api.openai.com/v1/models', {
-                    headers: {
-                        'Content-Type': 'application/json',
-                        Authorization: `Bearer ${apiKey}`,
-                    },
-                });
-
-                if (response.ok) {
-                    const data = await response.json();
-
-                    const hasGPTModels = data.data && data.data.some(m => m.id.startsWith('gpt-'));
-                    if (hasGPTModels) {
-                        console.log('OpenAI API key validation successful');
-                        return true;
-                    } else {
-                        console.log('API key valid but no GPT models available');
-                        return false;
-                    }
-                } else {
-                    const errorData = await response.json().catch(() => ({}));
-                    console.log('API key validation failed:', response.status, errorData.error?.message || 'Unknown error');
-                    return false;
-                }
-            } catch (error) {
-                console.error('API key validation network error:', error);
-                return apiKey.length >= 20; // Fallback for network issues
-            }
-        } else if (provider === 'gemini') {
-            // Gemini API keys typically start with 'AIza'
-            if (!apiKey.match(/^[A-Za-z0-9_-]+$/)) return false;
-            
-            try {
-                console.log('Validating Gemini API key...');
-                
-                // Test the API key with a simple models list request
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.models && data.models.length > 0) {
-                        console.log('Gemini API key validation successful');
-                        return true;
-                    }
-                }
-                
-                console.log('Gemini API key validation failed');
-                return false;
-            } catch (error) {
-                console.error('Gemini API key validation network error:', error);
-                return apiKey.length >= 20; // Fallback
-            }
-        }
-        
-        return false;
-    }
-
-    startSlideOutAnimation() {
-        this.classList.add('sliding-out');
-    }
-
-    handleUsePicklesKey(e) {
-        e.preventDefault();
-        if (this.wasJustDragged) return;
-
-        console.log('Requesting Firebase authentication from main process...');
-        if (window.require) {
-            window.require('electron').ipcRenderer.invoke('start-firebase-auth');
-        }
-    }
-
-    handleClose() {
-        console.log('Close button clicked');
-        if (window.require) {
-            window.require('electron').ipcRenderer.invoke('quit-application');
-        }
-    }
-
-    handleAnimationEnd(e) {
-        if (e.target !== this) return;
-
-        if (this.classList.contains('sliding-out')) {
-            this.classList.remove('sliding-out');
-            this.classList.add('hidden');
-
-            if (this.validatedApiKey) {
-                if (window.require) {
-                    window.require('electron').ipcRenderer.invoke('api-key-validated', {
-                        apiKey: this.validatedApiKey,
-                        provider: this.validatedProvider || 'openai'
-                    });
-                }
-                this.validatedApiKey = null;
-                this.validatedProvider = null;
-            }
-        }
-    }
-
-    connectedCallback() {
-        super.connectedCallback();
-        this.addEventListener('animationend', this.handleAnimationEnd);
-
-    }
-
-    disconnectedCallback() {
-        super.disconnectedCallback();
-        this.removeEventListener('animationend', this.handleAnimationEnd);
-
-    }
-
-    render() {
-        const isButtonDisabled = this.isLoading || !this.apiKey || !this.apiKey.trim();
-        console.log('Rendering with provider:', this.selectedProvider);
-
-        return html`
-            <div class="container" @mousedown=${this.handleMouseDown}>
-                <button class="close-button" @click=${this.handleClose} title="Close application">
-                    <svg width="8" height="8" viewBox="0 0 10 10" fill="currentColor">
-                        <path d="M1 1L9 9M9 1L1 9" stroke="currentColor" stroke-width="1.2" />
-                    </svg>
-                </button>
-                <h1 class="title">Choose how to power your AI</h1>
-
-                <div class="form-content">
-                    <div class="error-message">${this.errorMessage}</div>
-                    <div class="provider-label">Select AI Provider:</div>
-                    <select
-                        class="provider-select"
-                        .value=${this.selectedProvider || 'openai'}
-                        @change=${this.handleProviderChange}
-                        ?disabled=${this.isLoading}
-                        tabindex="0"
-                    >
-                        <option value="openai" ?selected=${this.selectedProvider === 'openai'}>OpenAI</option>
-                        <option value="gemini" ?selected=${this.selectedProvider === 'gemini'}>Google Gemini</option>
-                    </select>
-                    <input
-                        type="password"
-                        class="api-input"
-                        placeholder=${this.selectedProvider === 'openai' ? "Enter your OpenAI API key" : "Enter your Gemini API key"}
-                        .value=${this.apiKey || ''}
-                        @input=${this.handleInput}
-                        @keypress=${this.handleKeyPress}
-                        @paste=${this.handlePaste}
-                        @focus=${() => (this.errorMessage = '')}
-                        ?disabled=${this.isLoading}
-                        autocomplete="off"
-                        spellcheck="false"
-                        tabindex="0"
-                    />
-
-                    <button class="action-button" @click=${this.handleSubmit} ?disabled=${isButtonDisabled} tabindex="0">
-                        ${this.isLoading ? 'Validating...' : 'Confirm'}
-                    </button>
-
-                    <div class="or-text">or</div>
-
-                    <button class="action-button" @click=${this.handleUsePicklesKey}>Use Pickle's API Key</button>
-                </div>
-            </div>
-        `;
-    }
+    
+    this.providers = { llm: llmProviders, stt: sttProviders };
+    
+    // 기본 선택 값 설정
+    if (llmProviders.length > 0) this.llmProvider = llmProviders[0].id;
+    if (sttProviders.length > 0) this.sttProvider = sttProviders[0].id;
+    
+    this.requestUpdate();
 }
 
-customElements.define('apikey-header', ApiKeyHeader);
+  async handleMouseDown(e) {
+    if (e.target.tagName === "INPUT" || e.target.tagName === "BUTTON" || e.target.tagName === "SELECT") {
+      return
+    }
+
+    e.preventDefault()
+
+    const { ipcRenderer } = window.require("electron")
+    const initialPosition = await ipcRenderer.invoke("get-header-position")
+
+    this.dragState = {
+      initialMouseX: e.screenX,
+      initialMouseY: e.screenY,
+      initialWindowX: initialPosition.x,
+      initialWindowY: initialPosition.y,
+      moved: false,
+    }
+
+    window.addEventListener("mousemove", this.handleMouseMove)
+    window.addEventListener("mouseup", this.handleMouseUp, { once: true })
+  }
+
+  handleMouseMove(e) {
+    if (!this.dragState) return
+
+    const deltaX = Math.abs(e.screenX - this.dragState.initialMouseX)
+    const deltaY = Math.abs(e.screenY - this.dragState.initialMouseY)
+
+    if (deltaX > 3 || deltaY > 3) {
+      this.dragState.moved = true
+    }
+
+    const newWindowX = this.dragState.initialWindowX + (e.screenX - this.dragState.initialMouseX)
+    const newWindowY = this.dragState.initialWindowY + (e.screenY - this.dragState.initialMouseY)
+
+    const { ipcRenderer } = window.require("electron")
+    ipcRenderer.invoke("move-header-to", newWindowX, newWindowY)
+  }
+
+  handleMouseUp(e) {
+    if (!this.dragState) return
+
+    const wasDragged = this.dragState.moved
+
+    window.removeEventListener("mousemove", this.handleMouseMove)
+    this.dragState = null
+
+    if (wasDragged) {
+      this.wasJustDragged = true
+      setTimeout(() => {
+        this.wasJustDragged = false
+      }, 200)
+    }
+  }
+
+  handleInput(e) {
+    this.apiKey = e.target.value
+    this.errorMessage = ""
+    console.log("Input changed:", this.apiKey?.length || 0, "chars")
+
+    this.requestUpdate()
+    this.updateComplete.then(() => {
+      const inputField = this.shadowRoot?.querySelector(".apikey-input")
+      if (inputField && this.isInputFocused) {
+        inputField.focus()
+      }
+    })
+  }
+
+  handleProviderChange(e) {
+    this.selectedProvider = e.target.value
+    this.errorMessage = ""
+    console.log("Provider changed to:", this.selectedProvider)
+    this.requestUpdate()
+  }
+
+  handlePaste(e) {
+    e.preventDefault()
+    this.errorMessage = ""
+    const clipboardText = (e.clipboardData || window.clipboardData).getData("text")
+    console.log("Paste event detected:", clipboardText?.substring(0, 10) + "...")
+
+    if (clipboardText) {
+      this.apiKey = clipboardText.trim()
+
+      const inputElement = e.target
+      inputElement.value = this.apiKey
+    }
+
+    this.requestUpdate()
+    this.updateComplete.then(() => {
+      const inputField = this.shadowRoot?.querySelector(".apikey-input")
+      if (inputField) {
+        inputField.focus()
+        inputField.setSelectionRange(inputField.value.length, inputField.value.length)
+      }
+    })
+  }
+
+  handleKeyPress(e) {
+    if (e.key === "Enter") {
+      e.preventDefault()
+      this.handleSubmit()
+    }
+  }
+
+  //////// after_modelStateService ////////
+  async handleSubmit() {
+    console.log('[ApiKeyHeader] handleSubmit: Submitting API keys...');
+    if (this.isLoading || !this.llmApiKey.trim() || !this.sttApiKey.trim()) {
+        this.errorMessage = "Please enter keys for both LLM and STT.";
+        return;
+    }
+
+    this.isLoading = true;
+    this.errorMessage = "";
+    this.requestUpdate();
+
+    const { ipcRenderer } = window.require('electron');
+
+    console.log('[ApiKeyHeader] handleSubmit: Validating LLM key...');
+    const llmValidation = ipcRenderer.invoke('model:validate-key', { provider: this.llmProvider, key: this.llmApiKey.trim() });
+    const sttValidation = ipcRenderer.invoke('model:validate-key', { provider: this.sttProvider, key: this.sttApiKey.trim() });
+
+    const [llmResult, sttResult] = await Promise.all([llmValidation, sttValidation]);
+
+    if (llmResult.success && sttResult.success) {
+        console.log('[ApiKeyHeader] handleSubmit: Both LLM and STT keys are valid.');
+        this.startSlideOutAnimation();
+    } else {
+        console.log('[ApiKeyHeader] handleSubmit: Validation failed.');
+        let errorParts = [];
+        if (!llmResult.success) errorParts.push(`LLM Key: ${llmResult.error || 'Invalid'}`);
+        if (!sttResult.success) errorParts.push(`STT Key: ${sttResult.error || 'Invalid'}`);
+        this.errorMessage = errorParts.join(' | ');
+    }
+
+    this.isLoading = false;
+    this.requestUpdate();
+}
+//////// after_modelStateService ////////
+
+
+  startSlideOutAnimation() {
+    console.log('[ApiKeyHeader] startSlideOutAnimation: Starting slide out animation.');
+    this.classList.add("sliding-out")
+  }
+
+  handleUsePicklesKey(e) {
+    e.preventDefault()
+    if (this.wasJustDragged) return
+
+    console.log("Requesting Firebase authentication from main process...")
+    if (window.require) {
+      window.require("electron").ipcRenderer.invoke("start-firebase-auth")
+    }
+  }
+
+  handleClose() {
+    console.log("Close button clicked")
+    if (window.require) {
+      window.require("electron").ipcRenderer.invoke("quit-application")
+    }
+  }
+
+
+  //////// after_modelStateService ////////
+  handleAnimationEnd(e) {
+    if (e.target !== this || !this.classList.contains('sliding-out')) return;
+    this.classList.remove("sliding-out");
+    this.classList.add("hidden");
+    window.require('electron').ipcRenderer.invoke('get-current-user').then(userState => {
+        console.log('[ApiKeyHeader] handleAnimationEnd: User state updated:', userState);
+        this.stateUpdateCallback?.(userState);
+    });
+  }
+//////// after_modelStateService ////////
+
+  connectedCallback() {
+    super.connectedCallback()
+    this.addEventListener("animationend", this.handleAnimationEnd)
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback()
+    this.removeEventListener("animationend", this.handleAnimationEnd)
+  }
+
+  render() {
+    const isButtonDisabled = this.isLoading || !this.llmApiKey.trim() || !this.sttApiKey.trim();
+
+    return html`
+        <div class="container" @mousedown=${this.handleMouseDown}>
+            <h1 class="title">Enter Your API Keys</h1>
+
+            <div class="providers-container">
+                <div class="provider-column">
+                    <div class="provider-label"></div>
+                    <select class="provider-select" .value=${this.llmProvider} @change=${e => this.llmProvider = e.target.value} ?disabled=${this.isLoading}>
+                        ${this.providers.llm.map(p => html`<option value=${p.id}>${p.name}</option>`)}
+                    </select>
+                    <input type="password" class="api-input" placeholder="LLM Provider API Key" .value=${this.llmApiKey} @input=${e => this.llmApiKey = e.target.value} ?disabled=${this.isLoading}>
+                </div>
+
+                <div class="provider-column">
+                    <div class="provider-label"></div>
+                    <select class="provider-select" .value=${this.sttProvider} @change=${e => this.sttProvider = e.target.value} ?disabled=${this.isLoading}>
+                        ${this.providers.stt.map(p => html`<option value=${p.id}>${p.name}</option>`)}
+                    </select>
+                    <input type="password" class="api-input" placeholder="STT Provider API Key" .value=${this.sttApiKey} @input=${e => this.sttApiKey = e.target.value} ?disabled=${this.isLoading}>
+                </div>
+            </div>
+            
+            <div class="error-message">${this.errorMessage}</div>
+
+            <button class="action-button" @click=${this.handleSubmit} ?disabled=${isButtonDisabled}>
+                ${this.isLoading ? "Validating..." : "Confirm"}
+            </button>
+            <div class="or-text">or</div>
+            <button class="action-button" @click=${this.handleUsePicklesKey}>Use Pickle's Key (Login)</button>
+        </div>
+    `;
+}
+}
+
+customElements.define("apikey-header", ApiKeyHeader)

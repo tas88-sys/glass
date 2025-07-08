@@ -1,21 +1,52 @@
 const { BrowserWindow, globalShortcut, ipcMain, screen, app, shell, desktopCapturer } = require('electron');
+const WindowLayoutManager = require('./windowLayoutManager');
+const SmoothMovementManager = require('./smoothMovementManager');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('os');
 const util = require('util');
 const execFile = util.promisify(require('child_process').execFile);
 const sharp = require('sharp');
-const sqliteClient = require('../common/services/sqliteClient');
+const authService = require('../common/services/authService');
+const systemSettingsRepository = require('../common/repositories/systemSettings');
+const userRepository = require('../common/repositories/user');
 const fetch = require('node-fetch');
+const Store = require('electron-store');
+const shortCutStore = new Store({
+    name: 'user-preferences',
+    defaults: {
+        customKeybinds: {}
+    }
+});
 
-let currentFirebaseUser = null;
+/* ────────────────[ GLASS BYPASS ]─────────────── */
+let liquidGlass;
+const isLiquidGlassSupported = () => {
+    if (process.platform !== 'darwin') {
+        return false;
+    }
+    const majorVersion = parseInt(os.release().split('.')[0], 10);
+    // return majorVersion >= 25; // macOS 26+ (Darwin 25+)
+    return majorVersion >= 26; // See you soon!
+};
+let shouldUseLiquidGlass = isLiquidGlassSupported();
+if (shouldUseLiquidGlass) {
+    try {
+        liquidGlass = require('electron-liquid-glass');
+    } catch (e) {
+        console.warn('Could not load optional dependency "electron-liquid-glass". The feature will be disabled.');
+        shouldUseLiquidGlass = false;
+    }
+}
+/* ────────────────[ GLASS BYPASS ]─────────────── */
+
 let isContentProtectionOn = true;
 let currentDisplayId = null;
 
 let mouseEventsIgnored = false;
 let lastVisibleWindows = new Set(['header']);
-const HEADER_HEIGHT = 60;
-const DEFAULT_WINDOW_WIDTH = 345;
+const HEADER_HEIGHT = 47;
+const DEFAULT_WINDOW_WIDTH = 353;
 
 let currentHeaderState = 'apikey';
 const windowPool = new Map();
@@ -26,47 +57,33 @@ let settingsHideTimer = null;
 
 let selectedCaptureSourceId = null;
 
-const windowDefinitions = {
-    header: {
-        file: 'header.html',
-        options: {
-            /*…*/
-        },
-        allowedStates: ['apikey', 'app'],
-    },
-    ask: {
-        file: 'ask.html',
-        options: {
-            /*…*/
-        },
-        allowedStates: ['app'],
-    },
-    listen: {
-        file: 'assistant.html',
-        options: {
-            /*…*/
-        },
-        allowedStates: ['app'],
-    },
-    settings: {
-        file: 'settings.html',
-        options: {
-            /*…*/
-        },
-        allowedStates: ['app'],
-    },
-};
+// let shortcutEditorWindow = null;
+let layoutManager = null;
+function updateLayout() {
+    if (layoutManager) {
+        layoutManager.updateLayout();
+    }
+}
+
+let movementManager = null;
+
 
 const featureWindows = ['listen','ask','settings'];
+// const featureWindows = ['listen','ask','settings','shortcut-settings'];
+function isAllowed(name) {
+    if (name === 'header') return true;
+    return featureWindows.includes(name) && currentHeaderState === 'main';
+}
 
-function createFeatureWindows(header) {
-    if (windowPool.has('listen')) return;
+function createFeatureWindows(header, namesToCreate) {
+    // if (windowPool.has('listen')) return;
 
     const commonChildOptions = {
         parent: header,
         show: false,
         frame: false,
         transparent: true,
+        vibrancy: false,
         hasShadow: false,
         skipTaskbar: true,
         hiddenInMissionControl: true,
@@ -74,36 +91,207 @@ function createFeatureWindows(header) {
         webPreferences: { nodeIntegration: true, contextIsolation: false },
     };
 
-    // listen
-    const listen = new BrowserWindow({
-        ...commonChildOptions, width:400,height:300,minWidth:400,maxWidth:400,
-        minHeight:200,maxHeight:700,
-    });
-    listen.setContentProtection(isContentProtectionOn);
-    listen.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
-    listen.loadFile(path.join(__dirname,'../app/content.html'),{query:{view:'listen'}});
-    windowPool.set('listen', listen);
+    const createFeatureWindow = (name) => {
+        if (windowPool.has(name)) return;
+        
+        switch (name) {
+            case 'listen': {
+                const listen = new BrowserWindow({
+                    ...commonChildOptions, width:400,minWidth:400,maxWidth:400,
+                    maxHeight:700,
+                });
+                listen.setContentProtection(isContentProtectionOn);
+                listen.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
+                if (process.platform === 'darwin') {
+                    listen.setWindowButtonVisibility(false);
+                }
+                const listenLoadOptions = { query: { view: 'listen' } };
+                if (!shouldUseLiquidGlass) {
+                    listen.loadFile(path.join(__dirname, '../app/content.html'), listenLoadOptions);
+                }
+                else {
+                    listenLoadOptions.query.glass = 'true';
+                    listen.loadFile(path.join(__dirname, '../app/content.html'), listenLoadOptions);
+                    listen.webContents.once('did-finish-load', () => {
+                        const viewId = liquidGlass.addView(listen.getNativeWindowHandle(), {
+                            cornerRadius: 12,
+                            tintColor: '#FF00001A', // Red tint
+                            opaque: false, 
+                        });
+                        if (viewId !== -1) {
+                            liquidGlass.unstable_setVariant(viewId, 2);
+                            // liquidGlass.unstable_setScrim(viewId, 1);
+                            // liquidGlass.unstable_setSubdued(viewId, 1);
+                        }
+                    });
+                }
+                windowPool.set('listen', listen);
+                break;
+            }
 
-    // ask
-    const ask = new BrowserWindow({ ...commonChildOptions, width:600, height:350 });
-    ask.setContentProtection(isContentProtectionOn);
-    ask.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
-    ask.loadFile(path.join(__dirname,'../app/content.html'),{query:{view:'ask'}});
-    ask.on('blur',()=>ask.webContents.send('window-blur'));
-    
-    // Open DevTools in development
-    if (!app.isPackaged) {
-        ask.webContents.openDevTools({ mode: 'detach' });
+            // ask
+            case 'ask': {
+                const ask = new BrowserWindow({ ...commonChildOptions, width:600 });
+                ask.setContentProtection(isContentProtectionOn);
+                ask.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
+                if (process.platform === 'darwin') {
+                    ask.setWindowButtonVisibility(false);
+                }
+                const askLoadOptions = { query: { view: 'ask' } };
+                if (!shouldUseLiquidGlass) {
+                    ask.loadFile(path.join(__dirname, '../app/content.html'), askLoadOptions);
+                }
+                else {
+                    askLoadOptions.query.glass = 'true';
+                    ask.loadFile(path.join(__dirname, '../app/content.html'), askLoadOptions);
+                    ask.webContents.once('did-finish-load', () => {
+                        const viewId = liquidGlass.addView(ask.getNativeWindowHandle(), {
+                            cornerRadius: 12,
+                            tintColor: '#FF00001A', // Red tint
+                            opaque: false, 
+                        });
+                        if (viewId !== -1) {
+                            liquidGlass.unstable_setVariant(viewId, 2);
+                            // liquidGlass.unstable_setScrim(viewId, 1);
+                            // liquidGlass.unstable_setSubdued(viewId, 1);
+                        }
+                    });
+                }
+
+                ask.on('blur',()=>ask.webContents.send('window-blur'));
+                
+                // Open DevTools in development
+                if (!app.isPackaged) {
+                    ask.webContents.openDevTools({ mode: 'detach' });
+                }
+                windowPool.set('ask', ask);
+                break;
+            }
+
+            // settings
+            case 'settings': {
+                const settings = new BrowserWindow({ ...commonChildOptions, width:240, maxHeight:400, parent:undefined });
+                settings.setContentProtection(isContentProtectionOn);
+                settings.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
+                if (process.platform === 'darwin') {
+                    settings.setWindowButtonVisibility(false);
+                }
+                const settingsLoadOptions = { query: { view: 'settings' } };
+                if (!shouldUseLiquidGlass) {
+                    settings.loadFile(path.join(__dirname,'../app/content.html'), settingsLoadOptions)
+                        .catch(console.error);
+                }
+                else {
+                    settingsLoadOptions.query.glass = 'true';
+                    settings.loadFile(path.join(__dirname,'../app/content.html'), settingsLoadOptions)
+                        .catch(console.error);
+                    settings.webContents.once('did-finish-load', () => {
+                        const viewId = liquidGlass.addView(settings.getNativeWindowHandle(), {
+                            cornerRadius: 12,
+                            tintColor: '#FF00001A', // Red tint
+                            opaque: false, 
+                        });
+                        if (viewId !== -1) {
+                            liquidGlass.unstable_setVariant(viewId, 2);
+                            // liquidGlass.unstable_setScrim(viewId, 1);
+                            // liquidGlass.unstable_setSubdued(viewId, 1);
+                        }
+                    });
+                }
+                windowPool.set('settings', settings);  
+                break;
+            }
+
+            case 'shortcut-settings': {
+                const shortcutEditor = new BrowserWindow({
+                    ...commonChildOptions,
+                    width: 420,
+                    height: 720,
+                    modal: false,
+                    parent: undefined,
+                    alwaysOnTop: true,
+                    titleBarOverlay: false,
+                });
+
+                if (process.platform === 'darwin') {
+                    shortcutEditor.setAlwaysOnTop(true, 'screen-saver');
+                } else {
+                    shortcutEditor.setAlwaysOnTop(true);
+                }
+            
+                /* ──────────[ ① 다른 창 클릭 차단 ]────────── */
+                const disableClicks = () => {
+                    for (const [name, win] of windowPool) {
+                        if (win !== shortcutEditor && !win.isDestroyed()) {
+                            win.setIgnoreMouseEvents(true, { forward: true });
+                        }
+                    }
+                };
+                const restoreClicks = () => {
+                    for (const [, win] of windowPool) {
+                        if (!win.isDestroyed()) win.setIgnoreMouseEvents(false);
+                    }
+                };
+
+                const header = windowPool.get('header');
+                if (header && !header.isDestroyed()) {
+                    const { x, y, width } = header.getBounds();
+                    shortcutEditor.setBounds({ x, y, width });
+                }
+
+                shortcutEditor.once('ready-to-show', () => {
+                    disableClicks(); 
+                    shortcutEditor.show();
+                });
+
+                const loadOptions = { query: { view: 'shortcut-settings' } };
+                if (!shouldUseLiquidGlass) {
+                    shortcutEditor.loadFile(path.join(__dirname, '../app/content.html'), loadOptions);
+                } else {
+                    loadOptions.query.glass = 'true';
+                    shortcutEditor.loadFile(path.join(__dirname, '../app/content.html'), loadOptions);
+                    shortcutEditor.webContents.once('did-finish-load', () => {
+                        const viewId = liquidGlass.addView(shortcutEditor.getNativeWindowHandle(), {
+                            cornerRadius: 12, tintColor: '#FF00001A', opaque: false, 
+                        });
+                        if (viewId !== -1) {
+                            liquidGlass.unstable_setVariant(viewId, 2);
+                        }
+                    });
+                }
+                
+                shortcutEditor.on('closed', () => {
+                    restoreClicks();
+                    windowPool.delete('shortcut-settings');
+                    console.log('[Shortcuts] Re-enabled after editing.');
+                    loadAndRegisterShortcuts(movementManager);
+                });
+
+                shortcutEditor.webContents.once('dom-ready', async () => {
+                    const savedKeybinds = shortCutStore.get('customKeybinds', {});
+                    const defaultKeybinds = getDefaultKeybinds();
+                    const keybinds = { ...defaultKeybinds, ...savedKeybinds };
+                    shortcutEditor.webContents.send('load-shortcuts', keybinds);
+                });
+
+                if (!app.isPackaged) {
+                    shortcutEditor.webContents.openDevTools({ mode: 'detach' });
+                }
+                windowPool.set('shortcut-settings', shortcutEditor);
+                break;
+            }
+        }
+    };
+
+    if (Array.isArray(namesToCreate)) {
+        namesToCreate.forEach(name => createFeatureWindow(name));
+    } else if (typeof namesToCreate === 'string') {
+        createFeatureWindow(namesToCreate);
+    } else {
+        createFeatureWindow('listen');
+        createFeatureWindow('ask');
+        createFeatureWindow('settings');
     }
-    windowPool.set('ask', ask);
-
-    // settings
-    const settings = new BrowserWindow({ ...commonChildOptions, width:240, height:450, parent:undefined });
-    settings.setContentProtection(isContentProtectionOn);
-    settings.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
-    settings.loadFile(path.join(__dirname,'../app/content.html'),{query:{view:'customize'}})
-        .catch(console.error);
-    windowPool.set('settings', settings);
 }
 
 function destroyFeatureWindows() {
@@ -118,10 +306,7 @@ function destroyFeatureWindows() {
     });
 }
 
-function isAllowed(name) {
-    const def = windowDefinitions[name];
-    return def && def.allowedStates.includes(currentHeaderState);
-}
+
 
 function getCurrentDisplay(window) {
     if (!window || window.isDestroyed()) return screen.getPrimaryDisplay();
@@ -140,713 +325,9 @@ function getDisplayById(displayId) {
     return displays.find(d => d.id === displayId) || screen.getPrimaryDisplay();
 }
 
-class WindowLayoutManager {
-    constructor() {
-        this.isUpdating = false;
-        this.PADDING = 80;
-    }
 
-    updateLayout() {
-        if (this.isUpdating) return;
-        this.isUpdating = true;
 
-        setImmediate(() => {
-            this.positionWindows();
-            this.isUpdating = false;
-        });
-    }
-
-    positionWindows() {
-        const header = windowPool.get('header');
-        if (!header?.getBounds) return;
-
-        const headerBounds = header.getBounds();
-        const display = getCurrentDisplay(header);
-        const { width: screenWidth, height: screenHeight } = display.workAreaSize;
-        const { x: workAreaX, y: workAreaY } = display.workArea;
-
-        const headerCenterX = headerBounds.x - workAreaX + headerBounds.width / 2;
-        const headerCenterY = headerBounds.y - workAreaY + headerBounds.height / 2;
-
-        const relativeX = headerCenterX / screenWidth;
-        const relativeY = headerCenterY / screenHeight;
-
-        const strategy = this.determineLayoutStrategy(headerBounds, screenWidth, screenHeight, relativeX, relativeY);
-
-        this.positionFeatureWindows(headerBounds, strategy, screenWidth, screenHeight, workAreaX, workAreaY);
-        this.positionSettingsWindow(headerBounds, strategy, screenWidth, screenHeight, workAreaX, workAreaY);
-    }
-
-    determineLayoutStrategy(headerBounds, screenWidth, screenHeight, relativeX, relativeY) {
-        const spaceBelow = screenHeight - (headerBounds.y + headerBounds.height);
-        const spaceAbove = headerBounds.y;
-        const spaceLeft = headerBounds.x;
-        const spaceRight = screenWidth - (headerBounds.x + headerBounds.width);
-
-        const spaces = {
-            below: spaceBelow,
-            above: spaceAbove,
-            left: spaceLeft,
-            right: spaceRight,
-        };
-
-        if (spaceBelow >= 400) {
-            return {
-                name: 'below',
-                primary: 'below',
-                secondary: relativeX < 0.5 ? 'right' : 'left',
-            };
-        } else if (spaceAbove >= 400) {
-            return {
-                name: 'above',
-                primary: 'above',
-                secondary: relativeX < 0.5 ? 'right' : 'left',
-            };
-        } else if (relativeX < 0.3 && spaceRight >= 800) {
-            return {
-                name: 'right-side',
-                primary: 'right',
-                secondary: spaceBelow > spaceAbove ? 'below' : 'above',
-            };
-        } else if (relativeX > 0.7 && spaceLeft >= 800) {
-            return {
-                name: 'left-side',
-                primary: 'left',
-                secondary: spaceBelow > spaceAbove ? 'below' : 'above',
-            };
-        } else {
-            return {
-                name: 'adaptive',
-                primary: spaceBelow > spaceAbove ? 'below' : 'above',
-                secondary: spaceRight > spaceLeft ? 'right' : 'left',
-            };
-        }
-    }
-
-    positionFeatureWindows(headerBounds, strategy, screenWidth, screenHeight, workAreaX, workAreaY) {
-        const ask = windowPool.get('ask');
-        const listen = windowPool.get('listen');
-        const askVisible = ask && ask.isVisible() && !ask.isDestroyed();
-        const listenVisible = listen && listen.isVisible() && !listen.isDestroyed();
-
-        if (!askVisible && !listenVisible) return;
-
-        const PAD = 8;
-
-        /* ① 헤더 중심 X를 “디스플레이 기준 상대좌표”로 변환  */
-        const headerCenterXRel = headerBounds.x - workAreaX + headerBounds.width / 2;
-
-        let askBounds = askVisible ? ask.getBounds() : null;
-        let listenBounds = listenVisible ? listen.getBounds() : null;
-
-        /* ------------------------------------------------- */
-        /* 두 창 모두 보이는 경우 */
-        /* ------------------------------------------------- */
-        if (askVisible && listenVisible) {
-            const combinedWidth = listenBounds.width + PAD + askBounds.width;
-
-            /* ② 모든 X 좌표를 상대좌표로 계산 */
-            let groupStartXRel = headerCenterXRel - combinedWidth / 2;
-            let listenXRel = groupStartXRel;
-            let askXRel = groupStartXRel + listenBounds.width + PAD;
-
-            /* 좌우 화면 여백 클램프 – 역시 상대좌표로 */
-            if (listenXRel < PAD) {
-                listenXRel = PAD;
-                askXRel = listenXRel + listenBounds.width + PAD;
-            }
-            if (askXRel + askBounds.width > screenWidth - PAD) {
-                askXRel = screenWidth - PAD - askBounds.width;
-                listenXRel = askXRel - listenBounds.width - PAD;
-            }
-
-            /* Y 좌표는 이미 상대값으로 계산돼 있음 */
-            let yRel;
-            switch (strategy.primary) {
-                case 'below':
-                    yRel = headerBounds.y - workAreaY + headerBounds.height + PAD;
-                    break;
-                case 'above':
-                    yRel = headerBounds.y - workAreaY - Math.max(askBounds.height, listenBounds.height) - PAD;
-                    break;
-                default:
-                    yRel = headerBounds.y - workAreaY + headerBounds.height + PAD;
-                    break;
-            }
-
-            /* ③ setBounds 직전에 workAreaX/Y를 더해 절대좌표로 변환 */
-            listen.setBounds({
-                x: Math.round(listenXRel + workAreaX),
-                y: Math.round(yRel + workAreaY),
-                width: listenBounds.width,
-                height: listenBounds.height,
-            });
-            ask.setBounds({
-                x: Math.round(askXRel + workAreaX),
-                y: Math.round(yRel + workAreaY),
-                width: askBounds.width,
-                height: askBounds.height,
-            });
-
-            /* ------------------------------------------------- */
-            /* 하나만 보이는 경우 */
-            /* ------------------------------------------------- */
-        } else {
-            const win = askVisible ? ask : listen;
-            const winBounds = askVisible ? askBounds : listenBounds;
-
-            /* X, Y 둘 다 상대좌표로 계산 */
-            let xRel = headerCenterXRel - winBounds.width / 2;
-            let yRel;
-            switch (strategy.primary) {
-                case 'below':
-                    yRel = headerBounds.y - workAreaY + headerBounds.height + PAD;
-                    break;
-                case 'above':
-                    yRel = headerBounds.y - workAreaY - winBounds.height - PAD;
-                    break;
-                default:
-                    yRel = headerBounds.y - workAreaY + headerBounds.height + PAD;
-                    break;
-            }
-
-            /* 화면 경계 클램프 */
-            xRel = Math.max(PAD, Math.min(screenWidth - winBounds.width - PAD, xRel));
-            yRel = Math.max(PAD, Math.min(screenHeight - winBounds.height - PAD, yRel));
-
-            /* 절대좌표로 변환 후 배치 */
-            win.setBounds({
-                x: Math.round(xRel + workAreaX),
-                y: Math.round(yRel + workAreaY),
-                width: winBounds.width,
-                height: winBounds.height,
-            });
-        }
-    }
-
-    positionSettingsWindow(headerBounds, strategy, screenWidth, screenHeight) {
-        const settings = windowPool.get('settings');
-        if (!settings?.getBounds || !settings.isVisible()) return;
-
-        // if (settings.__lockedByButton) return;
-        if (settings.__lockedByButton) {
-            const headerDisplay = getCurrentDisplay(windowPool.get('header'));
-            const settingsDisplay = getCurrentDisplay(settings);
-            if (headerDisplay.id !== settingsDisplay.id) {
-                settings.__lockedByButton = false;
-            } else {
-                return; // 같은 화면이면 그대로 둔다
-            }
-        }
-
-        const settingsBounds = settings.getBounds();
-        const PAD = 5;
-
-        const buttonPadding = 17;
-        let x = headerBounds.x + headerBounds.width - settingsBounds.width - buttonPadding;
-        let y = headerBounds.y + headerBounds.height + PAD;
-
-        const otherVisibleWindows = [];
-        ['listen', 'ask'].forEach(name => {
-            const win = windowPool.get(name);
-            if (win && win.isVisible() && !win.isDestroyed()) {
-                otherVisibleWindows.push({
-                    name,
-                    bounds: win.getBounds(),
-                });
-            }
-        });
-
-        const settingsNewBounds = { x, y, width: settingsBounds.width, height: settingsBounds.height };
-        let hasOverlap = false;
-
-        for (const otherWin of otherVisibleWindows) {
-            if (this.boundsOverlap(settingsNewBounds, otherWin.bounds)) {
-                hasOverlap = true;
-                break;
-            }
-        }
-
-        if (hasOverlap) {
-            x = headerBounds.x + headerBounds.width + PAD;
-            y = headerBounds.y;
-            settingsNewBounds.x = x;
-            settingsNewBounds.y = y;
-
-            if (x + settingsBounds.width > screenWidth - 10) {
-                x = headerBounds.x - settingsBounds.width - PAD;
-                settingsNewBounds.x = x;
-            }
-
-            if (x < 10) {
-                x = headerBounds.x + headerBounds.width - settingsBounds.width - buttonPadding;
-                y = headerBounds.y - settingsBounds.height - PAD;
-                settingsNewBounds.x = x;
-                settingsNewBounds.y = y;
-
-                if (y < 10) {
-                    x = headerBounds.x + headerBounds.width - settingsBounds.width;
-                    y = headerBounds.y + headerBounds.height + PAD;
-                }
-            }
-        }
-
-        x = Math.max(10, Math.min(screenWidth - settingsBounds.width - 10, x));
-        y = Math.max(10, Math.min(screenHeight - settingsBounds.height - 10, y));
-
-        settings.setBounds({ x, y });
-        settings.moveTop();
-
-        // console.log(`[Layout] Settings positioned at (${x}, ${y}) ${hasOverlap ? '(adjusted for overlap)' : '(default position)'}`);
-    }
-
-    boundsOverlap(bounds1, bounds2) {
-        const margin = 10;
-        return !(
-            bounds1.x + bounds1.width + margin < bounds2.x ||
-            bounds2.x + bounds2.width + margin < bounds1.x ||
-            bounds1.y + bounds1.height + margin < bounds2.y ||
-            bounds2.y + bounds2.height + margin < bounds1.y
-        );
-    }
-
-    isWindowVisible(windowName) {
-        const window = windowPool.get(windowName);
-        return window && !window.isDestroyed() && window.isVisible();
-    }
-
-    destroy() {}
-}
-
-class SmoothMovementManager {
-    constructor() {
-        this.stepSize = 80;
-        this.animationDuration = 300;
-        this.headerPosition = { x: 0, y: 0 };
-        this.isAnimating = false;
-        this.hiddenPosition = null;
-        this.lastVisiblePosition = null;
-        this.currentDisplayId = null;
-    }
-
-    moveToDisplay(displayId) {
-        const header = windowPool.get('header');
-        if (!header || !header.isVisible() || this.isAnimating) return;
-
-        const targetDisplay = getDisplayById(displayId);
-        if (!targetDisplay) return;
-
-        const currentBounds = header.getBounds();
-        const currentDisplay = getCurrentDisplay(header);
-
-        if (currentDisplay.id === targetDisplay.id) {
-            console.log('[Movement] Already on target display');
-            return;
-        }
-
-        const relativeX = (currentBounds.x - currentDisplay.workArea.x) / currentDisplay.workAreaSize.width;
-        const relativeY = (currentBounds.y - currentDisplay.workArea.y) / currentDisplay.workAreaSize.height;
-
-        const targetX = targetDisplay.workArea.x + targetDisplay.workAreaSize.width * relativeX;
-        const targetY = targetDisplay.workArea.y + targetDisplay.workAreaSize.height * relativeY;
-
-        const finalX = Math.max(
-            targetDisplay.workArea.x,
-            Math.min(targetDisplay.workArea.x + targetDisplay.workAreaSize.width - currentBounds.width, targetX)
-        );
-        const finalY = Math.max(
-            targetDisplay.workArea.y,
-            Math.min(targetDisplay.workArea.y + targetDisplay.workAreaSize.height - currentBounds.height, targetY)
-        );
-
-        this.headerPosition = { x: currentBounds.x, y: currentBounds.y };
-        this.animateToPosition(header, finalX, finalY);
-
-        this.currentDisplayId = targetDisplay.id;
-    }
-
-    hideToEdge(edge, callback) {
-        const header = windowPool.get('header');
-        if (!header || !header.isVisible() || this.isAnimating) return;
-
-        console.log(`[Movement] Hiding to ${edge} edge`);
-
-        const currentBounds = header.getBounds();
-        this.lastVisiblePosition = { x: currentBounds.x, y: currentBounds.y };
-        this.headerPosition = { x: currentBounds.x, y: currentBounds.y };
-
-        const display = getCurrentDisplay(header);
-        const { width: screenWidth, height: screenHeight } = display.workAreaSize;
-        const { x: workAreaX, y: workAreaY } = display.workArea;
-        const headerBounds = header.getBounds();
-
-        let targetX = this.headerPosition.x;
-        let targetY = this.headerPosition.y;
-
-        switch (edge) {
-            case 'top':
-                targetY = workAreaY - headerBounds.height - 20;
-                break;
-            case 'bottom':
-                targetY = workAreaY + screenHeight + 20;
-                break;
-            case 'left':
-                targetX = workAreaX - headerBounds.width - 20;
-                break;
-            case 'right':
-                targetX = workAreaX + screenWidth + 20;
-                break;
-        }
-
-        this.hiddenPosition = { x: targetX, y: targetY, edge };
-
-        this.isAnimating = true;
-        const startX = this.headerPosition.x;
-        const startY = this.headerPosition.y;
-        const duration = 400;
-        const startTime = Date.now();
-
-        const animate = () => {
-            if (!header || typeof header.setPosition !== 'function' || header.isDestroyed()) {
-                this.isAnimating = false;
-                return;
-            }
-        
-            const elapsed = Date.now() - startTime;
-            const progress = Math.min(elapsed / duration, 1);
-            const eased = progress * progress * progress;
-        
-            const currentX = startX + (targetX - startX) * eased;
-            const currentY = startY + (targetY - startY) * eased;
-        
-            // Validate computed positions before using
-            if (!Number.isFinite(currentX) || !Number.isFinite(currentY)) {
-                console.error('[Movement] Invalid animation values for hide:', {
-                    currentX, currentY, progress, eased, startX, startY, targetX, targetY
-                });
-                this.isAnimating = false;
-                return;
-            }
-        
-            // Safely call setPosition
-            try {
-                header.setPosition(Math.round(currentX), Math.round(currentY));
-            } catch (err) {
-                console.error('[Movement] Failed to set position:', err);
-                this.isAnimating = false;
-                return;
-            }
-        
-            if (progress < 1) {
-                setTimeout(animate, 8);
-            } else {
-                this.headerPosition = { x: targetX, y: targetY };
-        
-                if (Number.isFinite(targetX) && Number.isFinite(targetY)) {
-                    try {
-                        header.setPosition(Math.round(targetX), Math.round(targetY));
-                    } catch (err) {
-                        console.error('[Movement] Failed to set final position:', err);
-                    }
-                }
-        
-                this.isAnimating = false;
-        
-                if (typeof callback === 'function') {
-                    try {
-                        callback();
-                    } catch (err) {
-                        console.error('[Movement] Callback error:', err);
-                    }
-                }
-        
-                console.log(`[Movement] Hide to ${edge} completed`);
-            }
-        };
-
-    animate();
-    }
-
-    showFromEdge(callback) {
-        const header = windowPool.get('header');
-        if (!header || this.isAnimating || !this.hiddenPosition || !this.lastVisiblePosition) return;
-
-        console.log(`[Movement] Showing from ${this.hiddenPosition.edge} edge`);
-
-        header.setPosition(this.hiddenPosition.x, this.hiddenPosition.y);
-        this.headerPosition = { x: this.hiddenPosition.x, y: this.hiddenPosition.y };
-
-        const targetX = this.lastVisiblePosition.x;
-        const targetY = this.lastVisiblePosition.y;
-
-        this.isAnimating = true;
-        const startX = this.headerPosition.x;
-        const startY = this.headerPosition.y;
-        const duration = 500;
-        const startTime = Date.now();
-
-        const animate = () => {
-            if (!header || header.isDestroyed()) {
-                this.isAnimating = false;
-                return;
-            }
-
-            const elapsed = Date.now() - startTime;
-            const progress = Math.min(elapsed / duration, 1);
-
-            const c1 = 1.70158;
-            const c3 = c1 + 1;
-            const eased = 1 + c3 * Math.pow(progress - 1, 3) + c1 * Math.pow(progress - 1, 2);
-
-            const currentX = startX + (targetX - startX) * eased;
-            const currentY = startY + (targetY - startY) * eased;
-
-            if (!Number.isFinite(currentX) || !Number.isFinite(currentY)) {
-                console.error('[Movement] Invalid animation values for show:', { currentX, currentY, progress, eased });
-                this.isAnimating = false;
-                return;
-            }
-
-            header.setPosition(Math.round(currentX), Math.round(currentY));
-
-            if (progress < 1) {
-                setTimeout(animate, 8);
-            } else {
-                this.headerPosition = { x: targetX, y: targetY };
-                this.headerPosition = { x: targetX, y: targetY };
-                if (Number.isFinite(targetX) && Number.isFinite(targetY)) {
-                    header.setPosition(Math.round(targetX), Math.round(targetY));
-                }
-                this.isAnimating = false;
-
-                this.hiddenPosition = null;
-                this.lastVisiblePosition = null;
-
-                if (callback) callback();
-
-                console.log(`[Movement] Show from edge completed`);
-            }
-        };
-
-        animate();
-    }
-
-    moveStep(direction) {
-        const header = windowPool.get('header');
-        if (!header || !header.isVisible() || this.isAnimating) return;
-
-        console.log(`[Movement] Step ${direction}`);
-
-        const currentBounds = header.getBounds();
-        this.headerPosition = { x: currentBounds.x, y: currentBounds.y };
-
-        let targetX = this.headerPosition.x;
-        let targetY = this.headerPosition.y;
-
-        switch (direction) {
-            case 'left':
-                targetX -= this.stepSize;
-                break;
-            case 'right':
-                targetX += this.stepSize;
-                break;
-            case 'up':
-                targetY -= this.stepSize;
-                break;
-            case 'down':
-                targetY += this.stepSize;
-                break;
-            default:
-                return;
-        }
-
-        const displays = screen.getAllDisplays();
-        let validPosition = false;
-
-        for (const display of displays) {
-            const { x, y, width, height } = display.workArea;
-            const headerBounds = header.getBounds();
-
-            if (targetX >= x && targetX + headerBounds.width <= x + width && targetY >= y && targetY + headerBounds.height <= y + height) {
-                validPosition = true;
-                break;
-            }
-        }
-
-        if (!validPosition) {
-            const nearestDisplay = screen.getDisplayNearestPoint({ x: targetX, y: targetY });
-            const { x, y, width, height } = nearestDisplay.workArea;
-            const headerBounds = header.getBounds();
-
-            targetX = Math.max(x, Math.min(x + width - headerBounds.width, targetX));
-            targetY = Math.max(y, Math.min(y + height - headerBounds.height, targetY));
-        }
-
-        if (targetX === this.headerPosition.x && targetY === this.headerPosition.y) {
-            console.log(`[Movement] Already at boundary for ${direction}`);
-            return;
-        }
-
-        this.animateToPosition(header, targetX, targetY);
-    }
-
-    animateToPosition(header, targetX, targetY) {
-        this.isAnimating = true;
-
-        const startX = this.headerPosition.x;
-        const startY = this.headerPosition.y;
-        const startTime = Date.now();
-
-        if (!Number.isFinite(targetX) || !Number.isFinite(targetY) || !Number.isFinite(startX) || !Number.isFinite(startY)) {
-            console.error('[Movement] Invalid position values:', { startX, startY, targetX, targetY });
-            this.isAnimating = false;
-            return;
-        }
-
-        const animate = () => {
-            if (!header || header.isDestroyed()) {
-                this.isAnimating = false;
-                return;
-            }
-
-            const elapsed = Date.now() - startTime;
-            const progress = Math.min(elapsed / this.animationDuration, 1);
-
-            const eased = 1 - Math.pow(1 - progress, 3);
-
-            const currentX = startX + (targetX - startX) * eased;
-            const currentY = startY + (targetY - startY) * eased;
-
-            if (!Number.isFinite(currentX) || !Number.isFinite(currentY)) {
-                console.error('[Movement] Invalid animation values:', { currentX, currentY, progress, eased });
-                this.isAnimating = false;
-                return;
-            }
-
-            header.setPosition(Math.round(currentX), Math.round(currentY));
-
-            if (progress < 1) {
-                setTimeout(animate, 8);
-            } else {
-                this.headerPosition = { x: targetX, y: targetY };
-                if (Number.isFinite(targetX) && Number.isFinite(targetY)) {
-                    header.setPosition(Math.round(targetX), Math.round(targetY));
-                } else {
-                    console.warn('[Movement] Final position invalid, skip setPosition:', { targetX, targetY });
-                }
-                this.isAnimating = false;
-
-                updateLayout();
-
-                console.log(`[Movement] Step completed to (${targetX}, ${targetY})`);
-            }
-        };
-
-        animate();
-    }
-
-    moveToEdge(direction) {
-        const header = windowPool.get('header');
-        if (!header || !header.isVisible() || this.isAnimating) return;
-
-        console.log(`[Movement] Move to edge: ${direction}`);
-
-        const display = getCurrentDisplay(header);
-        const { width, height } = display.workAreaSize;
-        const { x: workAreaX, y: workAreaY } = display.workArea;
-        const headerBounds = header.getBounds();
-
-        const currentBounds = header.getBounds();
-        let targetX = currentBounds.x;
-        let targetY = currentBounds.y;
-
-        switch (direction) {
-            case 'left':
-                targetX = workAreaX;
-                break;
-            case 'right':
-                targetX = workAreaX + width - headerBounds.width;
-                break;
-            case 'up':
-                targetY = workAreaY;
-                break;
-            case 'down':
-                targetY = workAreaY + height - headerBounds.height;
-                break;
-        }
-
-        this.headerPosition = { x: currentBounds.x, y: currentBounds.y };
-
-        this.isAnimating = true;
-        const startX = this.headerPosition.x;
-        const startY = this.headerPosition.y;
-        const duration = 400;
-        const startTime = Date.now(); // 이 줄을 animate 함수 정의 전으로 이동
-
-        if (!Number.isFinite(targetX) || !Number.isFinite(targetY) || !Number.isFinite(startX) || !Number.isFinite(startY)) {
-            console.error('[Movement] Invalid edge position values:', { startX, startY, targetX, targetY });
-            this.isAnimating = false;
-            return;
-        }
-
-        const animate = () => {
-            if (!header || header.isDestroyed()) {
-                this.isAnimating = false;
-                return;
-            }
-
-            const elapsed = Date.now() - startTime;
-            const progress = Math.min(elapsed / duration, 1);
-
-            const eased = 1 - Math.pow(1 - progress, 4);
-
-            const currentX = startX + (targetX - startX) * eased;
-            const currentY = startY + (targetY - startY) * eased;
-
-            if (!Number.isFinite(currentX) || !Number.isFinite(currentY)) {
-                console.error('[Movement] Invalid edge animation values:', { currentX, currentY, progress, eased });
-                this.isAnimating = false;
-                return;
-            }
-
-            header.setPosition(Math.round(currentX), Math.round(currentY));
-
-            if (progress < 1) {
-                setTimeout(animate, 8);
-            } else {
-                if (Number.isFinite(targetX) && Number.isFinite(targetY)) {
-                    header.setPosition(Math.round(targetX), Math.round(targetY));
-                }
-                this.headerPosition = { x: targetX, y: targetY };
-                this.isAnimating = false;
-
-                updateLayout();
-
-                console.log(`[Movement] Edge movement completed: ${direction}`);
-            }
-        };
-
-        animate();
-    }
-
-    handleKeyPress(direction) {}
-
-    handleKeyRelease(direction) {}
-
-    forceStopMovement() {
-        this.isAnimating = false;
-    }
-
-    destroy() {
-        this.isAnimating = false;
-        console.log('[Movement] Destroyed');
-    }
-}
-
-const layoutManager = new WindowLayoutManager();
-let movementManager = null;
-
-function toggleAllWindowsVisibility() {
+function toggleAllWindowsVisibility(movementManager) {
     const header = windowPool.get('header');
     if (!header) return;
 
@@ -878,12 +359,13 @@ function toggleAllWindowsVisibility() {
             if (win.isVisible()) {
                 lastVisibleWindows.add(name);
                 if (name !== 'header') {
-                    win.webContents.send('window-hide-animation');
-                    setTimeout(() => {
-                        if (!win.isDestroyed()) {
-                            win.hide();
-                        }
-                    }, 200);
+                    // win.webContents.send('window-hide-animation');
+                    // setTimeout(() => {
+                    //     if (!win.isDestroyed()) {
+                    //         win.hide();
+                    //     }
+                    // }, 200);
+                    win.hide();
                 }
             }
         });
@@ -893,7 +375,7 @@ function toggleAllWindowsVisibility() {
         movementManager.hideToEdge(nearestEdge, () => {
             header.hide();
             console.log('[Visibility] Smart hide completed');
-        });
+        }, { instant: true });
     } else {
         console.log('[Visibility] Smart showing from hidden position');
         console.log('[Visibility] Restoring windows:', Array.from(lastVisibleWindows));
@@ -918,21 +400,6 @@ function toggleAllWindowsVisibility() {
     }
 }
 
-function ensureDataDirectories() {
-    const homeDir = os.homedir();
-    const pickleGlassDir = path.join(homeDir, '.pickle-glass');
-    const dataDir = path.join(pickleGlassDir, 'data');
-    const imageDir = path.join(dataDir, 'image');
-    const audioDir = path.join(dataDir, 'audio');
-
-    [pickleGlassDir, dataDir, imageDir, audioDir].forEach(dir => {
-        if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
-        }
-    });
-
-    return { imageDir, audioDir };
-}
 
 function createWindows() {
     const primaryDisplay = screen.getPrimaryDisplay();
@@ -940,8 +407,8 @@ function createWindows() {
 
     const initialX = Math.round((screenWidth - DEFAULT_WINDOW_WIDTH) / 2);
     const initialY = workAreaY + 21;
-    movementManager = new SmoothMovementManager();
-
+    movementManager = new SmoothMovementManager(windowPool, getDisplayById, getCurrentDisplay, updateLayout);
+    
     const header = new BrowserWindow({
         width: DEFAULT_WINDOW_WIDTH,
         height: HEADER_HEIGHT,
@@ -949,6 +416,7 @@ function createWindows() {
         y: initialY,
         frame: false,
         transparent: true,
+        vibrancy: false,
         alwaysOnTop: true,
         skipTaskbar: true,
         hiddenInMissionControl: true,
@@ -962,23 +430,45 @@ function createWindows() {
             webSecurity: false,
         },
     });
-
-    windowPool.set('header', header);
-
-    if (currentHeaderState === 'app') {
-        createFeatureWindows(header);
+    if (process.platform === 'darwin') {
+        header.setWindowButtonVisibility(false);
     }
-
-
+    const headerLoadOptions = {};
+    if (!shouldUseLiquidGlass) {
+        header.loadFile(path.join(__dirname, '../app/header.html'), headerLoadOptions);
+    }
+    else {
+        headerLoadOptions.query = { glass: 'true' };
+        header.loadFile(path.join(__dirname, '../app/header.html'), headerLoadOptions);
+        header.webContents.once('did-finish-load', () => {
+            const viewId = liquidGlass.addView(header.getNativeWindowHandle(), {
+                cornerRadius: 12,
+                tintColor: '#FF00001A', // Red tint
+                opaque: false, 
+            });
+            if (viewId !== -1) {
+                liquidGlass.unstable_setVariant(viewId, 2); 
+                // liquidGlass.unstable_setScrim(viewId, 1); 
+                // liquidGlass.unstable_setSubdued(viewId, 1);
+            }
+        });
+    }
     windowPool.set('header', header);
+    layoutManager = new WindowLayoutManager(windowPool);
 
-    if (currentHeaderState === 'app') {
-        createFeatureWindows(header);
+    header.webContents.once('dom-ready', () => {
+        loadAndRegisterShortcuts(movementManager);
+    });
+
+    setupIpcHandlers(movementManager);
+
+    if (currentHeaderState === 'main') {
+        createFeatureWindows(header, ['listen', 'ask', 'settings', 'shortcut-settings']);
     }
 
     header.setContentProtection(isContentProtectionOn);
     header.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    header.loadFile(path.join(__dirname, '../app/header.html'));
+    // header.loadFile(path.join(__dirname, '../app/header.html'));
     
     // Open DevTools in development
     if (!app.isPackaged) {
@@ -1004,18 +494,10 @@ function createWindows() {
 
     header.on('resize', updateLayout);
 
-    header.webContents.once('dom-ready', () => {
-        loadAndRegisterShortcuts();
-    });
-
-    ipcMain.handle('toggle-all-windows-visibility', toggleAllWindowsVisibility);
+    ipcMain.handle('toggle-all-windows-visibility', () => toggleAllWindowsVisibility(movementManager));
 
     ipcMain.handle('toggle-feature', async (event, featureName) => {
-        if (!windowPool.get(featureName) && currentHeaderState === 'app') {
-            createFeatureWindows(windowPool.get('header'));
-        }
-
-        if (!windowPool.get(featureName) && currentHeaderState === 'app') {
+        if (!windowPool.get(featureName) && currentHeaderState === 'main') {
             createFeatureWindows(windowPool.get('header'));
         }
 
@@ -1023,10 +505,10 @@ function createWindows() {
 
         if (windowToToggle) {
             if (featureName === 'listen') {
-                const liveSummaryService = require('../features/listen/liveSummaryService');
-                if (liveSummaryService.isSessionActive()) {
+                const listenService = global.listenService;
+                if (listenService && listenService.isSessionActive()) {
                     console.log('[WindowManager] Listen session is active, closing it via toggle.');
-                    await liveSummaryService.closeSession();
+                    await listenService.closeSession();
                     return;
                 }
             }
@@ -1207,48 +689,36 @@ function createWindows() {
         }
     });
 
-    setupIpcHandlers();
-
     return windowPool;
 }
 
-function loadAndRegisterShortcuts() {
+function loadAndRegisterShortcuts(movementManager) {
+    if (windowPool.has('shortcut-settings')) {
+        console.log('[Shortcuts] Editing in progress, skipping registration.');
+        return;
+    }
+
     const defaultKeybinds = getDefaultKeybinds();
-    const header = windowPool.get('header');
+    const savedKeybinds = shortCutStore.get('customKeybinds', {});
+    const keybinds = { ...defaultKeybinds, ...savedKeybinds };
+
     const sendToRenderer = (channel, ...args) => {
         windowPool.forEach(win => {
-            try {
-                if (win && !win.isDestroyed()) {
+            if (win && !win.isDestroyed()) {
+                try {
                     win.webContents.send(channel, ...args);
+                } catch (e) {
+                    // 창이 이미 닫혔을 수 있으므로 오류를 무시합니다.
                 }
-            } catch (e) {}
+            }
         });
     };
 
-    const openaiSessionRef = { current: null };
-
-    if (!header) {
-        return updateGlobalShortcuts(defaultKeybinds, undefined, sendToRenderer, openaiSessionRef);
-    }
-
-    header.webContents
-        .executeJavaScript(`(() => localStorage.getItem('customKeybinds'))()`)
-        .then(saved => (saved ? JSON.parse(saved) : {}))
-        .then(savedKeybinds => {
-            const keybinds = { ...defaultKeybinds, ...savedKeybinds };
-            updateGlobalShortcuts(keybinds, header, sendToRenderer, openaiSessionRef);
-        })
-        .catch(() => updateGlobalShortcuts(defaultKeybinds, header, sendToRenderer, openaiSessionRef));
+    updateGlobalShortcuts(keybinds, windowPool.get('header'), sendToRenderer, movementManager);
 }
 
-function updateLayout() {
-    layoutManager.updateLayout();
-}
 
-function setupIpcHandlers(openaiSessionRef) {
-    const layoutManager = new WindowLayoutManager();
-    // const movementManager = new SmoothMovementManager();
-
+function setupIpcHandlers(movementManager) {
     screen.on('display-added', (event, newDisplay) => {
         console.log('[Display] New display added:', newDisplay.id);
     });
@@ -1365,17 +835,6 @@ function setupIpcHandlers(openaiSessionRef) {
         app.quit();
     });
 
-    ipcMain.handle('message-sending', async event => {
-        console.log('📨 Main: Received message-sending signal');
-        const askWindow = windowPool.get('ask');
-        if (askWindow && !askWindow.isDestroyed()) {
-            console.log('📤 Main: Sending hide-text-input to ask window');
-            askWindow.webContents.send('hide-text-input');
-            return { success: true };
-        }
-        return { success: false };
-    });
-
     ipcMain.handle('is-window-visible', (event, windowName) => {
         const window = windowPool.get(windowName);
         if (window && !window.isDestroyed()) {
@@ -1404,11 +863,12 @@ function setupIpcHandlers(openaiSessionRef) {
         console.log(`[WindowManager] Header state changed to: ${state}`);
         currentHeaderState = state;
 
-        if (state === 'app') {
+        if (state === 'main') {
             createFeatureWindows(windowPool.get('header'));
-        } else {         // 'apikey'
+        } else {         // 'apikey' | 'permission'
             destroyFeatureWindows();
         }
+        loadAndRegisterShortcuts(movementManager);
 
         for (const [name, win] of windowPool) {
             if (!isAllowed(name) && !win.isDestroyed()) {
@@ -1418,74 +878,67 @@ function setupIpcHandlers(openaiSessionRef) {
                 win.show();
             }
         }
-
-        const header = windowPool.get('header');
-        if (header && !header.isDestroyed()) {
-            header.webContents
-                .executeJavaScript(`(() => localStorage.getItem('customKeybinds'))()`)
-                .then(saved => {
-                    const defaultKeybinds = getDefaultKeybinds();
-                    const savedKeybinds = saved ? JSON.parse(saved) : {};
-                    const keybinds = { ...defaultKeybinds, ...savedKeybinds };
-
-                    const sendToRenderer = (channel, ...args) => {
-                        windowPool.forEach(win => {
-                            try {
-                                if (win && !win.isDestroyed()) {
-                                    win.webContents.send(channel, ...args);
-                                }
-                            } catch (e) {}
-                        });
-                    };
-
-                    updateGlobalShortcuts(keybinds, header, sendToRenderer, { current: null });
-                })
-                .catch(console.error);
-        }
-    });
-
-    ipcMain.handle('get-available-screens', async () => {
-        try {
-            const sources = await desktopCapturer.getSources({
-                types: ['screen'],
-                thumbnailSize: { width: 300, height: 200 },
-            });
-
-            const displays = screen.getAllDisplays();
-
-            return sources.map((source, index) => {
-                const display = displays[index] || displays[0];
-                return {
-                    id: source.id,
-                    name: source.name,
-                    thumbnail: source.thumbnail.toDataURL(),
-                    display: {
-                        id: display.id,
-                        bounds: display.bounds,
-                        workArea: display.workArea,
-                        scaleFactor: display.scaleFactor,
-                        isPrimary: display.id === screen.getPrimaryDisplay().id,
-                    },
-                };
-            });
-        } catch (error) {
-            console.error('Failed to get available screens:', error);
-            return [];
-        }
-    });
-
-    ipcMain.handle('set-capture-source', (event, sourceId) => {
-        selectedCaptureSourceId = sourceId;
-        console.log(`[Capture] Selected source: ${sourceId}`);
-        return { success: true };
-    });
-
-    ipcMain.handle('get-capture-source', () => {
-        return selectedCaptureSourceId;
     });
 
     ipcMain.on('update-keybinds', (event, newKeybinds) => {
         updateGlobalShortcuts(newKeybinds);
+    });
+
+    ipcMain.handle('get-current-shortcuts', () => {
+        const defaultKeybinds = getDefaultKeybinds();
+        const savedKeybinds = shortCutStore.get('customKeybinds', {});
+        return { ...defaultKeybinds, ...savedKeybinds };
+    });
+
+    ipcMain.handle('open-shortcut-editor', () => {
+        const header = windowPool.get('header');
+        if (!header) return;
+        
+        // 편집기 열기 전 모든 단축키 비활성화
+        globalShortcut.unregisterAll();
+        console.log('[Shortcuts] Disabled for editing.');
+
+        createFeatureWindows(header, 'shortcut-settings');
+    });
+
+    ipcMain.handle('get-default-shortcuts', () => {
+        shortCutStore.set('customKeybinds', {});
+        return getDefaultKeybinds();
+    });
+
+    ipcMain.handle('save-shortcuts', async (event, newKeybinds) => {
+        try {
+            const defaultKeybinds = getDefaultKeybinds();
+            const customKeybinds = {};
+            for (const key in newKeybinds) {
+                if (newKeybinds[key] && newKeybinds[key] !== defaultKeybinds[key]) {
+                    customKeybinds[key] = newKeybinds[key];
+                }
+            }
+            
+            shortCutStore.set('customKeybinds', customKeybinds);
+            console.log('[Shortcuts] Custom keybinds saved to store:', customKeybinds);
+
+            const editor = windowPool.get('shortcut-settings');
+            if (editor && !editor.isDestroyed()) {
+                editor.close(); 
+            } else {
+                loadAndRegisterShortcuts(movementManager);
+            }
+
+            return { success: true };
+        } catch (error) {
+            console.error("Failed to save shortcuts:", error);
+            loadAndRegisterShortcuts(movementManager);
+            return { success: false, error: error.message };
+        }
+    });
+
+    ipcMain.on('close-shortcut-editor', () => {
+        const editor = windowPool.get('shortcut-settings');
+        if (editor && !editor.isDestroyed()) {
+            editor.close();
+        }
     });
 
     ipcMain.handle('open-login-page', () => {
@@ -1581,12 +1034,6 @@ function setupIpcHandlers(openaiSessionRef) {
         }
     });
 
-    ipcMain.on('move-to-edge', (event, direction) => {
-        if (movementManager) {
-            movementManager.moveToEdge(direction);
-        }
-    });
-
     ipcMain.handle('force-close-window', (event, windowName) => {
         const window = windowPool.get(windowName);
         if (window && !window.isDestroyed()) {
@@ -1627,68 +1074,7 @@ function setupIpcHandlers(openaiSessionRef) {
     });
 
     ipcMain.handle('capture-screenshot', async (event, options = {}) => {
-        if (process.platform === 'darwin') {
-            try {
-                const tempPath = path.join(os.tmpdir(), `screenshot-${Date.now()}.jpg`);
-
-                await execFile('screencapture', ['-x', '-t', 'jpg', tempPath]);
-
-                const imageBuffer = await fs.promises.readFile(tempPath);
-                await fs.promises.unlink(tempPath);
-
-                const resizedBuffer = await sharp(imageBuffer)
-                    // .resize({ height: 1080 })
-                    .resize({ height: 384 })
-                    .jpeg({ quality: 80 })
-                    .toBuffer();
-
-                const base64 = resizedBuffer.toString('base64');
-                const metadata = await sharp(resizedBuffer).metadata();
-
-                lastScreenshot = {
-                    base64,
-                    width: metadata.width,
-                    height: metadata.height,
-                    timestamp: Date.now(),
-                };
-
-                return { success: true, base64, width: metadata.width, height: metadata.height };
-            } catch (error) {
-                console.error('Failed to capture and resize screenshot:', error);
-                return { success: false, error: error.message };
-            }
-        }
-
-        try {
-            const sources = await desktopCapturer.getSources({
-                types: ['screen'],
-                thumbnailSize: {
-                    width: 1920,
-                    height: 1080,
-                },
-            });
-
-            if (sources.length === 0) {
-                throw new Error('No screen sources available');
-            }
-            const source = sources[0];
-            const buffer = source.thumbnail.toJPEG(70);
-            const base64 = buffer.toString('base64');
-            const size = source.thumbnail.getSize();
-
-            return {
-                success: true,
-                base64,
-                width: size.width,
-                height: size.height,
-            };
-        } catch (error) {
-            console.error('Failed to capture screenshot using desktopCapturer:', error);
-            return {
-                success: false,
-                error: error.message,
-            };
-        }
+        return captureScreenshot(options);
     });
 
     ipcMain.handle('get-current-screenshot', async event => {
@@ -1715,131 +1101,10 @@ function setupIpcHandlers(openaiSessionRef) {
         }
     });
 
-    ipcMain.handle('firebase-auth-state-changed', (event, user) => {
-        console.log('[WindowManager] Firebase auth state changed:', user ? user.email : 'null');
-        const previousUser = currentFirebaseUser;
-
-        // 🛡️  Guard: ignore duplicate events where auth state did not actually change
-        const sameUser = user && previousUser && user.uid && previousUser.uid && user.uid === previousUser.uid;
-        const bothNull = !user && !previousUser;
-        if (sameUser || bothNull) {
-            // No real state change ➜ skip further processing
-            console.log('[WindowManager] No real state change, skipping further processing');
-            return;
-        }
-
-        currentFirebaseUser = user;
-
-        if (user && user.email) {
-            (async () => {
-                try {
-                    const existingKey = getStoredApiKey();
-                    if (existingKey) {
-                        console.log('[WindowManager] Virtual key already exists, skipping fetch');
-                        return;
-                    }
-
-                    if (!user.idToken) {
-                        console.warn('[WindowManager] No ID token available, cannot fetch virtual key');
-                        return;
-                    }
-
-                    console.log('[WindowManager] Fetching virtual key via onAuthStateChanged');
-                    const vKey = await getVirtualKeyByEmail(user.email, user.idToken);
-                    console.log('[WindowManager] Virtual key fetched successfully');
-
-                    setApiKey(vKey)
-                        .then(() => {
-                            windowPool.forEach(win => {
-                                if (win && !win.isDestroyed()) {
-                                    win.webContents.send('api-key-updated');
-                                }
-                            });
-                        })
-                        .catch(err => console.error('[WindowManager] Failed to save virtual key:', err));
-                } catch (err) {
-                    console.error('[WindowManager] Virtual key fetch failed:', err);
-
-                    if (err.message.includes('token') || err.message.includes('Authentication')) {
-                        windowPool.forEach(win => {
-                            if (win && !win.isDestroyed()) {
-                                win.webContents.send('auth-error', {
-                                    message: 'Authentication expired. Please login again.',
-                                    shouldLogout: true,
-                                });
-                            }
-                        });
-                    }
-                }
-            })();
-        }
-
-        // If the user logged out, also hide the settings window
-        if (!user && previousUser) {
-            // ADDED: Only trigger on actual state change from logged in to logged out
-            console.log('[WindowManager] User logged out, clearing API key and notifying renderers');
-
-            setApiKey(null)
-                .then(() => {
-                    console.log('[WindowManager] API key cleared successfully after logout');
-                    windowPool.forEach(win => {
-                        if (win && !win.isDestroyed()) {
-                            win.webContents.send('api-key-removed');
-                        }
-                    });
-                })
-                .catch(err => {
-                    console.error('[WindowManager] setApiKey error:', err);
-                    windowPool.forEach(win => {
-                        if (win && !win.isDestroyed()) {
-                            win.webContents.send('api-key-removed');
-                        }
-                    });
-                });
-
-            const settingsWindow = windowPool.get('settings');
-            if (settingsWindow && settingsWindow.isVisible()) {
-                settingsWindow.hide();
-                console.log('[WindowManager] Settings window hidden after logout.');
-            }
-        }
-        // Broadcast to all windows
-        windowPool.forEach(win => {
-            if (win && !win.isDestroyed()) {
-                win.webContents.send('firebase-user-updated', user);
-            }
-        });
-    });
-
-    ipcMain.handle('get-current-firebase-user', () => {
-        return currentFirebaseUser;
-    });
-
-    ipcMain.handle('firebase-logout', () => {
+    ipcMain.handle('firebase-logout', async () => {
         console.log('[WindowManager] Received request to log out.');
-        setApiKey(null)
-            .then(() => {
-                console.log('[WindowManager] API key cleared successfully after logout');
-                windowPool.forEach(win => {
-                    if (win && !win.isDestroyed()) {
-                        win.webContents.send('api-key-removed');
-                    }
-                });
-            })
-            .catch(err => {
-                console.error('[WindowManager] setApiKey error:', err);
-                windowPool.forEach(win => {
-                    if (win && !win.isDestroyed()) {
-                        win.webContents.send('api-key-removed');
-                    }
-                });
-            });
-
-        const header = windowPool.get('header');
-        if (header && !header.isDestroyed()) {
-            console.log('[WindowManager] Header window exists, sending to renderer...');
-            header.webContents.send('request-firebase-logout');
-        }
+        
+        await authService.signOut();
     });
 
     ipcMain.handle('check-system-permissions', async () => {
@@ -1898,7 +1163,7 @@ function setupIpcHandlers(openaiSessionRef) {
             // Req mic permission
             const granted = await systemPreferences.askForMediaAccess('microphone');
             return { 
-                success: granted,
+                success: granted, 
                 status: granted ? 'granted' : 'denied'
             };
         } catch (error) {
@@ -1944,11 +1209,8 @@ function setupIpcHandlers(openaiSessionRef) {
 
     ipcMain.handle('mark-permissions-completed', async () => {
         try {
-            // Store in SQLite that permissions have been completed
-            await sqliteClient.query(
-                'INSERT OR REPLACE INTO system_settings (key, value) VALUES (?, ?)',
-                ['permissions_completed', 'true']
-            );
+            // This is a system-level setting, not user-specific.
+            await systemSettingsRepository.markPermissionsAsCompleted();
             console.log('[Permissions] Marked permissions as completed');
             return { success: true };
         } catch (error) {
@@ -1959,11 +1221,7 @@ function setupIpcHandlers(openaiSessionRef) {
 
     ipcMain.handle('check-permissions-completed', async () => {
         try {
-            const result = await sqliteClient.query(
-                'SELECT value FROM system_settings WHERE key = ?',
-                ['permissions_completed']
-            );
-            const completed = result.length > 0 && result[0].value === 'true';
+            const completed = await systemSettingsRepository.checkPermissionsCompleted();
             console.log('[Permissions] Permissions completed status:', completed);
             return completed;
         } catch (error) {
@@ -1971,234 +1229,66 @@ function setupIpcHandlers(openaiSessionRef) {
             return false;
         }
     });
-}
 
-
-
-let storedApiKey = null;
-let storedProvider = 'openai';
-
-async function setApiKey(apiKey, provider = 'openai') {
-    storedApiKey = apiKey;
-    storedProvider = provider;
-    console.log('[WindowManager] API key and provider stored (and will be persisted to DB)');
-
-    try {
-        await sqliteClient.saveApiKey(apiKey, sqliteClient.defaultUserId, provider);
-        console.log('[WindowManager] API key and provider saved to SQLite');
-    } catch (err) {
-        console.error('[WindowManager] Failed to save API key to SQLite:', err);
-    }
-
-    windowPool.forEach(win => {
-        if (win && !win.isDestroyed()) {
-            const js = apiKey ? `
-                localStorage.setItem('openai_api_key', ${JSON.stringify(apiKey)});
-                localStorage.setItem('ai_provider', ${JSON.stringify(provider)});
-            ` : `
-                localStorage.removeItem('openai_api_key');
-                localStorage.removeItem('ai_provider');
-            `;
-            win.webContents.executeJavaScript(js).catch(() => {});
+    ipcMain.handle('close-ask-window-if-empty', async () => {
+        const askWindow = windowPool.get('ask');
+        if (askWindow && !askWindow.isFocused()) {
+            askWindow.hide();
         }
     });
 }
 
-async function loadApiKeyFromDb() {
-    try {
-        const user = await sqliteClient.getUser(sqliteClient.defaultUserId);
-        if (user && user.api_key) {
-            console.log('[WindowManager] API key and provider loaded from SQLite for default user.');
-            storedApiKey = user.api_key;
-            storedProvider = user.provider || 'openai';
-            return user.api_key;
-        }
-        return null;
-    } catch (error) {
-        console.error('[WindowManager] Failed to load API key from SQLite:', error);
-        return null;
+
+
+//////// after_modelStateService ////////
+async function getStoredApiKey() {
+    if (global.modelStateService) {
+        const provider = await getStoredProvider();
+        return global.modelStateService.getApiKey(provider);
     }
+    return null; // Fallback
 }
 
-function getCurrentFirebaseUser() {
-    return currentFirebaseUser;
+async function getStoredProvider() {
+    if (global.modelStateService) {
+        return global.modelStateService.getCurrentProvider('llm');
+    }
+    return 'openai'; // Fallback
 }
 
-function isFirebaseLoggedIn() {
-    return !!currentFirebaseUser;
-}
-
-function setCurrentFirebaseUser(user) {
-    currentFirebaseUser = user;
-    console.log('[WindowManager] Firebase user updated:', user ? user.email : 'null');
-}
-
-function getStoredApiKey() {
-    return storedApiKey;
-}
-
-function getStoredProvider() {
-    return storedProvider || 'openai';
+/**
+ * 
+ * @param {IpcMainInvokeEvent} event 
+ * @param {{type: 'llm' | 'stt'}}
+ */
+async function getCurrentModelInfo(event, { type }) {
+    if (global.modelStateService && (type === 'llm' || type === 'stt')) {
+        return global.modelStateService.getCurrentModelInfo(type);
+    }
+    return null;
 }
 
 function setupApiKeyIPC() {
     const { ipcMain } = require('electron');
 
-    ipcMain.handle('get-stored-api-key', async () => {
-        if (storedApiKey === null) {
-            const dbKey = await loadApiKeyFromDb();
-            if (dbKey) {
-                await setApiKey(dbKey, storedProvider);
-            }
-        }
-        return storedApiKey;
-    });
+    ipcMain.handle('get-stored-api-key', getStoredApiKey);
+    ipcMain.handle('get-ai-provider', getStoredProvider);
+    ipcMain.handle('get-current-model-info', getCurrentModelInfo);
 
     ipcMain.handle('api-key-validated', async (event, data) => {
-        console.log('[WindowManager] API key validation completed, saving...');
-        
-        // Support both old format (string) and new format (object)
-        const apiKey = typeof data === 'string' ? data : data.apiKey;
-        const provider = typeof data === 'string' ? 'openai' : (data.provider || 'openai');
-        
-        await setApiKey(apiKey, provider);
-
-        windowPool.forEach((win, name) => {
-            if (win && !win.isDestroyed()) {
-                win.webContents.send('api-key-validated', { apiKey, provider });
-            }
-        });
-
+        console.warn("[DEPRECATED] 'api-key-validated' IPC was called. This logic is now handled by 'model:validate-key'.");
         return { success: true };
     });
 
     ipcMain.handle('remove-api-key', async () => {
-        console.log('[WindowManager] API key removal requested');
-        await setApiKey(null);
-
-        windowPool.forEach((win, name) => {
-            if (win && !win.isDestroyed()) {
-                win.webContents.send('api-key-removed');
-            }
-        });
-
-        const settingsWindow = windowPool.get('settings');
-        if (settingsWindow && settingsWindow.isVisible()) {
-            settingsWindow.hide();
-            console.log('[WindowManager] Settings window hidden after clearing API key.');
-        }
-
+         console.warn("[DEPRECATED] 'remove-api-key' IPC was called. This is now handled by 'model:remove-api-key'.");
         return { success: true };
     });
-
-    ipcMain.handle('get-current-api-key', async () => {
-        if (storedApiKey === null) {
-            const dbKey = await loadApiKeyFromDb();
-            if (dbKey) {
-                await setApiKey(dbKey, storedProvider);
-            }
-        }
-        return storedApiKey;
-    });
     
-    ipcMain.handle('get-ai-provider', async () => {
-        console.log('[WindowManager] AI provider requested from renderer');
-        return storedProvider || 'openai';
-    });
-
-    console.log('[WindowManager] API key related IPC handlers registered (SQLite-backed)');
+    console.log('[WindowManager] API key related IPC handlers have been updated for ModelStateService.');
 }
+//////// after_modelStateService ////////
 
-function createWindow(sendToRenderer, openaiSessionRef) {
-    const mainWindow = new BrowserWindow({
-        width: DEFAULT_WINDOW_WIDTH,
-        height: HEADER_HEIGHT,
-        x: initialX,
-        y: initialY,
-        frame: false,
-        transparent: false,
-        hasShadow: true,
-        alwaysOnTop: true,
-        skipTaskbar: true,
-        hiddenInMissionControl: true,
-        webPreferences: {
-            nodeIntegration: true,
-            contextIsolation: false,
-            backgroundThrottling: false,
-            enableBlinkFeatures: 'GetDisplayMedia',
-            webSecurity: true,
-            allowRunningInsecureContent: false,
-        },
-        backgroundColor: '#FF0000',
-    });
-
-    const { session, desktopCapturer } = require('electron');
-    session.defaultSession.setDisplayMediaRequestHandler(
-        (request, callback) => {
-            desktopCapturer.getSources({ types: ['screen'] }).then(sources => {
-                callback({ video: sources[0], audio: 'loopback' });
-            });
-        },
-        { useSystemPicker: true }
-    );
-
-    mainWindow.setResizable(false);
-    mainWindow.setContentProtection(true);
-    mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-
-    const primaryDisplay = screen.getPrimaryDisplay();
-    const { width: screenWidth } = primaryDisplay.workAreaSize;
-    const x = Math.floor((screenWidth - DEFAULT_WINDOW_WIDTH) / 2);
-    const y = 0;
-    mainWindow.setPosition(x, y);
-
-    if (process.platform === 'win32') {
-        mainWindow.setAlwaysOnTop(true, 'screen-saver', 1);
-    }
-
-    mainWindow.loadFile(path.join(__dirname, '../index.html'));
-
-    mainWindow.webContents.once('dom-ready', () => {
-        setTimeout(() => {
-            const defaultKeybinds = getDefaultKeybinds();
-            let keybinds = defaultKeybinds;
-
-            mainWindow.webContents
-                .executeJavaScript(
-                    `
-                (() => {
-                    try {
-                        const savedKeybinds = localStorage.getItem('customKeybinds');
-                        const savedContentProtection = localStorage.getItem('contentProtection');
-                        
-                        return {
-                            keybinds: savedKeybinds ? JSON.parse(savedKeybinds) : null,
-                            contentProtection: savedContentProtection !== null ? savedContentProtection === 'true' : true
-                        };
-                    } catch (e) {
-                        return { keybinds: null, contentProtection: true };
-                    }
-                })()
-            `
-                )
-                .then(savedSettings => {
-                    if (savedSettings.keybinds) {
-                        keybinds = { ...defaultKeybinds, ...savedSettings.keybinds };
-                    }
-                    mainWindow.setContentProtection(savedSettings.contentProtection);
-                    updateGlobalShortcuts(keybinds, mainWindow, sendToRenderer, openaiSessionRef);
-                })
-                .catch(() => {
-                    mainWindow.setContentProtection(true);
-                    updateGlobalShortcuts(defaultKeybinds, mainWindow, sendToRenderer, openaiSessionRef);
-                });
-        }, 150);
-    });
-
-    setupWindowIpcHandlers(mainWindow, sendToRenderer, openaiSessionRef);
-
-    return mainWindow;
-}
 
 function getDefaultKeybinds() {
     const isMac = process.platform === 'darwin';
@@ -2218,39 +1308,27 @@ function getDefaultKeybinds() {
     };
 }
 
-function updateGlobalShortcuts(keybinds, mainWindow, sendToRenderer, openaiSessionRef) {
-    console.log('Updating global shortcuts with:', keybinds);
-
-    // Unregister all existing shortcuts
+function updateGlobalShortcuts(keybinds, mainWindow, sendToRenderer, movementManager) {
     globalShortcut.unregisterAll();
 
-    if (movementManager) {
-        movementManager.destroy();
+    if (sendToRenderer) {
+        sendToRenderer('shortcuts-updated', keybinds);
+        console.log('[Shortcuts] Broadcasted updated shortcuts to all windows.');
     }
-    movementManager = new SmoothMovementManager();
-
+    
+    // ✨ 하드코딩된 단축키 등록을 위해 변수 유지
     const isMac = process.platform === 'darwin';
     const modifier = isMac ? 'Cmd' : 'Ctrl';
+    const header = windowPool.get('header');
+    const state = header?.currentHeaderState || currentHeaderState;
 
-    if (keybinds.toggleVisibility) {
-        try {
-            globalShortcut.register(keybinds.toggleVisibility, toggleAllWindowsVisibility);
-            console.log(`Registered toggleVisibility: ${keybinds.toggleVisibility}`);
-        } catch (error) {
-            console.error(`Failed to register toggleVisibility (${keybinds.toggleVisibility}):`, error);
-        }
-    }
-
+    // ✨ 기능 1: 사용자가 설정할 수 없는 '모니터 이동' 단축키 (기존 로직 유지)
     const displays = screen.getAllDisplays();
     if (displays.length > 1) {
         displays.forEach((display, index) => {
             const key = `${modifier}+Shift+${index + 1}`;
             try {
-                globalShortcut.register(key, () => {
-                    if (movementManager) {
-                        movementManager.moveToDisplay(display.id);
-                    }
-                });
+                globalShortcut.register(key, () => movementManager.moveToDisplay(display.id));
                 console.log(`Registered display switch shortcut: ${key} -> Display ${index + 1}`);
             } catch (error) {
                 console.error(`Failed to register display switch ${key}:`, error);
@@ -2258,254 +1336,161 @@ function updateGlobalShortcuts(keybinds, mainWindow, sendToRenderer, openaiSessi
         });
     }
 
-    if (currentHeaderState === 'apikey') {
+    // API 키 입력 상태에서는 필수 단축키(toggleVisibility) 외에는 아무것도 등록하지 않음
+    if (state === 'apikey') {
+        if (keybinds.toggleVisibility) {
+            try {
+                globalShortcut.register(keybinds.toggleVisibility, () => toggleAllWindowsVisibility(movementManager));
+            } catch (error) {
+                console.error(`Failed to register toggleVisibility (${keybinds.toggleVisibility}):`, error);
+            }
+        }
         console.log('ApiKeyHeader is active, skipping conditional shortcuts');
         return;
     }
 
-    const directions = [
-        { key: `${modifier}+Left`, direction: 'left' },
-        { key: `${modifier}+Right`, direction: 'right' },
-        { key: `${modifier}+Up`, direction: 'up' },
-        { key: `${modifier}+Down`, direction: 'down' },
-    ];
-
-    directions.forEach(({ key, direction }) => {
-        try {
-            globalShortcut.register(key, () => {
-                const header = windowPool.get('header');
-                if (header && header.isVisible()) {
-                    movementManager.moveStep(direction);
-                }
-            });
-            console.log(`Registered global shortcut: ${key} -> ${direction}`);
-        } catch (error) {
-            console.error(`Failed to register ${key}:`, error);
-        }
-    });
-
+    // ✨ 기능 2: 사용자가 설정할 수 없는 '화면 가장자리 이동' 단축키 (기존 로직 유지)
     const edgeDirections = [
         { key: `${modifier}+Shift+Left`, direction: 'left' },
         { key: `${modifier}+Shift+Right`, direction: 'right' },
-        { key: `${modifier}+Shift+Up`, direction: 'up' },
-        { key: `${modifier}+Shift+Down`, direction: 'down' },
+        // { key: `${modifier}+Shift+Up`, direction: 'up' },
+        // { key: `${modifier}+Shift+Down`, direction: 'down' },
     ];
-
     edgeDirections.forEach(({ key, direction }) => {
         try {
             globalShortcut.register(key, () => {
-                const header = windowPool.get('header');
-                if (header && header.isVisible()) {
-                    movementManager.moveToEdge(direction);
-                }
+                if (header && header.isVisible()) movementManager.moveToEdge(direction);
             });
-            console.log(`Registered global shortcut: ${key} -> edge ${direction}`);
         } catch (error) {
-            console.error(`Failed to register ${key}:`, error);
+            console.error(`Failed to register edge move for ${key}:`, error);
         }
     });
 
-    if (keybinds.toggleClickThrough) {
+
+    // ✨ 기능 3: 사용자가 설정 가능한 모든 단축키를 동적으로 등록 (새로운 방식 적용)
+    for (const action in keybinds) {
+        const accelerator = keybinds[action];
+        if (!accelerator) continue;
+
         try {
-            globalShortcut.register(keybinds.toggleClickThrough, () => {
-                mouseEventsIgnored = !mouseEventsIgnored;
-                if (mouseEventsIgnored) {
-                    mainWindow.setIgnoreMouseEvents(true, { forward: true });
-                    console.log('Mouse events ignored');
-                } else {
-                    mainWindow.setIgnoreMouseEvents(false);
-                    console.log('Mouse events enabled');
-                }
-                mainWindow.webContents.send('click-through-toggled', mouseEventsIgnored);
-            });
-            console.log(`Registered toggleClickThrough: ${keybinds.toggleClickThrough}`);
-        } catch (error) {
-            console.error(`Failed to register toggleClickThrough (${keybinds.toggleClickThrough}):`, error);
-        }
-    }
-
-    if (keybinds.nextStep) {
-        try {
-            globalShortcut.register(keybinds.nextStep, () => {
-                console.log('⌘/Ctrl+Enter Ask shortcut triggered');
-
-                const askWindow = windowPool.get('ask');
-                if (!askWindow || askWindow.isDestroyed()) {
-                    console.error('Ask window not found or destroyed');
-                    return;
-                }
-
-                if (askWindow.isVisible()) {
-                    askWindow.webContents.send('ask-global-send');
-                } else {
-                    try {
-                        askWindow.show();
-
-                        const header = windowPool.get('header');
-                        if (header) {
-                            const currentHeaderPosition = header.getBounds();
+            let callback;
+            switch(action) {
+                case 'toggleVisibility':
+                    callback = () => toggleAllWindowsVisibility(movementManager);
+                    break;
+                case 'nextStep':
+                    callback = () => {
+                        const askWindow = windowPool.get('ask');
+                        if (!askWindow || askWindow.isDestroyed()) return;
+                        if (askWindow.isVisible()) {
+                            askWindow.webContents.send('ask-global-send');
+                        } else {
+                            askWindow.show();
                             updateLayout();
-                            header.setPosition(currentHeaderPosition.x, currentHeaderPosition.y, false);
+                            askWindow.webContents.send('window-show-animation');
                         }
-
-                        askWindow.webContents.send('window-show-animation');
-                    } catch (e) {
-                        console.error('Error showing Ask window:', e);
-                    }
-                }
-            });
-            console.log(`Registered Ask shortcut (nextStep): ${keybinds.nextStep}`);
-        } catch (error) {
-            console.error(`Failed to register Ask shortcut (${keybinds.nextStep}):`, error);
-        }
-    }
-
-    if (keybinds.manualScreenshot) {
-        try {
-            globalShortcut.register(keybinds.manualScreenshot, () => {
-                console.log('Manual screenshot shortcut triggered');
-                mainWindow.webContents.executeJavaScript(`
-                    if (window.captureManualScreenshot) {
-                        window.captureManualScreenshot();
-                    } else {
-                        console.log('Manual screenshot function not available');
-                    }
-                `);
-            });
-            console.log(`Registered manualScreenshot: ${keybinds.manualScreenshot}`);
-        } catch (error) {
-            console.error(`Failed to register manualScreenshot (${keybinds.manualScreenshot}):`, error);
-        }
-    }
-
-    if (keybinds.previousResponse) {
-        try {
-            globalShortcut.register(keybinds.previousResponse, () => {
-                console.log('Previous response shortcut triggered');
-                sendToRenderer('navigate-previous-response');
-            });
-            console.log(`Registered previousResponse: ${keybinds.previousResponse}`);
-        } catch (error) {
-            console.error(`Failed to register previousResponse (${keybinds.previousResponse}):`, error);
-        }
-    }
-
-    if (keybinds.nextResponse) {
-        try {
-            globalShortcut.register(keybinds.nextResponse, () => {
-                console.log('Next response shortcut triggered');
-                sendToRenderer('navigate-next-response');
-            });
-            console.log(`Registered nextResponse: ${keybinds.nextResponse}`);
-        } catch (error) {
-            console.error(`Failed to register nextResponse (${keybinds.nextResponse}):`, error);
-        }
-    }
-
-    if (keybinds.scrollUp) {
-        try {
-            globalShortcut.register(keybinds.scrollUp, () => {
-                console.log('Scroll up shortcut triggered');
-                sendToRenderer('scroll-response-up');
-            });
-            console.log(`Registered scrollUp: ${keybinds.scrollUp}`);
-        } catch (error) {
-            console.error(`Failed to register scrollUp (${keybinds.scrollUp}):`, error);
-        }
-    }
-
-    if (keybinds.scrollDown) {
-        try {
-            globalShortcut.register(keybinds.scrollDown, () => {
-                console.log('Scroll down shortcut triggered');
-                sendToRenderer('scroll-response-down');
-            });
-            console.log(`Registered scrollDown: ${keybinds.scrollDown}`);
-        } catch (error) {
-            console.error(`Failed to register scrollDown (${keybinds.scrollDown}):`, error);
-        }
-    }
-}
-
-function setupWindowIpcHandlers(mainWindow, sendToRenderer, openaiSessionRef) {
-    ipcMain.handle('resize-window', async (event, args) => {
-        try {
-            const { isMainViewVisible, view } = args;
-            let targetHeight = HEADER_HEIGHT;
-            let targetWidth = DEFAULT_WINDOW_WIDTH;
-
-            if (isMainViewVisible) {
-                const viewHeights = {
-                    listen: 400,
-                    customize: 600,
-                    help: 550,
-                    history: 550,
-                    setup: 200,
-                };
-                targetHeight = viewHeights[view] || 400;
+                    };
+                    break;
+                case 'scrollUp':
+                    callback = () => {
+                        // 'ask' 창을 명시적으로 가져옵니다.
+                        const askWindow = windowPool.get('ask');
+                        // 'ask' 창이 존재하고, 파괴되지 않았으며, 보이는 경우에만 이벤트를 전송합니다.
+                        if (askWindow && !askWindow.isDestroyed() && askWindow.isVisible()) {
+                            askWindow.webContents.send('scroll-response-up');
+                        }
+                    };
+                    break;
+                case 'scrollDown':
+                    callback = () => {
+                        // 'ask' 창을 명시적으로 가져옵니다.
+                        const askWindow = windowPool.get('ask');
+                        // 'ask' 창이 존재하고, 파괴되지 않았으며, 보이는 경우에만 이벤트를 전송합니다.
+                        if (askWindow && !askWindow.isDestroyed() && askWindow.isVisible()) {
+                            askWindow.webContents.send('scroll-response-down');
+                        }
+                    };
+                    break;
+                case 'moveUp':
+                    callback = () => { if (header && header.isVisible()) movementManager.moveStep('up'); };
+                    break;
+                case 'moveDown':
+                    callback = () => { if (header && header.isVisible()) movementManager.moveStep('down'); };
+                    break;
+                case 'moveLeft':
+                    callback = () => { if (header && header.isVisible()) movementManager.moveStep('left'); };
+                    break;
+                case 'moveRight':
+                    callback = () => { if (header && header.isVisible()) movementManager.moveStep('right'); };
+                    break;
+                case 'toggleClickThrough':
+                     callback = () => {
+                        mouseEventsIgnored = !mouseEventsIgnored;
+                        if(mainWindow && !mainWindow.isDestroyed()){
+                            mainWindow.setIgnoreMouseEvents(mouseEventsIgnored, { forward: true });
+                            mainWindow.webContents.send('click-through-toggled', mouseEventsIgnored);
+                        }
+                     };
+                     break;
+                case 'manualScreenshot':
+                    callback = () => {
+                        if(mainWindow && !mainWindow.isDestroyed()) {
+                             mainWindow.webContents.executeJavaScript('window.captureManualScreenshot && window.captureManualScreenshot();');
+                        }
+                    };
+                    break;
+                case 'previousResponse':
+                    callback = () => sendToRenderer('navigate-previous-response');
+                    break;
+                case 'nextResponse':
+                    callback = () => sendToRenderer('navigate-next-response');
+                    break;
             }
-
-            const [currentWidth, currentHeight] = mainWindow.getSize();
-            if (currentWidth !== targetWidth || currentHeight !== targetHeight) {
-                console.log('Window resize requested but disabled for manual resize prevention');
+            
+            if (callback) {
+                globalShortcut.register(accelerator, callback);
             }
+        } catch(e) {
+            console.error(`Failed to register shortcut for "${action}" (${accelerator}):`, e.message);
+        }
+    }
+}
+
+
+async function captureScreenshot(options = {}) {
+    if (process.platform === 'darwin') {
+        try {
+            const tempPath = path.join(os.tmpdir(), `screenshot-${Date.now()}.jpg`);
+
+            await execFile('screencapture', ['-x', '-t', 'jpg', tempPath]);
+
+            const imageBuffer = await fs.promises.readFile(tempPath);
+            await fs.promises.unlink(tempPath);
+
+            const resizedBuffer = await sharp(imageBuffer)
+                // .resize({ height: 1080 })
+                .resize({ height: 384 })
+                .jpeg({ quality: 80 })
+                .toBuffer();
+
+            const base64 = resizedBuffer.toString('base64');
+            const metadata = await sharp(resizedBuffer).metadata();
+
+            lastScreenshot = {
+                base64,
+                width: metadata.width,
+                height: metadata.height,
+                timestamp: Date.now(),
+            };
+
+            return { success: true, base64, width: metadata.width, height: metadata.height };
         } catch (error) {
-            console.error('Error resizing window:', error);
+            console.error('Failed to capture and resize screenshot:', error);
+            return { success: false, error: error.message };
         }
-    });
-
-    ipcMain.handle('toggle-window-visibility', async event => {
-        if (mainWindow.isVisible()) {
-            mainWindow.hide();
-        } else {
-            mainWindow.show();
-        }
-    });
-
-    ipcMain.handle('quit-application', async () => {
-        app.quit();
-    });
-
-    // Keep other essential IPC handlers
-    // ... other handlers like open-external, etc. can be added from the old file if needed
-}
-
-function clearApiKey() {
-    setApiKey(null);
-}
-
-async function getVirtualKeyByEmail(email, idToken) {
-    if (!idToken) {
-        throw new Error('Firebase ID token is required for virtual key request');
     }
 
-    const resp = await fetch('https://serverless-api-sf3o.vercel.app/api/virtual_key', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({ email: email.trim().toLowerCase() }),
-        redirect: 'follow',
-    });
-
-    const json = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-        console.error('[VK] API request failed:', json.message || 'Unknown error');
-        throw new Error(json.message || `HTTP ${resp.status}: Virtual key request failed`);
-    }
-
-    const vKey = json?.data?.virtualKey || json?.data?.virtual_key || json?.data?.newVKey?.slug;
-
-    if (!vKey) throw new Error('virtual key missing in response');
-    return vKey;
-}
-
-// Helper function to avoid code duplication
-async function captureScreenshotInternal(options = {}) {
     try {
-        const quality = options.quality || 'medium';
-
         const sources = await desktopCapturer.getSources({
             types: ['screen'],
             thumbnailSize: {
@@ -2517,28 +1502,10 @@ async function captureScreenshotInternal(options = {}) {
         if (sources.length === 0) {
             throw new Error('No screen sources available');
         }
-
         const source = sources[0];
-        const thumbnail = source.thumbnail;
-
-        let jpegQuality;
-        switch (quality) {
-            case 'high':
-                jpegQuality = 90;
-                break;
-            case 'low':
-                jpegQuality = 50;
-                break;
-            case 'medium':
-            default:
-                jpegQuality = 70;
-                break;
-        }
-
-        const buffer = thumbnail.toJPEG(jpegQuality);
+        const buffer = source.thumbnail.toJPEG(70);
         const base64 = buffer.toString('base64');
-
-        const size = thumbnail.getSize();
+        const size = source.thumbnail.getSize();
 
         return {
             success: true,
@@ -2547,7 +1514,11 @@ async function captureScreenshotInternal(options = {}) {
             height: size.height,
         };
     } catch (error) {
-        throw error;
+        console.error('Failed to capture screenshot using desktopCapturer:', error);
+        return {
+            success: false,
+            error: error.message,
+        };
     }
 }
 
@@ -2555,12 +1526,11 @@ module.exports = {
     createWindows,
     windowPool,
     fixedYPosition,
-    setApiKey,
+    //////// before_modelStateService ////////
+    // setApiKey,
+    //////// before_modelStateService ////////
     getStoredApiKey,
     getStoredProvider,
-    clearApiKey,
-    getCurrentFirebaseUser,
-    isFirebaseLoggedIn,
-    setCurrentFirebaseUser,
-    getVirtualKeyByEmail,
+    getCurrentModelInfo,
+    captureScreenshot,
 };
