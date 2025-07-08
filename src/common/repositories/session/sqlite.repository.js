@@ -108,14 +108,15 @@ function getOrCreateActive(uid, requestedType = 'ask') {
     }
 }
 
-function endAllActiveSessions() {
+function endAllActiveSessions(uid) {
     const db = sqliteClient.getDb();
     const now = Math.floor(Date.now() / 1000);
-    const query = `UPDATE sessions SET ended_at = ?, updated_at = ? WHERE ended_at IS NULL`;
+    // Filter by uid to match the Firebase repository's behavior.
+    const query = `UPDATE sessions SET ended_at = ?, updated_at = ? WHERE ended_at IS NULL AND uid = ?`;
     
     try {
-        const result = db.prepare(query).run(now, now);
-        console.log(`[Repo] Ended ${result.changes} active session(s).`);
+        const result = db.prepare(query).run(now, now, uid);
+        console.log(`[Repo] Ended ${result.changes} active SQLite session(s) for user ${uid}.`);
         return { changes: result.changes };
     } catch (err) {
         console.error('SQLite: Failed to end all active sessions:', err);

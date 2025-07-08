@@ -1,21 +1,39 @@
 const sqliteRepository = require('./sqlite.repository');
-// const firebaseRepository = require('./firebase.repository'); // Future implementation
+const firebaseRepository = require('./firebase.repository');
 const authService = require('../../../common/services/authService');
 
-function getRepository() {
-    // In the future, we can check the user's login status from authService
-    // const user = authService.getCurrentUser();
-    // if (user.isLoggedIn) {
-    //     return firebaseRepository;
-    // }
+function getBaseRepository() {
+    const user = authService.getCurrentUser();
+    if (user && user.isLoggedIn) {
+        return firebaseRepository;
+    }
     return sqliteRepository;
 }
 
-// Directly export functions for ease of use, decided by the strategy
-module.exports = {
-    getPresets: (...args) => getRepository().getPresets(...args),
-    getPresetTemplates: (...args) => getRepository().getPresetTemplates(...args),
-    createPreset: (...args) => getRepository().createPreset(...args),
-    updatePreset: (...args) => getRepository().updatePreset(...args),
-    deletePreset: (...args) => getRepository().deletePreset(...args),
+const settingsRepositoryAdapter = {
+    getPresets: () => {
+        const uid = authService.getCurrentUserId();
+        return getBaseRepository().getPresets(uid);
+    },
+
+    getPresetTemplates: () => {
+        return getBaseRepository().getPresetTemplates();
+    },
+
+    createPreset: (options) => {
+        const uid = authService.getCurrentUserId();
+        return getBaseRepository().createPreset({ uid, ...options });
+    },
+
+    updatePreset: (id, options) => {
+        const uid = authService.getCurrentUserId();
+        return getBaseRepository().updatePreset(id, options, uid);
+    },
+
+    deletePreset: (id) => {
+        const uid = authService.getCurrentUserId();
+        return getBaseRepository().deletePreset(id, uid);
+    },
 };
+
+module.exports = settingsRepositoryAdapter;

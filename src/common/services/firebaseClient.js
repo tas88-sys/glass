@@ -1,6 +1,9 @@
 const { initializeApp } = require('firebase/app');
 const { initializeAuth } = require('firebase/auth');
 const Store = require('electron-store');
+const { setLogLevel } = require('firebase/firestore');
+
+setLogLevel('debug');
 
 /**
  * Firebase Auth expects the `persistence` option passed to `initializeAuth()` to be *classes*,

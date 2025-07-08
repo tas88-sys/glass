@@ -40,7 +40,7 @@ function getById(uid) {
     return db.prepare('SELECT * FROM users WHERE uid = ?').get(uid);
 }
 
-function saveApiKey(apiKey, uid, provider = 'openai') {
+function saveApiKey(uid, apiKey, provider = 'openai') {
     const db = sqliteClient.getDb();
     try {
         const result = db.prepare('UPDATE users SET api_key = ?, provider = ? WHERE uid = ?').run(apiKey, provider, uid);

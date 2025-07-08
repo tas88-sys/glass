@@ -101,9 +101,8 @@ async function sendMessage(userPrompt) {
                         
                         // Save to DB
                         try {
-                            const uid = authService.getCurrentUserId();
-                            if (!uid) throw new Error("User not logged in, cannot save message.");
-                            const sessionId = await sessionRepository.getOrCreateActive(uid, 'ask');
+                            // The repository adapter will now handle the UID internally.
+                            const sessionId = await sessionRepository.getOrCreateActive('ask');
                             await askRepository.addAiMessage({ sessionId, role: 'user', content: userPrompt.trim() });
                             await askRepository.addAiMessage({ sessionId, role: 'assistant', content: fullResponse });
                             console.log(`[AskService] DB: Saved ask/answer pair to session ${sessionId}`);

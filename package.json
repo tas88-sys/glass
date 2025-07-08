@@ -1,9 +1,7 @@
 {
     "name": "pickle-glass",
     "productName": "Glass",
-
     "version": "0.2.2",
-
     "description": "Cl*ely for Free",
     "main": "src/index.js",
     "scripts": {
@@ -48,6 +46,7 @@
         "firebase": "^11.10.0",
         "firebase-admin": "^13.4.0",
         "jsonwebtoken": "^9.0.2",
+        "keytar": "^7.9.0",
         "node-fetch": "^2.7.0",
         "openai": "^4.70.0",
         "react-hot-toast": "^2.5.2",

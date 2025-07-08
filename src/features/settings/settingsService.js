@@ -208,13 +208,8 @@ async function saveSettings(settings) {
 
 async function getPresets() {
     try {
-        const uid = authService.getCurrentUserId();
-        if (!uid) {
-            // Logged out users only see default presets
-            return await settingsRepository.getPresetTemplates();
-        }
-        
-        const presets = await settingsRepository.getPresets(uid);
+        // The adapter now handles which presets to return based on login state.
+        const presets = await settingsRepository.getPresets();
         return presets;
     } catch (error) {
         console.error('[SettingsService] Error getting presets:', error);
@@ -234,12 +229,8 @@ async function getPresetTemplates() {
 
 async function createPreset(title, prompt) {
     try {
-        const uid = authService.getCurrentUserId();
-        if (!uid) {
-            throw new Error("User not logged in, cannot create preset.");
-        }
-        
-        const result = await settingsRepository.createPreset({ uid, title, prompt });
+        // The adapter injects the UID.
+        const result = await settingsRepository.createPreset({ title, prompt });
         
         windowNotificationManager.notifyRelevantWindows('presets-updated', {
             action: 'created',
@@ -256,12 +247,8 @@ async function createPreset(title, prompt) {
 
 async function updatePreset(id, title, prompt) {
     try {
-        const uid = authService.getCurrentUserId();
-        if (!uid) {
-            throw new Error("User not logged in, cannot update preset.");
-        }
-        
-        await settingsRepository.updatePreset(id, { title, prompt }, uid);
+        // The adapter injects the UID.
+        await settingsRepository.updatePreset(id, { title, prompt });
         
         windowNotificationManager.notifyRelevantWindows('presets-updated', {
             action: 'updated',
@@ -278,12 +265,8 @@ async function updatePreset(id, title, prompt) {
 
 async function deletePreset(id) {
     try {
-        const uid = authService.getCurrentUserId();
-        if (!uid) {
-            throw new Error("User not logged in, cannot delete preset.");
-        }
-        
-        await settingsRepository.deletePreset(id, uid);
+        // The adapter injects the UID.
+        await settingsRepository.deletePreset(id);
         
         windowNotificationManager.notifyRelevantWindows('presets-updated', {
             action: 'deleted',
@@ -299,10 +282,9 @@ async function deletePreset(id) {
 
 async function saveApiKey(apiKey, provider = 'openai') {
     try {
-        const uid = authService.getCurrentUserId();
-        if (!uid) {
+        const user = authService.getCurrentUser();
+        if (!user.isLoggedIn) {
             // For non-logged-in users, save to local storage
-            const { app } = require('electron');
             const Store = require('electron-store');
             const store = new Store();
             store.set('apiKey', apiKey);
@@ -318,8 +300,8 @@ async function saveApiKey(apiKey, provider = 'openai') {
             return { success: true };
         }
         
-        // For logged-in users, save to database
-        await userRepository.saveApiKey(apiKey, uid, provider);
+        // For logged-in users, use the repository adapter which injects the UID.
+        await userRepository.saveApiKey(apiKey, provider);
         
         // Notify windows
         BrowserWindow.getAllWindows().forEach(win => {
@@ -337,17 +319,16 @@ async function saveApiKey(apiKey, provider = 'openai') {
 
 async function removeApiKey() {
     try {
-        const uid = authService.getCurrentUserId();
-        if (!uid) {
+        const user = authService.getCurrentUser();
+        if (!user.isLoggedIn) {
             // For non-logged-in users, remove from local storage
-            const { app } = require('electron');
             const Store = require('electron-store');
             const store = new Store();
             store.delete('apiKey');
             store.delete('provider');
         } else {
-            // For logged-in users, remove from database
-            await userRepository.saveApiKey(null, uid, null);
+            // For logged-in users, use the repository adapter.
+            await userRepository.saveApiKey(null, null);
         }
         
         // Notify windows

@@ -251,7 +251,9 @@ function setupGeneralIpcHandlers() {
 
     ipcMain.handle('save-api-key', (event, apiKey) => {
         try {
-            userRepository.saveApiKey(apiKey, authService.getCurrentUserId());
+            // The adapter injects the UID and handles local/firebase logic.
+            // Assuming a default provider if not specified.
+            userRepository.saveApiKey(apiKey, 'openai');
             BrowserWindow.getAllWindows().forEach(win => {
                 win.webContents.send('api-key-updated');
             });
@@ -263,7 +265,8 @@ function setupGeneralIpcHandlers() {
     });
 
     ipcMain.handle('get-user-presets', () => {
-        return presetRepository.getPresets(authService.getCurrentUserId());
+        // The adapter injects the UID.
+        return presetRepository.getPresets();
     });
 
     ipcMain.handle('get-preset-templates', () => {
@@ -302,89 +305,112 @@ function setupWebDataHandlers() {
     const userRepository = require('./common/repositories/user');
     const presetRepository = require('./common/repositories/preset');
 
-    const handleRequest = (channel, responseChannel, payload) => {
+    const handleRequest = async (channel, responseChannel, payload) => {
         let result;
-        const currentUserId = authService.getCurrentUserId();
+        // const currentUserId = authService.getCurrentUserId(); // No longer needed here
         try {
             switch (channel) {
                 // SESSION
                 case 'get-sessions':
-                    result = sessionRepository.getAllByUserId(currentUserId);
+                    // Adapter injects UID
+                    result = await sessionRepository.getAllByUserId();
                     break;
                 case 'get-session-details':
-                    const session = sessionRepository.getById(payload);
+                    const session = await sessionRepository.getById(payload);
                     if (!session) {
                         result = null;
                         break;
                     }
-                    const transcripts = sttRepository.getAllTranscriptsBySessionId(payload);
-                    const ai_messages = askRepository.getAllAiMessagesBySessionId(payload);
-                    const summary = summaryRepository.getSummaryBySessionId(payload);
+                    const [transcripts, ai_messages, summary] = await Promise.all([
+                        sttRepository.getAllTranscriptsBySessionId(payload),
+                        askRepository.getAllAiMessagesBySessionId(payload),
+                        summaryRepository.getSummaryBySessionId(payload)
+                    ]);
                     result = { session, transcripts, ai_messages, summary };
                     break;
                 case 'delete-session':
-                    result = sessionRepository.deleteWithRelatedData(payload);
+                    result = await sessionRepository.deleteWithRelatedData(payload);
                     break;
                 case 'create-session':
-                    const id = sessionRepository.create(currentUserId, 'ask');
-                    if (payload.title) {
-                        sessionRepository.updateTitle(id, payload.title);
+                    // Adapter injects UID
+                    const id = await sessionRepository.create('ask');
+                    if (payload && payload.title) {
+                        await sessionRepository.updateTitle(id, payload.title);
                     }
                     result = { id };
                     break;
                 
                 // USER
                 case 'get-user-profile':
-                    result = userRepository.getById(currentUserId);
+                    // Adapter injects UID
+                    result = await userRepository.getById();
                     break;
                 case 'update-user-profile':
-                    result = userRepository.update({ uid: currentUserId, ...payload });
+                     // Adapter injects UID
+                    result = await userRepository.update(payload);
                     break;
                 case 'find-or-create-user':
-                    result = userRepository.findOrCreate(payload);
+                    result = await userRepository.findOrCreate(payload);
                     break;
                 case 'save-api-key':
-                    result = userRepository.saveApiKey(payload, currentUserId);
+                    // Assuming payload is { apiKey, provider }
+                    result = await userRepository.saveApiKey(payload.apiKey, payload.provider);
                     break;
                 case 'check-api-key-status':
-                    const user = userRepository.getById(currentUserId);
+                    // Adapter injects UID
+                    const user = await userRepository.getById();
                     result = { hasApiKey: !!user?.api_key && user.api_key.length > 0 };
                     break;
                 case 'delete-account':
-                    result = userRepository.deleteById(currentUserId);
+                    // Adapter injects UID
+                    result = await userRepository.deleteById();
                     break;
 
                 // PRESET
                 case 'get-presets':
-                    result = presetRepository.getPresets(currentUserId);
+                    // Adapter injects UID
+                    result = await presetRepository.getPresets();
                     break;
                 case 'create-preset':
-                    result = presetRepository.create({ ...payload, uid: currentUserId });
+                    // Adapter injects UID
+                    result = await presetRepository.create(payload);
                     settingsService.notifyPresetUpdate('created', result.id, payload.title);
                     break;
                 case 'update-preset':
-                    result = presetRepository.update(payload.id, payload.data, currentUserId);
+                    // Adapter injects UID
+                    result = await presetRepository.update(payload.id, payload.data);
                     settingsService.notifyPresetUpdate('updated', payload.id, payload.data.title);
                     break;
                 case 'delete-preset':
-                    result = presetRepository.delete(payload, currentUserId);
+                    // Adapter injects UID
+                    result = await presetRepository.delete(payload);
                     settingsService.notifyPresetUpdate('deleted', payload);
                     break;
                 
                 // BATCH
                 case 'get-batch-data':
                     const includes = payload ? payload.split(',').map(item => item.trim()) : ['profile', 'presets', 'sessions'];
-                    const batchResult = {};
+                    const promises = {};
             
                     if (includes.includes('profile')) {
-                        batchResult.profile = userRepository.getById(currentUserId);
+                        // Adapter injects UID
+                        promises.profile = userRepository.getById();
                     }
                     if (includes.includes('presets')) {
-                        batchResult.presets = presetRepository.getPresets(currentUserId);
+                        // Adapter injects UID
+                        promises.presets = presetRepository.getPresets();
                     }
                     if (includes.includes('sessions')) {
-                        batchResult.sessions = sessionRepository.getAllByUserId(currentUserId);
+                        // Adapter injects UID
+                        promises.sessions = sessionRepository.getAllByUserId();
                     }
+                    
+                    const batchResult = {};
+                    const promiseResults = await Promise.all(Object.values(promises));
+                    Object.keys(promises).forEach((key, index) => {
+                        batchResult[key] = promiseResults[index];
+                    });
+
                     result = batchResult;
                     break;
 

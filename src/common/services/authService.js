@@ -1,8 +1,8 @@
 const { onAuthStateChanged, signInWithCustomToken, signOut } = require('firebase/auth');
 const { BrowserWindow } = require('electron');
 const { getFirebaseAuth } = require('./firebaseClient');
-const userRepository = require('../repositories/user');
 const fetch = require('node-fetch');
+const encryptionService = require('./encryptionService');
 
 async function getVirtualKeyByEmail(email, idToken) {
     if (!idToken) {
@@ -37,6 +37,10 @@ class AuthService {
         this.currentUserMode = 'local'; // 'local' or 'firebase'
         this.currentUser = null;
         this.isInitialized = false;
+
+        // Initialize immediately for the default local user on startup.
+        // This ensures the key is ready before any login/logout state change.
+        encryptionService.initializeKey(this.currentUserId);
     }
 
     initialize() {
@@ -52,6 +56,10 @@ class AuthService {
                 this.currentUser = user;
                 this.currentUserId = user.uid;
                 this.currentUserMode = 'firebase';
+
+                // ** Initialize encryption key for the logged-in user **
+                await encryptionService.initializeKey(user.uid);
+
 
                 // Start background task to fetch and save virtual key
                 (async () => {
@@ -81,6 +89,9 @@ class AuthService {
                 this.currentUser = null;
                 this.currentUserId = 'default_user';
                 this.currentUserMode = 'local';
+                
+                // ** Initialize encryption key for the default/local user **
+                await encryptionService.initializeKey(this.currentUserId);
             }
             this.broadcastUserState();
         });
