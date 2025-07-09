@@ -48,7 +48,11 @@ class WhisperService extends LocalAIServiceBase {
             
             this.modelsDir = path.join(whisperDir, 'models');
             this.tempDir = path.join(whisperDir, 'temp');
-            this.whisperPath = path.join(whisperDir, 'bin', 'whisper');
+            
+            // Windows에서는 .exe 확장자 필요
+            const platform = this.getPlatform();
+            const whisperExecutable = platform === 'win32' ? 'whisper.exe' : 'whisper';
+            this.whisperPath = path.join(whisperDir, 'bin', whisperExecutable);
 
             await this.ensureDirectories();
             await this.ensureWhisperBinary();
@@ -304,15 +308,110 @@ class WhisperService extends LocalAIServiceBase {
         const tempFile = path.join(this.tempDir, 'whisper-binary.zip');
         
         try {
+            console.log('[WhisperService] Step 1: Downloading Whisper binary...');
             await this.downloadWithRetry(binaryUrl, tempFile);
-            const extractDir = path.dirname(this.whisperPath);
-            await spawnAsync('powershell', ['-command', `Expand-Archive -Path '${tempFile}' -DestinationPath '${extractDir}' -Force`]);
-            await fsPromises.unlink(tempFile);
+            
+            console.log('[WhisperService] Step 2: Extracting archive...');
+            const extractDir = path.join(this.tempDir, 'extracted');
+            
+            // 임시 압축 해제 디렉토리 생성
+            await fsPromises.mkdir(extractDir, { recursive: true });
+            
+            // PowerShell 명령에서 경로를 올바르게 인용
+            const expandCommand = `Expand-Archive -Path "${tempFile}" -DestinationPath "${extractDir}" -Force`;
+            await spawnAsync('powershell', ['-command', expandCommand]);
+            
+            console.log('[WhisperService] Step 3: Finding and moving whisper executable...');
+            
+            // 압축 해제된 디렉토리에서 whisper.exe 파일 찾기
+            const whisperExecutables = await this.findWhisperExecutables(extractDir);
+            
+            if (whisperExecutables.length === 0) {
+                throw new Error('whisper.exe not found in extracted files');
+            }
+            
+            // 첫 번째로 찾은 whisper.exe를 목표 위치로 복사
+            const sourceExecutable = whisperExecutables[0];
+            const targetDir = path.dirname(this.whisperPath);
+            await fsPromises.mkdir(targetDir, { recursive: true });
+            await fsPromises.copyFile(sourceExecutable, this.whisperPath);
+            
+            console.log('[WhisperService] Step 4: Verifying installation...');
+            
+            // 설치 검증
+            await fsPromises.access(this.whisperPath, fs.constants.F_OK);
+            
+            // whisper.exe 실행 테스트
+            try {
+                await spawnAsync(this.whisperPath, ['--help']);
+                console.log('[WhisperService] Whisper executable verified successfully');
+            } catch (testError) {
+                console.warn('[WhisperService] Whisper executable test failed, but file exists:', testError.message);
+            }
+            
+            console.log('[WhisperService] Step 5: Cleanup...');
+            
+            // 임시 파일 정리
+            await fsPromises.unlink(tempFile).catch(() => {});
+            await this.removeDirectory(extractDir).catch(() => {});
+            
             console.log('[WhisperService] Whisper installed successfully on Windows');
             return true;
+            
         } catch (error) {
             console.error('[WhisperService] Windows installation failed:', error);
+            
+            // 실패 시 임시 파일 정리
+            await fsPromises.unlink(tempFile).catch(() => {});
+            await this.removeDirectory(path.join(this.tempDir, 'extracted')).catch(() => {});
+            
             throw new Error(`Failed to install Whisper on Windows: ${error.message}`);
+        }
+    }
+    
+    // 압축 해제된 디렉토리에서 whisper.exe 파일들을 재귀적으로 찾기
+    async findWhisperExecutables(dir) {
+        const executables = [];
+        
+        try {
+            const items = await fsPromises.readdir(dir, { withFileTypes: true });
+            
+            for (const item of items) {
+                const fullPath = path.join(dir, item.name);
+                
+                if (item.isDirectory()) {
+                    const subExecutables = await this.findWhisperExecutables(fullPath);
+                    executables.push(...subExecutables);
+                } else if (item.isFile() && (item.name === 'whisper.exe' || item.name === 'main.exe')) {
+                    // main.exe도 포함 (일부 빌드에서 whisper 실행파일이 main.exe로 명명됨)
+                    executables.push(fullPath);
+                }
+            }
+        } catch (error) {
+            console.warn('[WhisperService] Error reading directory:', dir, error.message);
+        }
+        
+        return executables;
+    }
+    
+    // 디렉토리 재귀적 삭제
+    async removeDirectory(dir) {
+        try {
+            const items = await fsPromises.readdir(dir, { withFileTypes: true });
+            
+            for (const item of items) {
+                const fullPath = path.join(dir, item.name);
+                
+                if (item.isDirectory()) {
+                    await this.removeDirectory(fullPath);
+                } else {
+                    await fsPromises.unlink(fullPath);
+                }
+            }
+            
+            await fsPromises.rmdir(dir);
+        } catch (error) {
+            console.warn('[WhisperService] Error removing directory:', dir, error.message);
         }
     }
 
