@@ -11,7 +11,13 @@ const authService = require('../common/services/authService');
 const systemSettingsRepository = require('../common/repositories/systemSettings');
 const userRepository = require('../common/repositories/user');
 const fetch = require('node-fetch');
-
+const Store = require('electron-store');
+const shortCutStore = new Store({
+    name: 'user-preferences',
+    defaults: {
+        customKeybinds: {}
+    }
+});
 
 /* ────────────────[ GLASS BYPASS ]─────────────── */
 let liquidGlass;
@@ -51,6 +57,7 @@ let settingsHideTimer = null;
 
 let selectedCaptureSourceId = null;
 
+// let shortcutEditorWindow = null;
 let layoutManager = null;
 function updateLayout() {
     if (layoutManager) {
@@ -60,16 +67,16 @@ function updateLayout() {
 
 let movementManager = null;
 
-let storedProvider = 'openai';
 
 const featureWindows = ['listen','ask','settings'];
+// const featureWindows = ['listen','ask','settings','shortcut-settings'];
 function isAllowed(name) {
     if (name === 'header') return true;
     return featureWindows.includes(name) && currentHeaderState === 'main';
 }
 
-function createFeatureWindows(header) {
-    if (windowPool.has('listen')) return;
+function createFeatureWindows(header, namesToCreate) {
+    // if (windowPool.has('listen')) return;
 
     const commonChildOptions = {
         parent: header,
@@ -84,106 +91,207 @@ function createFeatureWindows(header) {
         webPreferences: { nodeIntegration: true, contextIsolation: false },
     };
 
-    // listen
-    const listen = new BrowserWindow({
-        ...commonChildOptions, width:400,minWidth:400,maxWidth:400,
-        maxHeight:700,
-    });
-    listen.setContentProtection(isContentProtectionOn);
-    listen.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
-    if (process.platform === 'darwin') {
-        listen.setWindowButtonVisibility(false);
-    }
-    const listenLoadOptions = { query: { view: 'listen' } };
-    if (!shouldUseLiquidGlass) {
-        listen.loadFile(path.join(__dirname, '../app/content.html'), listenLoadOptions);
-    }
-    else {
-        listenLoadOptions.query.glass = 'true';
-        listen.loadFile(path.join(__dirname, '../app/content.html'), listenLoadOptions);
-        listen.webContents.once('did-finish-load', () => {
-            const viewId = liquidGlass.addView(listen.getNativeWindowHandle(), {
-                cornerRadius: 12,
-                tintColor: '#FF00001A', // Red tint
-                opaque: false, 
-            });
-            if (viewId !== -1) {
-                liquidGlass.unstable_setVariant(viewId, 2);
-                // liquidGlass.unstable_setScrim(viewId, 1);
-                // liquidGlass.unstable_setSubdued(viewId, 1);
+    const createFeatureWindow = (name) => {
+        if (windowPool.has(name)) return;
+        
+        switch (name) {
+            case 'listen': {
+                const listen = new BrowserWindow({
+                    ...commonChildOptions, width:400,minWidth:400,maxWidth:400,
+                    maxHeight:700,
+                });
+                listen.setContentProtection(isContentProtectionOn);
+                listen.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
+                if (process.platform === 'darwin') {
+                    listen.setWindowButtonVisibility(false);
+                }
+                const listenLoadOptions = { query: { view: 'listen' } };
+                if (!shouldUseLiquidGlass) {
+                    listen.loadFile(path.join(__dirname, '../app/content.html'), listenLoadOptions);
+                }
+                else {
+                    listenLoadOptions.query.glass = 'true';
+                    listen.loadFile(path.join(__dirname, '../app/content.html'), listenLoadOptions);
+                    listen.webContents.once('did-finish-load', () => {
+                        const viewId = liquidGlass.addView(listen.getNativeWindowHandle(), {
+                            cornerRadius: 12,
+                            tintColor: '#FF00001A', // Red tint
+                            opaque: false, 
+                        });
+                        if (viewId !== -1) {
+                            liquidGlass.unstable_setVariant(viewId, 2);
+                            // liquidGlass.unstable_setScrim(viewId, 1);
+                            // liquidGlass.unstable_setSubdued(viewId, 1);
+                        }
+                    });
+                }
+                windowPool.set('listen', listen);
+                break;
             }
-        });
-    }
 
+            // ask
+            case 'ask': {
+                const ask = new BrowserWindow({ ...commonChildOptions, width:600 });
+                ask.setContentProtection(isContentProtectionOn);
+                ask.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
+                if (process.platform === 'darwin') {
+                    ask.setWindowButtonVisibility(false);
+                }
+                const askLoadOptions = { query: { view: 'ask' } };
+                if (!shouldUseLiquidGlass) {
+                    ask.loadFile(path.join(__dirname, '../app/content.html'), askLoadOptions);
+                }
+                else {
+                    askLoadOptions.query.glass = 'true';
+                    ask.loadFile(path.join(__dirname, '../app/content.html'), askLoadOptions);
+                    ask.webContents.once('did-finish-load', () => {
+                        const viewId = liquidGlass.addView(ask.getNativeWindowHandle(), {
+                            cornerRadius: 12,
+                            tintColor: '#FF00001A', // Red tint
+                            opaque: false, 
+                        });
+                        if (viewId !== -1) {
+                            liquidGlass.unstable_setVariant(viewId, 2);
+                            // liquidGlass.unstable_setScrim(viewId, 1);
+                            // liquidGlass.unstable_setSubdued(viewId, 1);
+                        }
+                    });
+                }
 
-    windowPool.set('listen', listen);
-
-    // ask
-    const ask = new BrowserWindow({ ...commonChildOptions, width:600 });
-    ask.setContentProtection(isContentProtectionOn);
-    ask.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
-    if (process.platform === 'darwin') {
-        ask.setWindowButtonVisibility(false);
-    }
-    const askLoadOptions = { query: { view: 'ask' } };
-    if (!shouldUseLiquidGlass) {
-        ask.loadFile(path.join(__dirname, '../app/content.html'), askLoadOptions);
-    }
-    else {
-        askLoadOptions.query.glass = 'true';
-        ask.loadFile(path.join(__dirname, '../app/content.html'), askLoadOptions);
-        ask.webContents.once('did-finish-load', () => {
-            const viewId = liquidGlass.addView(ask.getNativeWindowHandle(), {
-                cornerRadius: 12,
-                tintColor: '#FF00001A', // Red tint
-                opaque: false, 
-            });
-            if (viewId !== -1) {
-                liquidGlass.unstable_setVariant(viewId, 2);
-                // liquidGlass.unstable_setScrim(viewId, 1);
-                // liquidGlass.unstable_setSubdued(viewId, 1);
+                ask.on('blur',()=>ask.webContents.send('window-blur'));
+                
+                // Open DevTools in development
+                if (!app.isPackaged) {
+                    ask.webContents.openDevTools({ mode: 'detach' });
+                }
+                windowPool.set('ask', ask);
+                break;
             }
-        });
-    }
 
-    ask.on('blur',()=>ask.webContents.send('window-blur'));
-    
-    // Open DevTools in development
-    if (!app.isPackaged) {
-        ask.webContents.openDevTools({ mode: 'detach' });
-    }
-    windowPool.set('ask', ask);
-
-    // settings
-    const settings = new BrowserWindow({ ...commonChildOptions, width:240, maxHeight:400, parent:undefined });
-    settings.setContentProtection(isContentProtectionOn);
-    settings.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
-    if (process.platform === 'darwin') {
-        settings.setWindowButtonVisibility(false);
-    }
-    const settingsLoadOptions = { query: { view: 'settings' } };
-    if (!shouldUseLiquidGlass) {
-        settings.loadFile(path.join(__dirname,'../app/content.html'), settingsLoadOptions)
-            .catch(console.error);
-    }
-    else {
-        settingsLoadOptions.query.glass = 'true';
-        settings.loadFile(path.join(__dirname,'../app/content.html'), settingsLoadOptions)
-            .catch(console.error);
-        settings.webContents.once('did-finish-load', () => {
-            const viewId = liquidGlass.addView(settings.getNativeWindowHandle(), {
-                cornerRadius: 12,
-                tintColor: '#FF00001A', // Red tint
-                opaque: false, 
-            });
-            if (viewId !== -1) {
-                liquidGlass.unstable_setVariant(viewId, 2);
-                // liquidGlass.unstable_setScrim(viewId, 1);
-                // liquidGlass.unstable_setSubdued(viewId, 1);
+            // settings
+            case 'settings': {
+                const settings = new BrowserWindow({ ...commonChildOptions, width:240, maxHeight:400, parent:undefined });
+                settings.setContentProtection(isContentProtectionOn);
+                settings.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
+                if (process.platform === 'darwin') {
+                    settings.setWindowButtonVisibility(false);
+                }
+                const settingsLoadOptions = { query: { view: 'settings' } };
+                if (!shouldUseLiquidGlass) {
+                    settings.loadFile(path.join(__dirname,'../app/content.html'), settingsLoadOptions)
+                        .catch(console.error);
+                }
+                else {
+                    settingsLoadOptions.query.glass = 'true';
+                    settings.loadFile(path.join(__dirname,'../app/content.html'), settingsLoadOptions)
+                        .catch(console.error);
+                    settings.webContents.once('did-finish-load', () => {
+                        const viewId = liquidGlass.addView(settings.getNativeWindowHandle(), {
+                            cornerRadius: 12,
+                            tintColor: '#FF00001A', // Red tint
+                            opaque: false, 
+                        });
+                        if (viewId !== -1) {
+                            liquidGlass.unstable_setVariant(viewId, 2);
+                            // liquidGlass.unstable_setScrim(viewId, 1);
+                            // liquidGlass.unstable_setSubdued(viewId, 1);
+                        }
+                    });
+                }
+                windowPool.set('settings', settings);  
+                break;
             }
-        });
+
+            case 'shortcut-settings': {
+                const shortcutEditor = new BrowserWindow({
+                    ...commonChildOptions,
+                    width: 420,
+                    height: 720,
+                    modal: false,
+                    parent: undefined,
+                    alwaysOnTop: true,
+                    titleBarOverlay: false,
+                });
+
+                if (process.platform === 'darwin') {
+                    shortcutEditor.setAlwaysOnTop(true, 'screen-saver');
+                } else {
+                    shortcutEditor.setAlwaysOnTop(true);
+                }
+            
+                /* ──────────[ ① 다른 창 클릭 차단 ]────────── */
+                const disableClicks = () => {
+                    for (const [name, win] of windowPool) {
+                        if (win !== shortcutEditor && !win.isDestroyed()) {
+                            win.setIgnoreMouseEvents(true, { forward: true });
+                        }
+                    }
+                };
+                const restoreClicks = () => {
+                    for (const [, win] of windowPool) {
+                        if (!win.isDestroyed()) win.setIgnoreMouseEvents(false);
+                    }
+                };
+
+                const header = windowPool.get('header');
+                if (header && !header.isDestroyed()) {
+                    const { x, y, width } = header.getBounds();
+                    shortcutEditor.setBounds({ x, y, width });
+                }
+
+                shortcutEditor.once('ready-to-show', () => {
+                    disableClicks(); 
+                    shortcutEditor.show();
+                });
+
+                const loadOptions = { query: { view: 'shortcut-settings' } };
+                if (!shouldUseLiquidGlass) {
+                    shortcutEditor.loadFile(path.join(__dirname, '../app/content.html'), loadOptions);
+                } else {
+                    loadOptions.query.glass = 'true';
+                    shortcutEditor.loadFile(path.join(__dirname, '../app/content.html'), loadOptions);
+                    shortcutEditor.webContents.once('did-finish-load', () => {
+                        const viewId = liquidGlass.addView(shortcutEditor.getNativeWindowHandle(), {
+                            cornerRadius: 12, tintColor: '#FF00001A', opaque: false, 
+                        });
+                        if (viewId !== -1) {
+                            liquidGlass.unstable_setVariant(viewId, 2);
+                        }
+                    });
+                }
+                
+                shortcutEditor.on('closed', () => {
+                    restoreClicks();
+                    windowPool.delete('shortcut-settings');
+                    console.log('[Shortcuts] Re-enabled after editing.');
+                    loadAndRegisterShortcuts(movementManager);
+                });
+
+                shortcutEditor.webContents.once('dom-ready', async () => {
+                    const savedKeybinds = shortCutStore.get('customKeybinds', {});
+                    const defaultKeybinds = getDefaultKeybinds();
+                    const keybinds = { ...defaultKeybinds, ...savedKeybinds };
+                    shortcutEditor.webContents.send('load-shortcuts', keybinds);
+                });
+
+                if (!app.isPackaged) {
+                    shortcutEditor.webContents.openDevTools({ mode: 'detach' });
+                }
+                windowPool.set('shortcut-settings', shortcutEditor);
+                break;
+            }
+        }
+    };
+
+    if (Array.isArray(namesToCreate)) {
+        namesToCreate.forEach(name => createFeatureWindow(name));
+    } else if (typeof namesToCreate === 'string') {
+        createFeatureWindow(namesToCreate);
+    } else {
+        createFeatureWindow('listen');
+        createFeatureWindow('ask');
+        createFeatureWindow('settings');
     }
-    windowPool.set('settings', settings);   
 }
 
 function destroyFeatureWindows() {
@@ -197,6 +305,7 @@ function destroyFeatureWindows() {
         windowPool.delete(name);
     });
 }
+
 
 
 function getCurrentDisplay(window) {
@@ -354,7 +463,7 @@ function createWindows() {
     setupIpcHandlers(movementManager);
 
     if (currentHeaderState === 'main') {
-        createFeatureWindows(header);
+        createFeatureWindows(header, ['listen', 'ask', 'settings', 'shortcut-settings']);
     }
 
     header.setContentProtection(isContentProtectionOn);
@@ -384,10 +493,6 @@ function createWindows() {
     });
 
     header.on('resize', updateLayout);
-
-    // header.webContents.once('dom-ready', () => {
-    //     loadAndRegisterShortcuts();
-    // });
 
     ipcMain.handle('toggle-all-windows-visibility', () => toggleAllWindowsVisibility(movementManager));
 
@@ -584,37 +689,32 @@ function createWindows() {
         }
     });
 
-    // setupIpcHandlers();
-
     return windowPool;
 }
 
 function loadAndRegisterShortcuts(movementManager) {
+    if (windowPool.has('shortcut-settings')) {
+        console.log('[Shortcuts] Editing in progress, skipping registration.');
+        return;
+    }
+
     const defaultKeybinds = getDefaultKeybinds();
-    const header = windowPool.get('header');
+    const savedKeybinds = shortCutStore.get('customKeybinds', {});
+    const keybinds = { ...defaultKeybinds, ...savedKeybinds };
+
     const sendToRenderer = (channel, ...args) => {
         windowPool.forEach(win => {
-            try {
-                if (win && !win.isDestroyed()) {
+            if (win && !win.isDestroyed()) {
+                try {
                     win.webContents.send(channel, ...args);
+                } catch (e) {
+                    // 창이 이미 닫혔을 수 있으므로 오류를 무시합니다.
                 }
-            } catch (e) {}
+            }
         });
     };
 
-
-    if (!header) {
-        return updateGlobalShortcuts(defaultKeybinds, undefined, sendToRenderer, movementManager);
-    }
-
-    header.webContents
-        .executeJavaScript(`(() => localStorage.getItem('customKeybinds'))()`)
-        .then(saved => (saved ? JSON.parse(saved) : {}))
-        .then(savedKeybinds => {
-            const keybinds = { ...defaultKeybinds, ...savedKeybinds };
-            updateGlobalShortcuts(keybinds, header, sendToRenderer, movementManager);
-        })
-        .catch(() => updateGlobalShortcuts(defaultKeybinds, header, sendToRenderer, movementManager));
+    updateGlobalShortcuts(keybinds, windowPool.get('header'), sendToRenderer, movementManager);
 }
 
 
@@ -768,6 +868,7 @@ function setupIpcHandlers(movementManager) {
         } else {         // 'apikey' | 'permission'
             destroyFeatureWindows();
         }
+        loadAndRegisterShortcuts(movementManager);
 
         for (const [name, win] of windowPool) {
             if (!isAllowed(name) && !win.isDestroyed()) {
@@ -777,34 +878,67 @@ function setupIpcHandlers(movementManager) {
                 win.show();
             }
         }
-
-        const header = windowPool.get('header');
-        if (header && !header.isDestroyed()) {
-            header.webContents
-                .executeJavaScript(`(() => localStorage.getItem('customKeybinds'))()`)
-                .then(saved => {
-                    const defaultKeybinds = getDefaultKeybinds();
-                    const savedKeybinds = saved ? JSON.parse(saved) : {};
-                    const keybinds = { ...defaultKeybinds, ...savedKeybinds };
-
-                    const sendToRenderer = (channel, ...args) => {
-                        windowPool.forEach(win => {
-                            try {
-                                if (win && !win.isDestroyed()) {
-                                    win.webContents.send(channel, ...args);
-                                }
-                            } catch (e) {}
-                        });
-                    };
-
-                    updateGlobalShortcuts(keybinds, header, sendToRenderer, movementManager);
-                })
-                .catch(console.error);
-        }
     });
 
     ipcMain.on('update-keybinds', (event, newKeybinds) => {
         updateGlobalShortcuts(newKeybinds);
+    });
+
+    ipcMain.handle('get-current-shortcuts', () => {
+        const defaultKeybinds = getDefaultKeybinds();
+        const savedKeybinds = shortCutStore.get('customKeybinds', {});
+        return { ...defaultKeybinds, ...savedKeybinds };
+    });
+
+    ipcMain.handle('open-shortcut-editor', () => {
+        const header = windowPool.get('header');
+        if (!header) return;
+        
+        // 편집기 열기 전 모든 단축키 비활성화
+        globalShortcut.unregisterAll();
+        console.log('[Shortcuts] Disabled for editing.');
+
+        createFeatureWindows(header, 'shortcut-settings');
+    });
+
+    ipcMain.handle('get-default-shortcuts', () => {
+        shortCutStore.set('customKeybinds', {});
+        return getDefaultKeybinds();
+    });
+
+    ipcMain.handle('save-shortcuts', async (event, newKeybinds) => {
+        try {
+            const defaultKeybinds = getDefaultKeybinds();
+            const customKeybinds = {};
+            for (const key in newKeybinds) {
+                if (newKeybinds[key] && newKeybinds[key] !== defaultKeybinds[key]) {
+                    customKeybinds[key] = newKeybinds[key];
+                }
+            }
+            
+            shortCutStore.set('customKeybinds', customKeybinds);
+            console.log('[Shortcuts] Custom keybinds saved to store:', customKeybinds);
+
+            const editor = windowPool.get('shortcut-settings');
+            if (editor && !editor.isDestroyed()) {
+                editor.close(); 
+            } else {
+                loadAndRegisterShortcuts(movementManager);
+            }
+
+            return { success: true };
+        } catch (error) {
+            console.error("Failed to save shortcuts:", error);
+            loadAndRegisterShortcuts(movementManager);
+            return { success: false, error: error.message };
+        }
+    });
+
+    ipcMain.on('close-shortcut-editor', () => {
+        const editor = windowPool.get('shortcut-settings');
+        if (editor && !editor.isDestroyed()) {
+            editor.close();
+        }
     });
 
     ipcMain.handle('open-login-page', () => {
@@ -971,15 +1105,6 @@ function setupIpcHandlers(movementManager) {
         console.log('[WindowManager] Received request to log out.');
         
         await authService.signOut();
-        //////// before_modelStateService ////////
-        // await setApiKey(null);
-        
-        // windowPool.forEach(win => {
-        //     if (win && !win.isDestroyed()) {
-        //         win.webContents.send('api-key-removed');
-        //     }
-        // });
-        //////// before_modelStateService ////////
     });
 
     ipcMain.handle('check-system-permissions', async () => {
@@ -1114,101 +1239,6 @@ function setupIpcHandlers(movementManager) {
 }
 
 
-//////// before_modelStateService ////////
-// async function setApiKey(apiKey, provider = 'openai') {
-//     console.log('[WindowManager] Persisting API key and provider to DB');
-
-//     try {
-//         await userRepository.saveApiKey(apiKey, authService.getCurrentUserId(), provider);
-//         console.log('[WindowManager] API key and provider saved to SQLite');
-        
-//         // Notify authService that the key status may have changed
-//         await authService.updateApiKeyStatus();
-
-//     } catch (err) {
-//         console.error('[WindowManager] Failed to save API key to SQLite:', err);
-//     }
-
-//     windowPool.forEach(win => {
-//         if (win && !win.isDestroyed()) {
-//             const js = apiKey ? `
-//                 localStorage.setItem('openai_api_key', ${JSON.stringify(apiKey)});
-//                 localStorage.setItem('ai_provider', ${JSON.stringify(provider)});
-//             ` : `
-//                 localStorage.removeItem('openai_api_key');
-//                 localStorage.removeItem('ai_provider');
-//             `;
-//             win.webContents.executeJavaScript(js).catch(() => {});
-//         }
-//     });
-// }
-
-
-// async function getStoredApiKey() {
-//     const userId = authService.getCurrentUserId();
-//     if (!userId) return null;
-//     const user = await userRepository.getById(userId);
-//     return user?.api_key || null;
-// }
-
-// async function getStoredProvider() {
-//     const userId = authService.getCurrentUserId();
-//     if (!userId) return 'openai';
-//     const user = await userRepository.getById(userId);
-//     return user?.provider || 'openai';
-// }
-
-// function setupApiKeyIPC() {
-//     const { ipcMain } = require('electron');
-
-//     // Both handlers now do the same thing: fetch the key from the source of truth.
-//     ipcMain.handle('get-stored-api-key', getStoredApiKey);
-
-//     ipcMain.handle('api-key-validated', async (event, data) => {
-//         console.log('[WindowManager] API key validation completed, saving...');
-        
-//         // Support both old format (string) and new format (object)
-//         const apiKey = typeof data === 'string' ? data : data.apiKey;
-//         const provider = typeof data === 'string' ? 'openai' : (data.provider || 'openai');
-        
-//         await setApiKey(apiKey, provider);
-
-//         windowPool.forEach((win, name) => {
-//             if (win && !win.isDestroyed()) {
-//                 win.webContents.send('api-key-validated', { apiKey, provider });
-//             }
-//         });
-
-//         return { success: true };
-//     });
-
-//     ipcMain.handle('remove-api-key', async () => {
-//         console.log('[WindowManager] API key removal requested');
-//         await setApiKey(null);
-
-//         windowPool.forEach((win, name) => {
-//             if (win && !win.isDestroyed()) {
-//                 win.webContents.send('api-key-removed');
-//             }
-//         });
-
-//         const settingsWindow = windowPool.get('settings');
-//         if (settingsWindow && settingsWindow.isVisible()) {
-//             settingsWindow.hide();
-//             console.log('[WindowManager] Settings window hidden after clearing API key.');
-//         }
-
-//         return { success: true };
-//     });
-    
-//     ipcMain.handle('get-ai-provider', getStoredProvider);
-
-//     console.log('[WindowManager] API key related IPC handlers registered (SQLite-backed)');
-// }
-//////// before_modelStateService ////////
-
-
-
 
 //////// after_modelStateService ////////
 async function getStoredApiKey() {
@@ -1227,15 +1257,15 @@ async function getStoredProvider() {
 }
 
 /**
- * 렌더러에서 요청한 타입('llm' 또는 'stt')에 대한 모델 정보를 반환합니다.
- * @param {IpcMainInvokeEvent} event - 일렉트론 IPC 이벤트 객체
- * @param {{type: 'llm' | 'stt'}} { type } - 요청할 모델 타입
+ * 
+ * @param {IpcMainInvokeEvent} event 
+ * @param {{type: 'llm' | 'stt'}}
  */
 async function getCurrentModelInfo(event, { type }) {
     if (global.modelStateService && (type === 'llm' || type === 'stt')) {
         return global.modelStateService.getCurrentModelInfo(type);
     }
-    return null; // 서비스가 없거나 유효하지 않은 타입일 경우 null 반환
+    return null;
 }
 
 function setupApiKeyIPC() {
@@ -1279,33 +1309,26 @@ function getDefaultKeybinds() {
 }
 
 function updateGlobalShortcuts(keybinds, mainWindow, sendToRenderer, movementManager) {
-    // console.log('Updating global shortcuts with:', keybinds);
-
-    // Unregister all existing shortcuts
     globalShortcut.unregisterAll();
 
-    let toggleVisibilityDebounceTimer = null;
-
+    if (sendToRenderer) {
+        sendToRenderer('shortcuts-updated', keybinds);
+        console.log('[Shortcuts] Broadcasted updated shortcuts to all windows.');
+    }
+    
+    // ✨ 하드코딩된 단축키 등록을 위해 변수 유지
     const isMac = process.platform === 'darwin';
     const modifier = isMac ? 'Cmd' : 'Ctrl';
+    const header = windowPool.get('header');
+    const state = header?.currentHeaderState || currentHeaderState;
 
-    if (keybinds.toggleVisibility) {
-        try {
-            globalShortcut.register(keybinds.toggleVisibility, () => toggleAllWindowsVisibility(movementManager));
-            console.log(`Registered toggleVisibility: ${keybinds.toggleVisibility}`);
-        } catch (error) {
-            console.error(`Failed to register toggleVisibility (${keybinds.toggleVisibility}):`, error);
-        }
-    }
-
+    // ✨ 기능 1: 사용자가 설정할 수 없는 '모니터 이동' 단축키 (기존 로직 유지)
     const displays = screen.getAllDisplays();
     if (displays.length > 1) {
         displays.forEach((display, index) => {
             const key = `${modifier}+Shift+${index + 1}`;
             try {
-                globalShortcut.register(key, () => {
-                    movementManager.moveToDisplay(display.id);
-                });
+                globalShortcut.register(key, () => movementManager.moveToDisplay(display.id));
                 console.log(`Registered display switch shortcut: ${key} -> Display ${index + 1}`);
             } catch (error) {
                 console.error(`Failed to register display switch ${key}:`, error);
@@ -1313,171 +1336,122 @@ function updateGlobalShortcuts(keybinds, mainWindow, sendToRenderer, movementMan
         });
     }
 
-    if (currentHeaderState === 'apikey') {
+    // API 키 입력 상태에서는 필수 단축키(toggleVisibility) 외에는 아무것도 등록하지 않음
+    if (state === 'apikey') {
+        if (keybinds.toggleVisibility) {
+            try {
+                globalShortcut.register(keybinds.toggleVisibility, () => toggleAllWindowsVisibility(movementManager));
+            } catch (error) {
+                console.error(`Failed to register toggleVisibility (${keybinds.toggleVisibility}):`, error);
+            }
+        }
         console.log('ApiKeyHeader is active, skipping conditional shortcuts');
         return;
     }
 
-    const directions = [
-        { key: `${modifier}+Left`, direction: 'left' },
-        { key: `${modifier}+Right`, direction: 'right' },
-        { key: `${modifier}+Up`, direction: 'up' },
-        { key: `${modifier}+Down`, direction: 'down' },
-    ];
-
-    directions.forEach(({ key, direction }) => {
-        try {
-            globalShortcut.register(key, () => {
-                const header = windowPool.get('header');
-                if (header && header.isVisible()) {
-                    movementManager.moveStep(direction);
-                }
-            });
-            // console.log(`Registered global shortcut: ${key} -> ${direction}`);
-        } catch (error) {
-            console.error(`Failed to register ${key}:`, error);
-        }
-    });
-
+    // ✨ 기능 2: 사용자가 설정할 수 없는 '화면 가장자리 이동' 단축키 (기존 로직 유지)
     const edgeDirections = [
         { key: `${modifier}+Shift+Left`, direction: 'left' },
         { key: `${modifier}+Shift+Right`, direction: 'right' },
-        { key: `${modifier}+Shift+Up`, direction: 'up' },
-        { key: `${modifier}+Shift+Down`, direction: 'down' },
+        // { key: `${modifier}+Shift+Up`, direction: 'up' },
+        // { key: `${modifier}+Shift+Down`, direction: 'down' },
     ];
-
     edgeDirections.forEach(({ key, direction }) => {
         try {
             globalShortcut.register(key, () => {
-                const header = windowPool.get('header');
-                if (header && header.isVisible()) {
-                    movementManager.moveToEdge(direction);
-                }
+                if (header && header.isVisible()) movementManager.moveToEdge(direction);
             });
-            console.log(`Registered global shortcut: ${key} -> edge ${direction}`);
         } catch (error) {
-            console.error(`Failed to register ${key}:`, error);
+            console.error(`Failed to register edge move for ${key}:`, error);
         }
     });
 
-    if (keybinds.toggleClickThrough) {
+
+    // ✨ 기능 3: 사용자가 설정 가능한 모든 단축키를 동적으로 등록 (새로운 방식 적용)
+    for (const action in keybinds) {
+        const accelerator = keybinds[action];
+        if (!accelerator) continue;
+
         try {
-            globalShortcut.register(keybinds.toggleClickThrough, () => {
-                mouseEventsIgnored = !mouseEventsIgnored;
-                if (mouseEventsIgnored) {
-                    mainWindow.setIgnoreMouseEvents(true, { forward: true });
-                    console.log('Mouse events ignored');
-                } else {
-                    mainWindow.setIgnoreMouseEvents(false);
-                    console.log('Mouse events enabled');
-                }
-                mainWindow.webContents.send('click-through-toggled', mouseEventsIgnored);
-            });
-            // console.log(`Registered toggleClickThrough: ${keybinds.toggleClickThrough}`);
-        } catch (error) {
-            console.error(`Failed to register toggleClickThrough (${keybinds.toggleClickThrough}):`, error);
-        }
-    }
-
-    if (keybinds.nextStep) {
-        try {
-            globalShortcut.register(keybinds.nextStep, () => {
-                console.log('⌘/Ctrl+Enter Ask shortcut triggered');
-
-                const askWindow = windowPool.get('ask');
-                if (!askWindow || askWindow.isDestroyed()) {
-                    console.error('Ask window not found or destroyed');
-                    return;
-                }
-
-                if (askWindow.isVisible()) {
-                    askWindow.webContents.send('ask-global-send');
-                } else {
-                    try {
-                        askWindow.show();
-
-                        const header = windowPool.get('header');
-                        if (header) {
-                            const currentHeaderPosition = header.getBounds();
+            let callback;
+            switch(action) {
+                case 'toggleVisibility':
+                    callback = () => toggleAllWindowsVisibility(movementManager);
+                    break;
+                case 'nextStep':
+                    callback = () => {
+                        const askWindow = windowPool.get('ask');
+                        if (!askWindow || askWindow.isDestroyed()) return;
+                        if (askWindow.isVisible()) {
+                            askWindow.webContents.send('ask-global-send');
+                        } else {
+                            askWindow.show();
                             updateLayout();
-                            header.setPosition(currentHeaderPosition.x, currentHeaderPosition.y, false);
+                            askWindow.webContents.send('window-show-animation');
                         }
-
-                        askWindow.webContents.send('window-show-animation');
-                    } catch (e) {
-                        console.error('Error showing Ask window:', e);
-                    }
-                }
-            });
-            // console.log(`Registered Ask shortcut (nextStep): ${keybinds.nextStep}`);
-        } catch (error) {
-            console.error(`Failed to register Ask shortcut (${keybinds.nextStep}):`, error);
-        }
-    }
-
-    if (keybinds.manualScreenshot) {
-        try {
-            globalShortcut.register(keybinds.manualScreenshot, () => {
-                console.log('Manual screenshot shortcut triggered');
-                mainWindow.webContents.executeJavaScript(`
-                    if (window.captureManualScreenshot) {
-                        window.captureManualScreenshot();
-                    } else {
-                        console.log('Manual screenshot function not available');
-                    }
-                `);
-            });
-            // console.log(`Registered manualScreenshot: ${keybinds.manualScreenshot}`);
-        } catch (error) {
-            console.error(`Failed to register manualScreenshot (${keybinds.manualScreenshot}):`, error);
-        }
-    }
-
-    if (keybinds.previousResponse) {
-        try {
-            globalShortcut.register(keybinds.previousResponse, () => {
-                console.log('Previous response shortcut triggered');
-                sendToRenderer('navigate-previous-response');
-            });
-            // console.log(`Registered previousResponse: ${keybinds.previousResponse}`);
-        } catch (error) {
-            console.error(`Failed to register previousResponse (${keybinds.previousResponse}):`, error);
-        }
-    }
-
-    if (keybinds.nextResponse) {
-        try {
-            globalShortcut.register(keybinds.nextResponse, () => {
-                console.log('Next response shortcut triggered');
-                sendToRenderer('navigate-next-response');
-            });
-            // console.log(`Registered nextResponse: ${keybinds.nextResponse}`);
-        } catch (error) {
-            console.error(`Failed to register nextResponse (${keybinds.nextResponse}):`, error);
-        }
-    }
-
-    if (keybinds.scrollUp) {
-        try {
-            globalShortcut.register(keybinds.scrollUp, () => {
-                console.log('Scroll up shortcut triggered');
-                sendToRenderer('scroll-response-up');
-            });
-            // console.log(`Registered scrollUp: ${keybinds.scrollUp}`);
-        } catch (error) {
-            console.error(`Failed to register scrollUp (${keybinds.scrollUp}):`, error);
-        }
-    }
-
-    if (keybinds.scrollDown) {
-        try {
-            globalShortcut.register(keybinds.scrollDown, () => {
-                console.log('Scroll down shortcut triggered');
-                sendToRenderer('scroll-response-down');
-            });
-            // console.log(`Registered scrollDown: ${keybinds.scrollDown}`);
-        } catch (error) {
-            console.error(`Failed to register scrollDown (${keybinds.scrollDown}):`, error);
+                    };
+                    break;
+                case 'scrollUp':
+                    callback = () => {
+                        // 'ask' 창을 명시적으로 가져옵니다.
+                        const askWindow = windowPool.get('ask');
+                        // 'ask' 창이 존재하고, 파괴되지 않았으며, 보이는 경우에만 이벤트를 전송합니다.
+                        if (askWindow && !askWindow.isDestroyed() && askWindow.isVisible()) {
+                            askWindow.webContents.send('scroll-response-up');
+                        }
+                    };
+                    break;
+                case 'scrollDown':
+                    callback = () => {
+                        // 'ask' 창을 명시적으로 가져옵니다.
+                        const askWindow = windowPool.get('ask');
+                        // 'ask' 창이 존재하고, 파괴되지 않았으며, 보이는 경우에만 이벤트를 전송합니다.
+                        if (askWindow && !askWindow.isDestroyed() && askWindow.isVisible()) {
+                            askWindow.webContents.send('scroll-response-down');
+                        }
+                    };
+                    break;
+                case 'moveUp':
+                    callback = () => { if (header && header.isVisible()) movementManager.moveStep('up'); };
+                    break;
+                case 'moveDown':
+                    callback = () => { if (header && header.isVisible()) movementManager.moveStep('down'); };
+                    break;
+                case 'moveLeft':
+                    callback = () => { if (header && header.isVisible()) movementManager.moveStep('left'); };
+                    break;
+                case 'moveRight':
+                    callback = () => { if (header && header.isVisible()) movementManager.moveStep('right'); };
+                    break;
+                case 'toggleClickThrough':
+                     callback = () => {
+                        mouseEventsIgnored = !mouseEventsIgnored;
+                        if(mainWindow && !mainWindow.isDestroyed()){
+                            mainWindow.setIgnoreMouseEvents(mouseEventsIgnored, { forward: true });
+                            mainWindow.webContents.send('click-through-toggled', mouseEventsIgnored);
+                        }
+                     };
+                     break;
+                case 'manualScreenshot':
+                    callback = () => {
+                        if(mainWindow && !mainWindow.isDestroyed()) {
+                             mainWindow.webContents.executeJavaScript('window.captureManualScreenshot && window.captureManualScreenshot();');
+                        }
+                    };
+                    break;
+                case 'previousResponse':
+                    callback = () => sendToRenderer('navigate-previous-response');
+                    break;
+                case 'nextResponse':
+                    callback = () => sendToRenderer('navigate-next-response');
+                    break;
+            }
+            
+            if (callback) {
+                globalShortcut.register(accelerator, callback);
+            }
+        } catch(e) {
+            console.error(`Failed to register shortcut for "${action}" (${accelerator}):`, e.message);
         }
     }
 }

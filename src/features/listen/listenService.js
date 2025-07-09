@@ -1,4 +1,4 @@
-const { BrowserWindow } = require('electron');
+const { BrowserWindow, app } = require('electron');
 const SttService = require('./stt/sttService');
 const SummaryService = require('./summary/summaryService');
 const authService = require('../../common/services/authService');
@@ -117,8 +117,27 @@ class ListenService {
                 throw new Error('Failed to initialize database session');
             }
 
-            // Initialize STT sessions
-            await this.sttService.initializeSttSessions(language);
+            /* ---------- STT Initialization Retry Logic ---------- */
+            const MAX_RETRY = 10;
+            const RETRY_DELAY_MS = 300;   // 0.3 seconds
+
+            let sttReady = false;
+            for (let attempt = 1; attempt <= MAX_RETRY; attempt++) {
+                try {
+                    await this.sttService.initializeSttSessions(language);
+                    sttReady = true;
+                    break;                         // Exit on success
+                } catch (err) {
+                    console.warn(
+                        `[ListenService] STT init attempt ${attempt} failed: ${err.message}`
+                    );
+                    if (attempt < MAX_RETRY) {
+                        await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+                    }
+                }
+            }
+            if (!sttReady) throw new Error('STT init failed after retries');
+            /* ------------------------------------------- */
 
             console.log('✅ Listen service initialized successfully.');
             
@@ -213,9 +232,9 @@ class ListenService {
             try {
                 await this.sendAudioContent(data, mimeType);
                 return { success: true };
-            } catch (error) {
-                console.error('Error sending user audio:', error);
-                return { success: false, error: error.message };
+            } catch (e) {
+                console.error('Error sending user audio:', e);
+                return { success: false, error: e.message };
             }
         });
 
@@ -237,9 +256,13 @@ class ListenService {
             if (process.platform !== 'darwin') {
                 return { success: false, error: 'macOS audio capture only available on macOS' };
             }
+            if (this.sttService.isMacOSAudioRunning?.()) {
+                return { success: false, error: 'already_running' };
+            }
+
             try {
                 const success = await this.startMacOSAudioCapture();
-                return { success };
+                return { success, error: null };
             } catch (error) {
                 console.error('Error starting macOS audio capture:', error);
                 return { success: false, error: error.message };
@@ -274,4 +297,4 @@ class ListenService {
     }
 }
 
-module.exports = ListenService; 
+module.exports = ListenService;

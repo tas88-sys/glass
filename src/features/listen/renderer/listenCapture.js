@@ -1,5 +1,30 @@
 const { ipcRenderer } = require('electron');
+const createAecModule = require('../../../assets/aec.js');
 
+let aecModPromise = null;     // 한 번만 로드
+let aecMod        = null;
+let aecPtr        = 0;        // Rust Aec* 1개만 재사용
+
+/** WASM 모듈 가져오고 1회 초기화 */
+async function getAec () {
+  if (aecModPromise) return aecModPromise;   // 캐시
+
+    aecModPromise = createAecModule().then((M) => {
+        aecMod = M; 
+        // C 심볼 → JS 래퍼 바인딩 (딱 1번)
+        M.newPtr   = M.cwrap('AecNew',        'number',
+                            ['number','number','number','number']);
+        M.cancel   = M.cwrap('AecCancelEcho', null,
+                            ['number','number','number','number','number']);
+        M.destroy  = M.cwrap('AecDestroy',    null, ['number']);
+        return M;
+    });
+
+  return aecModPromise;
+}
+
+// 바로 로드-실패 로그를 보기 위해
+getAec().catch(console.error);
 // ---------------------------
 // Constants & Globals
 // ---------------------------
@@ -80,128 +105,49 @@ function arrayBufferToBase64(buffer) {
     return btoa(binary);
 }
 
-// ---------------------------
-// Complete SimpleAEC implementation (exact from renderer.js)
-// ---------------------------
-class SimpleAEC {
-    constructor() {
-        this.adaptiveFilter = new Float32Array(1024);
-        this.mu = 0.2;
-        this.echoDelay = 100;
-        this.sampleRate = 24000;
-        this.delaySamples = Math.floor((this.echoDelay / 1000) * this.sampleRate);
-
-        this.echoGain = 0.5;
-        this.noiseFloor = 0.01;
-
-        // 🔧 Adaptive-gain parameters (User-tuned, very aggressive)
-        this.targetErr = 0.002;
-        this.adaptRate  = 0.1;
-
-        console.log('🎯 AEC initialized (hyper-aggressive)');
-    }
-
-    process(micData, systemData) {
-        if (!systemData || systemData.length === 0) {
-            return micData;
-        }
-
-        for (let i = 0; i < systemData.length; i++) {
-            if (systemData[i] > 0.98) systemData[i] = 0.98;
-            else if (systemData[i] < -0.98) systemData[i] = -0.98;
-
-            systemData[i] = Math.tanh(systemData[i] * 4);
-        }
-
-        let sum2 = 0;
-        for (let i = 0; i < systemData.length; i++) sum2 += systemData[i] * systemData[i];
-        const rms = Math.sqrt(sum2 / systemData.length);
-        const targetRms = 0.08;                   // 🔧 기준 RMS (기존 0.1)
-        const scale = targetRms / (rms + 1e-6);   // 1e-6: 0-division 방지
-
-        const output = new Float32Array(micData.length);
-
-        const optimalDelay = this.findOptimalDelay(micData, systemData);
-
-        for (let i = 0; i < micData.length; i++) {
-            let echoEstimate = 0;
-
-            for (let d = -500; d <= 500; d += 100) {
-                const delayIndex = i - optimalDelay - d;
-                if (delayIndex >= 0 && delayIndex < systemData.length) {
-                    const weight = Math.exp(-Math.abs(d) / 1000);
-                    echoEstimate += systemData[delayIndex] * scale * this.echoGain * weight;
-                }
-            }
-
-            output[i] = micData[i] - echoEstimate * 0.9;
-
-            if (Math.abs(output[i]) < this.noiseFloor) {
-                output[i] *= 0.5;
-            }
-
-            if (this.isSimilarToSystem(output[i], systemData, i, optimalDelay)) {
-                output[i] *= 0.25;
-            }
-
-            output[i] = Math.max(-1, Math.min(1, output[i]));
-        }
-
-
-        let errSum = 0;
-        for (let i = 0; i < output.length; i++) errSum += output[i] * output[i];
-        const errRms = Math.sqrt(errSum / output.length);
-
-        const err = errRms - this.targetErr;
-        this.echoGain += this.adaptRate * err;      // 비례 제어
-        this.echoGain  = Math.max(0, Math.min(1, this.echoGain));
-
-        return output;
-    }
-
-    findOptimalDelay(micData, systemData) {
-        let maxCorr = 0;
-        let optimalDelay = this.delaySamples;
-
-        for (let delay = 0; delay < 5000 && delay < systemData.length; delay += 200) {
-            let corr = 0;
-            let count = 0;
-
-            for (let i = 0; i < Math.min(500, micData.length); i++) {
-                if (i + delay < systemData.length) {
-                    corr += micData[i] * systemData[i + delay];
-                    count++;
-                }
-            }
-
-            if (count > 0) {
-                corr = Math.abs(corr / count);
-                if (corr > maxCorr) {
-                    maxCorr = corr;
-                    optimalDelay = delay;
-                }
-            }
-        }
-
-        return optimalDelay;
-    }
-
-    isSimilarToSystem(sample, systemData, index, delay) {
-        const windowSize = 50;
-        let similarity = 0;
-
-        for (let i = -windowSize; i <= windowSize; i++) {
-            const sysIndex = index - delay + i;
-            if (sysIndex >= 0 && sysIndex < systemData.length) {
-                similarity += Math.abs(sample - systemData[sysIndex]);
-            }
-        }
-
-        return similarity / (2 * windowSize + 1) < 0.15;
-    }
+/* ───────────────────────── JS ↔︎ WASM 헬퍼 ───────────────────────── */
+function int16PtrFromFloat32(mod, f32) {
+  const len   = f32.length;
+  const bytes = len * 2;
+  const ptr   = mod._malloc(bytes);
+  // HEAP16이 없으면 HEAPU8.buffer로 직접 래핑
+  const heapBuf = (mod.HEAP16 ? mod.HEAP16.buffer : mod.HEAPU8.buffer);
+  const i16   = new Int16Array(heapBuf, ptr, len);
+  for (let i = 0; i < len; ++i) {
+    const s = Math.max(-1, Math.min(1, f32[i]));
+    i16[i]  = s < 0 ? s * 0x8000 : s * 0x7fff;
+  }
+  return { ptr, view: i16 };
 }
 
-let aecProcessor = new SimpleAEC();
+function float32FromInt16View(i16) {
+  const out = new Float32Array(i16.length);
+  for (let i = 0; i < i16.length; ++i) out[i] = i16[i] / 32768;
+  return out;
+}
+
+/* 필요하다면 종료 시 */
+function disposeAec () {
+  getAec().then(mod => { if (aecPtr) mod.destroy(aecPtr); });
+}
+
+function runAecSync (micF32, sysF32) {
+  if (!aecMod || !aecPtr || !aecMod.HEAPU8) return micF32;          // 아직 모듈 안 뜸 → 패스
+
+  const len  = micF32.length;
+  const mic  = int16PtrFromFloat32(aecMod, micF32);
+  const echo = int16PtrFromFloat32(aecMod, sysF32);
+  const out  = aecMod._malloc(len * 2);
+
+  aecMod.cancel(aecPtr, mic.ptr, echo.ptr, out, len);
+
+  const heapBuf = (aecMod.HEAP16 ? aecMod.HEAP16.buffer : aecMod.HEAPU8.buffer);
+  const outF32  = float32FromInt16View(new Int16Array(heapBuf, out, len));
+
+  aecMod._free(mic.ptr); aecMod._free(echo.ptr); aecMod._free(out);
+  return outF32;
+}
+
 
 // System audio data handler
 ipcRenderer.on('system-audio-data', (event, { data }) => {
@@ -214,8 +160,6 @@ ipcRenderer.on('system-audio-data', (event, { data }) => {
     if (systemAudioBuffer.length > MAX_SYSTEM_BUFFER_SIZE) {
         systemAudioBuffer = systemAudioBuffer.slice(-MAX_SYSTEM_BUFFER_SIZE);
     }
-
-    console.log('📥 Received system audio for AEC reference');
 });
 
 // ---------------------------
@@ -305,39 +249,47 @@ setInterval(() => {
 // ---------------------------
 // Audio processing functions (exact from renderer.js)
 // ---------------------------
-function setupMicProcessing(micStream) {
+async function setupMicProcessing(micStream) {
+    /* ── WASM 먼저 로드 ───────────────────────── */
+    const mod = await getAec();
+    if (!aecPtr) aecPtr = mod.newPtr(160, 1600, 24000, 1);
+
+
     const micAudioContext = new AudioContext({ sampleRate: SAMPLE_RATE });
+    await micAudioContext.resume(); 
     const micSource = micAudioContext.createMediaStreamSource(micStream);
     const micProcessor = micAudioContext.createScriptProcessor(BUFFER_SIZE, 1, 1);
 
     let audioBuffer = [];
     const samplesPerChunk = SAMPLE_RATE * AUDIO_CHUNK_DURATION;
 
-    micProcessor.onaudioprocess = async e => {
+    micProcessor.onaudioprocess = (e) => {
         const inputData = e.inputBuffer.getChannelData(0);
         audioBuffer.push(...inputData);
+        console.log('🎤 micProcessor.onaudioprocess');
 
+        // samplesPerChunk(=2400) 만큼 모이면 전송
         while (audioBuffer.length >= samplesPerChunk) {
             let chunk = audioBuffer.splice(0, samplesPerChunk);
-            let processedChunk = new Float32Array(chunk);
+            let processedChunk = new Float32Array(chunk); // 기본값
 
-            // Check for system audio and apply AEC only if voice is active
-            if (aecProcessor && systemAudioBuffer.length > 0) {
-                const latestSystemAudio = systemAudioBuffer[systemAudioBuffer.length - 1];
-                const systemFloat32 = base64ToFloat32Array(latestSystemAudio.data);
+            // ───────────────── WASM AEC ─────────────────
+            if (systemAudioBuffer.length > 0) {
+                const latest = systemAudioBuffer[systemAudioBuffer.length - 1];
+                const sysF32 = base64ToFloat32Array(latest.data);
 
-                // Apply AEC only when system audio has active speech
-                if (isVoiceActive(systemFloat32)) {
-                    processedChunk = aecProcessor.process(new Float32Array(chunk), systemFloat32);
-                    console.log('🔊 Applied AEC because system audio is active');
-                }
+                // **음성 구간일 때만 런**
+                processedChunk = runAecSync(new Float32Array(chunk), sysF32);
+                console.log('🔊 Applied WASM-AEC (speex)');
+            } else {
+                console.log('🔊 No system audio for AEC reference');
             }
 
-            const pcmData16 = convertFloat32ToInt16(processedChunk);
-            const base64Data = arrayBufferToBase64(pcmData16.buffer);
+            const pcm16 = convertFloat32ToInt16(processedChunk);
+            const b64 = arrayBufferToBase64(pcm16.buffer);
 
-            await ipcRenderer.invoke('send-audio-content', {
-                data: base64Data,
+            ipcRenderer.invoke('send-audio-content', {
+                data: b64,
                 mimeType: 'audio/pcm;rate=24000',
             });
         }
@@ -520,7 +472,19 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
             // Start macOS audio capture
             const audioResult = await ipcRenderer.invoke('start-macos-audio');
             if (!audioResult.success) {
-                throw new Error('Failed to start macOS audio capture: ' + audioResult.error);
+                console.warn('[listenCapture] macOS audio start failed:', audioResult.error);
+
+                // 이미 실행 중 → stop 후 재시도
+                if (audioResult.error === 'already_running') {
+                    await ipcRenderer.invoke('stop-macos-audio');
+                    await new Promise(r => setTimeout(r, 500));
+                    const retry = await ipcRenderer.invoke('start-macos-audio');
+                    if (!retry.success) {
+                        throw new Error('Retry failed: ' + retry.error);
+                    }
+                } else {
+                    throw new Error('Failed to start macOS audio capture: ' + audioResult.error);
+                }
             }
 
             // Initialize screen capture in main process
@@ -543,7 +507,7 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
                 });
 
                 console.log('macOS microphone capture started');
-                const { context, processor } = setupMicProcessing(micMediaStream);
+                const { context, processor } = await setupMicProcessing(micMediaStream);
                 audioContext = context;
                 audioProcessor = processor;
             } catch (micErr) {
@@ -616,7 +580,7 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
                     video: false,
                 });
                 console.log('Windows microphone capture started');
-                const { context, processor } = setupMicProcessing(micMediaStream);
+                const { context, processor } = await setupMicProcessing(micMediaStream);
                 audioContext = context;
                 audioProcessor = processor;
             } catch (micErr) {
@@ -719,6 +683,9 @@ function stopCapture() {
 // Exports & global registration
 // ---------------------------
 module.exports = {
+    getAec,          // 새로 만든 초기화 함수
+    runAecSync,      // sync 버전
+    disposeAec,      // 필요시 Rust 객체 파괴
     startCapture,
     stopCapture,
     captureManualScreenshot,

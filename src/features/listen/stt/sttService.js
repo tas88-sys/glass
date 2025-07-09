@@ -12,11 +12,6 @@ class SttService {
         this.myCurrentUtterance = '';
         this.theirCurrentUtterance = '';
         
-        this.myLastPartialText = '';
-        this.theirLastPartialText = '';
-        this.myInactivityTimer = null;
-        this.theirInactivityTimer = null;
-        
         // Turn-completion debouncing
         this.myCompletionBuffer = '';
         this.theirCompletionBuffer = '';
@@ -38,33 +33,6 @@ class SttService {
         this.onStatusUpdate = onStatusUpdate;
     }
 
-    // async getApiKey() {
-    //     const storedKey = await getStoredApiKey();
-    //     if (storedKey) {
-    //         console.log('[SttService] Using stored API key');
-    //         return storedKey;
-    //     }
-
-    //     const envKey = process.env.OPENAI_API_KEY;
-    //     if (envKey) {
-    //         console.log('[SttService] Using environment API key');
-    //         return envKey;
-    //     }
-
-    //     console.error('[SttService] No API key found in storage or environment');
-    //     return null;
-    // }
-
-    // async getAiProvider() {
-    //     try {
-    //         const { ipcRenderer } = require('electron');
-    //         const provider = await ipcRenderer.invoke('get-ai-provider');
-    //         return provider || 'openai';
-    //     } catch (error) {
-    //         return getStoredProvider ? getStoredProvider() : 'openai';
-    //     }
-    // }
-
     sendToRenderer(channel, data) {
         BrowserWindow.getAllWindows().forEach(win => {
             if (!win.isDestroyed()) {
@@ -74,10 +42,9 @@ class SttService {
     }
 
     flushMyCompletion() {
-        if (!this.modelInfo || !this.myCompletionBuffer.trim()) return;
+        const finalText = (this.myCompletionBuffer + this.myCurrentUtterance).trim();
+        if (!this.modelInfo || !finalText) return;
 
-        const finalText = this.myCompletionBuffer.trim();
-        
         // Notify completion callback
         if (this.onTranscriptionComplete) {
             this.onTranscriptionComplete('Me', finalText);
@@ -102,9 +69,8 @@ class SttService {
     }
 
     flushTheirCompletion() {
-        if (!this.modelInfo || !this.theirCompletionBuffer.trim()) return;
-
-        const finalText = this.theirCompletionBuffer.trim();
+        const finalText = (this.theirCompletionBuffer + this.theirCurrentUtterance).trim();
+        if (!this.modelInfo || !finalText) return;
         
         // Notify completion callback
         if (this.onTranscriptionComplete) {
@@ -130,26 +96,22 @@ class SttService {
     }
 
     debounceMyCompletion(text) {
-        // 상대방이 말하고 있던 경우, 화자가 변경되었으므로 즉시 상대방의 말풍선을 완성합니다.
-        if (this.theirCompletionTimer) {
-            clearTimeout(this.theirCompletionTimer);
-            this.flushTheirCompletion();
+        if (this.modelInfo?.provider === 'gemini') {
+            this.myCompletionBuffer += text;
+        } else {
+            this.myCompletionBuffer += (this.myCompletionBuffer ? ' ' : '') + text;
         }
-
-        this.myCompletionBuffer += (this.myCompletionBuffer ? ' ' : '') + text;
 
         if (this.myCompletionTimer) clearTimeout(this.myCompletionTimer);
         this.myCompletionTimer = setTimeout(() => this.flushMyCompletion(), COMPLETION_DEBOUNCE_MS);
     }
 
     debounceTheirCompletion(text) {
-        // 내가 말하고 있던 경우, 화자가 변경되었으므로 즉시 내 말풍선을 완성합니다.
-        if (this.myCompletionTimer) {
-            clearTimeout(this.myCompletionTimer);
-            this.flushMyCompletion();
+        if (this.modelInfo?.provider === 'gemini') {
+            this.theirCompletionBuffer += text;
+        } else {
+            this.theirCompletionBuffer += (this.theirCompletionBuffer ? ' ' : '') + text;
         }
-
-        this.theirCompletionBuffer += (this.theirCompletionBuffer ? ' ' : '') + text;
 
         if (this.theirCompletionTimer) clearTimeout(this.theirCompletionTimer);
         this.theirCompletionTimer = setTimeout(() => this.flushTheirCompletion(), COMPLETION_DEBOUNCE_MS);
@@ -157,12 +119,6 @@ class SttService {
 
     async initializeSttSessions(language = 'en') {
         const effectiveLanguage = process.env.OPENAI_TRANSCRIBE_LANG || language || 'en';
-        
-        // const API_KEY = await this.getApiKey();
-        // if (!API_KEY) {
-        //     throw new Error('No API key available');
-        // }
-        // const provider = await this.getAiProvider();
 
         const modelInfo = await getCurrentModelInfo(null, { type: 'stt' });
         if (!modelInfo || !modelInfo.apiKey) {
@@ -171,10 +127,6 @@ class SttService {
         this.modelInfo = modelInfo;
         console.log(`[SttService] Initializing STT for ${modelInfo.provider} using model ${modelInfo.model}`);
 
-
-        // const isGemini = modelInfo.provider === 'gemini';
-        // console.log(`[SttService] Initializing STT for provider: ${modelInfo.provider}`);
-
         const handleMyMessage = message => {
             if (!this.modelInfo) {
                 console.log('[SttService] Ignoring message - session already closed');
@@ -182,13 +134,35 @@ class SttService {
             }
             
             if (this.modelInfo.provider === 'gemini') {
-                const text = message.serverContent?.inputTranscription?.text || '';
-                if (text && text.trim()) {
-                    const finalUtteranceText = text.trim().replace(/<noise>/g, '').trim();
-                    if (finalUtteranceText && finalUtteranceText !== '.') {
-                        this.debounceMyCompletion(finalUtteranceText);
-                    }
+                if (!message.serverContent?.modelTurn) {
+                    console.log('[Gemini STT - Me]', JSON.stringify(message, null, 2));
                 }
+
+                if (message.serverContent?.turnComplete) {
+                    if (this.myCompletionTimer) {
+                        clearTimeout(this.myCompletionTimer);
+                        this.flushMyCompletion();
+                    }
+                    return;
+                }
+            
+                const transcription = message.serverContent?.inputTranscription;
+                if (!transcription || !transcription.text) return;
+                
+                const textChunk = transcription.text;
+                if (!textChunk.trim() || textChunk.trim() === '<noise>') {
+                    return; // 1. Ignore whitespace-only chunks or noise
+                }
+            
+                this.debounceMyCompletion(textChunk);
+                
+                this.sendToRenderer('stt-update', {
+                    speaker: 'Me',
+                    text: this.myCompletionBuffer,
+                    isPartial: true,
+                    isFinal: false,
+                    timestamp: Date.now(),
+                });
             } else {
                 const type = message.type;
                 const text = message.transcript || message.delta || (message.alternatives && message.alternatives[0]?.transcript) || '';
@@ -222,19 +196,43 @@ class SttService {
         };
 
         const handleTheirMessage = message => {
+            if (!message || typeof message !== 'object') return;
+
             if (!this.modelInfo) {
                 console.log('[SttService] Ignoring message - session already closed');
                 return;
             }
             
             if (this.modelInfo.provider === 'gemini') {
-                const text = message.serverContent?.inputTranscription?.text || '';
-                if (text && text.trim()) {
-                    const finalUtteranceText = text.trim().replace(/<noise>/g, '').trim();
-                    if (finalUtteranceText && finalUtteranceText !== '.') {
-                        this.debounceTheirCompletion(finalUtteranceText);
-                    }
+                if (!message.serverContent?.modelTurn) {
+                    console.log('[Gemini STT - Them]', JSON.stringify(message, null, 2));
                 }
+
+                if (message.serverContent?.turnComplete) {
+                    if (this.theirCompletionTimer) {
+                        clearTimeout(this.theirCompletionTimer);
+                        this.flushTheirCompletion();
+                    }
+                    return;
+                }
+            
+                const transcription = message.serverContent?.inputTranscription;
+                if (!transcription || !transcription.text) return;
+
+                const textChunk = transcription.text;
+                if (!textChunk.trim() || textChunk.trim() === '<noise>') {
+                    return; // 1. Ignore whitespace-only chunks or noise
+                }
+
+                this.debounceTheirCompletion(textChunk);
+                
+                this.sendToRenderer('stt-update', {
+                    speaker: 'Them',
+                    text: this.theirCompletionBuffer,
+                    isPartial: true,
+                    isFinal: false,
+                    timestamp: Date.now(),
+                });
             } else {
                 const type = message.type;
                 const text = message.transcript || message.delta || (message.alternatives && message.alternatives[0]?.transcript) || '';
@@ -494,14 +492,6 @@ class SttService {
         this.stopMacOSAudioCapture();
 
         // Clear timers
-        if (this.myInactivityTimer) {
-            clearTimeout(this.myInactivityTimer);
-            this.myInactivityTimer = null;
-        }
-        if (this.theirInactivityTimer) {
-            clearTimeout(this.theirInactivityTimer);
-            this.theirInactivityTimer = null;
-        }
         if (this.myCompletionTimer) {
             clearTimeout(this.myCompletionTimer);
             this.myCompletionTimer = null;
@@ -527,8 +517,6 @@ class SttService {
         // Reset state
         this.myCurrentUtterance = '';
         this.theirCurrentUtterance = '';
-        this.myLastPartialText = '';
-        this.theirLastPartialText = '';
         this.myCompletionBuffer = '';
         this.theirCompletionBuffer = '';
         this.modelInfo = null; 

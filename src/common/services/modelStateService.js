@@ -67,6 +67,11 @@ class ModelStateService {
         };
         this.state = this.store.get(`users.${userId}`, defaultState);
         console.log(`[ModelStateService] State loaded for user: ${userId}`);
+        for (const p of Object.keys(PROVIDERS)) {
+                if (!(p in this.state.apiKeys)) {
+                    this.state.apiKeys[p] = null;
+                }
+            }
         this._autoSelectAvailableModels();
         this._saveState();
         this._logCurrentSelection();

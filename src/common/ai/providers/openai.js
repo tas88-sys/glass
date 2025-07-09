@@ -48,11 +48,11 @@ async function createSTT({ apiKey, language = 'en', callbacks = {}, usePortkey =
           turn_detection: {
             type: 'server_vad',
             threshold: 0.5,
-            prefix_padding_ms: 50,
-            silence_duration_ms: 25,
+            prefix_padding_ms: 200,
+            silence_duration_ms: 100,
           },
           input_audio_noise_reduction: {
-            type: 'near_field'
+            type: 'far_field'
           }
         }
       };
@@ -72,6 +72,7 @@ async function createSTT({ apiKey, language = 'en', callbacks = {}, usePortkey =
         close: () => {
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'session.close' }));
+            ws.onmessage = ws.onerror = () => {};  // 핸들러 제거
             ws.close(1000, 'Client initiated close.');
           }
         }
@@ -79,10 +80,17 @@ async function createSTT({ apiKey, language = 'en', callbacks = {}, usePortkey =
     };
 
     ws.onmessage = (event) => {
-      const message = JSON.parse(event.data);
-      if (callbacks && callbacks.onmessage) {
-        callbacks.onmessage(message);
-      }
+      // ── 종료·하트비트 패킷 필터링 ──────────────────────────────
+      if (!event.data || event.data === 'null' || event.data === '[DONE]') return;
+
+      let msg;
+      try { msg = JSON.parse(event.data); }
+      catch { return; }                       // JSON 파싱 실패 무시
+
+      if (!msg || typeof msg !== 'object') return;
+
+      msg.provider = 'openai';                // ← 항상 명시
+      callbacks.onmessage?.(msg);
     };
 
     ws.onerror = (error) => {

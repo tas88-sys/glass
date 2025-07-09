@@ -14,8 +14,6 @@
 
 > This project is a fork of [CheatingDaddy](https://github.com/sohzm/cheating-daddy) with modifications and enhancements. Thanks to [Soham](https://x.com/soham_btw) and all the open-source contributors who made this possible!
 
-> Currently, we're working on a full code refactor and modularization. Once that's completed, we'll jump into addressing the major issues. You can find WIP issues & changelog below this document.
-
 🤖 **Fast, light & open-source**—Glass lives on your desktop, sees what you see, listens in real time, understands your context, and turns every moment into structured knowledge.
 
 💬 **Proactive in meetings**—it surfaces action items, summaries, and answers the instant you need them.
@@ -117,15 +115,17 @@ We have a list of [help wanted](https://github.com/pickle-com/glass/issues?q=is%
 
 | Status | Issue                          | Description                                       |
 |--------|--------------------------------|---------------------------------------------------|
-| 🚧 WIP      | Windows Build                  | Make Glass buildable & runnable in Windows |
 | 🚧 WIP      | Local LLM Support                  | Supporting Local LLM to power AI answers |
-| 🚧 WIP     | AEC Improvement                | Transcription is not working occasionally |
 | 🚧 WIP      | Firebase Data Storage Issue    | Session & ask should be saved in firebase for signup users |
 | 🚧 WIP      | Liquid Glass                    | Liquid Glass UI for MacOS 26 |
 
 ### Changelog
 
 - Jul 5: Now support Gemini, Intel Mac supported
+- Jul 6: Full code refactoring has done.
+- Jul 7: Now support Claude, LLM/STT model selection
+- Jul 8: Now support Windows(beta), Improved AEC by Rust(to seperate mic/system audio), shortcut editing(beta)
+
 
 
 ## About Pickle

@@ -2,6 +2,7 @@ import { html, css, LitElement } from '../assets/lit-core-2.7.4.min.js';
 import { SettingsView } from '../features/settings/SettingsView.js';
 import { AssistantView } from '../features/listen/AssistantView.js';
 import { AskView } from '../features/ask/AskView.js';
+import { ShortcutSettingsView } from '../features/settings/ShortCutSettingsView.js';
 
 import '../features/listen/renderer/renderer.js';
 
@@ -268,6 +269,8 @@ export class PickleGlassApp extends LitElement {
                     .onProfileChange=${profile => (this.selectedProfile = profile)}
                     .onLanguageChange=${lang => (this.selectedLanguage = lang)}
                 ></settings-view>`;
+            case 'shortcut-settings':
+                return html`<shortcut-settings-view></shortcut-settings-view>`;
             case 'history':
                 return html`<history-view></history-view>`;
             case 'help':

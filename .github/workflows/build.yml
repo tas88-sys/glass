@@ -42,3 +42,4 @@ jobs:
           SLACK_MESSAGE: "😭 Build failed for `${{ github.repository }}` repo on main branch."
           SLACK_COLOR: 'danger'
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+

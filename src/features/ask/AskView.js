@@ -658,6 +658,8 @@ export class AskView extends LitElement {
         this.handleDocumentClick = this.handleDocumentClick.bind(this);
         this.handleWindowBlur = this.handleWindowBlur.bind(this);
 
+        this.handleScroll = this.handleScroll.bind(this);
+
         this.loadLibraries();
 
         // --- Resize helpers ---
@@ -863,6 +865,9 @@ export class AskView extends LitElement {
 
             ipcRenderer.on('ask-response-chunk', this.handleStreamChunk);
             ipcRenderer.on('ask-response-stream-end', this.handleStreamEnd);
+
+            ipcRenderer.on('scroll-response-up', () => this.handleScroll('up'));
+            ipcRenderer.on('scroll-response-down', () => this.handleScroll('down'));
             console.log('✅ AskView: IPC 이벤트 리스너 등록 완료');
         }
     }
@@ -901,7 +906,22 @@ export class AskView extends LitElement {
 
             ipcRenderer.removeListener('ask-response-chunk', this.handleStreamChunk);
             ipcRenderer.removeListener('ask-response-stream-end', this.handleStreamEnd);
+
+            ipcRenderer.removeListener('scroll-response-up', () => this.handleScroll('up'));
+            ipcRenderer.removeListener('scroll-response-down', () => this.handleScroll('down'));
             console.log('✅ AskView: IPC 이벤트 리스너 제거 완료');
+        }
+    }
+    
+    handleScroll(direction) {
+        const scrollableElement = this.shadowRoot.querySelector('#responseContainer');
+        if (scrollableElement) {
+            const scrollAmount = 100; // 한 번에 스크롤할 양 (px)
+            if (direction === 'up') {
+                scrollableElement.scrollTop -= scrollAmount;
+            } else {
+                scrollableElement.scrollTop += scrollAmount;
+            }
         }
     }
 

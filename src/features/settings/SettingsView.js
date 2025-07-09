@@ -437,22 +437,10 @@ export class SettingsView extends LitElement {
         }
     `;
 
-    //////// before_modelStateService ////////
-    // static properties = {
-    //     firebaseUser: { type: Object, state: true },
-    //     apiKey: { type: String, state: true },
-    //     isLoading: { type: Boolean, state: true },
-    //     isContentProtectionOn: { type: Boolean, state: true },
-    //     settings: { type: Object, state: true },
-    //     presets: { type: Array, state: true },
-    //     selectedPreset: { type: Object, state: true },
-    //     showPresets: { type: Boolean, state: true },
-    //     saving: { type: Boolean, state: true },
-    // };
-    //////// before_modelStateService ////////
 
     //////// after_modelStateService ////////
     static properties = {
+        shortcuts: { type: Object, state: true },
         firebaseUser: { type: Object, state: true },
         isLoading: { type: Boolean, state: true },
         isContentProtectionOn: { type: Boolean, state: true },
@@ -468,25 +456,15 @@ export class SettingsView extends LitElement {
         presets: { type: Array, state: true },
         selectedPreset: { type: Object, state: true },
         showPresets: { type: Boolean, state: true },
+        autoUpdateEnabled: { type: Boolean, state: true },
+        autoUpdateLoading: { type: Boolean, state: true },
     };
     //////// after_modelStateService ////////
 
     constructor() {
         super();
-        //////// before_modelStateService ////////
-        // this.firebaseUser = null;
-        // this.apiKey = null;
-        // this.isLoading = false;
-        // this.isContentProtectionOn = true;
-        // this.settings = null;
-        // this.presets = [];
-        // this.selectedPreset = null;
-        // this.showPresets = false;
-        // this.saving = false;
-        // this.loadInitialData();
-        //////// before_modelStateService ////////
-
         //////// after_modelStateService ////////
+        this.shortcuts = {};
         this.firebaseUser = null;
         this.apiKeys = { openai: '', gemini: '', anthropic: '' };
         this.providerConfig = {};
@@ -503,51 +481,47 @@ export class SettingsView extends LitElement {
         this.selectedPreset = null;
         this.showPresets = false;
         this.handleUsePicklesKey = this.handleUsePicklesKey.bind(this)
+        this.autoUpdateEnabled = true;
+        this.autoUpdateLoading = true;
         this.loadInitialData();
         //////// after_modelStateService ////////
     }
 
+    async loadAutoUpdateSetting() {
+        if (!window.require) return;
+        const { ipcRenderer } = window.require('electron');
+        this.autoUpdateLoading = true;
+        try {
+            const enabled = await ipcRenderer.invoke('settings:get-auto-update');
+            this.autoUpdateEnabled = enabled;
+            console.log('Auto-update setting loaded:', enabled);
+        } catch (e) {
+            console.error('Error loading auto-update setting:', e);
+            this.autoUpdateEnabled = true; // fallback
+        }
+        this.autoUpdateLoading = false;
+        this.requestUpdate();
+    }
 
-    //////// before_modelStateService ////////
-    // async loadInitialData() {
-    //     if (!window.require) return;
-        
-    //     try {
-    //         this.isLoading = true;
-    //         const { ipcRenderer } = window.require('electron');
-            
-    //         // Load all data in parallel
-    //         const [settings, presets, apiKey, contentProtection, userState] = await Promise.all([
-    //             ipcRenderer.invoke('settings:getSettings'),
-    //             ipcRenderer.invoke('settings:getPresets'),
-    //             ipcRenderer.invoke('get-stored-api-key'),
-    //             ipcRenderer.invoke('get-content-protection-status'),
-    //             ipcRenderer.invoke('get-current-user')
-    //         ]);
-            
-    //         this.settings = settings;
-    //         this.presets = presets || [];
-    //         this.apiKey = apiKey;
-    //         this.isContentProtectionOn = contentProtection;
-            
-    //         // Set first user preset as selected
-    //         if (this.presets.length > 0) {
-    //             const firstUserPreset = this.presets.find(p => p.is_default === 0);
-    //             if (firstUserPreset) {
-    //                 this.selectedPreset = firstUserPreset;
-    //             }
-    //         }
-            
-    //         if (userState && userState.isLoggedIn) {
-    //             this.firebaseUser = userState.user;
-    //         }
-    //     } catch (error) {
-    //         console.error('Error loading initial data:', error);
-    //     } finally {
-    //         this.isLoading = false;
-    //     }
-    // }
-    //////// before_modelStateService ////////
+    async handleToggleAutoUpdate() {
+        if (!window.require || this.autoUpdateLoading) return;
+        const { ipcRenderer } = window.require('electron');
+        this.autoUpdateLoading = true;
+        this.requestUpdate();
+        try {
+            const newValue = !this.autoUpdateEnabled;
+            const result = await ipcRenderer.invoke('settings:set-auto-update', newValue);
+            if (result && result.success) {
+                this.autoUpdateEnabled = newValue;
+            } else {
+                console.error('Failed to update auto-update setting');
+            }
+        } catch (e) {
+            console.error('Error toggling auto-update:', e);
+        }
+        this.autoUpdateLoading = false;
+        this.requestUpdate();
+    }
 
     //////// after_modelStateService ////////
     async loadInitialData() {
@@ -555,7 +529,7 @@ export class SettingsView extends LitElement {
         this.isLoading = true;
         const { ipcRenderer } = window.require('electron');
         try {
-            const [userState, config, storedKeys, availableLlm, availableStt, selectedModels, presets, contentProtection] = await Promise.all([
+            const [userState, config, storedKeys, availableLlm, availableStt, selectedModels, presets, contentProtection, shortcuts] = await Promise.all([
                 ipcRenderer.invoke('get-current-user'),
                 ipcRenderer.invoke('model:get-provider-config'), // Provider 설정 로드
                 ipcRenderer.invoke('model:get-all-keys'),
@@ -563,7 +537,8 @@ export class SettingsView extends LitElement {
                 ipcRenderer.invoke('model:get-available-models', { type: 'stt' }),
                 ipcRenderer.invoke('model:get-selected-models'),
                 ipcRenderer.invoke('settings:getPresets'),
-                ipcRenderer.invoke('get-content-protection-status')
+                ipcRenderer.invoke('get-content-protection-status'),
+                ipcRenderer.invoke('get-current-shortcuts')
             ]);
             
             if (userState && userState.isLoggedIn) this.firebaseUser = userState;
@@ -575,6 +550,7 @@ export class SettingsView extends LitElement {
             this.selectedStt = selectedModels.stt;
             this.presets = presets || [];
             this.isContentProtectionOn = contentProtection;
+            this.shortcuts = shortcuts || {};
             if (this.presets.length > 0) {
                 const firstUserPreset = this.presets.find(p => p.is_default === 0);
                 if (firstUserPreset) this.selectedPreset = firstUserPreset;
@@ -668,12 +644,20 @@ export class SettingsView extends LitElement {
       }
     //////// after_modelStateService ////////
 
+    openShortcutEditor() {
+        if (window.require) {
+            const { ipcRenderer } = window.require('electron');
+            ipcRenderer.invoke('open-shortcut-editor');
+        }
+    }
+
     connectedCallback() {
         super.connectedCallback();
         
         this.setupEventListeners();
         this.setupIpcListeners();
         this.setupWindowResize();
+        this.loadAutoUpdateSetting();
     }
 
     disconnectedCallback() {
@@ -705,6 +689,7 @@ export class SettingsView extends LitElement {
             } else {
                 this.firebaseUser = null;
             }
+            this.loadAutoUpdateSetting();
             this.requestUpdate();
         };
         
@@ -732,10 +717,15 @@ export class SettingsView extends LitElement {
                 console.error('[SettingsView] Failed to refresh presets:', error);
             }
         };
+        this._shortcutListener = (event, keybinds) => {
+            console.log('[SettingsView] Received updated shortcuts:', keybinds);
+            this.shortcuts = keybinds;
+        };
         
         ipcRenderer.on('user-state-changed', this._userStateListener);
         ipcRenderer.on('settings-updated', this._settingsUpdatedListener);
         ipcRenderer.on('presets-updated', this._presetsUpdatedListener);
+        ipcRenderer.on('shortcuts-updated', this._shortcutListener);
     }
 
     cleanupIpcListeners() {
@@ -751,6 +741,9 @@ export class SettingsView extends LitElement {
         }
         if (this._presetsUpdatedListener) {
             ipcRenderer.removeListener('presets-updated', this._presetsUpdatedListener);
+        }
+        if (this._shortcutListener) {
+            ipcRenderer.removeListener('shortcuts-updated', this._shortcutListener);
         }
     }
 
@@ -797,12 +790,39 @@ export class SettingsView extends LitElement {
         }
     }
 
+    // getMainShortcuts() {
+    //     return [
+    //         { name: 'Show / Hide', key: '\\' },
+    //         { name: 'Ask Anything', key: '↵' },
+    //         { name: 'Scroll AI Response', key: '↕' }
+    //     ];
+    // }
     getMainShortcuts() {
         return [
-            { name: 'Show / Hide', key: '\\' },
-            { name: 'Ask Anything', key: '↵' },
-            { name: 'Scroll AI Response', key: '↕' }
+            { name: 'Show / Hide', accelerator: this.shortcuts.toggleVisibility },
+            { name: 'Ask Anything', accelerator: this.shortcuts.nextStep },
+            { name: 'Scroll Up Response', accelerator: this.shortcuts.scrollUp },
+            { name: 'Scroll Down Response', accelerator: this.shortcuts.scrollDown },
         ];
+    }
+
+    renderShortcutKeys(accelerator) {
+        if (!accelerator) return html`N/A`;
+        
+        const keyMap = {
+            'Cmd': '⌘', 'Command': '⌘', 'Ctrl': '⌃', 'Alt': '⌥', 'Shift': '⇧', 'Enter': '↵',
+            'Up': '↑', 'Down': '↓', 'Left': '←', 'Right': '→'
+        };
+
+        // scrollDown/scrollUp의 특수 처리
+        if (accelerator.includes('↕')) {
+            const keys = accelerator.replace('↕','').split('+');
+            keys.push('↕');
+             return html`${keys.map(key => html`<span class="shortcut-key">${keyMap[key] || key}</span>`)}`;
+        }
+
+        const keys = accelerator.split('+');
+        return html`${keys.map(key => html`<span class="shortcut-key">${keyMap[key] || key}</span>`)}`;
     }
 
     togglePresets() {
@@ -1131,14 +1151,20 @@ export class SettingsView extends LitElement {
 
                 ${apiKeyManagementHTML}
                 ${modelSelectionHTML}
+
+                <div class="buttons-section" style="border-top: 1px solid rgba(255, 255, 255, 0.1); padding-top: 6px; margin-top: 6px;">
+                    <button class="settings-button full-width" @click=${this.openShortcutEditor}>
+                        Edit Shortcuts
+                    </button>
+                </div>
+
                 
                 <div class="shortcuts-section">
                     ${this.getMainShortcuts().map(shortcut => html`
                         <div class="shortcut-item">
                             <span class="shortcut-name">${shortcut.name}</span>
                             <div class="shortcut-keys">
-                                <span class="cmd-key">⌘</span>
-                                <span class="shortcut-key">${shortcut.key}</span>
+                                ${this.renderShortcutKeys(shortcut.accelerator)}
                             </div>
                         </div>
                     `)}
@@ -1176,6 +1202,9 @@ export class SettingsView extends LitElement {
                 <div class="buttons-section">
                     <button class="settings-button full-width" @click=${this.handlePersonalize}>
                         <span>Personalize / Meeting Notes</span>
+                    </button>
+                    <button class="settings-button full-width" @click=${this.handleToggleAutoUpdate} ?disabled=${this.autoUpdateLoading}>
+                        <span>Automatic Updates: ${this.autoUpdateEnabled ? 'On' : 'Off'}</span>
                     </button>
                     
                     <div class="move-buttons">
