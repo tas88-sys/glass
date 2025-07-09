@@ -366,11 +366,6 @@ export class SettingsView extends LitElement {
             margin-right: 6px;
         }
 
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
         .hidden {
             display: none;
         }
@@ -410,30 +405,7 @@ export class SettingsView extends LitElement {
         }
         .model-item { padding: 5px 8px; font-size: 11px; border-radius: 3px; cursor: pointer; transition: background-color 0.15s; }
         .model-item:hover { background-color: rgba(255,255,255,0.1); }
-        .model-item.selected { background-color: rgba(0, 122, 255, 0.4); font-weight: 500; }
-            
-        /* ────────────────[ GLASS BYPASS ]─────────────── */
-        :host-context(body.has-glass) {
-            animation: none !important;
-            transition: none !important;
-            transform: none !important;
-            will-change: auto !important;
-        }
-
-        :host-context(body.has-glass) * {
-            background: transparent !important;
-            filter: none !important;
-            backdrop-filter: none !important;
-            box-shadow: none !important;
-            outline: none !important;
-            border: none !important;
-            border-radius: 0 !important;
-            transition: none !important;
-            animation: none !important;
-        }
-
-        :host-context(body.has-glass) .settings-container::before {
-            display: none !important;
+        .model-item.selected { background-color: rgba(0, 122, 255, 0.4); font-weight: 500;
         }
     `;
 

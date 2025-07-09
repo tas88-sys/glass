@@ -9,10 +9,7 @@ export class MainHeader extends LitElement {
     static styles = css`
         :host {
             display: flex;
-            transform: translate3d(0, 0, 0);
-            backface-visibility: hidden;
             transition: transform 0.2s cubic-bezier(0.23, 1, 0.32, 1), opacity 0.2s ease-out;
-            will-change: transform, opacity;
         }
 
         :host(.hiding) {
@@ -33,65 +30,6 @@ export class MainHeader extends LitElement {
             pointer-events: none;
         }
 
-        @keyframes slideUp {
-            0% {
-                opacity: 1;
-                transform: translateY(0) scale(1);
-                filter: blur(0px);
-            }
-            30% {
-                opacity: 0.7;
-                transform: translateY(-20%) scale(0.98);
-                filter: blur(0.5px);
-            }
-            70% {
-                opacity: 0.3;
-                transform: translateY(-80%) scale(0.92);
-                filter: blur(1.5px);
-            }
-            100% {
-                opacity: 0;
-                transform: translateY(-150%) scale(0.85);
-                filter: blur(2px);
-            }
-        }
-
-        @keyframes slideDown {
-            0% {
-                opacity: 0;
-                transform: translateY(-150%) scale(0.85);
-                filter: blur(2px);
-            }
-            30% {
-                opacity: 0.5;
-                transform: translateY(-50%) scale(0.92);
-                filter: blur(1px);
-            }
-            65% {
-                opacity: 0.9;
-                transform: translateY(-5%) scale(0.99);
-                filter: blur(0.2px);
-            }
-            85% {
-                opacity: 0.98;
-                transform: translateY(2%) scale(1.005);
-                filter: blur(0px);
-            }
-            100% {
-                opacity: 1;
-                transform: translateY(0) scale(1);
-                filter: blur(0px);
-            }
-        }
-
-        @keyframes fadeIn {
-            0% {
-                opacity: 0;
-            }
-            100% {
-                opacity: 1;
-            }
-        }
 
         * {
             font-family: 'Helvetica Neue', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -100,6 +38,7 @@ export class MainHeader extends LitElement {
         }
 
         .header {
+            -webkit-app-region: drag;
             width: max-content;
             height: 47px;
             padding: 2px 10px 2px 13px;
@@ -141,6 +80,7 @@ export class MainHeader extends LitElement {
         }
 
         .listen-button {
+            -webkit-app-region: no-drag;
             height: 26px;
             padding: 0 13px;
             background: transparent;
@@ -193,6 +133,7 @@ export class MainHeader extends LitElement {
         }
 
         .header-actions {
+            -webkit-app-region: no-drag;
             height: 26px;
             box-sizing: border-box;
             justify-content: flex-start;
@@ -264,6 +205,7 @@ export class MainHeader extends LitElement {
         }
 
         .settings-button {
+            -webkit-app-region: no-drag;
             padding: 5px;
             border-radius: 50%;
             background: transparent;
@@ -291,123 +233,18 @@ export class MainHeader extends LitElement {
             width: 16px;
             height: 16px;
         }
-
-        /* ────────────────[ GLASS BYPASS ]─────────────── */
-        :host-context(body.has-glass) .header,
-        :host-context(body.has-glass) .listen-button,
-        :host-context(body.has-glass) .header-actions,
-        :host-context(body.has-glass) .settings-button {
-            background: transparent !important;
-            filter: none !important;
-            box-shadow: none !important;
-            backdrop-filter: none !important;
-        }
-        :host-context(body.has-glass) .icon-box {
-            background: transparent !important;
-            border: none !important;
-        }
-
-        :host-context(body.has-glass) .header::before,
-        :host-context(body.has-glass) .header::after,
-        :host-context(body.has-glass) .listen-button::before,
-        :host-context(body.has-glass) .listen-button::after {
-            display: none !important;
-        }
-
-        :host-context(body.has-glass) .header-actions:hover,
-        :host-context(body.has-glass) .settings-button:hover,
-        :host-context(body.has-glass) .listen-button:hover::before {
-            background: transparent !important;
-        }
-        :host-context(body.has-glass) * {
-            animation: none !important;
-            transition: none !important;
-            transform: none !important;
-            filter: none !important;
-            backdrop-filter: none !important;
-            box-shadow: none !important;
-        }
-
-        :host-context(body.has-glass) .header,
-        :host-context(body.has-glass) .listen-button,
-        :host-context(body.has-glass) .header-actions,
-        :host-context(body.has-glass) .settings-button,
-        :host-context(body.has-glass) .icon-box {
-            border-radius: 0 !important;
-        }
-        :host-context(body.has-glass) {
-            animation: none !important;
-            transition: none !important;
-            transform: none !important;
-            will-change: auto !important;
-        }
         `;
 
     constructor() {
         super();
         this.shortcuts = {};
-        this.dragState = null;
-        this.wasJustDragged = false;
         this.isVisible = true;
         this.isAnimating = false;
         this.hasSlidIn = false;
         this.settingsHideTimer = null;
         this.isSessionActive = false;
         this.animationEndTimer = null;
-        this.handleMouseMove = this.handleMouseMove.bind(this);
-        this.handleMouseUp = this.handleMouseUp.bind(this);
         this.handleAnimationEnd = this.handleAnimationEnd.bind(this);
-    }
-
-    async handleMouseDown(e) {
-        e.preventDefault();
-
-        const { ipcRenderer } = window.require('electron');
-        const initialPosition = await ipcRenderer.invoke('get-header-position');
-
-        this.dragState = {
-            initialMouseX: e.screenX,
-            initialMouseY: e.screenY,
-            initialWindowX: initialPosition.x,
-            initialWindowY: initialPosition.y,
-            moved: false,
-        };
-
-        window.addEventListener('mousemove', this.handleMouseMove, { capture: true });
-        window.addEventListener('mouseup', this.handleMouseUp, { once: true, capture: true });
-    }
-
-    handleMouseMove(e) {
-        if (!this.dragState) return;
-
-        const deltaX = Math.abs(e.screenX - this.dragState.initialMouseX);
-        const deltaY = Math.abs(e.screenY - this.dragState.initialMouseY);
-        
-        if (deltaX > 3 || deltaY > 3) {
-            this.dragState.moved = true;
-        }
-
-        const newWindowX = this.dragState.initialWindowX + (e.screenX - this.dragState.initialMouseX);
-        const newWindowY = this.dragState.initialWindowY + (e.screenY - this.dragState.initialMouseY);
-
-        const { ipcRenderer } = window.require('electron');
-        ipcRenderer.invoke('move-header-to', newWindowX, newWindowY);
-    }
-
-    handleMouseUp(e) {
-        if (!this.dragState) return;
-
-        const wasDragged = this.dragState.moved;
-
-        window.removeEventListener('mousemove', this.handleMouseMove, { capture: true });
-        this.dragState = null;
-
-        if (wasDragged) {
-            this.wasJustDragged = true;
-            setTimeout(() => {
-                this.wasJustDragged = false;
-            }, 0);
-        }
     }
 
     toggleVisibility() {
@@ -431,58 +268,29 @@ export class MainHeader extends LitElement {
     }
 
     hide() {
-        this.classList.remove('showing', 'hidden');
+        this.classList.remove('showing');
         this.classList.add('hiding');
-        this.isVisible = false;
-        
-        this.animationEndTimer = setTimeout(() => {
-            if (this.classList.contains('hiding')) {
-                this.handleAnimationEnd({ target: this });
-            }
-        }, 350);
     }
-
+    
     show() {
         this.classList.remove('hiding', 'hidden');
         this.classList.add('showing');
-        this.isVisible = true;
-        
-        this.animationEndTimer = setTimeout(() => {
-            if (this.classList.contains('showing')) {
-                this.handleAnimationEnd({ target: this });
-            }
-        }, 400);
     }
-
+    
     handleAnimationEnd(e) {
         if (e.target !== this) return;
-        
-        if (this.animationEndTimer) {
-            clearTimeout(this.animationEndTimer);
-            this.animationEndTimer = null;
-        }
-        
+    
         this.isAnimating = false;
-        
+    
         if (this.classList.contains('hiding')) {
-            this.classList.remove('hiding');
             this.classList.add('hidden');
-            
             if (window.require) {
-                const { ipcRenderer } = window.require('electron');
-                ipcRenderer.send('header-animation-complete', 'hidden');
+                window.require('electron').ipcRenderer.send('header-animation-finished', 'hidden');
             }
         } else if (this.classList.contains('showing')) {
-            this.classList.remove('showing');
-            
             if (window.require) {
-                const { ipcRenderer } = window.require('electron');
-                ipcRenderer.send('header-animation-complete', 'visible');
+                window.require('electron').ipcRenderer.send('header-animation-finished', 'visible');
             }
-        } else if (this.classList.contains('sliding-in')) {
-            this.classList.remove('sliding-in');
-            this.hasSlidIn = true;
-            console.log('[MainHeader] Slide-in animation completed');
         }
     }
 
@@ -530,16 +338,12 @@ export class MainHeader extends LitElement {
     }
 
     invoke(channel, ...args) {
-        if (this.wasJustDragged) {
-            return;
-        }
         if (window.require) {
             window.require('electron').ipcRenderer.invoke(channel, ...args);
         }
     }
 
     showWindow(name, element) {
-        if (this.wasJustDragged) return;
         if (window.require) {
             const { ipcRenderer } = window.require('electron');
             console.log(`[MainHeader] showWindow('${name}') called at ${Date.now()}`);
@@ -564,7 +368,6 @@ export class MainHeader extends LitElement {
     }
 
     hideWindow(name) {
-        if (this.wasJustDragged) return;
         if (window.require) {
             console.log(`[MainHeader] hideWindow('${name}') called at ${Date.now()}`);
             window.require('electron').ipcRenderer.send('hide-window', name);
@@ -600,7 +403,7 @@ export class MainHeader extends LitElement {
 
     render() {
         return html`
-            <div class="header" @mousedown=${this.handleMouseDown}>
+            <div class="header">
                 <button 
                     class="listen-button ${this.isSessionActive ? 'active' : ''}"
                     @click=${() => this.invoke(this.isSessionActive ? 'close-session' : 'toggle-feature', 'listen')}

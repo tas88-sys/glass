@@ -359,12 +359,6 @@ function toggleAllWindowsVisibility(movementManager) {
             if (win.isVisible()) {
                 lastVisibleWindows.add(name);
                 if (name !== 'header') {
-                    // win.webContents.send('window-hide-animation');
-                    // setTimeout(() => {
-                    //     if (!win.isDestroyed()) {
-                    //         win.hide();
-                    //     }
-                    // }, 200);
                     win.hide();
                 }
             }
@@ -460,6 +454,7 @@ function createWindows() {
         });
     }
     windowPool.set('header', header);
+    header.on('moved', updateLayout);
     layoutManager = new WindowLayoutManager(windowPool);
 
     header.webContents.once('dom-ready', () => {
@@ -586,13 +581,6 @@ function createWindows() {
                     } else {
                         console.log('[WindowManager] No response found, closing window');
                         askWindow.webContents.send('window-hide-animation');
-
-                        setTimeout(() => {
-                            if (!askWindow.isDestroyed()) {
-                                askWindow.hide();
-                                updateLayout();
-                            }
-                        }, 250);
                     }
                 } catch (error) {
                     console.error('[WindowManager] Error checking Ask window state:', error);
@@ -621,13 +609,6 @@ function createWindows() {
                     } else {
                         windowToToggle.webContents.send('window-hide-animation');
                     }
-
-                    setTimeout(() => {
-                        if (!windowToToggle.isDestroyed()) {
-                            windowToToggle.hide();
-                            updateLayout();
-                        }
-                    }, 250);
                 } else {
                     try {
                         windowToToggle.show();
@@ -763,6 +744,14 @@ function setupIpcHandlers(movementManager) {
         }
     });
 
+    ipcMain.on('animation-finished', (event) => {
+        const win = BrowserWindow.fromWebContents(event.sender);
+        if (win && !win.isDestroyed()) {
+            console.log(`[WindowManager] Hiding window after animation.`);
+            win.hide();
+        }
+    });
+
     ipcMain.on('show-window', (event, args) => {
         const { name, bounds } = typeof args === 'object' && args !== null ? args : { name: args, bounds: null };
         const win = windowPool.get(name);
@@ -811,8 +800,6 @@ function setupIpcHandlers(movementManager) {
                     clearTimeout(settingsHideTimer);
                 }
                 settingsHideTimer = setTimeout(() => {
-                    // window.setAlwaysOnTop(false);
-                    // window.hide();
                     if (window && !window.isDestroyed()) {
                         window.setAlwaysOnTop(false);
                         window.hide();
@@ -1014,74 +1001,20 @@ function setupIpcHandlers(movementManager) {
         return { success: false, error: 'Header window not found' };
     });
 
-    ipcMain.on('header-animation-complete', (event, state) => {
+    ipcMain.on('header-animation-finished', (event, state) => {
         const header = windowPool.get('header');
-        if (!header) return;
-
+        if (!header || header.isDestroyed()) return;
+    
         if (state === 'hidden') {
             header.hide();
+            console.log('[WindowManager] Header hidden after animation.');
         } else if (state === 'visible') {
-            lastVisibleWindows.forEach(name => {
-                if (name === 'header') return;
-                const win = windowPool.get(name);
-                if (win) win.show();
-            });
-
-            setImmediate(updateLayout);
-            setTimeout(updateLayout, 120);
-        }
-    });
-
-    ipcMain.handle('get-header-position', () => {
-        const header = windowPool.get('header');
-        if (header) {
-            const [x, y] = header.getPosition();
-            return { x, y };
-        }
-        return { x: 0, y: 0 };
-    });
-
-    ipcMain.handle('move-header', (event, newX, newY) => {
-        const header = windowPool.get('header');
-        if (header) {
-            const currentY = newY !== undefined ? newY : header.getBounds().y;
-            header.setPosition(newX, currentY, false);
-
+            // 자식 창들을 다시 보여주는 로직은 toggleAllWindowsVisibility에 이미 있으므로 여기서는 중복 작업을 피합니다.
+            console.log('[WindowManager] Header shown after animation.');
             updateLayout();
         }
     });
 
-    ipcMain.handle('move-header-to', (event, newX, newY) => {
-        const header = windowPool.get('header');
-        if (header) {
-            const targetDisplay = screen.getDisplayNearestPoint({ x: newX, y: newY });
-            const { x: workAreaX, y: workAreaY, width, height } = targetDisplay.workArea;
-            const headerBounds = header.getBounds();
-
-            // Only clamp if the new position would actually go out of bounds
-            // This prevents progressive restriction of movement
-            let clampedX = newX;
-            let clampedY = newY;
-            
-            // Check if we need to clamp X position
-            if (newX < workAreaX) {
-                clampedX = workAreaX;
-            } else if (newX + headerBounds.width > workAreaX + width) {
-                clampedX = workAreaX + width - headerBounds.width;
-            }
-            
-            // Check if we need to clamp Y position  
-            if (newY < workAreaY) {
-                clampedY = workAreaY;
-            } else if (newY + headerBounds.height > workAreaY + height) {
-                clampedY = workAreaY + height - headerBounds.height;
-            }
-
-            header.setPosition(clampedX, clampedY, false);
-
-            updateLayout();
-        }
-    });
 
     ipcMain.handle('move-window-step', (event, direction) => {
         if (movementManager) {
@@ -1095,13 +1028,6 @@ function setupIpcHandlers(movementManager) {
             console.log(`[WindowManager] Force closing window: ${windowName}`);
 
             window.webContents.send('window-hide-animation');
-
-            setTimeout(() => {
-                if (!window.isDestroyed()) {
-                    window.hide();
-                    updateLayout();
-                }
-            }, 250);
         }
     });
 
