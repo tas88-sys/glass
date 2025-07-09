@@ -34,6 +34,8 @@ extraResources:
 
 asarUnpack:
     - "src/assets/SystemAudioDump"
+    - "**/node_modules/sharp/**/*"
+    - "**/node_modules/@img/**/*"
 
 # Windows configuration
 win:

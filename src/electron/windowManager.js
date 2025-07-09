@@ -6,7 +6,17 @@ const fs = require('node:fs');
 const os = require('os');
 const util = require('util');
 const execFile = util.promisify(require('child_process').execFile);
-const sharp = require('sharp');
+
+// Try to load sharp, but don't fail if it's not available
+let sharp;
+try {
+    sharp = require('sharp');
+    console.log('[WindowManager] Sharp module loaded successfully');
+} catch (error) {
+    console.warn('[WindowManager] Sharp module not available:', error.message);
+    console.warn('[WindowManager] Screenshot functionality will work with reduced image processing capabilities');
+    sharp = null;
+}
 const authService = require('../common/services/authService');
 const systemSettingsRepository = require('../common/repositories/systemSettings');
 const userRepository = require('../common/repositories/user');
@@ -1522,25 +1532,45 @@ async function captureScreenshot(options = {}) {
             const imageBuffer = await fs.promises.readFile(tempPath);
             await fs.promises.unlink(tempPath);
 
-            const resizedBuffer = await sharp(imageBuffer)
-                // .resize({ height: 1080 })
-                .resize({ height: 384 })
-                .jpeg({ quality: 80 })
-                .toBuffer();
+            if (sharp) {
+                try {
+                    // Try using sharp for optimal image processing
+                    const resizedBuffer = await sharp(imageBuffer)
+                        // .resize({ height: 1080 })
+                        .resize({ height: 384 })
+                        .jpeg({ quality: 80 })
+                        .toBuffer();
 
-            const base64 = resizedBuffer.toString('base64');
-            const metadata = await sharp(resizedBuffer).metadata();
+                    const base64 = resizedBuffer.toString('base64');
+                    const metadata = await sharp(resizedBuffer).metadata();
 
+                    lastScreenshot = {
+                        base64,
+                        width: metadata.width,
+                        height: metadata.height,
+                        timestamp: Date.now(),
+                    };
+
+                    return { success: true, base64, width: metadata.width, height: metadata.height };
+                } catch (sharpError) {
+                    console.warn('Sharp module failed, falling back to basic image processing:', sharpError.message);
+                }
+            }
+            
+            // Fallback: Return the original image without resizing
+            console.log('[WindowManager] Using fallback image processing (no resize/compression)');
+            const base64 = imageBuffer.toString('base64');
+            
             lastScreenshot = {
                 base64,
-                width: metadata.width,
-                height: metadata.height,
+                width: null, // We don't have metadata without sharp
+                height: null,
                 timestamp: Date.now(),
             };
 
-            return { success: true, base64, width: metadata.width, height: metadata.height };
+            return { success: true, base64, width: null, height: null };
         } catch (error) {
-            console.error('Failed to capture and resize screenshot:', error);
+            console.error('Failed to capture screenshot:', error);
             return { success: false, error: error.message };
         }
     }
