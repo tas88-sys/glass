@@ -364,6 +364,25 @@ async function updateContentProtection(enabled) {
     }
 }
 
+async function getAutoUpdateSetting() {
+    try {
+        return settingsRepository.getAutoUpdate();
+    } catch (error) {
+        console.error('[SettingsService] Error getting auto update setting:', error);
+        return true; // Fallback to enabled
+    }
+}
+
+async function setAutoUpdateSetting(isEnabled) {
+    try {
+        await settingsRepository.setAutoUpdate(isEnabled);
+        return { success: true };
+    } catch (error) {
+        console.error('[SettingsService] Error setting auto update setting:', error);
+        return { success: false, error: error.message };
+    }
+}
+
 function initialize() {
     // cleanup 
     windowNotificationManager.cleanup();
@@ -409,6 +428,15 @@ function initialize() {
     ipcMain.handle('settings:updateContentProtection', async (event, enabled) => {
         return await updateContentProtection(enabled);
     });
+
+    ipcMain.handle('settings:get-auto-update', async () => {
+        return await getAutoUpdateSetting();
+    });
+
+    ipcMain.handle('settings:set-auto-update', async (event, isEnabled) => {
+        console.log('[SettingsService] Setting auto update setting:', isEnabled);
+        return await setAutoUpdateSetting(isEnabled);
+    });
     
     console.log('[SettingsService] Initialized and ready.');
 }
@@ -440,4 +468,5 @@ module.exports = {
     saveApiKey,
     removeApiKey,
     updateContentProtection,
+    getAutoUpdateSetting,
 };

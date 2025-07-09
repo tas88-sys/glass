@@ -41,63 +41,71 @@ class AuthService {
         // Initialize immediately for the default local user on startup.
         // This ensures the key is ready before any login/logout state change.
         encryptionService.initializeKey(this.currentUserId);
+        this.initializationPromise = null;
     }
 
     initialize() {
-        if (this.isInitialized) return;
+        if (this.isInitialized) return this.initializationPromise;
 
-        const auth = getFirebaseAuth();
-        onAuthStateChanged(auth, async (user) => {
-            const previousUser = this.currentUser;
+        this.initializationPromise = new Promise((resolve) => {
+            const auth = getFirebaseAuth();
+            onAuthStateChanged(auth, async (user) => {
+                const previousUser = this.currentUser;
 
-            if (user) {
-                // User signed IN
-                console.log(`[AuthService] Firebase user signed in:`, user.uid);
-                this.currentUser = user;
-                this.currentUserId = user.uid;
-                this.currentUserMode = 'firebase';
+                if (user) {
+                    // User signed IN
+                    console.log(`[AuthService] Firebase user signed in:`, user.uid);
+                    this.currentUser = user;
+                    this.currentUserId = user.uid;
+                    this.currentUserMode = 'firebase';
 
-                // ** Initialize encryption key for the logged-in user **
-                await encryptionService.initializeKey(user.uid);
+                    // ** Initialize encryption key for the logged-in user **
+                    await encryptionService.initializeKey(user.uid);
 
 
-                // Start background task to fetch and save virtual key
-                (async () => {
-                    try {
-                        const idToken = await user.getIdToken(true);
-                        const virtualKey = await getVirtualKeyByEmail(user.email, idToken);
+                    // Start background task to fetch and save virtual key
+                    (async () => {
+                        try {
+                            const idToken = await user.getIdToken(true);
+                            const virtualKey = await getVirtualKeyByEmail(user.email, idToken);
 
-                        if (global.modelStateService) {
-                            global.modelStateService.setFirebaseVirtualKey(virtualKey);
+                            if (global.modelStateService) {
+                                global.modelStateService.setFirebaseVirtualKey(virtualKey);
+                            }
+                            console.log(`[AuthService] BG: Virtual key for ${user.email} has been processed.`);
+
+                        } catch (error) {
+                            console.error('[AuthService] BG: Failed to fetch or save virtual key:', error);
                         }
-                        console.log(`[AuthService] BG: Virtual key for ${user.email} has been processed.`);
+                    })();
 
-                    } catch (error) {
-                        console.error('[AuthService] BG: Failed to fetch or save virtual key:', error);
+                } else {
+                    // User signed OUT
+                    console.log(`[AuthService] No Firebase user.`);
+                    if (previousUser) {
+                        console.log(`[AuthService] Clearing API key for logged-out user: ${previousUser.uid}`);
+                        if (global.modelStateService) {
+                            global.modelStateService.setFirebaseVirtualKey(null);
+                        }
                     }
-                })();
+                    this.currentUser = null;
+                    this.currentUserId = 'default_user';
+                    this.currentUserMode = 'local';
 
-            } else {
-                // User signed OUT
-                console.log(`[AuthService] No Firebase user.`);
-                if (previousUser) {
-                    console.log(`[AuthService] Clearing API key for logged-out user: ${previousUser.uid}`);
-                    if (global.modelStateService) {
-                        global.modelStateService.setFirebaseVirtualKey(null);
-                    }
+                    // ** Initialize encryption key for the default/local user **
+                    await encryptionService.initializeKey(this.currentUserId);
                 }
-                this.currentUser = null;
-                this.currentUserId = 'default_user';
-                this.currentUserMode = 'local';
+                this.broadcastUserState();
                 
-                // ** Initialize encryption key for the default/local user **
-                await encryptionService.initializeKey(this.currentUserId);
-            }
-            this.broadcastUserState();
+                if (!this.isInitialized) {
+                    this.isInitialized = true;
+                    console.log('[AuthService] Initialized and resolved initialization promise.');
+                    resolve();
+                }
+            });
         });
 
-        this.isInitialized = true;
-        console.log('[AuthService] Initialized and attached to Firebase Auth state.');
+        return this.initializationPromise;
     }
 
     async signInWithCustomToken(token) {

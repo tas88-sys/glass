@@ -85,10 +85,53 @@ async function deletePreset(id, uid) {
     return { changes: 1 };
 }
 
+async function getAutoUpdate(uid) {
+    // Assume users are stored in a "users" collection, and auto_update_enabled is a field
+    const userDocRef = doc(getFirestore(), 'users', uid);
+    try {
+        const userSnap = await getDoc(userDocRef);
+        if (userSnap.exists()) {
+            const data = userSnap.data();
+            if (typeof data.auto_update_enabled !== 'undefined') {
+                console.log('Firebase: Auto update setting found:', data.auto_update_enabled);
+                return !!data.auto_update_enabled;
+            } else {
+                // Field does not exist, just return default
+                return true;
+            }
+        } else {
+            // User doc does not exist, just return default
+            return true;
+        }
+    } catch (error) {
+        console.error('Firebase: Error getting auto_update_enabled setting:', error);
+        return true; // fallback to enabled
+    }
+}
+
+async function setAutoUpdate(uid, isEnabled) {
+    const userDocRef = doc(getFirestore(), 'users', uid);
+    try {
+        const userSnap = await getDoc(userDocRef);
+        if (userSnap.exists()) {
+            await updateDoc(userDocRef, { auto_update_enabled: !!isEnabled });
+        }
+        // If user doc does not exist, do nothing (no creation)
+        return { success: true };
+    } catch (error) {
+        console.error('Firebase: Error setting auto-update:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+
+
 module.exports = {
     getPresets,
     getPresetTemplates,
     createPreset,
     updatePreset,
     deletePreset,
+    getAutoUpdate,
+    setAutoUpdate,
 }; 

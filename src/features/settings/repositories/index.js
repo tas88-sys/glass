@@ -34,6 +34,16 @@ const settingsRepositoryAdapter = {
         const uid = authService.getCurrentUserId();
         return getBaseRepository().deletePreset(id, uid);
     },
+
+    getAutoUpdate: () => {
+        const uid = authService.getCurrentUserId();
+        return getBaseRepository().getAutoUpdate(uid);
+    },
+
+    setAutoUpdate: (isEnabled) => {
+        const uid = authService.getCurrentUserId();
+        return getBaseRepository().setAutoUpdate(uid, isEnabled);
+    },
 };
 
 module.exports = settingsRepositoryAdapter;
