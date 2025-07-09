@@ -1,10 +1,12 @@
-const { getFirestore, doc, getDoc, setDoc, deleteDoc, writeBatch, query, where, getDocs, collection } = require('firebase/firestore');
+const { doc, getDoc, setDoc, deleteDoc, writeBatch, query, where, getDocs, collection, Timestamp } = require('firebase/firestore');
+const { getFirestoreInstance } = require('../../services/firebaseClient');
 const { createEncryptedConverter } = require('../firestoreConverter');
+const encryptionService = require('../../services/encryptionService');
 
 const userConverter = createEncryptedConverter(['api_key']);
 
 function usersCol() {
-    const db = getFirestore();
+    const db = getFirestoreInstance();
     return collection(db, 'users').withConverter(userConverter);
 }
 
@@ -14,7 +16,7 @@ function usersCol() {
 async function findOrCreate(user) {
     if (!user || !user.uid) throw new Error('User object and uid are required');
     const { uid, displayName, email } = user;
-    const now = Math.floor(Date.now() / 1000);
+    const now = Timestamp.now();
     const docRef = doc(usersCol(), uid);
     const docSnap = await getDoc(docRef);
 
@@ -49,7 +51,7 @@ async function update({ uid, displayName }) {
 }
 
 async function deleteById(uid) {
-    const db = getFirestore();
+    const db = getFirestoreInstance();
     const batch = writeBatch(db);
 
     // 1. Delete all sessions owned by the user

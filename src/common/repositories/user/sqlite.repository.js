@@ -58,6 +58,16 @@ function update({ uid, displayName }) {
     return { changes: result.changes };
 }
 
+function setMigrationComplete(uid) {
+    const db = sqliteClient.getDb();
+    const stmt = db.prepare('UPDATE users SET has_migrated_to_firebase = 1 WHERE uid = ?');
+    const result = stmt.run(uid);
+    if (result.changes > 0) {
+        console.log(`[Repo] Marked migration as complete for user ${uid}.`);
+    }
+    return result;
+}
+
 function deleteById(uid) {
     const db = sqliteClient.getDb();
     const userSessions = db.prepare('SELECT id FROM sessions WHERE uid = ?').all(uid);
@@ -88,5 +98,6 @@ module.exports = {
     getById,
     saveApiKey,
     update,
+    setMigrationComplete,
     deleteById
 }; 

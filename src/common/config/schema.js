@@ -7,7 +7,8 @@ const LATEST_SCHEMA = {
             { name: 'created_at', type: 'INTEGER' },
             { name: 'api_key', type: 'TEXT' },
             { name: 'provider', type: 'TEXT DEFAULT \'openai\'' },
-            { name: 'auto_update_enabled', type: 'INTEGER DEFAULT 1' }
+            { name: 'auto_update_enabled', type: 'INTEGER DEFAULT 1' },
+            { name: 'has_migrated_to_firebase', type: 'INTEGER DEFAULT 0' }
         ]
     },
     sessions: {

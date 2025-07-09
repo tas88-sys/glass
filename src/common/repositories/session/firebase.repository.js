@@ -1,16 +1,18 @@
-const { getFirestore, doc, getDoc, collection, addDoc, query, where, getDocs, writeBatch, orderBy, limit, runTransaction, updateDoc } = require('firebase/firestore');
+const { doc, getDoc, collection, addDoc, query, where, getDocs, writeBatch, orderBy, limit, updateDoc, Timestamp } = require('firebase/firestore');
+const { getFirestoreInstance } = require('../../services/firebaseClient');
 const { createEncryptedConverter } = require('../firestoreConverter');
+const encryptionService = require('../../services/encryptionService');
 
 const sessionConverter = createEncryptedConverter(['title']);
 
 function sessionsCol() {
-    const db = getFirestore();
+    const db = getFirestoreInstance();
     return collection(db, 'sessions').withConverter(sessionConverter);
 }
 
 // Sub-collection references are now built from the top-level
 function subCollections(sessionId) {
-    const db = getFirestore();
+    const db = getFirestoreInstance();
     const sessionPath = `sessions/${sessionId}`;
     return {
         transcripts: collection(db, `${sessionPath}/transcripts`),
@@ -26,7 +28,7 @@ async function getById(id) {
 }
 
 async function create(uid, type = 'ask') {
-    const now = Math.floor(Date.now() / 1000);
+    const now = Timestamp.now();
     const newSession = {
         uid: uid,
         members: [uid], // For future sharing functionality
@@ -49,12 +51,15 @@ async function getAllByUserId(uid) {
 
 async function updateTitle(id, title) {
     const docRef = doc(sessionsCol(), id);
-    await updateDoc(docRef, { title });
+    await updateDoc(docRef, {
+        title: encryptionService.encrypt(title),
+        updated_at: Timestamp.now()
+    });
     return { changes: 1 };
 }
 
 async function deleteWithRelatedData(id) {
-    const db = getFirestore();
+    const db = getFirestoreInstance();
     const batch = writeBatch(db);
 
     const { transcripts, ai_messages, summary } = subCollections(id);
@@ -77,7 +82,7 @@ async function deleteWithRelatedData(id) {
 
 async function end(id) {
     const docRef = doc(sessionsCol(), id);
-    await updateDoc(docRef, { ended_at: Math.floor(Date.now() / 1000) });
+    await updateDoc(docRef, { ended_at: Timestamp.now() });
     return { changes: 1 };
 }
 
@@ -89,7 +94,7 @@ async function updateType(id, type) {
 
 async function touch(id) {
     const docRef = doc(sessionsCol(), id);
-    await updateDoc(docRef, { updated_at: Math.floor(Date.now() / 1000) });
+    await updateDoc(docRef, { updated_at: Timestamp.now() });
     return { changes: 1 };
 }
 
@@ -111,7 +116,7 @@ async function getOrCreateActive(uid, requestedType = 'ask') {
 
         console.log(`[Repo] Found active Firebase session ${activeSession.id}`);
         
-        const updates = { updated_at: Math.floor(Date.now() / 1000) };
+        const updates = { updated_at: Timestamp.now() };
         if (activeSession.session_type === 'ask' && requestedType === 'listen') {
             updates.session_type = 'listen';
             console.log(`[Repo] Promoted Firebase session ${activeSession.id} to 'listen' type.`);
@@ -131,9 +136,10 @@ async function endAllActiveSessions(uid) {
 
     if (snapshot.empty) return { changes: 0 };
 
-    const batch = writeBatch(getFirestore());
+    const batch = writeBatch(getFirestoreInstance());
+    const now = Timestamp.now();
     snapshot.forEach(d => {
-        batch.update(d.ref, { ended_at: Math.floor(Date.now() / 1000) });
+        batch.update(d.ref, { ended_at: now });
     });
     await batch.commit();
 

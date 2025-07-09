@@ -1,5 +1,7 @@
-const { getFirestore, collection, doc, addDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, orderBy } = require('firebase/firestore');
+const { collection, doc, addDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, orderBy, Timestamp } = require('firebase/firestore');
+const { getFirestoreInstance } = require('../../services/firebaseClient');
 const { createEncryptedConverter } = require('../firestoreConverter');
+const encryptionService = require('../../services/encryptionService');
 
 const userPresetConverter = createEncryptedConverter(['prompt', 'title']);
 
@@ -12,13 +14,14 @@ const defaultPresetConverter = {
 };
 
 function userPresetsCol() {
-    const db = getFirestore();
+    const db = getFirestoreInstance();
     return collection(db, 'prompt_presets').withConverter(userPresetConverter);
 }
 
 function defaultPresetsCol() {
-    const db = getFirestore();
-    return collection(db, 'defaults/prompt_presets').withConverter(defaultPresetConverter);
+    const db = getFirestoreInstance();
+    // Path must have an odd number of segments. 'v1' is a placeholder document.
+    return collection(db, 'defaults/v1/prompt_presets').withConverter(defaultPresetConverter);
 }
 
 async function getPresets(uid) {
@@ -49,12 +52,12 @@ async function getPresetTemplates() {
 }
 
 async function create({ uid, title, prompt }) {
-    const now = Math.floor(Date.now() / 1000);
+    const now = Timestamp.now();
     const newPreset = {
         uid: uid,
         title,
         prompt,
-        is_default: false,
+        is_default: 0,
         created_at: now,
     };
     const docRef = await addDoc(userPresetsCol(), newPreset);
@@ -68,8 +71,18 @@ async function update(id, { title, prompt }, uid) {
     if (!docSnap.exists() || docSnap.data().uid !== uid || docSnap.data().is_default) {
         throw new Error("Preset not found or permission denied to update.");
     }
-    
-    await updateDoc(docRef, { title, prompt });
+
+    // Encrypt sensitive fields before sending to Firestore because `updateDoc` bypasses converters.
+    const updates = {};
+    if (title !== undefined) {
+        updates.title = encryptionService.encrypt(title);
+    }
+    if (prompt !== undefined) {
+        updates.prompt = encryptionService.encrypt(prompt);
+    }
+    updates.updated_at = Timestamp.now();
+
+    await updateDoc(docRef, updates);
     return { changes: 1 };
 }
 

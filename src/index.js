@@ -187,8 +187,8 @@ app.whenReady().then(async () => {
         await databaseInitializer.initialize();
         console.log('>>> [index.js] Database initialized successfully');
         
-        // Clean up zombie sessions from previous runs first
-        sessionRepository.endAllActiveSessions();
+        // Clean up zombie sessions from previous runs first - MOVED TO authService
+        // sessionRepository.endAllActiveSessions();
 
         await authService.initialize();
 
@@ -237,7 +237,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', async () => {
     console.log('[Shutdown] App is about to quit.');
     listenService.stopMacOSAudioCapture();
-    await sessionRepository.endAllActiveSessions();
+    // await sessionRepository.endAllActiveSessions(); // MOVED TO authService
     databaseInitializer.close();
 });
 

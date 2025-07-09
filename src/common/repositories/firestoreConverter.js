@@ -1,4 +1,5 @@
 const encryptionService = require('../services/encryptionService');
+const { Timestamp } = require('firebase/firestore');
 
 /**
  * Creates a Firestore converter that automatically encrypts and decrypts specified fields.
@@ -19,7 +20,7 @@ function createEncryptedConverter(fieldsToEncrypt = []) {
                 }
             }
             // Ensure there's a timestamp for the last modification
-            firestoreData.updated_at = Math.floor(Date.now() / 1000);
+            firestoreData.updated_at = Timestamp.now();
             return firestoreData;
         },
         /**
@@ -35,6 +36,14 @@ function createEncryptedConverter(fieldsToEncrypt = []) {
                     appObject[field] = encryptionService.decrypt(appObject[field]);
                 }
             }
+
+            // Convert Firestore Timestamps back to Unix timestamps (seconds) for app-wide consistency
+            for (const key in appObject) {
+                if (appObject[key] instanceof Timestamp) {
+                    appObject[key] = appObject[key].seconds;
+                }
+            }
+            
             return appObject;
         }
     };

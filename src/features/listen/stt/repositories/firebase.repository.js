@@ -1,16 +1,17 @@
-const { getFirestore, collection, addDoc, query, getDocs, orderBy } = require('firebase/firestore');
+const { collection, addDoc, query, getDocs, orderBy, Timestamp } = require('firebase/firestore');
+const { getFirestoreInstance } = require('../../../../common/services/firebaseClient');
 const { createEncryptedConverter } = require('../../../../common/repositories/firestoreConverter');
 
 const transcriptConverter = createEncryptedConverter(['text']);
 
 function transcriptsCol(sessionId) {
     if (!sessionId) throw new Error("Session ID is required to access transcripts.");
-    const db = getFirestore();
+    const db = getFirestoreInstance();
     return collection(db, `sessions/${sessionId}/transcripts`).withConverter(transcriptConverter);
 }
 
 async function addTranscript({ uid, sessionId, speaker, text }) {
-    const now = Math.floor(Date.now() / 1000);
+    const now = Timestamp.now();
     const newTranscript = {
         uid, // To identify the author/source of the transcript
         session_id: sessionId,

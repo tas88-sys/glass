@@ -1,7 +1,9 @@
-const { getFirestore, collection, doc, addDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, orderBy } = require('firebase/firestore');
+const { collection, doc, addDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, orderBy } = require('firebase/firestore');
+const { getFirestoreInstance } = require('../../../common/services/firebaseClient');
 const { createEncryptedConverter } = require('../../../common/repositories/firestoreConverter');
+const encryptionService = require('../../../common/services/encryptionService');
 
-const userPresetConverter = createEncryptedConverter(['prompt']);
+const userPresetConverter = createEncryptedConverter(['prompt', 'title']);
 
 const defaultPresetConverter = {
     toFirestore: (data) => data,
@@ -12,13 +14,13 @@ const defaultPresetConverter = {
 };
 
 function userPresetsCol() {
-    const db = getFirestore();
+    const db = getFirestoreInstance();
     return collection(db, 'prompt_presets').withConverter(userPresetConverter);
 }
 
 function defaultPresetsCol() {
-    const db = getFirestore();
-    return collection(db, 'defaults/prompt_presets').withConverter(defaultPresetConverter);
+    const db = getFirestoreInstance();
+    return collection(db, 'defaults/v1/prompt_presets').withConverter(defaultPresetConverter);
 }
 
 async function getPresets(uid) {
@@ -54,7 +56,7 @@ async function createPreset({ uid, title, prompt }) {
         uid: uid,
         title,
         prompt,
-        is_default: false,
+        is_default: 0,
         created_at: now,
     };
     const docRef = await addDoc(userPresetsCol(), newPreset);
@@ -68,8 +70,17 @@ async function updatePreset(id, { title, prompt }, uid) {
     if (!docSnap.exists() || docSnap.data().uid !== uid || docSnap.data().is_default) {
         throw new Error("Preset not found or permission denied to update.");
     }
+
+    const updates = {};
+    if (title !== undefined) {
+        updates.title = encryptionService.encrypt(title);
+    }
+    if (prompt !== undefined) {
+        updates.prompt = encryptionService.encrypt(prompt);
+    }
+    updates.updated_at = Math.floor(Date.now() / 1000);
     
-    await updateDoc(docRef, { title, prompt });
+    await updateDoc(docRef, updates);
     return { changes: 1 };
 }
 
@@ -87,7 +98,7 @@ async function deletePreset(id, uid) {
 
 async function getAutoUpdate(uid) {
     // Assume users are stored in a "users" collection, and auto_update_enabled is a field
-    const userDocRef = doc(getFirestore(), 'users', uid);
+    const userDocRef = doc(getFirestoreInstance(), 'users', uid);
     try {
         const userSnap = await getDoc(userDocRef);
         if (userSnap.exists()) {
@@ -110,7 +121,7 @@ async function getAutoUpdate(uid) {
 }
 
 async function setAutoUpdate(uid, isEnabled) {
-    const userDocRef = doc(getFirestore(), 'users', uid);
+    const userDocRef = doc(getFirestoreInstance(), 'users', uid);
     try {
         const userSnap = await getDoc(userDocRef);
         if (userSnap.exists()) {
