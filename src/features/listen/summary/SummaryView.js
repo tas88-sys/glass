@@ -412,7 +412,7 @@ export class SummaryView extends LitElement {
             const { ipcRenderer } = window.require('electron');
 
             try {
-                const isAskViewVisible = await ipcRenderer.invoke('is-window-visible', 'ask');
+                const isAskViewVisible = await ipcRenderer.invoke('is-ask-window-visible', 'ask');
 
                 if (!isAskViewVisible) {
                     await ipcRenderer.invoke('toggle-feature', 'ask');

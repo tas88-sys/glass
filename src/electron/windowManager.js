@@ -78,13 +78,6 @@ function updateLayout() {
 let movementManager = null;
 
 
-const featureWindows = ['listen','ask','settings'];
-// const featureWindows = ['listen','ask','settings','shortcut-settings'];
-function isAllowed(name) {
-    if (name === 'header') return true;
-    return featureWindows.includes(name) && currentHeaderState === 'main';
-}
-
 function createFeatureWindows(header, namesToCreate) {
     // if (windowPool.has('listen')) return;
 
@@ -305,6 +298,7 @@ function createFeatureWindows(header, namesToCreate) {
 }
 
 function destroyFeatureWindows() {
+    const featureWindows = ['listen','ask','settings','shortcut-settings'];
     if (settingsHideTimer) {
         clearTimeout(settingsHideTimer);
         settingsHideTimer = null;
@@ -337,72 +331,35 @@ function getDisplayById(displayId) {
 
 
 
-function toggleAllWindowsVisibility(movementManager) {
+function toggleAllWindowsVisibility() {
     const header = windowPool.get('header');
     if (!header) return;
-
+  
     if (header.isVisible()) {
-        console.log('[Visibility] Smart hiding - calculating nearest edge');
-
-        const headerBounds = header.getBounds();
-        const display = screen.getPrimaryDisplay();
-        const { width: screenWidth, height: screenHeight } = display.workAreaSize;
-
-        const centerX = headerBounds.x + headerBounds.width / 2;
-        const centerY = headerBounds.y + headerBounds.height / 2;
-
-        const distances = {
-            top: centerY,
-            bottom: screenHeight - centerY,
-            left: centerX,
-            right: screenWidth - centerX,
-        };
-
-        const nearestEdge = Object.keys(distances).reduce((nearest, edge) => (distances[edge] < distances[nearest] ? edge : nearest));
-
-        console.log(`[Visibility] Nearest edge: ${nearestEdge} (distance: ${distances[nearestEdge].toFixed(1)}px)`);
-
-        lastVisibleWindows.clear();
-        lastVisibleWindows.add('header');
-
-        windowPool.forEach((win, name) => {
-            if (win.isVisible()) {
-                lastVisibleWindows.add(name);
-                if (name !== 'header') {
-                    win.hide();
-                }
-            }
-        });
-
-        console.log('[Visibility] Visible windows before hide:', Array.from(lastVisibleWindows));
-
-        movementManager.hideToEdge(nearestEdge, () => {
-            header.hide();
-            console.log('[Visibility] Smart hide completed');
-        }, { instant: true });
-    } else {
-        console.log('[Visibility] Smart showing from hidden position');
-        console.log('[Visibility] Restoring windows:', Array.from(lastVisibleWindows));
-
-        header.show();
-
-        movementManager.showFromEdge(() => {
-            lastVisibleWindows.forEach(name => {
-                if (name === 'header') return;
-                const win = windowPool.get(name);
-                if (win && !win.isDestroyed()) {
-                    win.show();
-                    win.webContents.send('window-show-animation');
-                }
-            });
-
-            setImmediate(updateLayout);
-            setTimeout(updateLayout, 120);
-
-            console.log('[Visibility] Smart show completed');
-        });
+      lastVisibleWindows.clear();
+  
+      windowPool.forEach((win, name) => {
+        if (win && !win.isDestroyed() && win.isVisible()) {
+          lastVisibleWindows.add(name);
+        }
+      });
+  
+      lastVisibleWindows.forEach(name => {
+        if (name === 'header') return;
+        const win = windowPool.get(name);
+        if (win && !win.isDestroyed()) win.hide();
+      });
+      header.hide();
+  
+      return;
     }
-}
+  
+    lastVisibleWindows.forEach(name => {
+      const win = windowPool.get(name);
+      if (win && !win.isDestroyed())
+        win.show();
+    });
+  }
 
 
 function createWindows() {
@@ -508,7 +465,7 @@ function createWindows() {
         updateLayout();
     });
 
-    ipcMain.handle('toggle-all-windows-visibility', () => toggleAllWindowsVisibility(movementManager));
+    ipcMain.handle('toggle-all-windows-visibility', () => toggleAllWindowsVisibility());
 
     ipcMain.handle('toggle-feature', async (event, featureName) => {
         if (!windowPool.get(featureName) && currentHeaderState === 'main') {
@@ -821,18 +778,11 @@ function setupIpcHandlers(movementManager) {
         }
     });
 
-    ipcMain.handle('hide-all', () => {
-        windowPool.forEach(win => {
-            if (win.isFocused()) return;
-            win.hide();
-        });
-    });
-
     ipcMain.handle('quit-application', () => {
         app.quit();
     });
 
-    ipcMain.handle('is-window-visible', (event, windowName) => {
+    ipcMain.handle('is-ask-window-visible', (event, windowName) => {
         const window = windowPool.get(windowName);
         if (window && !window.isDestroyed()) {
             return window.isVisible();
@@ -866,15 +816,6 @@ function setupIpcHandlers(movementManager) {
             destroyFeatureWindows();
         }
         loadAndRegisterShortcuts(movementManager);
-
-        for (const [name, win] of windowPool) {
-            if (!isAllowed(name) && !win.isDestroyed()) {
-                win.hide();
-            }
-            if (isAllowed(name) && win.isVisible()) {
-                win.show();
-            }
-        }
     });
 
     ipcMain.on('update-keybinds', (event, newKeybinds) => {
@@ -947,9 +888,6 @@ function setupIpcHandlers(movementManager) {
 
     setupApiKeyIPC();
 
-    ipcMain.handle('resize-window', () => {});
-
-    ipcMain.handle('resize-for-view', () => {});
 
     ipcMain.handle('resize-header-window', (event, { width, height }) => {
         const header = windowPool.get('header');
@@ -1010,7 +948,6 @@ function setupIpcHandlers(movementManager) {
             header.hide();
             console.log('[WindowManager] Header hidden after animation.');
         } else if (state === 'visible') {
-            // 자식 창들을 다시 보여주는 로직은 toggleAllWindowsVisibility에 이미 있으므로 여기서는 중복 작업을 피합니다.
             console.log('[WindowManager] Header shown after animation.');
             updateLayout();
         }
@@ -1322,7 +1259,7 @@ function updateGlobalShortcuts(keybinds, mainWindow, sendToRenderer, movementMan
     if (state === 'apikey') {
         if (keybinds.toggleVisibility) {
             try {
-                globalShortcut.register(keybinds.toggleVisibility, () => toggleAllWindowsVisibility(movementManager));
+                globalShortcut.register(keybinds.toggleVisibility, () => toggleAllWindowsVisibility());
             } catch (error) {
                 console.error(`Failed to register toggleVisibility (${keybinds.toggleVisibility}):`, error);
             }
@@ -1358,7 +1295,7 @@ function updateGlobalShortcuts(keybinds, mainWindow, sendToRenderer, movementMan
             let callback;
             switch(action) {
                 case 'toggleVisibility':
-                    callback = () => toggleAllWindowsVisibility(movementManager);
+                    callback = () => toggleAllWindowsVisibility();
                     break;
                 case 'nextStep':
                     callback = () => {
@@ -1528,9 +1465,6 @@ module.exports = {
     createWindows,
     windowPool,
     fixedYPosition,
-    //////// before_modelStateService ////////
-    // setApiKey,
-    //////// before_modelStateService ////////
     getStoredApiKey,
     getStoredProvider,
     getCurrentModelInfo,

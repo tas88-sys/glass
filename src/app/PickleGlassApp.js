@@ -136,16 +136,6 @@ export class PickleGlassApp extends LitElement {
         }
     }
 
-    requestWindowResize() {
-        if (window.require) {
-            const { ipcRenderer } = window.require('electron');
-            ipcRenderer.invoke('resize-window', {
-                isMainViewVisible: this.isMainViewVisible,
-                view: this.currentView,
-            });
-        }
-    }
-
     setStatus(text) {
         this.statusText = text;
     }
