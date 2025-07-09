@@ -47,7 +47,7 @@ win:
           arch: x64
     requestedExecutionLevel: asInvoker
     # Disable code signing to avoid symbolic link issues on Windows
-    signAndEditExecutable: false
+    signAndEditExecutable: true
 
 # NSIS installer configuration for Windows
 nsis:
