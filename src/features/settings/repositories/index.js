@@ -18,4 +18,6 @@ module.exports = {
     createPreset: (...args) => getRepository().createPreset(...args),
     updatePreset: (...args) => getRepository().updatePreset(...args),
     deletePreset: (...args) => getRepository().deletePreset(...args),
+    getAutoUpdate: (...args) => getRepository().getAutoUpdate(...args),
+    setAutoUpdate: (...args) => getRepository().setAutoUpdate(...args),
 };

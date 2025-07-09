@@ -120,6 +120,11 @@ class SmoothMovementManager {
         let targetX = this.headerPosition.x;
         let targetY = this.headerPosition.y;
 
+        const windowSize = {
+            width: currentBounds.width,
+            height: currentBounds.height
+        };
+
         switch (direction) {
             case 'left': targetX -= this.stepSize; break;
             case 'right': targetX += this.stepSize; break;
@@ -130,22 +135,23 @@ class SmoothMovementManager {
 
         const displays = screen.getAllDisplays();
         let validPosition = displays.some(d => (
-            targetX >= d.workArea.x && targetX + currentBounds.width <= d.workArea.x + d.workArea.width &&
-            targetY >= d.workArea.y && targetY + currentBounds.height <= d.workArea.y + d.workArea.height
+            targetX >= d.workArea.x && targetX + windowSize.width <= d.workArea.x + d.workArea.width &&
+            targetY >= d.workArea.y && targetY + windowSize.height <= d.workArea.y + d.workArea.height
         ));
 
         if (!validPosition) {
             const nearestDisplay = screen.getDisplayNearestPoint({ x: targetX, y: targetY });
             const { x, y, width, height } = nearestDisplay.workArea;
-            targetX = Math.max(x, Math.min(x + width - currentBounds.width, targetX));
-            targetY = Math.max(y, Math.min(y + height - currentBounds.height, targetY));
+            targetX = Math.max(x, Math.min(x + width - windowSize.width, targetX));
+            targetY = Math.max(y, Math.min(y + height - windowSize.height, targetY));
         }
 
         if (targetX === this.headerPosition.x && targetY === this.headerPosition.y) return;
-        this.animateToPosition(header, targetX, targetY);
+
+        this.animateToPosition(header, targetX, targetY, windowSize);
     }
 
-    animateToPosition(header, targetX, targetY) {
+    animateToPosition(header, targetX, targetY, windowSize) {
         if (!this._isWindowValid(header)) return;
         
         this.isAnimating = true;
@@ -173,7 +179,13 @@ class SmoothMovementManager {
             }
 
             if (!this._isWindowValid(header)) return;
-            header.setPosition(Math.round(currentX), Math.round(currentY));
+            const { width, height } = windowSize || header.getBounds();
+            header.setBounds({
+                x: Math.round(currentX),
+                y: Math.round(currentY),
+                width,
+                height
+            });
 
             if (progress < 1) {
                 this.animationFrameId = setTimeout(animate, 8);
@@ -198,20 +210,40 @@ class SmoothMovementManager {
         const display = this.getCurrentDisplay(header);
         const { width, height } = display.workAreaSize;
         const { x: workAreaX, y: workAreaY } = display.workArea;
-        const headerBounds = header.getBounds();
         const currentBounds = header.getBounds();
+        
+        const windowSize = {
+            width: currentBounds.width,
+            height: currentBounds.height
+        };
+
         let targetX = currentBounds.x;
         let targetY = currentBounds.y;
 
         switch (direction) {
-            case 'left': targetX = workAreaX; break;
-            case 'right': targetX = workAreaX + width - headerBounds.width; break;
-            case 'up': targetY = workAreaY; break;
-            case 'down': targetY = workAreaY + height - headerBounds.height; break;
+            case 'left': 
+                targetX = workAreaX; 
+                break;
+            case 'right': 
+                targetX = workAreaX + width - windowSize.width; 
+                break;
+            case 'up': 
+                targetY = workAreaY; 
+                break;
+            case 'down': 
+                targetY = workAreaY + height - windowSize.height; 
+                break;
         }
 
-        this.headerPosition = { x: currentBounds.x, y: currentBounds.y };
-        this.animateToPosition(header, targetX, targetY);
+        header.setBounds({
+            x: Math.round(targetX),
+            y: Math.round(targetY),
+            width: windowSize.width,
+            height: windowSize.height
+        });
+
+        this.headerPosition = { x: targetX, y: targetY };
+        this.updateLayout();
     }
 
     destroy() {

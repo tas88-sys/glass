@@ -26,6 +26,7 @@ const askService = require('./features/ask/askService');
 const settingsService = require('./features/settings/settingsService');
 const sessionRepository = require('./common/repositories/session');
 const ModelStateService = require('./common/services/modelStateService');
+const sqliteClient = require('./common/services/sqliteClient');
 
 const eventBridge = new EventEmitter();
 let WEB_PORT = 3000;
@@ -189,7 +190,7 @@ app.whenReady().then(async () => {
         // Clean up zombie sessions from previous runs first
         sessionRepository.endAllActiveSessions();
 
-        authService.initialize();
+        await authService.initialize();
 
         //////// after_modelStateService ////////
         modelStateService.initialize();
@@ -215,6 +216,7 @@ app.whenReady().then(async () => {
         );
     }
 
+    // initAutoUpdater should be called after auth is initialized
     initAutoUpdater();
 
     // Process any pending deep link after everything is initialized
@@ -651,8 +653,13 @@ async function startWebStack() {
 }
 
 // Auto-update initialization
-function initAutoUpdater() {
+async function initAutoUpdater() {
     try {
+        const autoUpdateEnabled = await settingsService.getAutoUpdateSetting();
+        if (!autoUpdateEnabled) {
+            console.log('[AutoUpdater] Skipped because auto-updates are disabled in settings');
+            return;
+        }
         // Skip auto-updater in development mode
         if (!app.isPackaged) {
             console.log('[AutoUpdater] Skipped in development (app is not packaged)');

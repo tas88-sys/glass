@@ -2,7 +2,7 @@
     "name": "pickle-glass",
     "productName": "Glass",
 
-    "version": "0.2.2",
+    "version": "0.2.3",
 
     "description": "Cl*ely for Free",
     "main": "src/index.js",
