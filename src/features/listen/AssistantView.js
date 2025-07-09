@@ -84,6 +84,87 @@ export class AssistantView extends LitElement {
             user-select: none;
         }
 
+/* Allow text selection in insights responses */
+.insights-container, .insights-container *, .markdown-content {
+    user-select: text !important;
+    cursor: text !important;
+}
+
+/* highlight.js 스타일 추가 */
+.insights-container pre {
+    background: rgba(0, 0, 0, 0.4) !important;
+    border-radius: 8px !important;
+    padding: 12px !important;
+    margin: 8px 0 !important;
+    overflow-x: auto !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    white-space: pre !important;
+    word-wrap: normal !important;
+    word-break: normal !important;
+}
+
+.insights-container code {
+    font-family: 'Monaco', 'Menlo', 'Consolas', monospace !important;
+    font-size: 11px !important;
+    background: transparent !important;
+    white-space: pre !important;
+    word-wrap: normal !important;
+    word-break: normal !important;
+}
+
+.insights-container pre code {
+    white-space: pre !important;
+    word-wrap: normal !important;
+    word-break: normal !important;
+    display: block !important;
+}
+
+.insights-container p code {
+    background: rgba(255, 255, 255, 0.1) !important;
+    padding: 2px 4px !important;
+    border-radius: 3px !important;
+    color: #ffd700 !important;
+}
+
+.hljs-keyword {
+    color: #ff79c6 !important;
+}
+
+.hljs-string {
+    color: #f1fa8c !important;
+}
+
+.hljs-comment {
+    color: #6272a4 !important;
+}
+
+.hljs-number {
+    color: #bd93f9 !important;
+}
+
+.hljs-function {
+    color: #50fa7b !important;
+}
+
+.hljs-title {
+    color: #50fa7b !important;
+}
+
+.hljs-variable {
+    color: #8be9fd !important;
+}
+
+.hljs-built_in {
+    color: #ffb86c !important;
+}
+
+.hljs-attr {
+    color: #50fa7b !important;
+}
+
+.hljs-tag {
+    color: #ff79c6 !important;
+}
         .assistant-container {
             display: flex;
             flex-direction: column;

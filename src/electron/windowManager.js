@@ -428,7 +428,13 @@ function createWindows() {
             contextIsolation: false,
             backgroundThrottling: false,
             webSecurity: false,
+            enableRemoteModule: false,
+            // Ensure proper rendering and prevent pixelation
+            experimentalFeatures: false,
         },
+        // Prevent pixelation and ensure proper rendering
+        useContentSize: true,
+        disableAutoHideCursor: true,
     });
     if (process.platform === 'darwin') {
         header.setWindowButtonVisibility(false);
@@ -492,7 +498,10 @@ function createWindows() {
         }
     });
 
-    header.on('resize', updateLayout);
+    header.on('resize', () => {
+        console.log('[WindowManager] Header resize event triggered');
+        updateLayout();
+    });
 
     ipcMain.handle('toggle-all-windows-visibility', () => toggleAllWindowsVisibility(movementManager));
 
@@ -957,19 +966,49 @@ function setupIpcHandlers(movementManager) {
     ipcMain.handle('resize-header-window', (event, { width, height }) => {
         const header = windowPool.get('header');
         if (header) {
+            console.log(`[WindowManager] Resize request: ${width}x${height}`);
+            
+            // Prevent resizing during animations or if already at target size
+            if (movementManager && movementManager.isAnimating) {
+                console.log('[WindowManager] Skipping resize during animation');
+                return { success: false, error: 'Cannot resize during animation' };
+            }
+
+            const currentBounds = header.getBounds();
+            console.log(`[WindowManager] Current bounds: ${currentBounds.width}x${currentBounds.height} at (${currentBounds.x}, ${currentBounds.y})`);
+            
+            // Skip if already at target size to prevent unnecessary operations
+            if (currentBounds.width === width && currentBounds.height === height) {
+                console.log('[WindowManager] Already at target size, skipping resize');
+                return { success: true };
+            }
+
             const wasResizable = header.isResizable();
             if (!wasResizable) {
                 header.setResizable(true);
             }
 
-            const bounds = header.getBounds();
-            const newX = bounds.x + Math.round((bounds.width - width) / 2);
+            // Calculate the center point of the current window
+            const centerX = currentBounds.x + currentBounds.width / 2;
+            // Calculate new X position to keep the window centered
+            const newX = Math.round(centerX - width / 2);
 
-            header.setBounds({ x: newX, y: bounds.y, width, height });
+            // Get the current display to ensure we stay within bounds
+            const display = getCurrentDisplay(header);
+            const { x: workAreaX, width: workAreaWidth } = display.workArea;
+            
+            // Clamp the new position to stay within display bounds
+            const clampedX = Math.max(workAreaX, Math.min(workAreaX + workAreaWidth - width, newX));
+
+            header.setBounds({ x: clampedX, y: currentBounds.y, width, height });
 
             if (!wasResizable) {
                 header.setResizable(false);
             }
+            
+            // Update layout after resize
+            updateLayout();
+            
             return { success: true };
         }
         return { success: false, error: 'Header window not found' };
@@ -1019,8 +1058,24 @@ function setupIpcHandlers(movementManager) {
             const { x: workAreaX, y: workAreaY, width, height } = targetDisplay.workArea;
             const headerBounds = header.getBounds();
 
-            const clampedX = Math.max(workAreaX, Math.min(workAreaX + width - headerBounds.width, newX));
-            const clampedY = Math.max(workAreaY, Math.min(workAreaY + height - headerBounds.height, newY));
+            // Only clamp if the new position would actually go out of bounds
+            // This prevents progressive restriction of movement
+            let clampedX = newX;
+            let clampedY = newY;
+            
+            // Check if we need to clamp X position
+            if (newX < workAreaX) {
+                clampedX = workAreaX;
+            } else if (newX + headerBounds.width > workAreaX + width) {
+                clampedX = workAreaX + width - headerBounds.width;
+            }
+            
+            // Check if we need to clamp Y position  
+            if (newY < workAreaY) {
+                clampedY = workAreaY;
+            } else if (newY + headerBounds.height > workAreaY + height) {
+                clampedY = workAreaY + height - headerBounds.height;
+            }
 
             header.setPosition(clampedX, clampedY, false);
 

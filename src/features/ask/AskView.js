@@ -98,6 +98,12 @@ export class AskView extends LitElement {
             user-select: none;
         }
 
+        /* Allow text selection in assistant responses */
+        .response-container, .response-container * {
+            user-select: text !important;
+            cursor: text !important;
+        }
+
         .response-container pre {
             background: rgba(0, 0, 0, 0.4) !important;
             border-radius: 8px !important;
