@@ -147,19 +147,11 @@ class SmoothMovementManager {
         }
 
         if (targetX === this.headerPosition.x && targetY === this.headerPosition.y) return;
-        
-        header.setBounds({
-            x: Math.round(targetX),
-            y: Math.round(targetY),
-            width: windowSize.width,
-            height: windowSize.height
-        });
-        
-        this.headerPosition = { x: targetX, y: targetY };
-        this.updateLayout();
+
+        this.animateToPosition(header, targetX, targetY, windowSize);
     }
 
-    animateToPosition(header, targetX, targetY) {
+    animateToPosition(header, targetX, targetY, windowSize) {
         if (!this._isWindowValid(header)) return;
         
         this.isAnimating = true;
@@ -187,7 +179,13 @@ class SmoothMovementManager {
             }
 
             if (!this._isWindowValid(header)) return;
-            header.setPosition(Math.round(currentX), Math.round(currentY));
+            const { width, height } = windowSize || header.getBounds();
+            header.setBounds({
+                x: Math.round(currentX),
+                y: Math.round(currentY),
+                width,
+                height
+            });
 
             if (progress < 1) {
                 this.animationFrameId = setTimeout(animate, 8);
