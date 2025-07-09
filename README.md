@@ -69,7 +69,7 @@ npm run setup
 **Currently Supporting:**
 - OpenAI API: Get OpenAI API Key [here](https://platform.openai.com/api-keys)
 - Gemini API: Get Gemini API Key [here](https://aistudio.google.com/apikey)
-- Local LLM (WIP)
+- Local LLM Ollama & Whisper
 
 ### Liquid Glass Design (coming soon)
 
@@ -115,8 +115,6 @@ We have a list of [help wanted](https://github.com/pickle-com/glass/issues?q=is%
 
 | Status | Issue                          | Description                                       |
 |--------|--------------------------------|---------------------------------------------------|
-| 🚧 WIP      | Local LLM Support                  | Supporting Local LLM to power AI answers |
-| 🚧 WIP      | Firebase Data Storage Issue    | Session & ask should be saved in firebase for signup users |
 | 🚧 WIP      | Liquid Glass                    | Liquid Glass UI for MacOS 26 |
 
 ### Changelog
@@ -125,7 +123,7 @@ We have a list of [help wanted](https://github.com/pickle-com/glass/issues?q=is%
 - Jul 6: Full code refactoring has done.
 - Jul 7: Now support Claude, LLM/STT model selection
 - Jul 8: Now support Windows(beta), Improved AEC by Rust(to seperate mic/system audio), shortcut editing(beta)
-
+- Jul 8: Now support Local LLM & STT, Firebase Data Storage 
 
 
 ## About Pickle

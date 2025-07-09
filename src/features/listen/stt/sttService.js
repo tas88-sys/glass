@@ -133,7 +133,50 @@ class SttService {
                 return;
             }
             
-            if (this.modelInfo.provider === 'gemini') {
+            if (this.modelInfo.provider === 'whisper') {
+                // Whisper STT emits 'transcription' events with different structure
+                if (message.text && message.text.trim()) {
+                    const finalText = message.text.trim();
+                    
+                    // Filter out Whisper noise transcriptions
+                    const noisePatterns = [
+                        '[BLANK_AUDIO]',
+                        '[INAUDIBLE]',
+                        '[MUSIC]',
+                        '[SOUND]',
+                        '[NOISE]',
+                        '(BLANK_AUDIO)',
+                        '(INAUDIBLE)',
+                        '(MUSIC)',
+                        '(SOUND)',
+                        '(NOISE)'
+                    ];
+                    
+
+                    
+                    const normalizedText = finalText.toLowerCase().trim();
+                    
+                    const isNoise = noisePatterns.some(pattern => 
+                        finalText.includes(pattern) || finalText === pattern
+                    );
+                    
+                    
+                    if (!isNoise && finalText.length > 2) {
+                        this.debounceMyCompletion(finalText);
+                        
+                        this.sendToRenderer('stt-update', {
+                            speaker: 'Me',
+                            text: finalText,
+                            isPartial: false,
+                            isFinal: true,
+                            timestamp: Date.now(),
+                        });
+                    } else {
+                        console.log(`[Whisper-Me] Filtered noise: "${finalText}"`);
+                    }
+                }
+                return;
+            } else if (this.modelInfo.provider === 'gemini') {
                 if (!message.serverContent?.modelTurn) {
                     console.log('[Gemini STT - Me]', JSON.stringify(message, null, 2));
                 }
@@ -203,7 +246,50 @@ class SttService {
                 return;
             }
             
-            if (this.modelInfo.provider === 'gemini') {
+            if (this.modelInfo.provider === 'whisper') {
+                // Whisper STT emits 'transcription' events with different structure
+                if (message.text && message.text.trim()) {
+                    const finalText = message.text.trim();
+                    
+                    // Filter out Whisper noise transcriptions
+                    const noisePatterns = [
+                        '[BLANK_AUDIO]',
+                        '[INAUDIBLE]',
+                        '[MUSIC]',
+                        '[SOUND]',
+                        '[NOISE]',
+                        '(BLANK_AUDIO)',
+                        '(INAUDIBLE)',
+                        '(MUSIC)',
+                        '(SOUND)',
+                        '(NOISE)'
+                    ];
+                    
+                    
+                    const normalizedText = finalText.toLowerCase().trim();
+                    
+                    const isNoise = noisePatterns.some(pattern => 
+                        finalText.includes(pattern) || finalText === pattern
+                    );
+                    
+                    
+                    // Only process if it's not noise, not a false positive, and has meaningful content
+                    if (!isNoise && finalText.length > 2) {
+                        this.debounceTheirCompletion(finalText);
+                        
+                        this.sendToRenderer('stt-update', {
+                            speaker: 'Them',
+                            text: finalText,
+                            isPartial: false,
+                            isFinal: true,
+                            timestamp: Date.now(),
+                        });
+                    } else {
+                        console.log(`[Whisper-Them] Filtered noise: "${finalText}"`);
+                    }
+                }
+                return;
+            } else if (this.modelInfo.provider === 'gemini') {
                 if (!message.serverContent?.modelTurn) {
                     console.log('[Gemini STT - Them]', JSON.stringify(message, null, 2));
                 }
@@ -294,9 +380,13 @@ class SttService {
             portkeyVirtualKey: this.modelInfo.provider === 'openai-glass' ? this.modelInfo.apiKey : undefined,
         };
 
+        // Add sessionType for Whisper to distinguish between My and Their sessions
+        const myOptions = { ...sttOptions, callbacks: mySttConfig.callbacks, sessionType: 'my' };
+        const theirOptions = { ...sttOptions, callbacks: theirSttConfig.callbacks, sessionType: 'their' };
+
         [this.mySttSession, this.theirSttSession] = await Promise.all([
-            createSTT(this.modelInfo.provider, { ...sttOptions, callbacks: mySttConfig.callbacks }),
-            createSTT(this.modelInfo.provider, { ...sttOptions, callbacks: theirSttConfig.callbacks }),
+            createSTT(this.modelInfo.provider, myOptions),
+            createSTT(this.modelInfo.provider, theirOptions),
         ]);
 
         console.log('✅ Both STT sessions initialized successfully.');
