@@ -120,6 +120,8 @@ class SmoothMovementManager {
         let targetX = this.headerPosition.x;
         let targetY = this.headerPosition.y;
 
+        console.log(`[MovementManager] Moving ${direction} from (${targetX}, ${targetY})`);
+
         switch (direction) {
             case 'left': targetX -= this.stepSize; break;
             case 'right': targetX += this.stepSize; break;
@@ -128,21 +130,39 @@ class SmoothMovementManager {
             default: return;
         }
 
-        const displays = screen.getAllDisplays();
-        let validPosition = displays.some(d => (
-            targetX >= d.workArea.x && targetX + currentBounds.width <= d.workArea.x + d.workArea.width &&
-            targetY >= d.workArea.y && targetY + currentBounds.height <= d.workArea.y + d.workArea.height
-        ));
-
-        if (!validPosition) {
-            const nearestDisplay = screen.getDisplayNearestPoint({ x: targetX, y: targetY });
-            const { x, y, width, height } = nearestDisplay.workArea;
-            targetX = Math.max(x, Math.min(x + width - currentBounds.width, targetX));
-            targetY = Math.max(y, Math.min(y + height - currentBounds.height, targetY));
+        // Find the display that contains or is nearest to the target position
+        const nearestDisplay = screen.getDisplayNearestPoint({ x: targetX, y: targetY });
+        const { x: workAreaX, y: workAreaY, width: workAreaWidth, height: workAreaHeight } = nearestDisplay.workArea;
+        
+        // Only clamp if the target position would actually go out of bounds
+        let clampedX = targetX;
+        let clampedY = targetY;
+        
+        // Check horizontal bounds
+        if (targetX < workAreaX) {
+            clampedX = workAreaX;
+        } else if (targetX + currentBounds.width > workAreaX + workAreaWidth) {
+            clampedX = workAreaX + workAreaWidth - currentBounds.width;
+        }
+        
+        // Check vertical bounds
+        if (targetY < workAreaY) {
+            clampedY = workAreaY;
+            console.log(`[MovementManager] Clamped Y to top edge: ${clampedY}`);
+        } else if (targetY + currentBounds.height > workAreaY + workAreaHeight) {
+            clampedY = workAreaY + workAreaHeight - currentBounds.height;
+            console.log(`[MovementManager] Clamped Y to bottom edge: ${clampedY}`);
         }
 
-        if (targetX === this.headerPosition.x && targetY === this.headerPosition.y) return;
-        this.animateToPosition(header, targetX, targetY);
+        console.log(`[MovementManager] Final position: (${clampedX}, ${clampedY}), Work area: ${workAreaX},${workAreaY} ${workAreaWidth}x${workAreaHeight}`);
+
+        // Only move if there's an actual change in position
+        if (clampedX === this.headerPosition.x && clampedY === this.headerPosition.y) {
+            console.log(`[MovementManager] No position change, skipping animation`);
+            return;
+        }
+        
+        this.animateToPosition(header, clampedX, clampedY);
     }
 
     animateToPosition(header, targetX, targetY) {
@@ -179,12 +199,13 @@ class SmoothMovementManager {
                 this.animationFrameId = setTimeout(animate, 8);
             } else {
                 this.animationFrameId = null;
-                this.headerPosition = { x: targetX, y: targetY };
+                this.isAnimating = false;
                 if (Number.isFinite(targetX) && Number.isFinite(targetY)) {
                     if (!this._isWindowValid(header)) return;
                     header.setPosition(Math.round(targetX), Math.round(targetY));
+                    // Update header position to the actual final position
+                    this.headerPosition = { x: Math.round(targetX), y: Math.round(targetY) };
                 }
-                this.isAnimating = false;
                 this.updateLayout();
             }
         };
