@@ -457,15 +457,9 @@ function createWindows() {
         headerLoadOptions.query = { glass: 'true' };
         header.loadFile(path.join(__dirname, '../app/header.html'), headerLoadOptions);
         header.webContents.once('did-finish-load', () => {
-            const viewId = liquidGlass.addView(header.getNativeWindowHandle(), {
-                cornerRadius: 12,
-                tintColor: '#FF00001A', // Red tint
-                opaque: false, 
-            });
+            const viewId = liquidGlass.addView(header.getNativeWindowHandle());
             if (viewId !== -1) {
-                liquidGlass.unstable_setVariant(viewId, 2); 
-                // liquidGlass.unstable_setScrim(viewId, 1); 
-                // liquidGlass.unstable_setSubdued(viewId, 1);
+                liquidGlass.unstable_setVariant(viewId, liquidGlass.GlassMaterialVariant.bubbles); 
             }
         });
     }
