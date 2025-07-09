@@ -213,13 +213,21 @@ class ModelStateService {
         const llmModels = PROVIDERS['openai-glass']?.llmModels;
         const sttModels = PROVIDERS['openai-glass']?.sttModels;
 
-        if (!this.state.selectedModels.llm && llmModels?.length > 0) {
+        // When logging in with Pickle, prioritize Pickle's models over existing selections
+        if (virtualKey && llmModels?.length > 0) {
             this.state.selectedModels.llm = llmModels[0].id;
+            console.log(`[ModelStateService] Prioritized Pickle LLM model: ${llmModels[0].id}`);
         }
-        if (!this.state.selectedModels.stt && sttModels?.length > 0) {
+        if (virtualKey && sttModels?.length > 0) {
             this.state.selectedModels.stt = sttModels[0].id;
+            console.log(`[ModelStateService] Prioritized Pickle STT model: ${sttModels[0].id}`);
         }
-        this._autoSelectAvailableModels();
+        
+        // If logging out (virtualKey is null), run auto-selection to find alternatives
+        if (!virtualKey) {
+            this._autoSelectAvailableModels();
+        }
+        
         this._saveState();
         this._logCurrentSelection();
     }
