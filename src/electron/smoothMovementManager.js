@@ -167,7 +167,7 @@ class SmoothMovementManager {
             return;
         }
         
-        this.animateToPosition(header, clampedX, clampedY);
+        this.animateToPosition(header, clampedX, clampedY, windowSize);
     }
 
     animateToPosition(header, targetX, targetY, windowSize) {
