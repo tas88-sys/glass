@@ -190,7 +190,7 @@ app.whenReady().then(async () => {
         // Clean up zombie sessions from previous runs first
         sessionRepository.endAllActiveSessions();
 
-        authService.initialize();
+        await authService.initialize();
 
         //////// after_modelStateService ////////
         modelStateService.initialize();
@@ -216,6 +216,7 @@ app.whenReady().then(async () => {
         );
     }
 
+    // initAutoUpdater should be called after auth is initialized
     initAutoUpdater();
 
     // Process any pending deep link after everything is initialized
@@ -289,27 +290,6 @@ function setupGeneralIpcHandlers() {
 
     ipcMain.handle('get-current-user', () => {
         return authService.getCurrentUser();
-    });
-
-    ipcMain.handle('get-auto-update', () => {
-        const uid = authService.getCurrentUserId();
-        try {
-            return sqliteClient.getAutoUpdate(uid);
-        } catch (error) {
-            console.error('Error getting auto-update setting:', error);
-            return true; // fallback to enabled
-        }
-    });
-
-    ipcMain.handle('set-auto-update', (event, isEnabled) => {
-        const uid = authService.getCurrentUserId();
-        try {
-            sqliteClient.setAutoUpdate(isEnabled, uid);
-            return true;
-        } catch (error) {
-            console.error('Error setting auto-update:', error);
-            return false;
-        }
     });
 
     // --- Web UI Data Handlers (New) ---
@@ -673,9 +653,9 @@ async function startWebStack() {
 }
 
 // Auto-update initialization
-function initAutoUpdater() {
+async function initAutoUpdater() {
     try {
-        const autoUpdateEnabled = sqliteClient.getAutoUpdate();
+        const autoUpdateEnabled = await settingsService.getAutoUpdateSetting();
         if (!autoUpdateEnabled) {
             console.log('[AutoUpdater] Skipped because auto-updates are disabled in settings');
             return;

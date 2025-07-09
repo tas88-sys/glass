@@ -492,9 +492,11 @@ export class SettingsView extends LitElement {
         const { ipcRenderer } = window.require('electron');
         this.autoUpdateLoading = true;
         try {
-            const enabled = await ipcRenderer.invoke('get-auto-update');
+            const enabled = await ipcRenderer.invoke('settings:get-auto-update');
             this.autoUpdateEnabled = enabled;
+            console.log('Auto-update setting loaded:', enabled);
         } catch (e) {
+            console.error('Error loading auto-update setting:', e);
             this.autoUpdateEnabled = true; // fallback
         }
         this.autoUpdateLoading = false;
@@ -508,8 +510,8 @@ export class SettingsView extends LitElement {
         this.requestUpdate();
         try {
             const newValue = !this.autoUpdateEnabled;
-            const success = await ipcRenderer.invoke('set-auto-update', newValue);
-            if (success) {
+            const result = await ipcRenderer.invoke('settings:set-auto-update', newValue);
+            if (result && result.success) {
                 this.autoUpdateEnabled = newValue;
             } else {
                 console.error('Failed to update auto-update setting');
@@ -687,6 +689,7 @@ export class SettingsView extends LitElement {
             } else {
                 this.firebaseUser = null;
             }
+            this.loadAutoUpdateSetting();
             this.requestUpdate();
         };
         
