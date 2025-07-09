@@ -343,40 +343,32 @@ export class MainHeader extends LitElement {
         }
     }
 
-    showWindow(name, element) {
+    showSettingsWindow(element) {
         if (window.require) {
             const { ipcRenderer } = window.require('electron');
-            console.log(`[MainHeader] showWindow('${name}') called at ${Date.now()}`);
+            console.log(`[MainHeader] showSettingsWindow called at ${Date.now()}`);
             
-            ipcRenderer.send('cancel-hide-window', name);
+            ipcRenderer.send('cancel-hide-settings-window');
 
-            if (name === 'settings' && element) {
-                const rect = element.getBoundingClientRect();
-                ipcRenderer.send('show-window', {
-                    name: 'settings',
-                    bounds: {
-                        x: rect.left,
-                        y: rect.top,
-                        width: rect.width,
-                        height: rect.height
-                    }
+            if (element) {
+                const { left, top, width, height } = element.getBoundingClientRect();
+                ipcRenderer.send('show-settings-window', {
+                    x: left,
+                    y: top,
+                    width,
+                    height,
                 });
-            } else {
-                ipcRenderer.send('show-window', name);
             }
         }
     }
 
-    hideWindow(name) {
+    hideSettingsWindow() {
         if (window.require) {
-            console.log(`[MainHeader] hideWindow('${name}') called at ${Date.now()}`);
-            window.require('electron').ipcRenderer.send('hide-window', name);
+            console.log(`[MainHeader] hideSettingsWindow called at ${Date.now()}`);
+            window.require('electron').ipcRenderer.send('hide-settings-window');
         }
     }
 
-    cancelHideWindow(name) {
-
-    }
 
     renderShortcut(accelerator) {
         if (!accelerator) return html``;
@@ -449,8 +441,8 @@ export class MainHeader extends LitElement {
 
                 <button 
                     class="settings-button"
-                    @mouseenter=${(e) => this.showWindow('settings', e.currentTarget)}
-                    @mouseleave=${() => this.hideWindow('settings')}
+                    @mouseenter=${(e) => this.showSettingsWindow(e.currentTarget)}
+                    @mouseleave=${() => this.hideSettingsWindow()}
                 >
                     <div class="settings-icon">
                         <svg width="16" height="17" viewBox="0 0 16 17" fill="none" xmlns="http://www.w3.org/2000/svg">

@@ -762,9 +762,9 @@ function setupIpcHandlers(movementManager) {
         }
     });
 
-    ipcMain.on('show-window', (event, args) => {
-        const { name, bounds } = typeof args === 'object' && args !== null ? args : { name: args, bounds: null };
-        const win = windowPool.get(name);
+    ipcMain.on('show-settings-window', (event, bounds) => {
+        if (!bounds) return;  
+        const win = windowPool.get('settings');
 
         if (win && !win.isDestroyed()) {
             if (settingsHideTimer) {
@@ -772,59 +772,50 @@ function setupIpcHandlers(movementManager) {
                 settingsHideTimer = null;
             }
 
-            if (name === 'settings') {
-                // Adjust position based on button bounds
-                const header = windowPool.get('header');
-                const headerBounds = header?.getBounds() ?? { x: 0, y: 0 };
-                const settingsBounds = win.getBounds();
+            // Adjust position based on button bounds
+            const header = windowPool.get('header');
+            const headerBounds = header?.getBounds() ?? { x: 0, y: 0 };
+            const settingsBounds = win.getBounds();
 
-                const disp = getCurrentDisplay(header);
-                const { x: waX, y: waY, width: waW, height: waH } = disp.workArea;
+            const disp = getCurrentDisplay(header);
+            const { x: waX, y: waY, width: waW, height: waH } = disp.workArea;
 
-                let x = Math.round(headerBounds.x + (bounds?.x ?? 0) + (bounds?.width ?? 0) / 2 - settingsBounds.width / 2);
-                let y = Math.round(headerBounds.y + (bounds?.y ?? 0) + (bounds?.height ?? 0) + 31);
+            let x = Math.round(headerBounds.x + (bounds?.x ?? 0) + (bounds?.width ?? 0) / 2 - settingsBounds.width / 2);
+            let y = Math.round(headerBounds.y + (bounds?.y ?? 0) + (bounds?.height ?? 0) + 31);
 
-                x = Math.max(waX + 10, Math.min(waX + waW - settingsBounds.width - 10, x));
-                y = Math.max(waY + 10, Math.min(waY + waH - settingsBounds.height - 10, y));
+            x = Math.max(waX + 10, Math.min(waX + waW - settingsBounds.width - 10, x));
+            y = Math.max(waY + 10, Math.min(waY + waH - settingsBounds.height - 10, y));
 
-                win.setBounds({ x, y });
-                win.__lockedByButton = true;
-                console.log(`[WindowManager] Positioning settings window at (${x}, ${y}) based on button bounds.`);
-            }
-
+            win.setBounds({ x, y });
+            win.__lockedByButton = true;
+            console.log(`[WindowManager] Positioning settings window at (${x}, ${y}) based on button bounds.`);
+            
             win.show();
             win.moveTop();
-
-            if (name === 'settings') {
-                win.setAlwaysOnTop(true);
-            }
-            // updateLayout();
+            win.setAlwaysOnTop(true);
         }
     });
 
-    ipcMain.on('hide-window', (event, name) => {
-        const window = windowPool.get(name);
+    ipcMain.on('hide-settings-window', (event) => {
+        const window = windowPool.get("settings");
         if (window && !window.isDestroyed()) {
-            if (name === 'settings') {
-                if (settingsHideTimer) {
-                    clearTimeout(settingsHideTimer);
-                }
-                settingsHideTimer = setTimeout(() => {
-                    if (window && !window.isDestroyed()) {
-                        window.setAlwaysOnTop(false);
-                        window.hide();
-                    }
-                    settingsHideTimer = null;
-                }, 200);
-            } else {
-                window.hide();
+            if (settingsHideTimer) {
+                clearTimeout(settingsHideTimer);
             }
+            settingsHideTimer = setTimeout(() => {
+                if (window && !window.isDestroyed()) {
+                    window.setAlwaysOnTop(false);
+                    window.hide();
+                }
+                settingsHideTimer = null;
+            }, 200);
+            
             window.__lockedByButton = false;
         }
     });
 
-    ipcMain.on('cancel-hide-window', (event, name) => {
-        if (name === 'settings' && settingsHideTimer) {
+    ipcMain.on('cancel-hide-settings-window', (event) => {
+        if (settingsHideTimer) {
             clearTimeout(settingsHideTimer);
             settingsHideTimer = null;
         }

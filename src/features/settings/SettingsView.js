@@ -1025,14 +1025,14 @@ export class SettingsView extends LitElement {
     handleMouseEnter = () => {
         if (window.require) {
             const { ipcRenderer } = window.require('electron');
-            ipcRenderer.send('cancel-hide-window', 'settings');
+            ipcRenderer.send('cancel-hide-settings-window');
         }
     }
 
     handleMouseLeave = () => {
         if (window.require) {
             const { ipcRenderer } = window.require('electron');
-            ipcRenderer.send('hide-window', 'settings');
+            ipcRenderer.send('hide-settings-window');
         }
     }
 
