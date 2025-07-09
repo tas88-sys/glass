@@ -28,8 +28,10 @@ const sessionRepository = require('./common/repositories/session');
 const ModelStateService = require('./common/services/modelStateService');
 const sqliteClient = require('./common/services/sqliteClient');
 
+// Global variables
 const eventBridge = new EventEmitter();
 let WEB_PORT = 3000;
+let isShuttingDown = false; // Flag to prevent infinite shutdown loop
 
 const listenService = new ListenService();
 // Make listenService globally accessible so other modules (e.g., windowManager, askService) can reuse the same instance
@@ -39,6 +41,10 @@ global.listenService = listenService;
 const modelStateService = new ModelStateService(authService);
 global.modelStateService = modelStateService;
 //////// after_modelStateService ////////
+
+// Import and initialize OllamaService
+const ollamaService = require('./common/services/ollamaService');
+const ollamaModelRepository = require('./common/repositories/ollamaModel');
 
 // Native deep link handling - cross-platform compatible
 let pendingDeepLinkUrl = null;
@@ -187,8 +193,8 @@ app.whenReady().then(async () => {
         await databaseInitializer.initialize();
         console.log('>>> [index.js] Database initialized successfully');
         
-        // Clean up zombie sessions from previous runs first
-        sessionRepository.endAllActiveSessions();
+        // Clean up zombie sessions from previous runs first - MOVED TO authService
+        // sessionRepository.endAllActiveSessions();
 
         await authService.initialize();
 
@@ -200,6 +206,21 @@ app.whenReady().then(async () => {
         askService.initialize();
         settingsService.initialize();
         setupGeneralIpcHandlers();
+        setupOllamaIpcHandlers();
+        setupWhisperIpcHandlers();
+
+        // Initialize Ollama models in database
+        await ollamaModelRepository.initializeDefaultModels();
+
+        // Auto warm-up selected Ollama model in background (non-blocking)
+        setTimeout(async () => {
+            try {
+                console.log('[index.js] Starting background Ollama model warm-up...');
+                await ollamaService.autoWarmUpSelectedModel();
+            } catch (error) {
+                console.log('[index.js] Background warm-up failed (non-critical):', error.message);
+            }
+        }, 2000); // Wait 2 seconds after app start
 
         // Start web server and create windows ONLY after all initializations are successful
         WEB_PORT = await startWebStack();
@@ -234,11 +255,71 @@ app.on('window-all-closed', () => {
     }
 });
 
-app.on('before-quit', async () => {
-    console.log('[Shutdown] App is about to quit.');
-    listenService.stopMacOSAudioCapture();
-    await sessionRepository.endAllActiveSessions();
-    databaseInitializer.close();
+app.on('before-quit', async (event) => {
+    // Prevent infinite loop by checking if shutdown is already in progress
+    if (isShuttingDown) {
+        console.log('[Shutdown] 🔄 Shutdown already in progress, allowing quit...');
+        return;
+    }
+    
+    console.log('[Shutdown] App is about to quit. Starting graceful shutdown...');
+    
+    // Set shutdown flag to prevent infinite loop
+    isShuttingDown = true;
+    
+    // Prevent immediate quit to allow graceful shutdown
+    event.preventDefault();
+    
+    try {
+        // 1. Stop audio capture first (immediate)
+        listenService.stopMacOSAudioCapture();
+        console.log('[Shutdown] Audio capture stopped');
+        
+        // 2. End all active sessions (database operations) - with error handling
+        try {
+            await sessionRepository.endAllActiveSessions();
+            console.log('[Shutdown] Active sessions ended');
+        } catch (dbError) {
+            console.warn('[Shutdown] Could not end active sessions (database may be closed):', dbError.message);
+        }
+        
+        // 3. Shutdown Ollama service (potentially time-consuming)
+        console.log('[Shutdown] shutting down Ollama service...');
+        const ollamaShutdownSuccess = await Promise.race([
+            ollamaService.shutdown(false), // Graceful shutdown
+            new Promise(resolve => setTimeout(() => resolve(false), 8000)) // 8s timeout
+        ]);
+        
+        if (ollamaShutdownSuccess) {
+            console.log('[Shutdown] Ollama service shut down gracefully');
+        } else {
+            console.log('[Shutdown] Ollama shutdown timeout, forcing...');
+            // Force shutdown if graceful failed
+            try {
+                await ollamaService.shutdown(true);
+            } catch (forceShutdownError) {
+                console.warn('[Shutdown] Force shutdown also failed:', forceShutdownError.message);
+            }
+        }
+        
+        // 4. Close database connections (final cleanup)
+        try {
+            databaseInitializer.close();
+            console.log('[Shutdown] Database connections closed');
+        } catch (closeError) {
+            console.warn('[Shutdown] Error closing database:', closeError.message);
+        }
+        
+        console.log('[Shutdown] Graceful shutdown completed successfully');
+        
+    } catch (error) {
+        console.error('[Shutdown] Error during graceful shutdown:', error);
+        // Continue with shutdown even if there were errors
+    } finally {
+        // Actually quit the app now
+        console.log('[Shutdown] Exiting application...');
+        app.exit(0); // Use app.exit() instead of app.quit() to force quit
+    }
 });
 
 app.on('activate', () => {
@@ -247,13 +328,79 @@ app.on('activate', () => {
     }
 });
 
+function setupWhisperIpcHandlers() {
+    const { WhisperService } = require('./common/services/whisperService');
+    const whisperService = new WhisperService();
+    
+    // Forward download progress events to renderer
+    whisperService.on('downloadProgress', (data) => {
+        const windows = BrowserWindow.getAllWindows();
+        windows.forEach(window => {
+            window.webContents.send('whisper:download-progress', data);
+        });
+    });
+    
+    // IPC handlers for Whisper operations
+    ipcMain.handle('whisper:download-model', async (event, modelId) => {
+        try {
+            console.log(`[Whisper IPC] Starting download for model: ${modelId}`);
+            
+            // Ensure WhisperService is initialized first
+            if (!whisperService.isInitialized) {
+                console.log('[Whisper IPC] Initializing WhisperService...');
+                await whisperService.initialize();
+            }
+            
+            // Set up progress listener
+            const progressHandler = (data) => {
+                if (data.modelId === modelId) {
+                    event.sender.send('whisper:download-progress', data);
+                }
+            };
+            
+            whisperService.on('downloadProgress', progressHandler);
+            
+            try {
+                await whisperService.ensureModelAvailable(modelId);
+                console.log(`[Whisper IPC] Model ${modelId} download completed successfully`);
+            } finally {
+                // Cleanup listener
+                whisperService.removeListener('downloadProgress', progressHandler);
+            }
+            
+            return { success: true };
+        } catch (error) {
+            console.error(`[Whisper IPC] Failed to download model ${modelId}:`, error);
+            return { success: false, error: error.message };
+        }
+    });
+    
+    ipcMain.handle('whisper:get-installed-models', async () => {
+        try {
+            // Ensure WhisperService is initialized first
+            if (!whisperService.isInitialized) {
+                console.log('[Whisper IPC] Initializing WhisperService for model list...');
+                await whisperService.initialize();
+            }
+            
+            const models = await whisperService.getInstalledModels();
+            return { success: true, models };
+        } catch (error) {
+            console.error('[Whisper IPC] Failed to get installed models:', error);
+            return { success: false, error: error.message };
+        }
+    });
+}
+
 function setupGeneralIpcHandlers() {
     const userRepository = require('./common/repositories/user');
     const presetRepository = require('./common/repositories/preset');
 
     ipcMain.handle('save-api-key', (event, apiKey) => {
         try {
-            userRepository.saveApiKey(apiKey, authService.getCurrentUserId());
+            // The adapter injects the UID and handles local/firebase logic.
+            // Assuming a default provider if not specified.
+            userRepository.saveApiKey(apiKey, 'openai');
             BrowserWindow.getAllWindows().forEach(win => {
                 win.webContents.send('api-key-updated');
             });
@@ -265,7 +412,8 @@ function setupGeneralIpcHandlers() {
     });
 
     ipcMain.handle('get-user-presets', () => {
-        return presetRepository.getPresets(authService.getCurrentUserId());
+        // The adapter injects the UID.
+        return presetRepository.getPresets();
     });
 
     ipcMain.handle('get-preset-templates', () => {
@@ -296,6 +444,201 @@ function setupGeneralIpcHandlers() {
     setupWebDataHandlers();
 }
 
+function setupOllamaIpcHandlers() {
+    // Ollama status and installation
+    ipcMain.handle('ollama:get-status', async () => {
+        try {
+            const installed = await ollamaService.isInstalled();
+            const running = installed ? await ollamaService.isServiceRunning() : false;
+            const models = await ollamaService.getAllModelsWithStatus();
+            
+            return { 
+                installed, 
+                running, 
+                models,
+                success: true 
+            };
+        } catch (error) {
+            console.error('[Ollama IPC] Failed to get status:', error);
+            return { success: false, error: error.message };
+        }
+    });
+
+    ipcMain.handle('ollama:install', async (event) => {
+        try {
+            const onProgress = (data) => {
+                event.sender.send('ollama:install-progress', data);
+            };
+
+            await ollamaService.autoInstall(onProgress);
+            
+            if (!await ollamaService.isServiceRunning()) {
+                onProgress({ stage: 'starting', message: 'Starting Ollama service...', progress: 0 });
+                await ollamaService.startService();
+                onProgress({ stage: 'starting', message: 'Ollama service started.', progress: 100 });
+            }
+            event.sender.send('ollama:install-complete', { success: true });
+            return { success: true };
+        } catch (error) {
+            console.error('[Ollama IPC] Failed to install:', error);
+            event.sender.send('ollama:install-complete', { success: false, error: error.message });
+            return { success: false, error: error.message };
+        }
+    });
+
+    ipcMain.handle('ollama:start-service', async (event) => {
+        try {
+            if (!await ollamaService.isServiceRunning()) {
+                console.log('[Ollama IPC] Starting Ollama service...');
+                await ollamaService.startService();
+            }
+            event.sender.send('ollama:install-complete', { success: true });
+            return { success: true };
+        } catch (error) {
+            console.error('[Ollama IPC] Failed to start service:', error);
+            event.sender.send('ollama:install-complete', { success: false, error: error.message });
+            return { success: false, error: error.message };
+        }
+    });
+
+    // Ensure Ollama is ready (starts service if installed but not running)
+    ipcMain.handle('ollama:ensure-ready', async () => {
+        try {
+            if (await ollamaService.isInstalled() && !await ollamaService.isServiceRunning()) {
+                console.log('[Ollama IPC] Ollama installed but not running, starting service...');
+                await ollamaService.startService();
+            }
+            return { success: true };
+        } catch (error) {
+            console.error('[Ollama IPC] Failed to ensure ready:', error);
+            return { success: false, error: error.message };
+        }
+    });
+
+    // Get all models with their status
+    ipcMain.handle('ollama:get-models', async () => {
+        try {
+            const models = await ollamaService.getAllModelsWithStatus();
+            return { success: true, models };
+        } catch (error) {
+            console.error('[Ollama IPC] Failed to get models:', error);
+            return { success: false, error: error.message };
+        }
+    });
+
+    // Get model suggestions for autocomplete
+    ipcMain.handle('ollama:get-model-suggestions', async () => {
+        try {
+            const suggestions = await ollamaService.getModelSuggestions();
+            return { success: true, suggestions };
+        } catch (error) {
+            console.error('[Ollama IPC] Failed to get model suggestions:', error);
+            return { success: false, error: error.message };
+        }
+    });
+
+    // Pull/install a specific model
+    ipcMain.handle('ollama:pull-model', async (event, modelName) => {
+        try {
+            console.log(`[Ollama IPC] Starting model pull: ${modelName}`);
+            
+            // Update DB status to installing
+            await ollamaModelRepository.updateInstallStatus(modelName, false, true);
+            
+            // Set up progress listener for real-time updates
+            const progressHandler = (data) => {
+                if (data.model === modelName) {
+                    event.sender.send('ollama:pull-progress', data);
+                }
+            };
+            
+            const completeHandler = (data) => {
+                if (data.model === modelName) {
+                    console.log(`[Ollama IPC] Model ${modelName} pull completed`);
+                    // Clean up listeners
+                    ollamaService.removeListener('pull-progress', progressHandler);
+                    ollamaService.removeListener('pull-complete', completeHandler);
+                }
+            };
+            
+            ollamaService.on('pull-progress', progressHandler);
+            ollamaService.on('pull-complete', completeHandler);
+            
+            // Pull the model using REST API
+            await ollamaService.pullModel(modelName);
+            
+            // Update DB status to installed
+            await ollamaModelRepository.updateInstallStatus(modelName, true, false);
+            
+            console.log(`[Ollama IPC] Model ${modelName} pull successful`);
+            return { success: true };
+        } catch (error) {
+            console.error('[Ollama IPC] Failed to pull model:', error);
+            // Reset status on error
+            await ollamaModelRepository.updateInstallStatus(modelName, false, false);
+            return { success: false, error: error.message };
+        }
+    });
+
+    // Check if a specific model is installed
+    ipcMain.handle('ollama:is-model-installed', async (event, modelName) => {
+        try {
+            const installed = await ollamaService.isModelInstalled(modelName);
+            return { success: true, installed };
+        } catch (error) {
+            console.error('[Ollama IPC] Failed to check model installation:', error);
+            return { success: false, error: error.message };
+        }
+    });
+
+    // Warm up a specific model
+    ipcMain.handle('ollama:warm-up-model', async (event, modelName) => {
+        try {
+            const success = await ollamaService.warmUpModel(modelName);
+            return { success };
+        } catch (error) {
+            console.error('[Ollama IPC] Failed to warm up model:', error);
+            return { success: false, error: error.message };
+        }
+    });
+
+    // Auto warm-up currently selected model
+    ipcMain.handle('ollama:auto-warm-up', async () => {
+        try {
+            const success = await ollamaService.autoWarmUpSelectedModel();
+            return { success };
+        } catch (error) {
+            console.error('[Ollama IPC] Failed to auto warm-up:', error);
+            return { success: false, error: error.message };
+        }
+    });
+
+    // Get warm-up status for debugging
+    ipcMain.handle('ollama:get-warm-up-status', async () => {
+        try {
+            const status = ollamaService.getWarmUpStatus();
+            return { success: true, status };
+        } catch (error) {
+            console.error('[Ollama IPC] Failed to get warm-up status:', error);
+            return { success: false, error: error.message };
+        }
+    });
+
+    // Shutdown Ollama service manually
+    ipcMain.handle('ollama:shutdown', async (event, force = false) => {
+        try {
+            console.log(`[Ollama IPC] Manual shutdown requested (force: ${force})`);
+            const success = await ollamaService.shutdown(force);
+            return { success };
+        } catch (error) {
+            console.error('[Ollama IPC] Failed to shutdown Ollama:', error);
+            return { success: false, error: error.message };
+        }
+    });
+
+    console.log('[Ollama IPC] Handlers registered');
+}
+
 function setupWebDataHandlers() {
     const sessionRepository = require('./common/repositories/session');
     const sttRepository = require('./features/listen/stt/repositories');
@@ -304,89 +647,112 @@ function setupWebDataHandlers() {
     const userRepository = require('./common/repositories/user');
     const presetRepository = require('./common/repositories/preset');
 
-    const handleRequest = (channel, responseChannel, payload) => {
+    const handleRequest = async (channel, responseChannel, payload) => {
         let result;
-        const currentUserId = authService.getCurrentUserId();
+        // const currentUserId = authService.getCurrentUserId(); // No longer needed here
         try {
             switch (channel) {
                 // SESSION
                 case 'get-sessions':
-                    result = sessionRepository.getAllByUserId(currentUserId);
+                    // Adapter injects UID
+                    result = await sessionRepository.getAllByUserId();
                     break;
                 case 'get-session-details':
-                    const session = sessionRepository.getById(payload);
+                    const session = await sessionRepository.getById(payload);
                     if (!session) {
                         result = null;
                         break;
                     }
-                    const transcripts = sttRepository.getAllTranscriptsBySessionId(payload);
-                    const ai_messages = askRepository.getAllAiMessagesBySessionId(payload);
-                    const summary = summaryRepository.getSummaryBySessionId(payload);
+                    const [transcripts, ai_messages, summary] = await Promise.all([
+                        sttRepository.getAllTranscriptsBySessionId(payload),
+                        askRepository.getAllAiMessagesBySessionId(payload),
+                        summaryRepository.getSummaryBySessionId(payload)
+                    ]);
                     result = { session, transcripts, ai_messages, summary };
                     break;
                 case 'delete-session':
-                    result = sessionRepository.deleteWithRelatedData(payload);
+                    result = await sessionRepository.deleteWithRelatedData(payload);
                     break;
                 case 'create-session':
-                    const id = sessionRepository.create(currentUserId, 'ask');
-                    if (payload.title) {
-                        sessionRepository.updateTitle(id, payload.title);
+                    // Adapter injects UID
+                    const id = await sessionRepository.create('ask');
+                    if (payload && payload.title) {
+                        await sessionRepository.updateTitle(id, payload.title);
                     }
                     result = { id };
                     break;
                 
                 // USER
                 case 'get-user-profile':
-                    result = userRepository.getById(currentUserId);
+                    // Adapter injects UID
+                    result = await userRepository.getById();
                     break;
                 case 'update-user-profile':
-                    result = userRepository.update({ uid: currentUserId, ...payload });
+                     // Adapter injects UID
+                    result = await userRepository.update(payload);
                     break;
                 case 'find-or-create-user':
-                    result = userRepository.findOrCreate(payload);
+                    result = await userRepository.findOrCreate(payload);
                     break;
                 case 'save-api-key':
-                    result = userRepository.saveApiKey(payload, currentUserId);
+                    // Assuming payload is { apiKey, provider }
+                    result = await userRepository.saveApiKey(payload.apiKey, payload.provider);
                     break;
                 case 'check-api-key-status':
-                    const user = userRepository.getById(currentUserId);
+                    // Adapter injects UID
+                    const user = await userRepository.getById();
                     result = { hasApiKey: !!user?.api_key && user.api_key.length > 0 };
                     break;
                 case 'delete-account':
-                    result = userRepository.deleteById(currentUserId);
+                    // Adapter injects UID
+                    result = await userRepository.deleteById();
                     break;
 
                 // PRESET
                 case 'get-presets':
-                    result = presetRepository.getPresets(currentUserId);
+                    // Adapter injects UID
+                    result = await presetRepository.getPresets();
                     break;
                 case 'create-preset':
-                    result = presetRepository.create({ ...payload, uid: currentUserId });
+                    // Adapter injects UID
+                    result = await presetRepository.create(payload);
                     settingsService.notifyPresetUpdate('created', result.id, payload.title);
                     break;
                 case 'update-preset':
-                    result = presetRepository.update(payload.id, payload.data, currentUserId);
+                    // Adapter injects UID
+                    result = await presetRepository.update(payload.id, payload.data);
                     settingsService.notifyPresetUpdate('updated', payload.id, payload.data.title);
                     break;
                 case 'delete-preset':
-                    result = presetRepository.delete(payload, currentUserId);
+                    // Adapter injects UID
+                    result = await presetRepository.delete(payload);
                     settingsService.notifyPresetUpdate('deleted', payload);
                     break;
                 
                 // BATCH
                 case 'get-batch-data':
                     const includes = payload ? payload.split(',').map(item => item.trim()) : ['profile', 'presets', 'sessions'];
-                    const batchResult = {};
+                    const promises = {};
             
                     if (includes.includes('profile')) {
-                        batchResult.profile = userRepository.getById(currentUserId);
+                        // Adapter injects UID
+                        promises.profile = userRepository.getById();
                     }
                     if (includes.includes('presets')) {
-                        batchResult.presets = presetRepository.getPresets(currentUserId);
+                        // Adapter injects UID
+                        promises.presets = presetRepository.getPresets();
                     }
                     if (includes.includes('sessions')) {
-                        batchResult.sessions = sessionRepository.getAllByUserId(currentUserId);
+                        // Adapter injects UID
+                        promises.sessions = sessionRepository.getAllByUserId();
                     }
+                    
+                    const batchResult = {};
+                    const promiseResults = await Promise.all(Object.values(promises));
+                    Object.keys(promises).forEach((key, index) => {
+                        batchResult[key] = promiseResults[index];
+                    });
+
                     result = batchResult;
                     break;
 

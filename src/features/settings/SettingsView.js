@@ -1,4 +1,5 @@
 import { html, css, LitElement } from '../../assets/lit-core-2.7.4.min.js';
+import { getOllamaProgressTracker } from '../../common/services/localProgressTracker.js';
 
 export class SettingsView extends LitElement {
     static styles = css`
@@ -403,9 +404,77 @@ export class SettingsView extends LitElement {
             overflow-y: auto; background: rgba(0,0,0,0.3); border-radius: 4px;
             padding: 4px; margin-top: 4px;
         }
-        .model-item { padding: 5px 8px; font-size: 11px; border-radius: 3px; cursor: pointer; transition: background-color 0.15s; }
+        .model-item { 
+            padding: 5px 8px; 
+            font-size: 11px; 
+            border-radius: 3px; 
+            cursor: pointer; 
+            transition: background-color 0.15s; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+        }
         .model-item:hover { background-color: rgba(255,255,255,0.1); }
-        .model-item.selected { background-color: rgba(0, 122, 255, 0.4); font-weight: 500;
+        .model-item.selected { background-color: rgba(0, 122, 255, 0.4); font-weight: 500; }
+        .model-status { 
+            font-size: 9px; 
+            color: rgba(255,255,255,0.6); 
+            margin-left: 8px; 
+        }
+        .model-status.installed { color: rgba(0, 255, 0, 0.8); }
+        .model-status.not-installed { color: rgba(255, 200, 0, 0.8); }
+        .install-progress {
+            flex: 1;
+            height: 4px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 2px;
+            margin-left: 8px;
+            overflow: hidden;
+        }
+        .install-progress-bar {
+            height: 100%;
+            background: rgba(0, 122, 255, 0.8);
+            transition: width 0.3s ease;
+        }
+        
+        /* Dropdown styles */
+        select.model-dropdown {
+            background: rgba(0,0,0,0.2);
+            color: white;
+            cursor: pointer;
+        }
+        
+        select.model-dropdown option {
+            background: #1a1a1a;
+            color: white;
+        }
+        
+        select.model-dropdown option:disabled {
+            color: rgba(255,255,255,0.4);
+        }
+            
+        /* ────────────────[ GLASS BYPASS ]─────────────── */
+        :host-context(body.has-glass) {
+            animation: none !important;
+            transition: none !important;
+            transform: none !important;
+            will-change: auto !important;
+        }
+
+        :host-context(body.has-glass) * {
+            background: transparent !important;
+            filter: none !important;
+            backdrop-filter: none !important;
+            box-shadow: none !important;
+            outline: none !important;
+            border: none !important;
+            border-radius: 0 !important;
+            transition: none !important;
+            animation: none !important;
+        }
+
+        :host-context(body.has-glass) .settings-container::before {
+            display: none !important;
         }
     `;
 
@@ -430,6 +499,12 @@ export class SettingsView extends LitElement {
         showPresets: { type: Boolean, state: true },
         autoUpdateEnabled: { type: Boolean, state: true },
         autoUpdateLoading: { type: Boolean, state: true },
+        // Ollama related properties
+        ollamaStatus: { type: Object, state: true },
+        ollamaModels: { type: Array, state: true },
+        installingModels: { type: Object, state: true },
+        // Whisper related properties
+        whisperModels: { type: Array, state: true },
     };
     //////// after_modelStateService ////////
 
@@ -438,7 +513,7 @@ export class SettingsView extends LitElement {
         //////// after_modelStateService ////////
         this.shortcuts = {};
         this.firebaseUser = null;
-        this.apiKeys = { openai: '', gemini: '', anthropic: '' };
+        this.apiKeys = { openai: '', gemini: '', anthropic: '', whisper: '' };
         this.providerConfig = {};
         this.isLoading = true;
         this.isContentProtectionOn = true;
@@ -452,6 +527,14 @@ export class SettingsView extends LitElement {
         this.presets = [];
         this.selectedPreset = null;
         this.showPresets = false;
+        // Ollama related
+        this.ollamaStatus = { installed: false, running: false };
+        this.ollamaModels = [];
+        this.installingModels = {}; // { modelName: progress }
+        this.progressTracker = getOllamaProgressTracker();
+        // Whisper related
+        this.whisperModels = [];
+        this.whisperProgressTracker = null; // Will be initialized when needed
         this.handleUsePicklesKey = this.handleUsePicklesKey.bind(this)
         this.autoUpdateEnabled = true;
         this.autoUpdateLoading = true;
@@ -501,7 +584,7 @@ export class SettingsView extends LitElement {
         this.isLoading = true;
         const { ipcRenderer } = window.require('electron');
         try {
-            const [userState, config, storedKeys, availableLlm, availableStt, selectedModels, presets, contentProtection, shortcuts] = await Promise.all([
+            const [userState, config, storedKeys, availableLlm, availableStt, selectedModels, presets, contentProtection, shortcuts, ollamaStatus, whisperModelsResult] = await Promise.all([
                 ipcRenderer.invoke('get-current-user'),
                 ipcRenderer.invoke('model:get-provider-config'), // Provider 설정 로드
                 ipcRenderer.invoke('model:get-all-keys'),
@@ -510,7 +593,9 @@ export class SettingsView extends LitElement {
                 ipcRenderer.invoke('model:get-selected-models'),
                 ipcRenderer.invoke('settings:getPresets'),
                 ipcRenderer.invoke('get-content-protection-status'),
-                ipcRenderer.invoke('get-current-shortcuts')
+                ipcRenderer.invoke('get-current-shortcuts'),
+                ipcRenderer.invoke('ollama:get-status'),
+                ipcRenderer.invoke('whisper:get-installed-models')
             ]);
             
             if (userState && userState.isLoggedIn) this.firebaseUser = userState;
@@ -527,6 +612,23 @@ export class SettingsView extends LitElement {
                 const firstUserPreset = this.presets.find(p => p.is_default === 0);
                 if (firstUserPreset) this.selectedPreset = firstUserPreset;
             }
+            // Ollama status
+            if (ollamaStatus?.success) {
+                this.ollamaStatus = { installed: ollamaStatus.installed, running: ollamaStatus.running };
+                this.ollamaModels = ollamaStatus.models || [];
+            }
+            // Whisper status
+            if (whisperModelsResult?.success) {
+                const installedWhisperModels = whisperModelsResult.models;
+                if (this.providerConfig.whisper) {
+                    this.providerConfig.whisper.sttModels.forEach(m => {
+                        const installedInfo = installedWhisperModels.find(i => i.id === m.id);
+                        if (installedInfo) {
+                            m.installed = installedInfo.installed;
+                        }
+                    });
+                }
+            }
         } catch (error) {
             console.error('Error loading initial settings data:', error);
         } finally {
@@ -538,8 +640,52 @@ export class SettingsView extends LitElement {
         const input = this.shadowRoot.querySelector(`#key-input-${provider}`);
         if (!input) return;
         const key = input.value;
+        
+        // For Ollama, we need to ensure it's ready first
+        if (provider === 'ollama') {
         this.saving = true;
-
+            const { ipcRenderer } = window.require('electron');
+            
+            // First ensure Ollama is installed and running
+            const ensureResult = await ipcRenderer.invoke('ollama:ensure-ready');
+            if (!ensureResult.success) {
+                alert(`Failed to setup Ollama: ${ensureResult.error}`);
+                this.saving = false;
+                return;
+            }
+            
+            // Now validate (which will check if service is running)
+            const result = await ipcRenderer.invoke('model:validate-key', { provider, key: 'local' });
+            
+            if (result.success) {
+                this.apiKeys = { ...this.apiKeys, [provider]: 'local' };
+                await this.refreshModelData();
+                await this.refreshOllamaStatus();
+            } else {
+                alert(`Failed to connect to Ollama: ${result.error}`);
+            }
+            this.saving = false;
+            return;
+        }
+        
+        // For Whisper, just enable it
+        if (provider === 'whisper') {
+            this.saving = true;
+            const { ipcRenderer } = window.require('electron');
+            const result = await ipcRenderer.invoke('model:validate-key', { provider, key: 'local' });
+            
+            if (result.success) {
+                this.apiKeys = { ...this.apiKeys, [provider]: 'local' };
+                await this.refreshModelData();
+            } else {
+                alert(`Failed to enable Whisper: ${result.error}`);
+            }
+            this.saving = false;
+            return;
+        }
+        
+        // For other providers, use the normal flow
+        this.saving = true;
         const { ipcRenderer } = window.require('electron');
         const result = await ipcRenderer.invoke('model:validate-key', { provider, key });
         
@@ -564,15 +710,17 @@ export class SettingsView extends LitElement {
 
     async refreshModelData() {
         const { ipcRenderer } = window.require('electron');
-        const [availableLlm, availableStt, selected] = await Promise.all([
+        const [availableLlm, availableStt, selected, storedKeys] = await Promise.all([
             ipcRenderer.invoke('model:get-available-models', { type: 'llm' }),
             ipcRenderer.invoke('model:get-available-models', { type: 'stt' }),
-            ipcRenderer.invoke('model:get-selected-models')
+            ipcRenderer.invoke('model:get-selected-models'),
+            ipcRenderer.invoke('model:get-all-keys')
         ]);
         this.availableLlmModels = availableLlm;
         this.availableSttModels = availableStt;
         this.selectedLlm = selected.llm;
         this.selectedStt = selected.stt;
+        this.apiKeys = storedKeys;
         this.requestUpdate();
     }
     
@@ -594,6 +742,28 @@ export class SettingsView extends LitElement {
     }
     
     async selectModel(type, modelId) {
+        // Check if this is an Ollama model that needs to be installed
+        const provider = this.getProviderForModel(type, modelId);
+        if (provider === 'ollama') {
+            const ollamaModel = this.ollamaModels.find(m => m.name === modelId);
+            if (ollamaModel && !ollamaModel.installed && !ollamaModel.installing) {
+                // Need to install the model first
+                await this.installOllamaModel(modelId);
+                return;
+            }
+        }
+        
+        // Check if this is a Whisper model that needs to be downloaded
+        if (provider === 'whisper' && type === 'stt') {
+            const isInstalling = this.installingModels[modelId] !== undefined;
+            const whisperModelInfo = this.providerConfig.whisper.sttModels.find(m => m.id === modelId);
+            
+            if (whisperModelInfo && !whisperModelInfo.installed && !isInstalling) {
+                await this.downloadWhisperModel(modelId);
+                return;
+            }
+        }
+        
         this.saving = true;
         const { ipcRenderer } = window.require('electron');
         await ipcRenderer.invoke('model:set-selected-model', { type, modelId });
@@ -603,6 +773,102 @@ export class SettingsView extends LitElement {
         this.isSttListVisible = false;
         this.saving = false;
         this.requestUpdate();
+    }
+    
+    async refreshOllamaStatus() {
+        const { ipcRenderer } = window.require('electron');
+        const ollamaStatus = await ipcRenderer.invoke('ollama:get-status');
+        if (ollamaStatus?.success) {
+            this.ollamaStatus = { installed: ollamaStatus.installed, running: ollamaStatus.running };
+            this.ollamaModels = ollamaStatus.models || [];
+        }
+    }
+    
+    async installOllamaModel(modelName) {
+        // Mark as installing
+        this.installingModels = { ...this.installingModels, [modelName]: 0 };
+        this.requestUpdate();
+        
+        try {
+            // Use the clean progress tracker - no manual event management needed
+            const success = await this.progressTracker.installModel(modelName, (progress) => {
+                this.installingModels = { ...this.installingModels, [modelName]: progress };
+                this.requestUpdate();
+            });
+            
+            if (success) {
+                // Refresh status after installation
+                await this.refreshOllamaStatus();
+                await this.refreshModelData();
+                // Auto-select the model after installation
+                await this.selectModel('llm', modelName);
+            } else {
+                alert(`Installation of ${modelName} was cancelled`);
+            }
+        } catch (error) {
+            console.error(`[SettingsView] Error installing model ${modelName}:`, error);
+            alert(`Error installing ${modelName}: ${error.message}`);
+        } finally {
+            // Automatic cleanup - no manual event listener management
+            delete this.installingModels[modelName];
+            this.requestUpdate();
+        }
+    }
+    
+    async downloadWhisperModel(modelId) {
+        // Mark as installing
+        this.installingModels = { ...this.installingModels, [modelId]: 0 };
+        this.requestUpdate();
+        
+        try {
+            const { ipcRenderer } = window.require('electron');
+            
+            // Set up progress listener
+            const progressHandler = (event, { modelId: id, progress }) => {
+                if (id === modelId) {
+                    this.installingModels = { ...this.installingModels, [modelId]: progress };
+                    this.requestUpdate();
+                }
+            };
+            
+            ipcRenderer.on('whisper:download-progress', progressHandler);
+            
+            // Start download
+            const result = await ipcRenderer.invoke('whisper:download-model', modelId);
+            
+            if (result.success) {
+                // Auto-select the model after download
+                await this.selectModel('stt', modelId);
+            } else {
+                alert(`Failed to download Whisper model: ${result.error}`);
+            }
+            
+            // Cleanup
+            ipcRenderer.removeListener('whisper:download-progress', progressHandler);
+        } catch (error) {
+            console.error(`[SettingsView] Error downloading Whisper model ${modelId}:`, error);
+            alert(`Error downloading ${modelId}: ${error.message}`);
+        } finally {
+            delete this.installingModels[modelId];
+            this.requestUpdate();
+        }
+    }
+    
+    getProviderForModel(type, modelId) {
+        for (const [providerId, config] of Object.entries(this.providerConfig)) {
+            const models = type === 'llm' ? config.llmModels : config.sttModels;
+            if (models?.some(m => m.id === modelId)) {
+                return providerId;
+            }
+        }
+        return null;
+    }
+
+    async handleWhisperModelSelect(modelId) {
+        if (!modelId) return;
+        
+        // Select the model (will trigger download if needed)
+        await this.selectModel('stt', modelId);
     }
 
     handleUsePicklesKey(e) {
@@ -637,6 +903,14 @@ export class SettingsView extends LitElement {
         this.cleanupEventListeners();
         this.cleanupIpcListeners();
         this.cleanupWindowResize();
+        
+        // Cancel any ongoing Ollama installations when component is destroyed
+        const installingModels = Object.keys(this.installingModels);
+        if (installingModels.length > 0) {
+            installingModels.forEach(modelName => {
+                this.progressTracker.cancelInstallation(modelName);
+            });
+        }
     }
 
     setupEventListeners() {
@@ -892,6 +1166,36 @@ export class SettingsView extends LitElement {
         }
     }
 
+    async handleOllamaShutdown() {
+        console.log('[SettingsView] Shutting down Ollama service...');
+        
+        if (!window.require) return;
+        
+        const { ipcRenderer } = window.require('electron');
+        
+        try {
+            // Show loading state
+            this.ollamaStatus = { ...this.ollamaStatus, running: false };
+            this.requestUpdate();
+            
+            const result = await ipcRenderer.invoke('ollama:shutdown', false); // Graceful shutdown
+            
+            if (result.success) {
+                console.log('[SettingsView] Ollama shut down successfully');
+                // Refresh status to reflect the change
+                await this.refreshOllamaStatus();
+            } else {
+                console.error('[SettingsView] Failed to shutdown Ollama:', result.error);
+                // Restore previous state on error
+                await this.refreshOllamaStatus();
+            }
+        } catch (error) {
+            console.error('[SettingsView] Error during Ollama shutdown:', error);
+            // Restore previous state on error
+            await this.refreshOllamaStatus();
+        }
+    }
+
 
     //////// before_modelStateService ////////
     // render() {
@@ -1044,20 +1348,124 @@ export class SettingsView extends LitElement {
             <div class="api-key-section">
                 ${Object.entries(this.providerConfig)
                     .filter(([id, config]) => !id.includes('-glass'))
-                    .map(([id, config]) => html`
+                    .map(([id, config]) => {
+                        if (id === 'ollama') {
+                            // Special UI for Ollama
+                            return html`
+                                <div class="provider-key-group">
+                                    <label>${config.name} (Local)</label>
+                                    ${this.ollamaStatus.installed && this.ollamaStatus.running ? html`
+                                        <div style="padding: 8px; background: rgba(0,255,0,0.1); border-radius: 4px; font-size: 11px; color: rgba(0,255,0,0.8);">
+                                            ✓ Ollama is running
+                                        </div>
+                                        <button class="settings-button full-width danger" @click=${this.handleOllamaShutdown}>
+                                            Stop Ollama Service
+                                        </button>
+                                    ` : this.ollamaStatus.installed ? html`
+                                        <div style="padding: 8px; background: rgba(255,200,0,0.1); border-radius: 4px; font-size: 11px; color: rgba(255,200,0,0.8);">
+                                            ⚠ Ollama installed but not running
+                                        </div>
+                                        <button class="settings-button full-width" @click=${() => this.handleSaveKey(id)}>
+                                            Start Ollama
+                                        </button>
+                                    ` : html`
+                                        <div style="padding: 8px; background: rgba(255,100,100,0.1); border-radius: 4px; font-size: 11px; color: rgba(255,100,100,0.8);">
+                                            ✗ Ollama not installed
+                                        </div>
+                                        <button class="settings-button full-width" @click=${() => this.handleSaveKey(id)}>
+                                            Install & Setup Ollama
+                                        </button>
+                                    `}
+                                </div>
+                            `;
+                        }
+                        
+                        if (id === 'whisper') {
+                            // Special UI for Whisper with model selection
+                            const whisperModels = config.sttModels || [];
+                            const selectedWhisperModel = this.selectedStt && this.getProviderForModel('stt', this.selectedStt) === 'whisper' 
+                                ? this.selectedStt 
+                                : null;
+                            
+                            return html`
+                                <div class="provider-key-group">
+                                    <label>${config.name} (Local STT)</label>
+                                    ${this.apiKeys[id] === 'local' ? html`
+                                        <div style="padding: 8px; background: rgba(0,255,0,0.1); border-radius: 4px; font-size: 11px; color: rgba(0,255,0,0.8); margin-bottom: 8px;">
+                                            ✓ Whisper is enabled
+                                        </div>
+                                        
+                                        <!-- Whisper Model Selection Dropdown -->
+                                        <label style="font-size: 10px; margin-top: 8px;">Select Model:</label>
+                                        <select 
+                                            class="model-dropdown" 
+                                            style="width: 100%; padding: 6px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.2); color: white; border-radius: 4px; font-size: 11px; margin-bottom: 8px;"
+                                            @change=${(e) => this.handleWhisperModelSelect(e.target.value)}
+                                            .value=${selectedWhisperModel || ''}
+                                        >
+                                            <option value="">Choose a model...</option>
+                                            ${whisperModels.map(model => {
+                                                const isInstalling = this.installingModels[model.id] !== undefined;
+                                                const progress = this.installingModels[model.id] || 0;
+                                                
+                                                let statusText = '';
+                                                if (isInstalling) {
+                                                    statusText = ` (Downloading ${progress}%)`;
+                                                } else if (model.installed) {
+                                                    statusText = ' (Installed)';
+                                                }
+                                                
+                                                return html`
+                                                    <option value="${model.id}" ?disabled=${isInstalling}>
+                                                        ${model.name}${statusText}
+                                                    </option>
+                                                `;
+                                            })}
+                                        </select>
+                                        
+                                        ${Object.entries(this.installingModels).map(([modelId, progress]) => {
+                                            if (modelId.startsWith('whisper-') && progress !== undefined) {
+                                                return html`
+                                                    <div style="margin: 8px 0;">
+                                                        <div style="font-size: 10px; color: rgba(255,255,255,0.7); margin-bottom: 4px;">
+                                                            Downloading ${modelId}...
+                                                        </div>
+                                                        <div class="install-progress" style="height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden;">
+                                                            <div class="install-progress-bar" style="height: 100%; background: rgba(0, 122, 255, 0.8); width: ${progress}%; transition: width 0.3s ease;"></div>
+                                                        </div>
+                                                    </div>
+                                                `;
+                                            }
+                                            return null;
+                                        })}
+                                        
+                                        <button class="settings-button full-width danger" @click=${() => this.handleClearKey(id)}>
+                                            Disable Whisper
+                                        </button>
+                                    ` : html`
+                                        <button class="settings-button full-width" @click=${() => this.handleSaveKey(id)}>
+                                            Enable Whisper STT
+                                        </button>
+                                    `}
+                                </div>
+                            `;
+                        }
+                        
+                        // Regular providers
+                        return html`
                         <div class="provider-key-group">
                             <label for="key-input-${id}">${config.name} API Key</label>
                             <input type="password" id="key-input-${id}"
                                 placeholder=${loggedIn ? "Using Pickle's Key" : `Enter ${config.name} API Key`} 
                                 .value=${this.apiKeys[id] || ''}
-                                
                             >
                             <div class="key-buttons">
                                <button class="settings-button" @click=${() => this.handleSaveKey(id)} >Save</button>
                                <button class="settings-button danger" @click=${() => this.handleClearKey(id)} }>Clear</button>
                             </div>
                         </div>
-                    `)}
+                        `;
+                    })}
             </div>
         `;
         
@@ -1076,11 +1484,30 @@ export class SettingsView extends LitElement {
                     </button>
                     ${this.isLlmListVisible ? html`
                         <div class="model-list">
-                            ${this.availableLlmModels.map(model => html`
-                                <div class="model-item ${this.selectedLlm === model.id ? 'selected' : ''}" @click=${() => this.selectModel('llm', model.id)}>
-                                    ${model.name}
+                            ${this.availableLlmModels.map(model => {
+                                const isOllama = this.getProviderForModel('llm', model.id) === 'ollama';
+                                const ollamaModel = isOllama ? this.ollamaModels.find(m => m.name === model.id) : null;
+                                const isInstalling = this.installingModels[model.id] !== undefined;
+                                const installProgress = this.installingModels[model.id] || 0;
+                                
+                                return html`
+                                    <div class="model-item ${this.selectedLlm === model.id ? 'selected' : ''}" 
+                                         @click=${() => this.selectModel('llm', model.id)}>
+                                        <span>${model.name}</span>
+                                        ${isOllama ? html`
+                                            ${isInstalling ? html`
+                                                <div class="install-progress">
+                                                    <div class="install-progress-bar" style="width: ${installProgress}%"></div>
                                 </div>
-                            `)}
+                                            ` : ollamaModel?.installed ? html`
+                                                <span class="model-status installed">✓ Installed</span>
+                                            ` : html`
+                                                <span class="model-status not-installed">Click to install</span>
+                                            `}
+                                        ` : ''}
+                                    </div>
+                                `;
+                            })}
                         </div>
                     ` : ''}
                 </div>
@@ -1091,11 +1518,23 @@ export class SettingsView extends LitElement {
                     </button>
                     ${this.isSttListVisible ? html`
                         <div class="model-list">
-                            ${this.availableSttModels.map(model => html`
-                                <div class="model-item ${this.selectedStt === model.id ? 'selected' : ''}" @click=${() => this.selectModel('stt', model.id)}>
-                                    ${model.name}
-                                </div>
-                            `)}
+                            ${this.availableSttModels.map(model => {
+                                const isWhisper = this.getProviderForModel('stt', model.id) === 'whisper';
+                                const isInstalling = this.installingModels[model.id] !== undefined;
+                                const installProgress = this.installingModels[model.id] || 0;
+                                
+                                return html`
+                                    <div class="model-item ${this.selectedStt === model.id ? 'selected' : ''}" 
+                                         @click=${() => this.selectModel('stt', model.id)}>
+                                        <span>${model.name}</span>
+                                        ${isWhisper && isInstalling ? html`
+                                            <div class="install-progress">
+                                                <div class="install-progress-bar" style="width: ${installProgress}%"></div>
+                                            </div>
+                                        ` : ''}
+                                    </div>
+                                `;
+                            })}
                         </div>
                     ` : ''}
                 </div>

@@ -1,6 +1,9 @@
 const { initializeApp } = require('firebase/app');
 const { initializeAuth } = require('firebase/auth');
 const Store = require('electron-store');
+const { getFirestore, setLogLevel } = require('firebase/firestore');
+
+// setLogLevel('debug');
 
 /**
  * Firebase Auth expects the `persistence` option passed to `initializeAuth()` to be *classes*,
@@ -66,6 +69,7 @@ const firebaseConfig = {
 
 let firebaseApp = null;
 let firebaseAuth = null;
+let firestoreInstance = null; // To hold the specific DB instance
 
 function initializeFirebase() {
     if (firebaseApp) {
@@ -84,7 +88,11 @@ function initializeFirebase() {
             persistence: [ElectronStorePersistence],
         });
 
+        // Initialize Firestore with the specific database ID
+        firestoreInstance = getFirestore(firebaseApp, 'pickle-glass');
+
         console.log('[FirebaseClient] Firebase initialized successfully with class-based electron-store persistence.');
+        console.log('[FirebaseClient] Firestore instance is targeting the "pickle-glass" database.');
     } catch (error) {
         console.error('[FirebaseClient] Firebase initialization failed:', error);
     }
@@ -97,7 +105,15 @@ function getFirebaseAuth() {
     return firebaseAuth;
 }
 
+function getFirestoreInstance() {
+    if (!firestoreInstance) {
+        throw new Error("Firestore has not been initialized. Call initializeFirebase() first.");
+    }
+    return firestoreInstance;
+}
+
 module.exports = {
     initializeFirebase,
     getFirebaseAuth,
+    getFirestoreInstance,
 }; 

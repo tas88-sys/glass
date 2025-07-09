@@ -28,8 +28,17 @@ async function sendMessage(userPrompt) {
         askWindow.webContents.send('hide-text-input');
     }
 
+    let sessionId; 
+
     try {
         console.log(`[AskService] 🤖 Processing message: ${userPrompt.substring(0, 50)}...`);
+
+        // --- Save user's message immediately ---
+        // This ensures the user message is always timestamped before the assistant's response.
+        sessionId = await sessionRepository.getOrCreateActive('ask');
+        await askRepository.addAiMessage({ sessionId, role: 'user', content: userPrompt.trim() });
+        console.log(`[AskService] DB: Saved user prompt to session ${sessionId}`);
+        // --- End of user message saving ---
 
         const modelInfo = await getCurrentModelInfo(null, { type: 'llm' });
         if (!modelInfo || !modelInfo.apiKey) {
@@ -99,16 +108,13 @@ async function sendMessage(userPrompt) {
                     if (data === '[DONE]') {
                         askWin.webContents.send('ask-response-stream-end');
                         
-                        // Save to DB
+                        // Save assistant's message to DB
                         try {
-                            const uid = authService.getCurrentUserId();
-                            if (!uid) throw new Error("User not logged in, cannot save message.");
-                            const sessionId = await sessionRepository.getOrCreateActive(uid, 'ask');
-                            await askRepository.addAiMessage({ sessionId, role: 'user', content: userPrompt.trim() });
+                            // sessionId is already available from when we saved the user prompt
                             await askRepository.addAiMessage({ sessionId, role: 'assistant', content: fullResponse });
-                            console.log(`[AskService] DB: Saved ask/answer pair to session ${sessionId}`);
+                            console.log(`[AskService] DB: Saved assistant response to session ${sessionId}`);
                         } catch(dbError) {
-                            console.error("[AskService] DB: Failed to save ask/answer pair:", dbError);
+                            console.error("[AskService] DB: Failed to save assistant response:", dbError);
                         }
                         
                         return { success: true, response: fullResponse };

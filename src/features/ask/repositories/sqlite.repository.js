@@ -1,6 +1,7 @@
 const sqliteClient = require('../../../common/services/sqliteClient');
 
-function addAiMessage({ sessionId, role, content, model = 'gpt-4.1' }) {
+function addAiMessage({ uid, sessionId, role, content, model = 'unknown' }) {
+    // uid is ignored in the SQLite implementation
     const db = sqliteClient.getDb();
     const messageId = require('crypto').randomUUID();
     const now = Math.floor(Date.now() / 1000);

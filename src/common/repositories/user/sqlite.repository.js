@@ -40,7 +40,7 @@ function getById(uid) {
     return db.prepare('SELECT * FROM users WHERE uid = ?').get(uid);
 }
 
-function saveApiKey(apiKey, uid, provider = 'openai') {
+function saveApiKey(uid, apiKey, provider = 'openai') {
     const db = sqliteClient.getDb();
     try {
         const result = db.prepare('UPDATE users SET api_key = ?, provider = ? WHERE uid = ?').run(apiKey, provider, uid);
@@ -56,6 +56,16 @@ function update({ uid, displayName }) {
     const db = sqliteClient.getDb();
     const result = db.prepare('UPDATE users SET display_name = ? WHERE uid = ?').run(displayName, uid);
     return { changes: result.changes };
+}
+
+function setMigrationComplete(uid) {
+    const db = sqliteClient.getDb();
+    const stmt = db.prepare('UPDATE users SET has_migrated_to_firebase = 1 WHERE uid = ?');
+    const result = stmt.run(uid);
+    if (result.changes > 0) {
+        console.log(`[Repo] Marked migration as complete for user ${uid}.`);
+    }
+    return result;
 }
 
 function deleteById(uid) {
@@ -88,5 +98,6 @@ module.exports = {
     getById,
     saveApiKey,
     update,
+    setMigrationComplete,
     deleteById
 }; 

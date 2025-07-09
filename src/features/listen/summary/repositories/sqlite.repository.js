@@ -1,6 +1,7 @@
 const sqliteClient = require('../../../../common/services/sqliteClient');
 
-function saveSummary({ sessionId, tldr, text, bullet_json, action_json, model = 'gpt-4.1' }) {
+function saveSummary({ uid, sessionId, tldr, text, bullet_json, action_json, model = 'unknown' }) {
+    // uid is ignored in the SQLite implementation
     return new Promise((resolve, reject) => {
         try {
             const db = sqliteClient.getDb();

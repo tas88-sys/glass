@@ -7,7 +7,8 @@ const LATEST_SCHEMA = {
             { name: 'created_at', type: 'INTEGER' },
             { name: 'api_key', type: 'TEXT' },
             { name: 'provider', type: 'TEXT DEFAULT \'openai\'' },
-            { name: 'auto_update_enabled', type: 'INTEGER DEFAULT 1' }
+            { name: 'auto_update_enabled', type: 'INTEGER DEFAULT 1' },
+            { name: 'has_migrated_to_firebase', type: 'INTEGER DEFAULT 0' }
         ]
     },
     sessions: {
@@ -71,6 +72,23 @@ const LATEST_SCHEMA = {
             { name: 'is_default', type: 'INTEGER NOT NULL' },
             { name: 'created_at', type: 'INTEGER' },
             { name: 'sync_state', type: 'TEXT DEFAULT \'clean\'' }
+        ]
+    },
+    ollama_models: {
+        columns: [
+            { name: 'name', type: 'TEXT PRIMARY KEY' },
+            { name: 'size', type: 'TEXT NOT NULL' },
+            { name: 'installed', type: 'INTEGER DEFAULT 0' },
+            { name: 'installing', type: 'INTEGER DEFAULT 0' }
+        ]
+    },
+    whisper_models: {
+        columns: [
+            { name: 'id', type: 'TEXT PRIMARY KEY' },
+            { name: 'name', type: 'TEXT NOT NULL' },
+            { name: 'size', type: 'TEXT NOT NULL' },
+            { name: 'installed', type: 'INTEGER DEFAULT 0' },
+            { name: 'installing', type: 'INTEGER DEFAULT 0' }
         ]
     }
 };

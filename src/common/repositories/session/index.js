@@ -1,26 +1,60 @@
 const sqliteRepository = require('./sqlite.repository');
-// const firebaseRepository = require('./firebase.repository'); // Future implementation
-const authService = require('../../../common/services/authService');
+const firebaseRepository = require('./firebase.repository');
 
-function getRepository() {
-    // In the future, we can check the user's login status from authService
-    // const user = authService.getCurrentUser();
-    // if (user.isLoggedIn) {
-    //     return firebaseRepository;
-    // }
+let authService = null;
+
+function setAuthService(service) {
+    authService = service;
+}
+
+function getBaseRepository() {
+    if (!authService) {
+        // Fallback or error if authService is not set, to prevent crashes.
+        // During initial load, it might not be set, so we default to sqlite.
+        return sqliteRepository;
+    }
+    const user = authService.getCurrentUser();
+    if (user && user.isLoggedIn) {
+        return firebaseRepository;
+    }
     return sqliteRepository;
 }
 
-// Directly export functions for ease of use, decided by the strategy
-module.exports = {
-    getById: (...args) => getRepository().getById(...args),
-    create: (...args) => getRepository().create(...args),
-    getAllByUserId: (...args) => getRepository().getAllByUserId(...args),
-    updateTitle: (...args) => getRepository().updateTitle(...args),
-    deleteWithRelatedData: (...args) => getRepository().deleteWithRelatedData(...args),
-    end: (...args) => getRepository().end(...args),
-    updateType: (...args) => getRepository().updateType(...args),
-    touch: (...args) => getRepository().touch(...args),
-    getOrCreateActive: (...args) => getRepository().getOrCreateActive(...args),
-    endAllActiveSessions: (...args) => getRepository().endAllActiveSessions(...args),
-}; 
+// The adapter layer that injects the UID
+const sessionRepositoryAdapter = {
+    setAuthService, // Expose the setter
+
+    getById: (id) => getBaseRepository().getById(id),
+    
+    create: (type = 'ask') => {
+        const uid = authService.getCurrentUserId();
+        return getBaseRepository().create(uid, type);
+    },
+    
+    getAllByUserId: () => {
+        const uid = authService.getCurrentUserId();
+        return getBaseRepository().getAllByUserId(uid);
+    },
+
+    updateTitle: (id, title) => getBaseRepository().updateTitle(id, title),
+    
+    deleteWithRelatedData: (id) => getBaseRepository().deleteWithRelatedData(id),
+
+    end: (id) => getBaseRepository().end(id),
+
+    updateType: (id, type) => getBaseRepository().updateType(id, type),
+
+    touch: (id) => getBaseRepository().touch(id),
+
+    getOrCreateActive: (requestedType = 'ask') => {
+        const uid = authService.getCurrentUserId();
+        return getBaseRepository().getOrCreateActive(uid, requestedType);
+    },
+
+    endAllActiveSessions: () => {
+        const uid = authService.getCurrentUserId();
+        return getBaseRepository().endAllActiveSessions(uid);
+    },
+};
+
+module.exports = sessionRepositoryAdapter; 

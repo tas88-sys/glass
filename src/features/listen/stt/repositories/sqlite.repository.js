@@ -1,6 +1,7 @@
 const sqliteClient = require('../../../../common/services/sqliteClient');
 
-function addTranscript({ sessionId, speaker, text }) {
+function addTranscript({ uid, sessionId, speaker, text }) {
+    // uid is ignored in the SQLite implementation
     const db = sqliteClient.getDb();
     const transcriptId = require('crypto').randomUUID();
     const now = Math.floor(Date.now() / 1000);

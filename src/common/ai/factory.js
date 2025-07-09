@@ -57,6 +57,34 @@ const PROVIDERS = {
       ],
       sttModels: [],
   },
+  'ollama': {
+      name: 'Ollama (Local)',
+      handler: () => require("./providers/ollama"),
+      llmModels: [], // Dynamic models populated from installed Ollama models
+      sttModels: [], // Ollama doesn't support STT yet
+  },
+  'whisper': {
+      name: 'Whisper (Local)',
+      handler: () => {
+          // Only load in main process
+          if (typeof window === 'undefined') {
+              return require("./providers/whisper");
+          }
+          // Return dummy for renderer
+          return {
+              createSTT: () => { throw new Error('Whisper STT is only available in main process'); },
+              createLLM: () => { throw new Error('Whisper does not support LLM'); },
+              createStreamingLLM: () => { throw new Error('Whisper does not support LLM'); }
+          };
+      },
+      llmModels: [],
+      sttModels: [
+          { id: 'whisper-tiny', name: 'Whisper Tiny (39M)' },
+          { id: 'whisper-base', name: 'Whisper Base (74M)' },
+          { id: 'whisper-small', name: 'Whisper Small (244M)' },
+          { id: 'whisper-medium', name: 'Whisper Medium (769M)' },
+      ],
+  },
 };
 
 function sanitizeModelId(model) {

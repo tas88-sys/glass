@@ -77,12 +77,15 @@ class ListenService {
 
     async initializeNewSession() {
         try {
-            const uid = authService.getCurrentUserId();
-            if (!uid) {
-                throw new Error("Cannot initialize session: user not logged in.");
+            // The UID is no longer passed to the repository method directly.
+            // The adapter layer handles UID injection. We just ensure a user is available.
+            const user = authService.getCurrentUser();
+            if (!user) {
+                // This case should ideally not happen as authService initializes a default user.
+                throw new Error("Cannot initialize session: auth service not ready.");
             }
             
-            this.currentSessionId = await sessionRepository.getOrCreateActive(uid, 'listen');
+            this.currentSessionId = await sessionRepository.getOrCreateActive('listen');
             console.log(`[DB] New listen session ensured: ${this.currentSessionId}`);
 
             // Set session ID for summary service

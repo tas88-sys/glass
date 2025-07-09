@@ -1,8 +1,10 @@
 const { onAuthStateChanged, signInWithCustomToken, signOut } = require('firebase/auth');
 const { BrowserWindow } = require('electron');
 const { getFirebaseAuth } = require('./firebaseClient');
-const userRepository = require('../repositories/user');
 const fetch = require('node-fetch');
+const encryptionService = require('./encryptionService');
+const migrationService = require('./migrationService');
+const sessionRepository = require('../repositories/session');
 
 async function getVirtualKeyByEmail(email, idToken) {
     if (!idToken) {
@@ -37,11 +39,21 @@ class AuthService {
         this.currentUserMode = 'local'; // 'local' or 'firebase'
         this.currentUser = null;
         this.isInitialized = false;
+
+        // Initialize immediately for the default local user on startup.
+        // This ensures the key is ready before any login/logout state change.
+        encryptionService.initializeKey(this.currentUserId);
         this.initializationPromise = null;
     }
 
     initialize() {
         if (this.isInitialized) return this.initializationPromise;
+
+        // --- Break the circular dependency ---
+        // Inject this authService instance into the session repository so it can be used
+        // without a direct `require` cycle.
+        sessionRepository.setAuthService(this);
+        // --- End of dependency injection ---
 
         this.initializationPromise = new Promise((resolve) => {
             const auth = getFirebaseAuth();
@@ -54,6 +66,17 @@ class AuthService {
                     this.currentUser = user;
                     this.currentUserId = user.uid;
                     this.currentUserMode = 'firebase';
+
+                    // Clean up any zombie sessions from a previous run for this user.
+                    await sessionRepository.endAllActiveSessions();
+
+                    // ** Initialize encryption key for the logged-in user **
+                    await encryptionService.initializeKey(user.uid);
+
+                    // ** Check for and run data migration for the user **
+                    // No 'await' here, so it runs in the background without blocking startup.
+                    migrationService.checkAndRunMigration(user);
+
 
                     // Start background task to fetch and save virtual key
                     (async () => {
@@ -83,6 +106,12 @@ class AuthService {
                     this.currentUser = null;
                     this.currentUserId = 'default_user';
                     this.currentUserMode = 'local';
+
+                    // End active sessions for the local/default user as well.
+                    await sessionRepository.endAllActiveSessions();
+
+                    // ** Initialize encryption key for the default/local user **
+                    await encryptionService.initializeKey(this.currentUserId);
                 }
                 this.broadcastUserState();
                 
@@ -112,6 +141,9 @@ class AuthService {
     async signOut() {
         const auth = getFirebaseAuth();
         try {
+            // End all active sessions for the current user BEFORE signing out.
+            await sessionRepository.endAllActiveSessions();
+
             await signOut(auth);
             console.log('[AuthService] User sign-out initiated successfully.');
             // onAuthStateChanged will handle the state update and broadcast,
