@@ -2,52 +2,57 @@
 
 Thank you for considering contributing to **Glass by Pickle**! Contributions make the open-source community vibrant, innovative, and collaborative. We appreciate every contribution you make—big or small.
 
-## 📌 Contribution Guidelines
-
-### 👥 Avoid Work Duplication
-
-Before creating an issue or submitting a pull request (PR), please check existing [Issues](https://github.com/pickle-com/glass/issues) and [Pull Requests](https://github.com/pickle-com/glass/pulls) to prevent duplicate efforts.
-
-### ✅ Start with Approved Issues
-
-- **Feature Requests**: Please wait for approval from core maintainers before starting work. Issues needing approval are marked with the `🚨 needs approval` label.
-- **Bugs & Improvements**: You may begin immediately without explicit approval.
-
-### 📝 Clearly Document Your Work
-
-Provide enough context and detail to allow easy understanding. Issues and PRs should clearly communicate the problem or feature and stand alone without external references.
-
-### 💡 Summarize Pull Requests
-
-Include a brief summary at the top of your PR, describing the intent and scope of your changes.
-
-### 🔗 Link Related Issues
-
-Use GitHub keywords (`Closes #123`, `Fixes #456`) to auto-link and close issues upon PR merge.
-
-### 🧪 Include Testing Information
-
-Clearly state how your changes were tested.
-
-> Example:  
-> "Tested locally on macOS 14, confirmed all features working as expected."
-
-### 🧠 Future-Proof Your Descriptions
-
-Document trade-offs, edge cases, and temporary workarounds clearly to help future maintainers understand your decisions.
+This document guides you through the entire contribution process, from finding an issue to getting your pull request merged.
 
 ---
 
-## 🔖 Issue Priorities
+## 🚀 Contribution Workflow
 
-| Issue Type                                         | Priority            |
-|----------------------------------------------------|---------------------|
-| Minor enhancements & non-core feature requests     | 🟢 Low Priority     |
-| UX improvements & minor bugs                       | 🟡 Medium Priority  |
-| Core functionalities & essential features          | 🟠 High Priority    |
-| Critical bugs & breaking issues                    | 🔴 Urgent           |
-|
+To ensure a smooth and effective workflow, all contributions must go through the following process. Please follow these steps carefully.
 
+### 1. Find or Create an Issue
+
+All work begins with an issue. This is the central place to discuss new ideas and track progress.
+
+-   Browse our existing [**Issues**](https://github.com/pickle-com/glass/issues) to find something you'd like to work on. We recommend looking for issues labeled `good first issue` if you're new!
+-   If you have a new idea or find a bug that hasn't been reported, please **create a new issue** using our templates.
+
+### 2. Claim the Issue
+
+To avoid duplicate work, you must claim an issue before you start coding.
+
+-   On the issue you want to work on, leave a comment with the command:
+    ```
+    /assign
+    ```
+-   Our GitHub bot will automatically assign the issue to you. Once your profile appears in the **`Assignees`** section on the right, you are ready to start development.
+
+### 3. Fork & Create a Branch
+
+Now it's time to set up your local environment.
+
+1.  **Fork** the repository to your own GitHub account.
+2.  **Clone** your forked repository to your local machine.
+3.  **Create a new branch** from `main`. A clear branch name is recommended.
+    -   For new features: `feat/short-description` (e.g., `feat/user-login-ui`)
+    -   For bug fixes: `fix/short-description` (e.g., `fix/header-rendering-bug`)
+
+### 4. Develop
+
+Write your code! As you work, please adhere to our quality standards.
+
+-   **Code Style & Quality**: Our project uses `Prettier` and `ESLint` to maintain a consistent code style.
+-   **Architecture & Design Patterns**: All new code must be consistent with the project's architecture. Please read our **[Design Patterns Guide](https://github.com/pickle-com/glass/blob/main/docs/DESIGN_PATTERNS.md)** before making significant changes.
+
+### 5. Create a Pull Request (PR)
+
+Once your work is ready, create a Pull Request to the `main` branch of the original repository.
+
+-   **Fill out the PR Template**: Our template will appear automatically. Please provide a clear summary of your changes.
+-   **Link the Issue**: In the PR description, include the line `Closes #XXX` (e.g., `Closes #123`) to link it to the issue you resolved. This is mandatory.
+-   **Code Review**: A maintainer will review your code, provide feedback, and merge it.
+
+---
 
 # Developing
 
@@ -86,10 +91,3 @@ npm run lint
 ```
 
 If you get errors, be sure to fix them before committing.
-
-
-## Making a Pull Request
-
-- Be sure to [check the "Allow edits from maintainers" option](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/allowing-changes-to-a-pull-request-branch-created-from-a-fork) when creating your PR. (This option isn't available if you're [contributing from a fork belonging to an organization](https://github.com/orgs/community/discussions/5634))
-- If your PR refers to or fixes an issue, add `refs #XXX` or `fixes #XXX` to the PR description. Replace `XXX` with the respective issue number. See more about [linking a pull request to an issue](https://docs.github.com/en/issues/tracking-your-work-with-issues/linking-a-pull-request-to-an-issue).
-- Lastly, make sure to keep your branches updated (e.g., click the `Update branch` button on the GitHub PR page).
