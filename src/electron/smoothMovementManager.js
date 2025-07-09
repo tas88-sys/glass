@@ -122,6 +122,11 @@ class SmoothMovementManager {
 
         console.log(`[MovementManager] Moving ${direction} from (${targetX}, ${targetY})`);
 
+        const windowSize = {
+            width: currentBounds.width,
+            height: currentBounds.height
+        };
+
         switch (direction) {
             case 'left': targetX -= this.stepSize; break;
             case 'right': targetX += this.stepSize; break;
@@ -165,7 +170,7 @@ class SmoothMovementManager {
         this.animateToPosition(header, clampedX, clampedY);
     }
 
-    animateToPosition(header, targetX, targetY) {
+    animateToPosition(header, targetX, targetY, windowSize) {
         if (!this._isWindowValid(header)) return;
         
         this.isAnimating = true;
@@ -193,7 +198,13 @@ class SmoothMovementManager {
             }
 
             if (!this._isWindowValid(header)) return;
-            header.setPosition(Math.round(currentX), Math.round(currentY));
+            const { width, height } = windowSize || header.getBounds();
+            header.setBounds({
+                x: Math.round(currentX),
+                y: Math.round(currentY),
+                width,
+                height
+            });
 
             if (progress < 1) {
                 this.animationFrameId = setTimeout(animate, 8);
@@ -219,20 +230,40 @@ class SmoothMovementManager {
         const display = this.getCurrentDisplay(header);
         const { width, height } = display.workAreaSize;
         const { x: workAreaX, y: workAreaY } = display.workArea;
-        const headerBounds = header.getBounds();
         const currentBounds = header.getBounds();
+        
+        const windowSize = {
+            width: currentBounds.width,
+            height: currentBounds.height
+        };
+
         let targetX = currentBounds.x;
         let targetY = currentBounds.y;
 
         switch (direction) {
-            case 'left': targetX = workAreaX; break;
-            case 'right': targetX = workAreaX + width - headerBounds.width; break;
-            case 'up': targetY = workAreaY; break;
-            case 'down': targetY = workAreaY + height - headerBounds.height; break;
+            case 'left': 
+                targetX = workAreaX; 
+                break;
+            case 'right': 
+                targetX = workAreaX + width - windowSize.width; 
+                break;
+            case 'up': 
+                targetY = workAreaY; 
+                break;
+            case 'down': 
+                targetY = workAreaY + height - windowSize.height; 
+                break;
         }
 
-        this.headerPosition = { x: currentBounds.x, y: currentBounds.y };
-        this.animateToPosition(header, targetX, targetY);
+        header.setBounds({
+            x: Math.round(targetX),
+            y: Math.round(targetY),
+            width: windowSize.width,
+            height: windowSize.height
+        });
+
+        this.headerPosition = { x: targetX, y: targetY };
+        this.updateLayout();
     }
 
     destroy() {

@@ -383,6 +383,29 @@ async function updateContentProtection(enabled) {
     }
 }
 
+async function getAutoUpdateSetting() {
+    try {
+        const uid = authService.getCurrentUserId();
+        // This can be awaited if the repository returns a promise.
+        // Assuming it's synchronous for now based on original structure.
+        return settingsRepository.getAutoUpdate(uid);
+    } catch (error) {
+        console.error('[SettingsService] Error getting auto update setting:', error);
+        return true; // Fallback to enabled
+    }
+}
+
+async function setAutoUpdateSetting(isEnabled) {
+    try {
+        const uid = authService.getCurrentUserId();
+        await settingsRepository.setAutoUpdate(uid, isEnabled);
+        return { success: true };
+    } catch (error) {
+        console.error('[SettingsService] Error setting auto update setting:', error);
+        return { success: false, error: error.message };
+    }
+}
+
 function initialize() {
     // cleanup 
     windowNotificationManager.cleanup();
@@ -428,6 +451,15 @@ function initialize() {
     ipcMain.handle('settings:updateContentProtection', async (event, enabled) => {
         return await updateContentProtection(enabled);
     });
+
+    ipcMain.handle('settings:get-auto-update', async () => {
+        return await getAutoUpdateSetting();
+    });
+
+    ipcMain.handle('settings:set-auto-update', async (event, isEnabled) => {
+        console.log('[SettingsService] Setting auto update setting:', isEnabled);
+        return await setAutoUpdateSetting(isEnabled);
+    });
     
     console.log('[SettingsService] Initialized and ready.');
 }
@@ -459,4 +491,5 @@ module.exports = {
     saveApiKey,
     removeApiKey,
     updateContentProtection,
+    getAutoUpdateSetting,
 };
