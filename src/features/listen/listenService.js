@@ -144,9 +144,7 @@ class ListenService {
 
             console.log('✅ Listen service initialized successfully.');
             
-            this.sendToRenderer('session-state-changed', { isActive: true });
             this.sendToRenderer('update-status', 'Connected. Ready to listen.');
-            // this.sendToRenderer('change-listen-capture-state', { status: "start" });
             
             return true;
         } catch (error) {
@@ -181,6 +179,7 @@ class ListenService {
 
     async closeSession() {
         try {
+            this.sendToRenderer('change-listen-capture-state', { status: "stop" });
             // Close STT sessions
             await this.sttService.closeSessions();
 
@@ -194,9 +193,7 @@ class ListenService {
             this.currentSessionId = null;
             this.summaryService.resetConversationHistory();
 
-            this.sendToRenderer('session-state-changed', { isActive: false });
             this.sendToRenderer('session-did-close');
-            this.sendToRenderer('change-listen-capture-state', { status: "stop" });
 
             console.log('Listen service session closed.');
             return { success: true };
@@ -285,9 +282,9 @@ class ListenService {
             }
         });
 
-        ipcMain.handle('close-session', async () => {
-            return await this.closeSession();
-        });
+        // ipcMain.handle('close-session', async () => {
+        //     return await this.closeSession();
+        // });
 
         ipcMain.handle('update-google-search-setting', async (event, enabled) => {
             try {

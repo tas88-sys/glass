@@ -472,7 +472,7 @@ function createWindows() {
             createFeatureWindows(windowPool.get('header'));
         }
 
-
+        const header = windowPool.get('header');
         if (featureName === 'listen') {
             console.log(`[WindowManager] Toggling feature: ${featureName}`);
             const listenWindow = windowPool.get(featureName);
@@ -480,18 +480,22 @@ function createWindows() {
             if (listenService && listenService.isSessionActive()) {
                 console.log('[WindowManager] Listen session is active, closing it via toggle.');
                 await listenService.closeSession();
-                return;
-            }
-            
-            if (listenWindow.isVisible()) {
-                listenWindow.webContents.send('window-hide-animation');
+                listenWindow.webContents.send('session-state-changed', { isActive: false });
+                header.webContents.send('session-state-text', 'Done');
+                // return;
             } else {
-                listenWindow.show();
-                updateLayout();
-                // listenWindow.webContents.send('start-listening-session');
-                listenWindow.webContents.send('window-show-animation');
-                await listenService.initializeSession();
-                // listenWindow.webContents.send('start-listening-session');
+                if (listenWindow.isVisible()) {
+                    listenWindow.webContents.send('window-hide-animation');
+                    listenWindow.webContents.send('session-state-changed', { isActive: false });
+                    header.webContents.send('session-state-text', 'Listen');
+                } else {
+                    listenWindow.show();
+                    updateLayout();
+                    listenWindow.webContents.send('window-show-animation');
+                    await listenService.initializeSession();
+                    listenWindow.webContents.send('session-state-changed', { isActive: true });
+                    header.webContents.send('session-state-text', 'Stop');
+                }
             }
         }
 

@@ -7,15 +7,9 @@ let aecPtr        = 0;        // Rust Aec* 1개만 재사용
 
 /** WASM 모듈 가져오고 1회 초기화 */
 async function getAec () {
-    if (aecModPromise) {
-        console.log('[AEC] getAec: 캐시=있음(재사용)');
-        return aecModPromise;                      // 캐시
-      }
-    
-      console.log('[AEC] getAec: 캐시=없음 → 모듈 로드 시작');
+  if (aecModPromise) return aecModPromise;   // 캐시
 
     aecModPromise = createAecModule().then((M) => {
-        console.log('[AEC] WASM 모듈 로드 완료');
         aecMod = M; 
         // C 심볼 → JS 래퍼 바인딩 (딱 1번)
         M.newPtr   = M.cwrap('AecNew',        'number',
@@ -24,12 +18,7 @@ async function getAec () {
                             ['number','number','number','number','number']);
         M.destroy  = M.cwrap('AecDestroy',    null, ['number']);
         return M;
-    })    
-    .catch(err => {
-        console.error('[AEC] WASM 모듈 로드 실패:', err);
-        throw err;                               // 상위에서도 잡을 수 있게
-      });
-      
+    });
 
   return aecModPromise;
 }
@@ -143,10 +132,6 @@ function disposeAec () {
 }
 
 function runAecSync (micF32, sysF32) {
-    const modStat  = aecMod?.HEAPU8        ? '있음' : '없음'; // aecMod가 초기화되었고 HEAP 접근 가능?
-    const ptrStat  = aecPtr                ? '있음' : '없음'; // newPtr 호출 여부
-    const heapStat = aecMod?.HEAPU8        ? '있음' : '없음'; // HEAPU8 생성 여부
-    console.log(`[AEC] mod:${modStat} ptr:${ptrStat} heap:${heapStat}`);
   if (!aecMod || !aecPtr || !aecMod.HEAPU8) return micF32;          // 아직 모듈 안 뜸 → 패스
 
   const len  = micF32.length;
@@ -160,7 +145,6 @@ function runAecSync (micF32, sysF32) {
   const outF32  = float32FromInt16View(new Int16Array(heapBuf, out, len));
 
   aecMod._free(mic.ptr); aecMod._free(echo.ptr); aecMod._free(out);
-  console.log(`[AEC] 적용 완료`);
   return outF32;
 }
 
@@ -282,7 +266,7 @@ async function setupMicProcessing(micStream) {
     micProcessor.onaudioprocess = (e) => {
         const inputData = e.inputBuffer.getChannelData(0);
         audioBuffer.push(...inputData);
-        // console.log('🎤 micProcessor.onaudioprocess');
+        console.log('🎤 micProcessor.onaudioprocess');
 
         // samplesPerChunk(=2400) 만큼 모이면 전송
         while (audioBuffer.length >= samplesPerChunk) {
@@ -296,7 +280,7 @@ async function setupMicProcessing(micStream) {
 
                 // **음성 구간일 때만 런**
                 processedChunk = runAecSync(new Float32Array(chunk), sysF32);
-                // console.log('🔊 Applied WASM-AEC (speex)');
+                console.log('🔊 Applied WASM-AEC (speex)');
             } else {
                 console.log('🔊 No system audio for AEC reference');
             }
