@@ -199,7 +199,7 @@ app.whenReady().then(async () => {
         await authService.initialize();
 
         //////// after_modelStateService ////////
-        modelStateService.initialize();
+        await modelStateService.initialize();
         //////// after_modelStateService ////////
 
         listenService.setupIpcHandlers();
