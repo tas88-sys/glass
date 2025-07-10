@@ -146,6 +146,7 @@ class ListenService {
             
             this.sendToRenderer('session-state-changed', { isActive: true });
             this.sendToRenderer('update-status', 'Connected. Ready to listen.');
+            // this.sendToRenderer('change-listen-capture-state', { status: "start" });
             
             return true;
         } catch (error) {
@@ -155,6 +156,7 @@ class ListenService {
         } finally {
             this.isInitializingSession = false;
             this.sendToRenderer('session-initializing', false);
+            this.sendToRenderer('change-listen-capture-state', { status: "start" });
         }
     }
 
@@ -194,6 +196,7 @@ class ListenService {
 
             this.sendToRenderer('session-state-changed', { isActive: false });
             this.sendToRenderer('session-did-close');
+            this.sendToRenderer('change-listen-capture-state', { status: "stop" });
 
             console.log('Listen service session closed.');
             return { success: true };

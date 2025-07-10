@@ -90,7 +90,7 @@ function createFeatureWindows(header, namesToCreate) {
         hasShadow: false,
         skipTaskbar: true,
         hiddenInMissionControl: true,
-        resizable: false,
+        resizable: true,
         webPreferences: { nodeIntegration: true, contextIsolation: false },
     };
 
@@ -100,8 +100,8 @@ function createFeatureWindows(header, namesToCreate) {
         switch (name) {
             case 'listen': {
                 const listen = new BrowserWindow({
-                    ...commonChildOptions, width:400,minWidth:400,maxWidth:400,
-                    maxHeight:700,
+                    ...commonChildOptions, width:400,minWidth:400,maxWidth:900,
+                    maxHeight:900,
                 });
                 listen.setContentProtection(isContentProtectionOn);
                 listen.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
@@ -472,18 +472,27 @@ function createWindows() {
             createFeatureWindows(windowPool.get('header'));
         }
 
-        const windowToToggle = windowPool.get(featureName);
 
-        if (windowToToggle) {
-            if (featureName === 'listen') {
-                const listenService = global.listenService;
-                if (listenService && listenService.isSessionActive()) {
-                    console.log('[WindowManager] Listen session is active, closing it via toggle.');
-                    await listenService.closeSession();
-                    return;
-                }
-            }
+        if (featureName === 'listen') {
             console.log(`[WindowManager] Toggling feature: ${featureName}`);
+            const listenWindow = windowPool.get(featureName);
+            const listenService = global.listenService;
+            if (listenService && listenService.isSessionActive()) {
+                console.log('[WindowManager] Listen session is active, closing it via toggle.');
+                await listenService.closeSession();
+                return;
+            }
+            
+            if (listenWindow.isVisible()) {
+                listenWindow.webContents.send('window-hide-animation');
+            } else {
+                listenWindow.show();
+                updateLayout();
+                // listenWindow.webContents.send('start-listening-session');
+                listenWindow.webContents.send('window-show-animation');
+                await listenService.initializeSession();
+                // listenWindow.webContents.send('start-listening-session');
+            }
         }
 
         if (featureName === 'ask') {
@@ -561,31 +570,29 @@ function createWindows() {
                 askWindow.webContents.send('window-show-animation');
                 askWindow.webContents.send('window-did-show');
             }
-        } else {
-            const windowToToggle = windowPool.get(featureName);
+        }
 
-            if (windowToToggle) {
-                if (windowToToggle.isDestroyed()) {
+        if (featureName === 'settings') {
+            const settingsWindow = windowPool.get(featureName);
+
+            if (settingsWindow) {
+                if (settingsWindow.isDestroyed()) {
                     console.error(`Window ${featureName} is destroyed, cannot toggle`);
                     return;
                 }
 
-                if (windowToToggle.isVisible()) {
+                if (settingsWindow.isVisible()) {
                     if (featureName === 'settings') {
-                        windowToToggle.webContents.send('settings-window-hide-animation');
+                        settingsWindow.webContents.send('settings-window-hide-animation');
                     } else {
-                        windowToToggle.webContents.send('window-hide-animation');
+                        settingsWindow.webContents.send('window-hide-animation');
                     }
                 } else {
                     try {
-                        windowToToggle.show();
+                        settingsWindow.show();
                         updateLayout();
 
-                        if (featureName === 'listen') {
-                            windowToToggle.webContents.send('start-listening-session');
-                        }
-
-                        windowToToggle.webContents.send('window-show-animation');
+                        settingsWindow.webContents.send('window-show-animation');
                     } catch (e) {
                         console.error('Error showing window:', e);
                     }
