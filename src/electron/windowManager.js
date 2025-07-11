@@ -38,6 +38,7 @@ const isLiquidGlassSupported = () => {
     const majorVersion = parseInt(os.release().split('.')[0], 10);
     // return majorVersion >= 25; // macOS 26+ (Darwin 25+)
     return majorVersion >= 25; // See you soon!
+    return majorVersion >= 25; // See you soon!
 };
 let shouldUseLiquidGlass = isLiquidGlassSupported();
 if (shouldUseLiquidGlass) {
@@ -394,6 +395,7 @@ function createWindows() {
         headerLoadOptions.query = { glass: 'true' };
         header.loadFile(path.join(__dirname, '../app/header.html'), headerLoadOptions);
         header.webContents.once('did-finish-load', () => {
+            const viewId = liquidGlass.addView(header.getNativeWindowHandle());
             const viewId = liquidGlass.addView(header.getNativeWindowHandle());
             if (viewId !== -1) {
                 liquidGlass.unstable_setVariant(viewId, liquidGlass.GlassMaterialVariant.bubbles);
