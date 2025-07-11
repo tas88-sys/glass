@@ -1,54 +1,32 @@
 const { ipcRenderer } = require('electron');
 const createAecModule = require('../../../assets/aec.js');
 
+let aecModPromise = null;     // 한 번만 로드
+let aecMod        = null;
+let aecPtr        = 0;        // Rust Aec* 1개만 재사용
 
-const getAecModule = (() => {
-    let aecModPromise = null; 
+/** WASM 모듈 가져오고 1회 초기화 */
+async function getAec () {
+  if (aecModPromise) return aecModPromise;   // 캐시
 
-    return () => {
-        if (aecModPromise) {
-            console.log('[AEC] getAecModule: cache=exists (reuse)');
-            return aecModPromise;
-        }
+    aecModPromise = createAecModule().then((M) => {
+        aecMod = M; 
 
-        console.log('[AEC] getAecModule: cache=none → load module');
-        aecModPromise = createAecModule().then((M) => {
-                        // --- WORKAROUND START ---
-            // HEAPU8이 없는 경우 수동으로 할당 시도
-            if (!M.HEAPU8) {
-                console.warn('[AEC] HEAPU8 is missing. Attempting manual assignment.');
-                // Emscripten 버전에 따라 메모리 위치가 다를 수 있습니다.
-                // mod.wasmMemory 또는 mod.instance.exports.memory 등을 시도해볼 수 있습니다.
-                const memory = M.wasmMemory || (M.instance && M.instance.exports.memory);
-                
-                if (memory) {
-                    M.HEAPU8 = new Uint8Array(memory.buffer);
-                    console.log('[AEC] Manual HEAPU8 assignment successful.');
-                } else {
-                    console.error('[AEC] Manual HEAPU8 assignment failed: memory object not found.');
-                }
-            }
-            // --- WORKAROUND END ---
-            console.log('[AEC] WASM module loaded');
-            M.newPtr   = M.cwrap('AecNew',        'number', ['number','number','number','number']);
-            M.cancel   = M.cwrap('AecCancelEcho', null,     ['number','number','number','number','number']);
-            M.destroy  = M.cwrap('AecDestroy',    null,     ['number']);
-            return M;
-        }).catch(err => {
-            console.error('[AEC] WASM module load failed:', err);
-            aecModPromise = null;
-            throw err;
-        });
+        console.log('WASM Module Loaded:', M); 
+        // C 심볼 → JS 래퍼 바인딩 (딱 1번)
+        M.newPtr   = M.cwrap('AecNew',        'number',
+                            ['number','number','number','number']);
+        M.cancel   = M.cwrap('AecCancelEcho', null,
+                            ['number','number','number','number','number']);
+        M.destroy  = M.cwrap('AecDestroy',    null, ['number']);
+        return M;
+    });
 
-        return aecModPromise;
-    };
-})();
+  return aecModPromise;
+}
 
-getAecModule().catch(console.error);
-let aecCleanupCallback = null;
-
-
-
+// 바로 로드-실패 로그를 보기 위해
+// getAec().catch(console.error);
 // ---------------------------
 // Constants & Globals
 // ---------------------------
@@ -134,6 +112,7 @@ function int16PtrFromFloat32(mod, f32) {
   const len   = f32.length;
   const bytes = len * 2;
   const ptr   = mod._malloc(bytes);
+  // HEAP16이 없으면 HEAPU8.buffer로 직접 래핑
   const heapBuf = (mod.HEAP16 ? mod.HEAP16.buffer : mod.HEAPU8.buffer);
   const i16   = new Int16Array(heapBuf, ptr, len);
   for (let i = 0; i < len; ++i) {
@@ -149,26 +128,72 @@ function float32FromInt16View(i16) {
   return out;
 }
 
+/* 필요하다면 종료 시 */
+function disposeAec () {
+  getAec().then(mod => { if (aecPtr) mod.destroy(aecPtr); });
+}
 
-function runAecSync (mod, aecPtr, micF32, sysF32) {
-    console.log(`[AEC-Check] mod: ${!!mod}, aecPtr: ${!!aecPtr}, mod.HEAPU8: ${!!(mod && mod.HEAPU8)}`);
-    if (!mod || !aecPtr || !mod.HEAPU8) {
+// listenCapture.js
+
+function runAecSync(micF32, sysF32) {
+    if (!aecMod || !aecPtr || !aecMod.HEAPU8) {
+        // console.log('🔊 No AEC module or heap buffer');
         return micF32;
     }
-    
-    const len  = micF32.length;
-    const mic  = int16PtrFromFloat32(mod, micF32);
-    const echo = int16PtrFromFloat32(mod, sysF32);
-    const out  = mod._malloc(len * 2);
 
-    mod.cancel(aecPtr, mic.ptr, echo.ptr, out, len);
+    // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+    //                  새로운 프레임 단위 처리 로직
+    // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 
-    const heapBuf = (mod.HEAP16 ? mod.HEAP16.buffer : mod.HEAPU8.buffer);
-    const outF32  = float32FromInt16View(new Int16Array(heapBuf, out, len));
+    const frameSize = 160; // AEC 모듈 초기화 시 설정한 프레임 크기
+    const numFrames = Math.floor(micF32.length / frameSize);
 
-    mod._free(mic.ptr); mod._free(echo.ptr); mod._free(out);
-    console.log(`[AEC] Applied WASM-AEC (speex)`);
-    return outF32;
+    // 최종 처리된 오디오 데이터를 담을 버퍼
+    const processedF32 = new Float32Array(micF32.length);
+
+    // 시스템 오디오와 마이크 오디오의 길이를 맞춥니다. (안정성 확보)
+    let alignedSysF32 = new Float32Array(micF32.length);
+    if (sysF32.length > 0) {
+        // sysF32를 micF32 길이에 맞게 자르거나 채웁니다.
+        const lengthToCopy = Math.min(micF32.length, sysF32.length);
+        alignedSysF32.set(sysF32.slice(0, lengthToCopy));
+    }
+
+
+    // 2400개 샘플을 160개 프레임으로 나누어 루프 실행
+    for (let i = 0; i < numFrames; i++) {
+        const offset = i * frameSize;
+
+        // 현재 프레임에 해당하는 160개 샘플을 잘라냅니다.
+        const micFrame = micF32.subarray(offset, offset + frameSize);
+        const echoFrame = alignedSysF32.subarray(offset, offset + frameSize);
+
+        // WASM 메모리에 프레임 데이터 쓰기
+        const micPtr = int16PtrFromFloat32(aecMod, micFrame);
+        const echoPtr = int16PtrFromFloat32(aecMod, echoFrame);
+        const outPtr = aecMod._malloc(frameSize * 2); // 160 * 2 bytes
+
+        // AEC 실행 (160개 샘플 단위)
+        aecMod.cancel(aecPtr, micPtr.ptr, echoPtr.ptr, outPtr, frameSize);
+
+        // WASM 메모리에서 처리된 프레임 데이터 읽기
+        const heapBuf = (aecMod.HEAP16 ? aecMod.HEAP16.buffer : aecMod.HEAPU8.buffer);
+        const outFrameI16 = new Int16Array(heapBuf, outPtr, frameSize);
+        const outFrameF32 = float32FromInt16View(outFrameI16);
+
+        // 처리된 프레임을 최종 버퍼의 올바른 위치에 복사
+        processedF32.set(outFrameF32, offset);
+
+        // 할당된 메모리 해제
+        aecMod._free(micPtr.ptr);
+        aecMod._free(echoPtr.ptr);
+        aecMod._free(outPtr);
+    }
+
+    return processedF32;
+    // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+    //                      여기까지가 새로운 로직
+    // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 }
 
 
@@ -273,17 +298,11 @@ setInterval(() => {
 // Audio processing functions (exact from renderer.js)
 // ---------------------------
 async function setupMicProcessing(micStream) {
-    const mod = await getAecModule();
-    const aecPtr = mod.newPtr(160, 1600, 24000, 1);
-    console.log('[AEC] new instance created. pointer:', aecPtr);
-    console.log(`[AEC-INIT-STATUS] mod: ${!!mod}, aecPtr: ${!!aecPtr}, mod.HEAPU8: ${!!(mod && mod.HEAPU8)}`);
+    /* ── WASM 먼저 로드 ───────────────────────── */
+    const mod = await getAec();
+    if (!aecPtr) aecPtr = mod.newPtr(160, 1600, 24000, 1);
 
-    aecCleanupCallback = () => {
-        if (mod && aecPtr) {
-            console.log(`[AEC] deleting instance (ptr: ${aecPtr})`);
-            mod.destroy(aecPtr);
-        }
-    };
+
     const micAudioContext = new AudioContext({ sampleRate: SAMPLE_RATE });
     await micAudioContext.resume(); 
     const micSource = micAudioContext.createMediaStreamSource(micStream);
@@ -295,17 +314,21 @@ async function setupMicProcessing(micStream) {
     micProcessor.onaudioprocess = (e) => {
         const inputData = e.inputBuffer.getChannelData(0);
         audioBuffer.push(...inputData);
+        // console.log('🎤 micProcessor.onaudioprocess');
 
+        // samplesPerChunk(=2400) 만큼 모이면 전송
         while (audioBuffer.length >= samplesPerChunk) {
             let chunk = audioBuffer.splice(0, samplesPerChunk);
-            let processedChunk = new Float32Array(chunk);
+            let processedChunk = new Float32Array(chunk); // 기본값
 
             // ───────────────── WASM AEC ─────────────────
             if (systemAudioBuffer.length > 0) {
                 const latest = systemAudioBuffer[systemAudioBuffer.length - 1];
                 const sysF32 = base64ToFloat32Array(latest.data);
 
-                processedChunk = runAecSync(mod, aecPtr, new Float32Array(chunk), sysF32);
+                // **음성 구간일 때만 런**
+                processedChunk = runAecSync(new Float32Array(chunk), sysF32);
+                // console.log('🔊 Applied WASM-AEC (speex)');
             } else {
                 console.log('🔊 No system audio for AEC reference');
             }
@@ -690,10 +713,6 @@ function stopCapture() {
         micMediaStream.getTracks().forEach(t => t.stop());
         micMediaStream = null;
     }
-    if (aecCleanupCallback) {
-        aecCleanupCallback();
-        aecCleanupCallback = null;
-    }
 
     // Stop screen capture in main process
     ipcRenderer.invoke('stop-screen-capture').catch(err => {
@@ -712,7 +731,9 @@ function stopCapture() {
 // Exports & global registration
 // ---------------------------
 module.exports = {
-    runAecSync,
+    getAec,          // 새로 만든 초기화 함수
+    runAecSync,      // sync 버전
+    disposeAec,      // 필요시 Rust 객체 파괴
     startCapture,
     stopCapture,
     captureManualScreenshot,
