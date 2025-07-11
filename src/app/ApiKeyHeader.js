@@ -78,6 +78,7 @@ export class ApiKeyHeader extends LitElement {
         }
 
         .close-button {
+            -webkit-app-region: no-drag;
             position: absolute;
             top: 10px;
             right: 10px;
@@ -157,6 +158,7 @@ export class ApiKeyHeader extends LitElement {
         }
 
         .api-input {
+            -webkit-app-region: no-drag;
             width: 100%;
             height: 34px;
             background: rgba(255, 255, 255, 0.1);
@@ -184,6 +186,7 @@ export class ApiKeyHeader extends LitElement {
         .provider-column { flex: 1; display: flex; flex-direction: column; align-items: center; }
         .provider-label { color: rgba(255, 255, 255, 0.7); font-size: 11px; font-weight: 500; margin-bottom: 6px; }
         .api-input, .provider-select {
+            -webkit-app-region: no-drag;
             width: 100%;
             height: 34px;
             text-align: center;
@@ -210,6 +213,7 @@ export class ApiKeyHeader extends LitElement {
 
 
         .action-button {
+            -webkit-app-region: no-drag;
             width: 100%;
             height: 34px;
             background: rgba(255, 255, 255, 0.2);

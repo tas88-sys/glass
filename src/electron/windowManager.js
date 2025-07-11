@@ -37,8 +37,7 @@ const isLiquidGlassSupported = () => {
     }
     const majorVersion = parseInt(os.release().split('.')[0], 10);
     // return majorVersion >= 25; // macOS 26+ (Darwin 25+)
-    return majorVersion >= 25; // See you soon!
-    return majorVersion >= 25; // See you soon!
+    return majorVersion >= 26; // See you soon!
 };
 let shouldUseLiquidGlass = isLiquidGlassSupported();
 if (shouldUseLiquidGlass) {
@@ -395,7 +394,6 @@ function createWindows() {
         headerLoadOptions.query = { glass: 'true' };
         header.loadFile(path.join(__dirname, '../app/header.html'), headerLoadOptions);
         header.webContents.once('did-finish-load', () => {
-            const viewId = liquidGlass.addView(header.getNativeWindowHandle());
             const viewId = liquidGlass.addView(header.getNativeWindowHandle());
             if (viewId !== -1) {
                 liquidGlass.unstable_setVariant(viewId, liquidGlass.GlassMaterialVariant.bubbles);
@@ -947,6 +945,57 @@ function setupIpcHandlers(movementManager) {
             updateLayout();
         }
     });
+
+    // ipcMain.handle('get-header-position', () => {
+    //     const header = windowPool.get('header');
+    //     if (header) {
+    //         const [x, y] = header.getPosition();
+    //         return { x, y };
+    //     }
+    //     return { x: 0, y: 0 };
+    // });
+
+    // ipcMain.handle('move-header', (event, newX, newY) => {
+    //     const header = windowPool.get('header');
+    //     if (header) {
+    //         const currentY = newY !== undefined ? newY : header.getBounds().y;
+    //         header.setPosition(newX, currentY, false);
+
+    //         updateLayout();
+    //     }
+    // });
+
+    // ipcMain.handle('move-header-to', (event, newX, newY) => {
+    //     const header = windowPool.get('header');
+    //     if (header) {
+    //         const targetDisplay = screen.getDisplayNearestPoint({ x: newX, y: newY });
+    //         const { x: workAreaX, y: workAreaY, width, height } = targetDisplay.workArea;
+    //         const headerBounds = header.getBounds();
+
+    //         // Only clamp if the new position would actually go out of bounds
+    //         // This prevents progressive restriction of movement
+    //         let clampedX = newX;
+    //         let clampedY = newY;
+            
+    //         // Check if we need to clamp X position
+    //         if (newX < workAreaX) {
+    //             clampedX = workAreaX;
+    //         } else if (newX + headerBounds.width > workAreaX + width) {
+    //             clampedX = workAreaX + width - headerBounds.width;
+    //         }
+            
+    //         // Check if we need to clamp Y position  
+    //         if (newY < workAreaY) {
+    //             clampedY = workAreaY;
+    //         } else if (newY + headerBounds.height > workAreaY + height) {
+    //             clampedY = workAreaY + height - headerBounds.height;
+    //         }
+
+    //         header.setPosition(clampedX, clampedY, false);
+
+    //         updateLayout();
+    //     }
+    // });
 
 
     ipcMain.handle('move-window-step', (event, direction) => {

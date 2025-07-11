@@ -82,6 +82,7 @@ export class MainHeader extends LitElement {
         }
 
         .listen-button {
+            -webkit-app-region: no-drag;
             height: 26px;
             padding: 0 13px;
             background: transparent;
@@ -189,6 +190,7 @@ export class MainHeader extends LitElement {
         }
 
         .header-actions {
+            -webkit-app-region: no-drag;
             height: 26px;
             box-sizing: border-box;
             justify-content: flex-start;
@@ -260,6 +262,7 @@ export class MainHeader extends LitElement {
         }
 
         .settings-button {
+            -webkit-app-region: no-drag;
             padding: 5px;
             border-radius: 50%;
             background: transparent;
@@ -350,6 +353,61 @@ export class MainHeader extends LitElement {
         this.actionText = 'Listen';
         this.animationEndTimer = null;
         this.handleAnimationEnd = this.handleAnimationEnd.bind(this);
+        this.handleMouseMove = this.handleMouseMove.bind(this);
+        this.handleMouseUp = this.handleMouseUp.bind(this);
+        this.dragState = null;
+        this.wasJustDragged = false;
+    }
+
+    async handleMouseDown(e) {
+        e.preventDefault();
+
+        const { ipcRenderer } = window.require('electron');
+        const initialPosition = await ipcRenderer.invoke('get-header-position');
+
+        this.dragState = {
+            initialMouseX: e.screenX,
+            initialMouseY: e.screenY,
+            initialWindowX: initialPosition.x,
+            initialWindowY: initialPosition.y,
+            moved: false,
+        };
+
+        window.addEventListener('mousemove', this.handleMouseMove, { capture: true });
+        window.addEventListener('mouseup', this.handleMouseUp, { once: true, capture: true });
+    }
+
+    handleMouseMove(e) {
+        if (!this.dragState) return;
+
+        const deltaX = Math.abs(e.screenX - this.dragState.initialMouseX);
+        const deltaY = Math.abs(e.screenY - this.dragState.initialMouseY);
+        
+        if (deltaX > 3 || deltaY > 3) {
+            this.dragState.moved = true;
+        }
+
+        const newWindowX = this.dragState.initialWindowX + (e.screenX - this.dragState.initialMouseX);
+        const newWindowY = this.dragState.initialWindowY + (e.screenY - this.dragState.initialMouseY);
+
+        const { ipcRenderer } = window.require('electron');
+        ipcRenderer.invoke('move-header-to', newWindowX, newWindowY);
+    }
+
+    handleMouseUp(e) {
+        if (!this.dragState) return;
+
+        const wasDragged = this.dragState.moved;
+
+        window.removeEventListener('mousemove', this.handleMouseMove, { capture: true });
+        this.dragState = null;
+
+        if (wasDragged) {
+            this.wasJustDragged = true;
+            setTimeout(() => {
+                this.wasJustDragged = false;
+            }, 0);
+        }
     }
 
     toggleVisibility() {
@@ -455,6 +513,7 @@ export class MainHeader extends LitElement {
     }
 
     invoke(channel, ...args) {
+        if (this.wasJustDragged) return;
         if (window.require) {
             window.require('electron').ipcRenderer.invoke(channel, ...args);
         }
@@ -462,6 +521,7 @@ export class MainHeader extends LitElement {
     }
 
     showSettingsWindow(element) {
+        if (this.wasJustDragged) return;
         if (window.require) {
             const { ipcRenderer } = window.require('electron');
             console.log(`[MainHeader] showSettingsWindow called at ${Date.now()}`);
@@ -481,6 +541,7 @@ export class MainHeader extends LitElement {
     }
 
     hideSettingsWindow() {
+        if (this.wasJustDragged) return;
         if (window.require) {
             console.log(`[MainHeader] hideSettingsWindow called at ${Date.now()}`);
             window.require('electron').ipcRenderer.send('hide-settings-window');
@@ -488,6 +549,7 @@ export class MainHeader extends LitElement {
     }
 
     async _handleListenClick() {
+        if (this.wasJustDragged) return;
         if (this.isTogglingSession) {
             return;
         }
@@ -536,7 +598,7 @@ export class MainHeader extends LitElement {
         const showStopIcon = this.actionText === 'Stop' || this.actionText === 'Done';
 
         return html`
-            <div class="header">
+            <div class="header" @mousedown=${this.handleMouseDown}>
                 <button 
                     class="listen-button ${Object.keys(buttonClasses).filter(k => buttonClasses[k]).join(' ')}"
                     @click=${this._handleListenClick}
