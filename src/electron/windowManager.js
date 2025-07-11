@@ -37,7 +37,7 @@ const isLiquidGlassSupported = () => {
     }
     const majorVersion = parseInt(os.release().split('.')[0], 10);
     // return majorVersion >= 25; // macOS 26+ (Darwin 25+)
-    return majorVersion >= 26; // See you soon!
+    return majorVersion >= 25; // See you soon!
 };
 let shouldUseLiquidGlass = isLiquidGlassSupported();
 if (shouldUseLiquidGlass) {
