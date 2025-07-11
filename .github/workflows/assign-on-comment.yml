@@ -8,7 +8,7 @@ jobs:
   # Job 1: Any contributor can self-assign
   self-assign:
     # Only run if the comment is exactly '/assign'
-    if: github.event.comment.body == '/assign'
+    if: startsWith(github.event.comment.body, '/assign') && !contains(github.event.comment.body, '@')
     runs-on: ubuntu-latest
     permissions:
       issues: write

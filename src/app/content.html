@@ -237,63 +237,62 @@
         <script>
             window.addEventListener('DOMContentLoaded', () => {
                 const app = document.getElementById('pickle-glass');
-                let animationTimeout = null;
-
+        
                 if (window.require) {
                     const { ipcRenderer } = window.require('electron');
-                    
+        
+                    // --- REFACTORED: Event-driven animation handling ---
+                    app.addEventListener('animationend', (event) => {
+                        // 숨김 애니메이션이 끝나면 main 프로세스에 알려 창을 실제로 숨깁니다.
+                        if (event.animationName === 'slideUpToHeader' || event.animationName === 'settingsCollapseToButton') {
+                            console.log(`Animation finished: ${event.animationName}. Notifying main process.`);
+                            ipcRenderer.send('animation-finished');
+        
+                            // 완료 후 애니메이션 클래스 정리
+                            app.classList.remove('window-sliding-up', 'settings-window-hide');
+                            app.classList.add('window-hidden');
+                        } else if (event.animationName === 'slideDownFromHeader' || event.animationName === 'settingsPopFromButton') {
+                             // 보이기 애니메이션 완료 후 클래스 정리
+                            app.classList.remove('window-sliding-down', 'settings-window-show');
+                        }
+                    });
+        
                     ipcRenderer.on('window-show-animation', () => {
                         console.log('Starting window show animation');
                         app.classList.remove('window-hidden', 'window-sliding-up', 'settings-window-hide');
                         app.classList.add('window-sliding-down');
-                        
-                        if (animationTimeout) clearTimeout(animationTimeout);
-                        animationTimeout = setTimeout(() => {
-                            app.classList.remove('window-sliding-down');
-                        }, 120);
                     });
-                    
+        
                     ipcRenderer.on('window-hide-animation', () => {
                         console.log('Starting window hide animation');
                         app.classList.remove('window-sliding-down', 'settings-window-show');
                         app.classList.add('window-sliding-up');
-                        
-                        if (animationTimeout) clearTimeout(animationTimeout);
-                        animationTimeout = setTimeout(() => {
-                            app.classList.remove('window-sliding-up');
-                            app.classList.add('window-hidden');
-                        }, 100);
                     });
-                    
+        
                     ipcRenderer.on('settings-window-hide-animation', () => {
                         console.log('Starting settings window hide animation');
                         app.classList.remove('window-sliding-down', 'settings-window-show');
                         app.classList.add('settings-window-hide');
-                        
-                        if (animationTimeout) clearTimeout(animationTimeout);
-                        animationTimeout = setTimeout(() => {
-                            app.classList.remove('settings-window-hide');
-                            app.classList.add('window-hidden');
-                        }, 100);
                     });
-
+        
+                    // --- UNCHANGED: Existing logic for listen window movement ---
                     ipcRenderer.on('listen-window-move-to-center', () => {
                         console.log('Moving listen window to center');
                         app.classList.add('listen-window-moving');
                         app.classList.remove('listen-window-left');
                         app.classList.add('listen-window-center');
-                        
+        
                         setTimeout(() => {
                             app.classList.remove('listen-window-moving');
                         }, 350);
                     });
-
+        
                     ipcRenderer.on('listen-window-move-to-left', () => {
                         console.log('Moving listen window to left');
                         app.classList.add('listen-window-moving');
                         app.classList.remove('listen-window-center');
                         app.classList.add('listen-window-left');
-                        
+        
                         setTimeout(() => {
                             app.classList.remove('listen-window-moving');
                         }, 350);
@@ -305,6 +304,11 @@
             const params = new URLSearchParams(window.location.search);
             if (params.get('glass') === 'true') {
                 document.body.classList.add('has-glass');
+                // --- ADDED: Link to centralized glass-bypass styles ---
+                const link = document.createElement('link');
+                link.rel = 'stylesheet';
+                link.href = '../common/styles/glass-bypass.css';
+                document.head.appendChild(link);
             }
         </script>
     </body>

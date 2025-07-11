@@ -41,56 +41,6 @@ export class AskView extends LitElement {
             pointer-events: none;
         }
 
-        @keyframes slideUp {
-            0% {
-                opacity: 1;
-                transform: translateY(0) scale(1);
-                filter: blur(0px);
-            }
-            30% {
-                opacity: 0.7;
-                transform: translateY(-20%) scale(0.98);
-                filter: blur(0.5px);
-            }
-            70% {
-                opacity: 0.3;
-                transform: translateY(-80%) scale(0.92);
-                filter: blur(1.5px);
-            }
-            100% {
-                opacity: 0;
-                transform: translateY(-150%) scale(0.85);
-                filter: blur(2px);
-            }
-        }
-
-        @keyframes slideDown {
-            0% {
-                opacity: 0;
-                transform: translateY(-150%) scale(0.85);
-                filter: blur(2px);
-            }
-            30% {
-                opacity: 0.5;
-                transform: translateY(-50%) scale(0.92);
-                filter: blur(1px);
-            }
-            65% {
-                opacity: 0.9;
-                transform: translateY(-5%) scale(0.99);
-                filter: blur(0.2px);
-            }
-            85% {
-                opacity: 0.98;
-                transform: translateY(2%) scale(1.005);
-                filter: blur(0px);
-            }
-            100% {
-                opacity: 1;
-                transform: translateY(0) scale(1);
-                filter: blur(0px);
-            }
-        }
 
         * {
             font-family: 'Helvetica Neue', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -252,20 +202,6 @@ export class AskView extends LitElement {
             animation: fadeInOut 0.3s ease-in-out;
         }
 
-        @keyframes fadeInOut {
-            0% {
-                opacity: 1;
-                transform: translateY(0);
-            }
-            50% {
-                opacity: 0;
-                transform: translateY(-10px);
-            }
-            100% {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
 
         .header-right {
             display: flex;
@@ -422,19 +358,6 @@ export class AskView extends LitElement {
             animation-delay: 0.4s;
         }
 
-        @keyframes pulse {
-            0%,
-            80%,
-            100% {
-                opacity: 0.3;
-                transform: scale(0.8);
-            }
-            40% {
-                opacity: 1;
-                transform: scale(1.2);
-            }
-        }
-
         .response-line {
             position: relative;
             padding: 2px 0;
@@ -492,7 +415,7 @@ export class AskView extends LitElement {
             background: rgba(0, 0, 0, 0.1);
             border-top: 1px solid rgba(255, 255, 255, 0.1);
             flex-shrink: 0;
-            transition: all 0.3s ease-in-out;
+            transition: opacity 0.1s ease-in-out, transform 0.1s ease-in-out;
             transform-origin: bottom;
         }
 
@@ -596,42 +519,6 @@ export class AskView extends LitElement {
             color: rgba(255, 255, 255, 0.5);
             font-size: 14px;
         }
-
-        /* ────────────────[ GLASS BYPASS ]─────────────── */
-        :host-context(body.has-glass) .ask-container,
-        :host-context(body.has-glass) .response-header,
-        :host-context(body.has-glass) .response-icon,
-        :host-context(body.has-glass) .copy-button,
-        :host-context(body.has-glass) .close-button,
-        :host-context(body.has-glass) .line-copy-button,
-        :host-context(body.has-glass) .text-input-container,
-        :host-context(body.has-glass) .response-container pre,
-        :host-context(body.has-glass) .response-container p code,
-        :host-context(body.has-glass) .response-container pre code {
-            background: transparent !important;
-            border: none !important;
-            outline: none !important;
-            box-shadow: none !important;
-            filter: none !important;
-            backdrop-filter: none !important;
-        }
-
-        :host-context(body.has-glass) .ask-container::before {
-            display: none !important;
-        }
-
-        :host-context(body.has-glass) .copy-button:hover,
-        :host-context(body.has-glass) .close-button:hover,
-        :host-context(body.has-glass) .line-copy-button,
-        :host-context(body.has-glass) .line-copy-button:hover,
-        :host-context(body.has-glass) .response-line:hover {
-            background: transparent !important;
-        }
-
-        :host-context(body.has-glass) .response-container::-webkit-scrollbar-track,
-        :host-context(body.has-glass) .response-container::-webkit-scrollbar-thumb {
-            background: transparent !important;
-        }
     `;
 
     constructor() {
@@ -654,6 +541,7 @@ export class AskView extends LitElement {
         this.handleStreamChunk = this.handleStreamChunk.bind(this);
         this.handleStreamEnd = this.handleStreamEnd.bind(this);
         this.handleSendText = this.handleSendText.bind(this);
+        this.handleGlobalSendRequest = this.handleGlobalSendRequest.bind(this);
         this.handleTextKeydown = this.handleTextKeydown.bind(this);
         this.closeResponsePanel = this.closeResponsePanel.bind(this);
         this.handleCopy = this.handleCopy.bind(this);
@@ -669,7 +557,6 @@ export class AskView extends LitElement {
         this.loadLibraries();
 
         // --- Resize helpers ---
-        this.adjustHeightThrottle = null;
         this.isThrottled = false;
     }
 
@@ -1333,6 +1220,14 @@ export class AskView extends LitElement {
 
     handleGlobalSendRequest() {
         const textInput = this.shadowRoot?.getElementById('textInput');
+
+        if (!this.showTextInput) {
+            this.showTextInput = true;
+            this.requestUpdate();
+            this.focusTextInput();
+            return;
+        }
+
         if (!textInput) return;
 
         textInput.focus();
@@ -1462,12 +1357,11 @@ export class AskView extends LitElement {
     adjustWindowHeightThrottled() {
         if (this.isThrottled) return;
 
-        this.adjustWindowHeight();
         this.isThrottled = true;
-
-        this.adjustHeightThrottle = setTimeout(() => {
+        requestAnimationFrame(() => {
+            this.adjustWindowHeight();
             this.isThrottled = false;
-        }, 16);
+        });
     }
 }
 

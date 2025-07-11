@@ -2,17 +2,16 @@ import { html, css, LitElement } from '../assets/lit-core-2.7.4.min.js';
 
 export class MainHeader extends LitElement {
     static properties = {
-        isSessionActive: { type: Boolean, state: true },
+        // isSessionActive: { type: Boolean, state: true },
+        isTogglingSession: { type: Boolean, state: true },
+        actionText: { type: String, state: true },
         shortcuts: { type: Object, state: true },
     };
 
     static styles = css`
         :host {
             display: flex;
-            transform: translate3d(0, 0, 0);
-            backface-visibility: hidden;
             transition: transform 0.2s cubic-bezier(0.23, 1, 0.32, 1), opacity 0.2s ease-out;
-            will-change: transform, opacity;
         }
 
         :host(.hiding) {
@@ -33,65 +32,6 @@ export class MainHeader extends LitElement {
             pointer-events: none;
         }
 
-        @keyframes slideUp {
-            0% {
-                opacity: 1;
-                transform: translateY(0) scale(1);
-                filter: blur(0px);
-            }
-            30% {
-                opacity: 0.7;
-                transform: translateY(-20%) scale(0.98);
-                filter: blur(0.5px);
-            }
-            70% {
-                opacity: 0.3;
-                transform: translateY(-80%) scale(0.92);
-                filter: blur(1.5px);
-            }
-            100% {
-                opacity: 0;
-                transform: translateY(-150%) scale(0.85);
-                filter: blur(2px);
-            }
-        }
-
-        @keyframes slideDown {
-            0% {
-                opacity: 0;
-                transform: translateY(-150%) scale(0.85);
-                filter: blur(2px);
-            }
-            30% {
-                opacity: 0.5;
-                transform: translateY(-50%) scale(0.92);
-                filter: blur(1px);
-            }
-            65% {
-                opacity: 0.9;
-                transform: translateY(-5%) scale(0.99);
-                filter: blur(0.2px);
-            }
-            85% {
-                opacity: 0.98;
-                transform: translateY(2%) scale(1.005);
-                filter: blur(0px);
-            }
-            100% {
-                opacity: 1;
-                transform: translateY(0) scale(1);
-                filter: blur(0px);
-            }
-        }
-
-        @keyframes fadeIn {
-            0% {
-                opacity: 0;
-            }
-            100% {
-                opacity: 1;
-            }
-        }
 
         * {
             font-family: 'Helvetica Neue', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -100,6 +40,7 @@ export class MainHeader extends LitElement {
         }
 
         .header {
+            -webkit-app-region: drag;
             width: max-content;
             height: 47px;
             padding: 2px 10px 2px 13px;
@@ -141,6 +82,7 @@ export class MainHeader extends LitElement {
         }
 
         .listen-button {
+            -webkit-app-region: no-drag;
             height: 26px;
             padding: 0 13px;
             background: transparent;
@@ -155,12 +97,35 @@ export class MainHeader extends LitElement {
             position: relative;
         }
 
+        .listen-button:disabled {
+            cursor: default;
+            opacity: 0.8;
+        }
+
         .listen-button.active::before {
             background: rgba(215, 0, 0, 0.5);
         }
 
         .listen-button.active:hover::before {
             background: rgba(255, 20, 20, 0.6);
+        }
+
+        .listen-button.done {
+            background-color: rgba(255, 255, 255, 0.6);
+            transition: background-color 0.15s ease;
+        }
+
+        .listen-button.done .action-text-content {
+            color: black;
+        }
+        
+        .listen-button.done .listen-icon svg rect,
+        .listen-button.done .listen-icon svg path {
+            fill: black;
+        }
+
+        .listen-button.done:hover {
+            background-color: #f0f0f0;
         }
 
         .listen-button:hover::before {
@@ -192,7 +157,40 @@ export class MainHeader extends LitElement {
             pointer-events: none;
         }
 
+        .listen-button.done::after {
+            display: none;
+        }
+
+        .loading-dots {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .loading-dots span {
+            width: 6px;
+            height: 6px;
+            background-color: white;
+            border-radius: 50%;
+            animation: pulse 1.4s infinite ease-in-out both;
+        }
+        .loading-dots span:nth-of-type(1) {
+            animation-delay: -0.32s;
+        }
+        .loading-dots span:nth-of-type(2) {
+            animation-delay: -0.16s;
+        }
+        @keyframes pulse {
+            0%, 80%, 100% {
+                opacity: 0.2;
+            }
+            40% {
+                opacity: 1.0;
+            }
+        }
+
         .header-actions {
+            -webkit-app-region: no-drag;
             height: 26px;
             box-sizing: border-box;
             justify-content: flex-start;
@@ -264,6 +262,7 @@ export class MainHeader extends LitElement {
         }
 
         .settings-button {
+            -webkit-app-region: no-drag;
             padding: 5px;
             border-radius: 50%;
             background: transparent;
@@ -291,123 +290,20 @@ export class MainHeader extends LitElement {
             width: 16px;
             height: 16px;
         }
-
-        /* ────────────────[ GLASS BYPASS ]─────────────── */
-        :host-context(body.has-glass) .header,
-        :host-context(body.has-glass) .listen-button,
-        :host-context(body.has-glass) .header-actions,
-        :host-context(body.has-glass) .settings-button {
-            background: transparent !important;
-            filter: none !important;
-            box-shadow: none !important;
-            backdrop-filter: none !important;
-        }
-        :host-context(body.has-glass) .icon-box {
-            background: transparent !important;
-            border: none !important;
-        }
-
-        :host-context(body.has-glass) .header::before,
-        :host-context(body.has-glass) .header::after,
-        :host-context(body.has-glass) .listen-button::before,
-        :host-context(body.has-glass) .listen-button::after {
-            display: none !important;
-        }
-
-        :host-context(body.has-glass) .header-actions:hover,
-        :host-context(body.has-glass) .settings-button:hover,
-        :host-context(body.has-glass) .listen-button:hover::before {
-            background: transparent !important;
-        }
-        :host-context(body.has-glass) * {
-            animation: none !important;
-            transition: none !important;
-            transform: none !important;
-            filter: none !important;
-            backdrop-filter: none !important;
-            box-shadow: none !important;
-        }
-
-        :host-context(body.has-glass) .header,
-        :host-context(body.has-glass) .listen-button,
-        :host-context(body.has-glass) .header-actions,
-        :host-context(body.has-glass) .settings-button,
-        :host-context(body.has-glass) .icon-box {
-            border-radius: 0 !important;
-        }
-        :host-context(body.has-glass) {
-            animation: none !important;
-            transition: none !important;
-            transform: none !important;
-            will-change: auto !important;
-        }
         `;
 
     constructor() {
         super();
         this.shortcuts = {};
-        this.dragState = null;
-        this.wasJustDragged = false;
         this.isVisible = true;
         this.isAnimating = false;
         this.hasSlidIn = false;
         this.settingsHideTimer = null;
-        this.isSessionActive = false;
+        // this.isSessionActive = false;
+        this.isTogglingSession = false;
+        this.actionText = 'Listen';
         this.animationEndTimer = null;
-        this.handleMouseMove = this.handleMouseMove.bind(this);
-        this.handleMouseUp = this.handleMouseUp.bind(this);
         this.handleAnimationEnd = this.handleAnimationEnd.bind(this);
-    }
-
-    async handleMouseDown(e) {
-        e.preventDefault();
-
-        const { ipcRenderer } = window.require('electron');
-        const initialPosition = await ipcRenderer.invoke('get-header-position');
-
-        this.dragState = {
-            initialMouseX: e.screenX,
-            initialMouseY: e.screenY,
-            initialWindowX: initialPosition.x,
-            initialWindowY: initialPosition.y,
-            moved: false,
-        };
-
-        window.addEventListener('mousemove', this.handleMouseMove, { capture: true });
-        window.addEventListener('mouseup', this.handleMouseUp, { once: true, capture: true });
-    }
-
-    handleMouseMove(e) {
-        if (!this.dragState) return;
-
-        const deltaX = Math.abs(e.screenX - this.dragState.initialMouseX);
-        const deltaY = Math.abs(e.screenY - this.dragState.initialMouseY);
-        
-        if (deltaX > 3 || deltaY > 3) {
-            this.dragState.moved = true;
-        }
-
-        const newWindowX = this.dragState.initialWindowX + (e.screenX - this.dragState.initialMouseX);
-        const newWindowY = this.dragState.initialWindowY + (e.screenY - this.dragState.initialMouseY);
-
-        const { ipcRenderer } = window.require('electron');
-        ipcRenderer.invoke('move-header-to', newWindowX, newWindowY);
-    }
-
-    handleMouseUp(e) {
-        if (!this.dragState) return;
-
-        const wasDragged = this.dragState.moved;
-
-        window.removeEventListener('mousemove', this.handleMouseMove, { capture: true });
-        this.dragState = null;
-
-        if (wasDragged) {
-            this.wasJustDragged = true;
-            setTimeout(() => {
-                this.wasJustDragged = false;
-            }, 0);
-        }
     }
 
     toggleVisibility() {
@@ -431,58 +327,29 @@ export class MainHeader extends LitElement {
     }
 
     hide() {
-        this.classList.remove('showing', 'hidden');
+        this.classList.remove('showing');
         this.classList.add('hiding');
-        this.isVisible = false;
-        
-        this.animationEndTimer = setTimeout(() => {
-            if (this.classList.contains('hiding')) {
-                this.handleAnimationEnd({ target: this });
-            }
-        }, 350);
     }
-
+    
     show() {
         this.classList.remove('hiding', 'hidden');
         this.classList.add('showing');
-        this.isVisible = true;
-        
-        this.animationEndTimer = setTimeout(() => {
-            if (this.classList.contains('showing')) {
-                this.handleAnimationEnd({ target: this });
-            }
-        }, 400);
     }
-
+    
     handleAnimationEnd(e) {
         if (e.target !== this) return;
-        
-        if (this.animationEndTimer) {
-            clearTimeout(this.animationEndTimer);
-            this.animationEndTimer = null;
-        }
-        
+    
         this.isAnimating = false;
-        
+    
         if (this.classList.contains('hiding')) {
-            this.classList.remove('hiding');
             this.classList.add('hidden');
-            
             if (window.require) {
-                const { ipcRenderer } = window.require('electron');
-                ipcRenderer.send('header-animation-complete', 'hidden');
+                window.require('electron').ipcRenderer.send('header-animation-finished', 'hidden');
             }
         } else if (this.classList.contains('showing')) {
-            this.classList.remove('showing');
-            
             if (window.require) {
-                const { ipcRenderer } = window.require('electron');
-                ipcRenderer.send('header-animation-complete', 'visible');
+                window.require('electron').ipcRenderer.send('header-animation-finished', 'visible');
             }
-        } else if (this.classList.contains('sliding-in')) {
-            this.classList.remove('sliding-in');
-            this.hasSlidIn = true;
-            console.log('[MainHeader] Slide-in animation completed');
         }
     }
 
@@ -497,10 +364,19 @@ export class MainHeader extends LitElement {
 
         if (window.require) {
             const { ipcRenderer } = window.require('electron');
-            this._sessionStateListener = (event, { isActive }) => {
-                this.isSessionActive = isActive;
+
+            this._sessionStateTextListener = (event, text) => {
+                this.actionText = text;
+                this.isTogglingSession = false;
             };
-            ipcRenderer.on('session-state-changed', this._sessionStateListener);
+            ipcRenderer.on('session-state-text', this._sessionStateTextListener);
+
+
+            // this._sessionStateListener = (event, { isActive }) => {
+            //     this.isSessionActive = isActive;
+            //     this.isTogglingSession = false;
+            // };
+            // ipcRenderer.on('session-state-changed', this._sessionStateListener);
             this._shortcutListener = (event, keybinds) => {
                 console.log('[MainHeader] Received updated shortcuts:', keybinds);
                 this.shortcuts = keybinds;
@@ -520,9 +396,12 @@ export class MainHeader extends LitElement {
         
         if (window.require) {
             const { ipcRenderer } = window.require('electron');
-            if (this._sessionStateListener) {
-                ipcRenderer.removeListener('session-state-changed', this._sessionStateListener);
+            if (this._sessionStateTextListener) {
+                ipcRenderer.removeListener('session-state-text', this._sessionStateTextListener);
             }
+            // if (this._sessionStateListener) {
+            //     ipcRenderer.removeListener('session-state-changed', this._sessionStateListener);
+            // }
             if (this._shortcutListener) {
                 ipcRenderer.removeListener('shortcuts-updated', this._shortcutListener);
             }
@@ -530,50 +409,55 @@ export class MainHeader extends LitElement {
     }
 
     invoke(channel, ...args) {
-        if (this.wasJustDragged) {
-            return;
-        }
         if (window.require) {
             window.require('electron').ipcRenderer.invoke(channel, ...args);
         }
+        // return Promise.resolve();
     }
 
-    showWindow(name, element) {
-        if (this.wasJustDragged) return;
+    showSettingsWindow(element) {
         if (window.require) {
             const { ipcRenderer } = window.require('electron');
-            console.log(`[MainHeader] showWindow('${name}') called at ${Date.now()}`);
+            console.log(`[MainHeader] showSettingsWindow called at ${Date.now()}`);
             
-            ipcRenderer.send('cancel-hide-window', name);
+            ipcRenderer.send('cancel-hide-settings-window');
 
-            if (name === 'settings' && element) {
-                const rect = element.getBoundingClientRect();
-                ipcRenderer.send('show-window', {
-                    name: 'settings',
-                    bounds: {
-                        x: rect.left,
-                        y: rect.top,
-                        width: rect.width,
-                        height: rect.height
-                    }
+            if (element) {
+                const { left, top, width, height } = element.getBoundingClientRect();
+                ipcRenderer.send('show-settings-window', {
+                    x: left,
+                    y: top,
+                    width,
+                    height,
                 });
-            } else {
-                ipcRenderer.send('show-window', name);
             }
         }
     }
 
-    hideWindow(name) {
-        if (this.wasJustDragged) return;
+    hideSettingsWindow() {
         if (window.require) {
-            console.log(`[MainHeader] hideWindow('${name}') called at ${Date.now()}`);
-            window.require('electron').ipcRenderer.send('hide-window', name);
+            console.log(`[MainHeader] hideSettingsWindow called at ${Date.now()}`);
+            window.require('electron').ipcRenderer.send('hide-settings-window');
         }
     }
 
-    cancelHideWindow(name) {
+    async _handleListenClick() {
+        if (this.isTogglingSession) {
+            return;
+        }
 
+        this.isTogglingSession = true;
+
+        try {
+            const channel = 'toggle-feature';
+            const args = ['listen'];
+            await this.invoke(channel, ...args);
+        } catch (error) {
+            console.error('IPC invoke for session toggle failed:', error);
+            this.isTogglingSession = false;
+        }
     }
+
 
     renderShortcut(accelerator) {
         if (!accelerator) return html``;
@@ -599,31 +483,45 @@ export class MainHeader extends LitElement {
     }
 
     render() {
-        return html`
-            <div class="header" @mousedown=${this.handleMouseDown}>
-                <button 
-                    class="listen-button ${this.isSessionActive ? 'active' : ''}"
-                    @click=${() => this.invoke(this.isSessionActive ? 'close-session' : 'toggle-feature', 'listen')}
-                >
-                    <div class="action-text">
-                        <div class="action-text-content">${this.isSessionActive ? 'Stop' : 'Listen'}</div>
-                    </div>
-                    <div class="listen-icon">
-                        ${this.isSessionActive
-                            ? html`
-                                <svg width="9" height="9" viewBox="0 0 9 9" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                    <rect width="9" height="9" rx="1" fill="white"/>
-                                </svg>
+        const buttonClasses = {
+            active: this.actionText === 'Stop',
+            done: this.actionText === 'Done',
+        };
+        const showStopIcon = this.actionText === 'Stop' || this.actionText === 'Done';
 
-                            `
-                            : html`
-                                <svg width="12" height="11" viewBox="0 0 12 11" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                    <path d="M1.69922 2.7515C1.69922 2.37153 2.00725 2.0635 2.38722 2.0635H2.73122C3.11119 2.0635 3.41922 2.37153 3.41922 2.7515V8.2555C3.41922 8.63547 3.11119 8.9435 2.73122 8.9435H2.38722C2.00725 8.9435 1.69922 8.63547 1.69922 8.2555V2.7515Z" fill="white"/>
-                                    <path d="M5.13922 1.3755C5.13922 0.995528 5.44725 0.6875 5.82722 0.6875H6.17122C6.55119 0.6875 6.85922 0.995528 6.85922 1.3755V9.6315C6.85922 10.0115 6.55119 10.3195 6.17122 10.3195H5.82722C5.44725 10.3195 5.13922 10.0115 5.13922 9.6315V1.3755Z" fill="white"/>
-                                    <path d="M8.57922 3.0955C8.57922 2.71553 8.88725 2.4075 9.26722 2.4075H9.61122C9.99119 2.4075 10.2992 2.71553 10.2992 3.0955V7.9115C10.2992 8.29147 9.99119 8.5995 9.61122 8.5995H9.26722C8.88725 8.5995 8.57922 8.29147 8.57922 7.9115V3.0955Z" fill="white"/>
-                                </svg>
-                            `}
-                    </div>
+        return html`
+            <div class="header">
+                <button 
+                    class="listen-button ${Object.keys(buttonClasses).filter(k => buttonClasses[k]).join(' ')}"
+                    @click=${this._handleListenClick}
+                    ?disabled=${this.isTogglingSession}
+                >
+                    ${this.isTogglingSession
+                        ? html`
+                            <div class="loading-dots">
+                                <span></span><span></span><span></span>
+                            </div>
+                        `
+                        : html`
+                            <div class="action-text">
+                                <div class="action-text-content">${this.actionText}</div>
+                            </div>
+                            <div class="listen-icon">
+                                ${showStopIcon
+                                    ? html`
+                                        <svg width="9" height="9" viewBox="0 0 9 9" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                            <rect width="9" height="9" rx="1" fill="white"/>
+                                        </svg>
+                                    `
+                                    : html`
+                                        <svg width="12" height="11" viewBox="0 0 12 11" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                            <path d="M1.69922 2.7515C1.69922 2.37153 2.00725 2.0635 2.38722 2.0635H2.73122C3.11119 2.0635 3.41922 2.37153 3.41922 2.7515V8.2555C3.41922 8.63547 3.11119 8.9435 2.73122 8.9435H2.38722C2.00725 8.9435 1.69922 8.63547 1.69922 8.2555V2.7515Z" fill="white"/>
+                                            <path d="M5.13922 1.3755C5.13922 0.995528 5.44725 0.6875 5.82722 0.6875H6.17122C6.55119 0.6875 6.85922 0.995528 6.85922 1.3755V9.6315C6.85922 10.0115 6.55119 10.3195 6.17122 10.3195H5.82722C5.44725 10.3195 5.13922 10.0115 5.13922 9.6315V1.3755Z" fill="white"/>
+                                            <path d="M8.57922 3.0955C8.57922 2.71553 8.88725 2.4075 9.26722 2.4075H9.61122C9.99119 2.4075 10.2992 2.71553 10.2992 3.0955V7.9115C10.2992 8.29147 9.99119 8.5995 9.61122 8.5995H9.26722C8.88725 8.5995 8.57922 8.29147 8.57922 7.9115V3.0955Z" fill="white"/>
+                                        </svg>
+                                    `}
+                            </div>
+                        `}
                 </button>
 
                 <div class="header-actions ask-action" @click=${() => this.invoke('toggle-feature', 'ask')}>
@@ -646,8 +544,8 @@ export class MainHeader extends LitElement {
 
                 <button 
                     class="settings-button"
-                    @mouseenter=${(e) => this.showWindow('settings', e.currentTarget)}
-                    @mouseleave=${() => this.hideWindow('settings')}
+                    @mouseenter=${(e) => this.showSettingsWindow(e.currentTarget)}
+                    @mouseleave=${() => this.hideSettingsWindow()}
                 >
                     <div class="settings-icon">
                         <svg width="16" height="17" viewBox="0 0 16 17" fill="none" xmlns="http://www.w3.org/2000/svg">

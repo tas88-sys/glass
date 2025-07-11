@@ -264,7 +264,7 @@ export class SummaryView extends LitElement {
         super.connectedCallback();
         if (window.require) {
             const { ipcRenderer } = window.require('electron');
-            ipcRenderer.on('update-structured-data', (event, data) => {
+            ipcRenderer.on('summary-update', (event, data) => {
                 this.structuredData = data;
                 this.requestUpdate();
             });
@@ -275,7 +275,7 @@ export class SummaryView extends LitElement {
         super.disconnectedCallback();
         if (window.require) {
             const { ipcRenderer } = window.require('electron');
-            ipcRenderer.removeAllListeners('update-structured-data');
+            ipcRenderer.removeAllListeners('summary-update');
         }
     }
 
@@ -412,7 +412,7 @@ export class SummaryView extends LitElement {
             const { ipcRenderer } = window.require('electron');
 
             try {
-                const isAskViewVisible = await ipcRenderer.invoke('is-window-visible', 'ask');
+                const isAskViewVisible = await ipcRenderer.invoke('is-ask-window-visible', 'ask');
 
                 if (!isAskViewVisible) {
                     await ipcRenderer.invoke('toggle-feature', 'ask');

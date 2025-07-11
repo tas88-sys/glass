@@ -4,30 +4,18 @@ export class PermissionHeader extends LitElement {
     static styles = css`
         :host {
             display: block;
-            transform: translate3d(0, 0, 0);
-            backface-visibility: hidden;
-            transition: opacity 0.25s ease-out;
+            transition: opacity 0.3s ease-in, transform 0.3s ease-in;
+            will-change: opacity, transform;
         }
 
         :host(.sliding-out) {
-            animation: slideOutUp 0.3s ease-in forwards;
-            will-change: opacity, transform;
+            opacity: 0;
+            transform: translateY(-20px);
         }
 
         :host(.hidden) {
             opacity: 0;
             pointer-events: none;
-        }
-
-        @keyframes slideOutUp {
-            from {
-                opacity: 1;
-                transform: translateY(0);
-            }
-            to {
-                opacity: 0;
-                transform: translateY(-20px);
-            }
         }
 
         * {
@@ -38,6 +26,7 @@ export class PermissionHeader extends LitElement {
         }
 
         .container {
+            -webkit-app-region: drag;
             width: 285px;
             height: 220px;
             padding: 18px 20px;
@@ -67,6 +56,7 @@ export class PermissionHeader extends LitElement {
         }
 
         .close-button {
+            -webkit-app-region: no-drag;
             position: absolute;
             top: 10px;
             right: 10px;
@@ -157,6 +147,7 @@ export class PermissionHeader extends LitElement {
         }
 
         .action-button {
+            -webkit-app-region: no-drag;
             width: 100%;
             height: 34px;
             background: rgba(255, 255, 255, 0.2);
@@ -198,6 +189,7 @@ export class PermissionHeader extends LitElement {
         }
 
         .continue-button {
+            -webkit-app-region: no-drag;
             width: 100%;
             height: 34px;
             background: rgba(34, 197, 94, 0.8);
@@ -237,30 +229,6 @@ export class PermissionHeader extends LitElement {
             background: rgba(255, 255, 255, 0.2);
             cursor: not-allowed;
         }
-
-        /* ────────────────[ GLASS BYPASS ]─────────────── */
-        :host-context(body.has-glass) .container,
-        :host-context(body.has-glass) .action-button,
-        :host-context(body.has-glass) .continue-button,
-        :host-context(body.has-glass) .close-button {
-            background: transparent !important;
-            border: none !important;
-            box-shadow: none !important;
-            filter: none !important;
-            backdrop-filter: none !important;
-        }
-
-        :host-context(body.has-glass) .container::after,
-        :host-context(body.has-glass) .action-button::after,
-        :host-context(body.has-glass) .continue-button::after {
-            display: none !important;
-        }
-
-        :host-context(body.has-glass) .action-button:hover,
-        :host-context(body.has-glass) .continue-button:hover,
-        :host-context(body.has-glass) .close-button:hover {
-            background: transparent !important;
-        }
     `;
 
     static properties = {
@@ -276,9 +244,6 @@ export class PermissionHeader extends LitElement {
         this.screenGranted = 'unknown';
         this.isChecking = false;
         this.continueCallback = null;
-
-        this.handleMouseMove = this.handleMouseMove.bind(this);
-        this.handleMouseUp = this.handleMouseUp.bind(this);
     }
 
     async connectedCallback() {
@@ -295,61 +260,6 @@ export class PermissionHeader extends LitElement {
         super.disconnectedCallback();
         if (this.permissionCheckInterval) {
             clearInterval(this.permissionCheckInterval);
-        }
-    }
-
-    async handleMouseDown(e) {
-        if (e.target.tagName === 'BUTTON') {
-            return;
-        }
-
-        e.preventDefault();
-
-        const { ipcRenderer } = window.require('electron');
-        const initialPosition = await ipcRenderer.invoke('get-header-position');
-
-        this.dragState = {
-            initialMouseX: e.screenX,
-            initialMouseY: e.screenY,
-            initialWindowX: initialPosition.x,
-            initialWindowY: initialPosition.y,
-            moved: false,
-        };
-
-        window.addEventListener('mousemove', this.handleMouseMove);
-        window.addEventListener('mouseup', this.handleMouseUp, { once: true });
-    }
-
-    handleMouseMove(e) {
-        if (!this.dragState) return;
-
-        const deltaX = Math.abs(e.screenX - this.dragState.initialMouseX);
-        const deltaY = Math.abs(e.screenY - this.dragState.initialMouseY);
-
-        if (deltaX > 3 || deltaY > 3) {
-            this.dragState.moved = true;
-        }
-
-        const newWindowX = this.dragState.initialWindowX + (e.screenX - this.dragState.initialMouseX);
-        const newWindowY = this.dragState.initialWindowY + (e.screenY - this.dragState.initialMouseY);
-
-        const { ipcRenderer } = window.require('electron');
-        ipcRenderer.invoke('move-header-to', newWindowX, newWindowY);
-    }
-
-    handleMouseUp(e) {
-        if (!this.dragState) return;
-
-        const wasDragged = this.dragState.moved;
-
-        window.removeEventListener('mousemove', this.handleMouseMove);
-        this.dragState = null;
-
-        if (wasDragged) {
-            this.wasJustDragged = true;
-            setTimeout(() => {
-                this.wasJustDragged = false;
-            }, 200);
         }
     }
 
@@ -390,7 +300,7 @@ export class PermissionHeader extends LitElement {
     }
 
     async handleMicrophoneClick() {
-        if (!window.require || this.microphoneGranted === 'granted' || this.wasJustDragged) return;
+        if (!window.require || this.microphoneGranted === 'granted') return;
         
         console.log('[PermissionHeader] Requesting microphone permission...');
         const { ipcRenderer } = window.require('electron');
@@ -423,7 +333,7 @@ export class PermissionHeader extends LitElement {
     }
 
     async handleScreenClick() {
-        if (!window.require || this.screenGranted === 'granted' || this.wasJustDragged) return;
+        if (!window.require || this.screenGranted === 'granted') return;
         
         console.log('[PermissionHeader] Checking screen recording permission...');
         const { ipcRenderer } = window.require('electron');
@@ -453,8 +363,7 @@ export class PermissionHeader extends LitElement {
     async handleContinue() {
         if (this.continueCallback && 
             this.microphoneGranted === 'granted' && 
-            this.screenGranted === 'granted' && 
-            !this.wasJustDragged) {
+            this.screenGranted === 'granted') {
             // Mark permissions as completed
             if (window.require) {
                 const { ipcRenderer } = window.require('electron');
@@ -481,7 +390,7 @@ export class PermissionHeader extends LitElement {
         const allGranted = this.microphoneGranted === 'granted' && this.screenGranted === 'granted';
 
         return html`
-            <div class="container" @mousedown=${this.handleMouseDown}>
+            <div class="container">
                 <button class="close-button" @click=${this.handleClose} title="Close application">
                     <svg width="8" height="8" viewBox="0 0 10 10" fill="currentColor">
                         <path d="M1 1L9 9M9 1L1 9" stroke="currentColor" stroke-width="1.2" />

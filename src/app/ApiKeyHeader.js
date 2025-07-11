@@ -25,31 +25,19 @@ export class ApiKeyHeader extends LitElement {
 
   static styles = css`
         :host {
-            display: block;
-            transform: translate3d(0, 0, 0);
-            backface-visibility: hidden;
-            transition: opacity 0.25s ease-out;
+          display: block;
+          transition: opacity 0.3s ease-in, transform 0.3s ease-in;
+          will-change: opacity, transform;
         }
 
         :host(.sliding-out) {
-            animation: slideOutUp 0.3s ease-in forwards;
-            will-change: opacity, transform;
+            opacity: 0;
+            transform: translateY(-20px);
         }
 
         :host(.hidden) {
             opacity: 0;
             pointer-events: none;
-        }
-
-        @keyframes slideOutUp {
-            from {
-                opacity: 1;
-                transform: translateY(0);
-            }
-            to {
-                opacity: 0;
-                transform: translateY(-20px);
-            }
         }
 
         * {
@@ -60,6 +48,7 @@ export class ApiKeyHeader extends LitElement {
         }
 
         .container {
+            -webkit-app-region: drag;
             width: 350px;
             min-height: 260px;
             padding: 18px 20px;
@@ -89,6 +78,7 @@ export class ApiKeyHeader extends LitElement {
         }
 
         .close-button {
+            -webkit-app-region: no-drag;
             position: absolute;
             top: 10px;
             right: 10px;
@@ -168,6 +158,7 @@ export class ApiKeyHeader extends LitElement {
         }
 
         .api-input {
+            -webkit-app-region: no-drag;
             width: 100%;
             height: 34px;
             background: rgba(255, 255, 255, 0.1);
@@ -195,6 +186,7 @@ export class ApiKeyHeader extends LitElement {
         .provider-column { flex: 1; display: flex; flex-direction: column; align-items: center; }
         .provider-label { color: rgba(255, 255, 255, 0.7); font-size: 11px; font-weight: 500; margin-bottom: 6px; }
         .api-input, .provider-select {
+            -webkit-app-region: no-drag;
             width: 100%;
             height: 34px;
             text-align: center;
@@ -221,6 +213,7 @@ export class ApiKeyHeader extends LitElement {
 
 
         .action-button {
+            -webkit-app-region: no-drag;
             width: 100%;
             height: 34px;
             background: rgba(255, 255, 255, 0.2);
@@ -266,37 +259,10 @@ export class ApiKeyHeader extends LitElement {
             font-weight: 500; /* Medium */
             margin: 10px 0;
         }
-
-        
-        /* ────────────────[ GLASS BYPASS ]─────────────── */
-        :host-context(body.has-glass) .container,
-        :host-context(body.has-glass) .api-input,
-        :host-context(body.has-glass) .provider-select,
-        :host-context(body.has-glass) .action-button,
-        :host-context(body.has-glass) .close-button {
-            background: transparent !important;
-            border: none !important;
-            box-shadow: none !important;
-            filter: none !important;
-            backdrop-filter: none !important;
-        }
-
-        :host-context(body.has-glass) .container::after,
-        :host-context(body.has-glass) .action-button::after {
-            display: none !important;
-        }
-
-        :host-context(body.has-glass) .action-button:hover,
-        :host-context(body.has-glass) .provider-select:hover,
-        :host-context(body.has-glass) .close-button:hover {
-            background: transparent !important;
-        }
     `
 
   constructor() {
     super()
-    this.dragState = null
-    this.wasJustDragged = false
     this.isLoading = false
     this.errorMessage = ""
     this.successMessage = ""
@@ -358,8 +324,6 @@ export class ApiKeyHeader extends LitElement {
     this.loadProviderConfig();
     //////// after_modelStateService ////////
 
-    this.handleMouseMove = this.handleMouseMove.bind(this)
-    this.handleMouseUp = this.handleMouseUp.bind(this)
     this.handleKeyPress = this.handleKeyPress.bind(this)
     this.handleSubmit = this.handleSubmit.bind(this)
     this.handleInput = this.handleInput.bind(this)
@@ -1533,7 +1497,6 @@ export class ApiKeyHeader extends LitElement {
 
   handleUsePicklesKey(e) {
     e.preventDefault()
-    if (this.wasJustDragged) return
 
     console.log("Requesting Firebase authentication from main process...")
     if (window.require) {

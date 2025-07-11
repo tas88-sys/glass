@@ -27,56 +27,6 @@ export class AssistantView extends LitElement {
             pointer-events: none;
         }
 
-        @keyframes slideUp {
-            0% {
-                opacity: 1;
-                transform: translateY(0) scale(1);
-                filter: blur(0px);
-            }
-            30% {
-                opacity: 0.7;
-                transform: translateY(-20%) scale(0.98);
-                filter: blur(0.5px);
-            }
-            70% {
-                opacity: 0.3;
-                transform: translateY(-80%) scale(0.92);
-                filter: blur(1.5px);
-            }
-            100% {
-                opacity: 0;
-                transform: translateY(-150%) scale(0.85);
-                filter: blur(2px);
-            }
-        }
-
-        @keyframes slideDown {
-            0% {
-                opacity: 0;
-                transform: translateY(-150%) scale(0.85);
-                filter: blur(2px);
-            }
-            30% {
-                opacity: 0.5;
-                transform: translateY(-50%) scale(0.92);
-                filter: blur(1px);
-            }
-            65% {
-                opacity: 0.9;
-                transform: translateY(-5%) scale(0.99);
-                filter: blur(0.2px);
-            }
-            85% {
-                opacity: 0.98;
-                transform: translateY(2%) scale(1.005);
-                filter: blur(0px);
-            }
-            100% {
-                opacity: 1;
-                transform: translateY(0) scale(1);
-                filter: blur(0px);
-            }
-        }
 
         * {
             font-family: 'Helvetica Neue', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -245,17 +195,6 @@ export class AssistantView extends LitElement {
             animation: slideIn 0.3s ease forwards;
         }
 
-        @keyframes slideIn {
-            from {
-                transform: translateX(10%);
-                opacity: 0;
-            }
-            to {
-                transform: translateX(0);
-                opacity: 1;
-            }
-        }
-
         .bar-controls {
             display: flex;
             gap: 4px;
@@ -348,134 +287,6 @@ export class AssistantView extends LitElement {
             font-family: 'Monaco', 'Menlo', monospace;
             font-size: 10px;
             color: rgba(255, 255, 255, 0.7);
-        }
-        
-        /* ────────────────[ GLASS BYPASS ]─────────────── */
-        :host-context(body.has-glass) .assistant-container,
-        :host-context(body.has-glass) .top-bar,
-        :host-context(body.has-glass) .toggle-button,
-        :host-context(body.has-glass) .copy-button,
-        :host-context(body.has-glass) .transcription-container,
-        :host-context(body.has-glass) .insights-container,
-        :host-context(body.has-glass) .stt-message,
-        :host-context(body.has-glass) .outline-item,
-        :host-context(body.has-glass) .request-item,
-        :host-context(body.has-glass) .markdown-content,
-        :host-context(body.has-glass) .insights-container pre,
-        :host-context(body.has-glass) .insights-container p code,
-        :host-context(body.has-glass) .insights-container pre code {
-            background: transparent !important;
-            border: none !important;
-            outline: none !important;
-            box-shadow: none !important;
-            filter: none !important;
-            backdrop-filter: none !important;
-        }
-
-        :host-context(body.has-glass) .assistant-container::before,
-        :host-context(body.has-glass) .assistant-container::after {
-            display: none !important;
-        }
-
-        :host-context(body.has-glass) .toggle-button:hover,
-        :host-context(body.has-glass) .copy-button:hover,
-        :host-context(body.has-glass) .outline-item:hover,
-        :host-context(body.has-glass) .request-item.clickable:hover,
-        :host-context(body.has-glass) .markdown-content:hover {
-            background: transparent !important;
-            transform: none !important;
-        }
-
-        :host-context(body.has-glass) .transcription-container::-webkit-scrollbar-track,
-        :host-context(body.has-glass) .transcription-container::-webkit-scrollbar-thumb,
-        :host-context(body.has-glass) .insights-container::-webkit-scrollbar-track,
-        :host-context(body.has-glass) .insights-container::-webkit-scrollbar-thumb {
-            background: transparent !important;
-        }
-        :host-context(body.has-glass) * {
-            animation: none !important;
-            transition: none !important;
-            transform: none !important;
-            filter: none !important;
-            backdrop-filter: none !important;
-            box-shadow: none !important;
-        }
-
-        :host-context(body.has-glass) .assistant-container,
-        :host-context(body.has-glass) .stt-message,
-        :host-context(body.has-glass) .toggle-button,
-        :host-context(body.has-glass) .copy-button {
-            border-radius: 0 !important;
-        }
-
-        :host-context(body.has-glass) ::-webkit-scrollbar,
-        :host-context(body.has-glass) ::-webkit-scrollbar-track,
-        :host-context(body.has-glass) ::-webkit-scrollbar-thumb {
-            background: transparent !important;
-            width: 0 !important;      /* 스크롤바 자체 숨기기 */
-        }
-        :host-context(body.has-glass) .assistant-container,
-        :host-context(body.has-glass) .top-bar,
-        :host-context(body.has-glass) .toggle-button,
-        :host-context(body.has-glass) .copy-button,
-        :host-context(body.has-glass) .transcription-container,
-        :host-context(body.has-glass) .insights-container,
-        :host-context(body.has-glass) .stt-message,
-        :host-context(body.has-glass) .outline-item,
-        :host-context(body.has-glass) .request-item,
-        :host-context(body.has-glass) .markdown-content,
-        :host-context(body.has-glass) .insights-container pre,
-        :host-context(body.has-glass) .insights-container p code,
-        :host-context(body.has-glass) .insights-container pre code {
-            background: transparent !important;
-            border: none !important;
-            outline: none !important;
-            box-shadow: none !important;
-            filter: none !important;
-            backdrop-filter: none !important;
-        }
-
-        :host-context(body.has-glass) .assistant-container::before,
-        :host-context(body.has-glass) .assistant-container::after {
-            display: none !important;
-        }
-
-        :host-context(body.has-glass) .toggle-button:hover,
-        :host-context(body.has-glass) .copy-button:hover,
-        :host-context(body.has-glass) .outline-item:hover,
-        :host-context(body.has-glass) .request-item.clickable:hover,
-        :host-context(body.has-glass) .markdown-content:hover {
-            background: transparent !important;
-            transform: none !important;
-        }
-
-        :host-context(body.has-glass) .transcription-container::-webkit-scrollbar-track,
-        :host-context(body.has-glass) .transcription-container::-webkit-scrollbar-thumb,
-        :host-context(body.has-glass) .insights-container::-webkit-scrollbar-track,
-        :host-context(body.has-glass) .insights-container::-webkit-scrollbar-thumb {
-            background: transparent !important;
-        }
-        :host-context(body.has-glass) * {
-            animation: none !important;
-            transition: none !important;
-            transform: none !important;
-            filter: none !important;
-            backdrop-filter: none !important;
-            box-shadow: none !important;
-        }
-
-        :host-context(body.has-glass) .assistant-container,
-        :host-context(body.has-glass) .stt-message,
-        :host-context(body.has-glass) .toggle-button,
-        :host-context(body.has-glass) .copy-button {
-            border-radius: 0 !important;
-        }
-
-        :host-context(body.has-glass) ::-webkit-scrollbar,
-        :host-context(body.has-glass) ::-webkit-scrollbar-track,
-        :host-context(body.has-glass) ::-webkit-scrollbar-thumb {
-            background: transparent !important;
-            width: 0 !important;
         }
     `;
 

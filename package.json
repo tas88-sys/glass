@@ -1,15 +1,13 @@
 {
     "name": "pickle-glass",
     "productName": "Glass",
-
     "version": "0.2.4",
-
     "description": "Cl*ely for Free",
     "main": "src/index.js",
     "scripts": {
         "setup": "npm install && cd pickleglass_web && npm install && npm run build && cd .. && npm start",
-        "start": "npm run build:renderer && electron-forge start",
-        "package": "npm run build:renderer && electron-forge package",
+        "start": "npm run build:renderer && electron .",
+        "package": "npm run build:all && electron-builder --dir",
         "make": "npm run build:renderer && electron-forge make",
         "build": "npm run build:all && electron-builder --config electron-builder.yml --publish never",
         "build:win": "npm run build:all && electron-builder --win --x64 --publish never",
@@ -58,14 +56,6 @@
         "ws": "^8.18.0"
     },
     "devDependencies": {
-        "@electron-forge/cli": "^7.8.1",
-        "@electron-forge/maker-deb": "^7.8.1",
-        "@electron-forge/maker-dmg": "^7.8.1",
-        "@electron-forge/maker-rpm": "^7.8.1",
-        "@electron-forge/maker-squirrel": "^7.8.1",
-        "@electron-forge/maker-zip": "^7.8.1",
-        "@electron-forge/plugin-auto-unpack-natives": "^7.8.1",
-        "@electron-forge/plugin-fuses": "^7.8.1",
         "@electron/fuses": "^1.8.0",
         "@electron/notarize": "^2.5.0",
         "electron": "^30.5.1",
