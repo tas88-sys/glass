@@ -56,7 +56,6 @@ export class PermissionHeader extends LitElement {
         }
 
         .close-button {
-            -webkit-app-region: no-drag;
             position: absolute;
             top: 10px;
             right: 10px;
@@ -147,7 +146,6 @@ export class PermissionHeader extends LitElement {
         }
 
         .action-button {
-            -webkit-app-region: no-drag;
             width: 100%;
             height: 34px;
             background: rgba(255, 255, 255, 0.2);
@@ -189,7 +187,6 @@ export class PermissionHeader extends LitElement {
         }
 
         .continue-button {
-            -webkit-app-region: no-drag;
             width: 100%;
             height: 34px;
             background: rgba(34, 197, 94, 0.8);
@@ -228,6 +225,30 @@ export class PermissionHeader extends LitElement {
         .continue-button:disabled {
             background: rgba(255, 255, 255, 0.2);
             cursor: not-allowed;
+        }
+        
+        /* ────────────────[ GLASS BYPASS ]─────────────── */
+        :host-context(body.has-glass) .container,
+        :host-context(body.has-glass) .action-button,
+        :host-context(body.has-glass) .continue-button,
+        :host-context(body.has-glass) .close-button {
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            filter: none !important;
+            backdrop-filter: none !important;
+        }
+
+        :host-context(body.has-glass) .container::after,
+        :host-context(body.has-glass) .action-button::after,
+        :host-context(body.has-glass) .continue-button::after {
+            display: none !important;
+        }
+
+        :host-context(body.has-glass) .action-button:hover,
+        :host-context(body.has-glass) .continue-button:hover,
+        :host-context(body.has-glass) .close-button:hover {
+            background: transparent !important;
         }
     `;
 

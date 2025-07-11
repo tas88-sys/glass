@@ -519,6 +519,42 @@ export class AskView extends LitElement {
             color: rgba(255, 255, 255, 0.5);
             font-size: 14px;
         }
+
+        /* ────────────────[ GLASS BYPASS ]─────────────── */
+        :host-context(body.has-glass) .ask-container,
+        :host-context(body.has-glass) .response-header,
+        :host-context(body.has-glass) .response-icon,
+        :host-context(body.has-glass) .copy-button,
+        :host-context(body.has-glass) .close-button,
+        :host-context(body.has-glass) .line-copy-button,
+        :host-context(body.has-glass) .text-input-container,
+        :host-context(body.has-glass) .response-container pre,
+        :host-context(body.has-glass) .response-container p code,
+        :host-context(body.has-glass) .response-container pre code {
+            background: transparent !important;
+            border: none !important;
+            outline: none !important;
+            box-shadow: none !important;
+            filter: none !important;
+            backdrop-filter: none !important;
+        }
+
+        :host-context(body.has-glass) .ask-container::before {
+            display: none !important;
+        }
+
+        :host-context(body.has-glass) .copy-button:hover,
+        :host-context(body.has-glass) .close-button:hover,
+        :host-context(body.has-glass) .line-copy-button,
+        :host-context(body.has-glass) .line-copy-button:hover,
+        :host-context(body.has-glass) .response-line:hover {
+            background: transparent !important;
+        }
+
+        :host-context(body.has-glass) .response-container::-webkit-scrollbar-track,
+        :host-context(body.has-glass) .response-container::-webkit-scrollbar-thumb {
+            background: transparent !important;
+        }
     `;
 
     constructor() {

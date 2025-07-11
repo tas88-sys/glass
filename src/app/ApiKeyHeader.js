@@ -78,7 +78,6 @@ export class ApiKeyHeader extends LitElement {
         }
 
         .close-button {
-            -webkit-app-region: no-drag;
             position: absolute;
             top: 10px;
             right: 10px;
@@ -158,7 +157,6 @@ export class ApiKeyHeader extends LitElement {
         }
 
         .api-input {
-            -webkit-app-region: no-drag;
             width: 100%;
             height: 34px;
             background: rgba(255, 255, 255, 0.1);
@@ -186,7 +184,6 @@ export class ApiKeyHeader extends LitElement {
         .provider-column { flex: 1; display: flex; flex-direction: column; align-items: center; }
         .provider-label { color: rgba(255, 255, 255, 0.7); font-size: 11px; font-weight: 500; margin-bottom: 6px; }
         .api-input, .provider-select {
-            -webkit-app-region: no-drag;
             width: 100%;
             height: 34px;
             text-align: center;
@@ -213,7 +210,6 @@ export class ApiKeyHeader extends LitElement {
 
 
         .action-button {
-            -webkit-app-region: no-drag;
             width: 100%;
             height: 34px;
             background: rgba(255, 255, 255, 0.2);
@@ -258,6 +254,29 @@ export class ApiKeyHeader extends LitElement {
             font-size: 12px;
             font-weight: 500; /* Medium */
             margin: 10px 0;
+        }
+        /* ────────────────[ GLASS BYPASS ]─────────────── */
+        :host-context(body.has-glass) .container,
+        :host-context(body.has-glass) .api-input,
+        :host-context(body.has-glass) .provider-select,
+        :host-context(body.has-glass) .action-button,
+        :host-context(body.has-glass) .close-button {
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            filter: none !important;
+            backdrop-filter: none !important;
+        }
+
+        :host-context(body.has-glass) .container::after,
+        :host-context(body.has-glass) .action-button::after {
+            display: none !important;
+        }
+
+        :host-context(body.has-glass) .action-button:hover,
+        :host-context(body.has-glass) .provider-select:hover,
+        :host-context(body.has-glass) .close-button:hover {
+            background: transparent !important;
         }
     `
 

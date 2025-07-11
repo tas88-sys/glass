@@ -37,7 +37,7 @@ const isLiquidGlassSupported = () => {
     }
     const majorVersion = parseInt(os.release().split('.')[0], 10);
     // return majorVersion >= 25; // macOS 26+ (Darwin 25+)
-    return majorVersion >= 26; // See you soon!
+    return majorVersion >= 25; // See you soon!
 };
 let shouldUseLiquidGlass = isLiquidGlassSupported();
 if (shouldUseLiquidGlass) {
@@ -116,13 +116,9 @@ function createFeatureWindows(header, namesToCreate) {
                     listenLoadOptions.query.glass = 'true';
                     listen.loadFile(path.join(__dirname, '../app/content.html'), listenLoadOptions);
                     listen.webContents.once('did-finish-load', () => {
-                        const viewId = liquidGlass.addView(listen.getNativeWindowHandle(), {
-                            cornerRadius: 12,
-                            tintColor: '#FF00001A', // Red tint
-                            opaque: false, 
-                        });
+                        const viewId = liquidGlass.addView(listen.getNativeWindowHandle());
                         if (viewId !== -1) {
-                            liquidGlass.unstable_setVariant(viewId, 2);
+                            liquidGlass.unstable_setVariant(viewId, liquidGlass.GlassMaterialVariant.bubbles);
                             // liquidGlass.unstable_setScrim(viewId, 1);
                             // liquidGlass.unstable_setSubdued(viewId, 1);
                         }
@@ -148,13 +144,9 @@ function createFeatureWindows(header, namesToCreate) {
                     askLoadOptions.query.glass = 'true';
                     ask.loadFile(path.join(__dirname, '../app/content.html'), askLoadOptions);
                     ask.webContents.once('did-finish-load', () => {
-                        const viewId = liquidGlass.addView(ask.getNativeWindowHandle(), {
-                            cornerRadius: 12,
-                            tintColor: '#FF00001A', // Red tint
-                            opaque: false, 
-                        });
+                        const viewId = liquidGlass.addView(ask.getNativeWindowHandle());
                         if (viewId !== -1) {
-                            liquidGlass.unstable_setVariant(viewId, 2);
+                            liquidGlass.unstable_setVariant(viewId, liquidGlass.GlassMaterialVariant.bubbles);
                             // liquidGlass.unstable_setScrim(viewId, 1);
                             // liquidGlass.unstable_setSubdued(viewId, 1);
                         }
@@ -189,13 +181,9 @@ function createFeatureWindows(header, namesToCreate) {
                     settings.loadFile(path.join(__dirname,'../app/content.html'), settingsLoadOptions)
                         .catch(console.error);
                     settings.webContents.once('did-finish-load', () => {
-                        const viewId = liquidGlass.addView(settings.getNativeWindowHandle(), {
-                            cornerRadius: 12,
-                            tintColor: '#FF00001A', // Red tint
-                            opaque: false, 
-                        });
+                        const viewId = liquidGlass.addView(settings.getNativeWindowHandle());
                         if (viewId !== -1) {
-                            liquidGlass.unstable_setVariant(viewId, 2);
+                            liquidGlass.unstable_setVariant(viewId, liquidGlass.GlassMaterialVariant.bubbles);
                             // liquidGlass.unstable_setScrim(viewId, 1);
                             // liquidGlass.unstable_setSubdued(viewId, 1);
                         }
@@ -254,11 +242,9 @@ function createFeatureWindows(header, namesToCreate) {
                     loadOptions.query.glass = 'true';
                     shortcutEditor.loadFile(path.join(__dirname, '../app/content.html'), loadOptions);
                     shortcutEditor.webContents.once('did-finish-load', () => {
-                        const viewId = liquidGlass.addView(shortcutEditor.getNativeWindowHandle(), {
-                            cornerRadius: 12, tintColor: '#FF00001A', opaque: false, 
-                        });
+                        const viewId = liquidGlass.addView(shortcutEditor.getNativeWindowHandle());
                         if (viewId !== -1) {
-                            liquidGlass.unstable_setVariant(viewId, 2);
+                            liquidGlass.unstable_setVariant(viewId, liquidGlass.GlassMaterialVariant.bubbles);
                         }
                     });
                 }
@@ -408,13 +394,9 @@ function createWindows() {
         headerLoadOptions.query = { glass: 'true' };
         header.loadFile(path.join(__dirname, '../app/header.html'), headerLoadOptions);
         header.webContents.once('did-finish-load', () => {
-            const viewId = liquidGlass.addView(header.getNativeWindowHandle(), {
-                cornerRadius: 12,
-                tintColor: '#FF00001A', // Red tint
-                opaque: false, 
-            });
+            const viewId = liquidGlass.addView(header.getNativeWindowHandle());
             if (viewId !== -1) {
-                liquidGlass.unstable_setVariant(viewId, 2); 
+                liquidGlass.unstable_setVariant(viewId, liquidGlass.GlassMaterialVariant.bubbles);
                 // liquidGlass.unstable_setScrim(viewId, 1); 
                 // liquidGlass.unstable_setSubdued(viewId, 1);
             }
