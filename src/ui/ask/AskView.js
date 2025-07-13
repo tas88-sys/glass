@@ -1,4 +1,5 @@
 import { html, css, LitElement } from '../../ui/assets/lit-core-2.7.4.min.js';
+import { parser, parser_write, parser_end, default_renderer } from '../../ui/assets/smd.js';
 
 export class AskView extends LitElement {
     static properties = {
@@ -725,6 +726,10 @@ export class AskView extends LitElement {
         this.DOMPurify = null;
         this.isLibrariesLoaded = false;
 
+        // SMD.js streaming markdown parser
+        this.smdParser = null;
+        this.smdContainer = null;
+        this.lastProcessedLength = 0;
 
         this.handleSendText = this.handleSendText.bind(this);
         this.handleTextKeydown = this.handleTextKeydown.bind(this);
@@ -763,13 +768,13 @@ export class AskView extends LitElement {
         if (container) this.resizeObserver.observe(container);
 
         this.handleQuestionFromAssistant = (event, question) => {
-            console.log('📨 AskView: Received question from ListenView:', question);
+            console.log('AskView: Received question from ListenView:', question);
             this.handleSendText(null, question);
         };
 
         if (window.api) {
             window.api.askView.onShowTextInput(() => {
-                console.log('📤 Show text input signal received');
+                console.log('Show text input signal received');
                 if (!this.showTextInput) {
                     this.showTextInput = true;
                     this.updateComplete.then(() => this.focusTextInput());
@@ -797,7 +802,7 @@ export class AskView extends LitElement {
                   }
                 }
               });
-            console.log('✅ AskView: IPC 이벤트 리스너 등록 완료');
+            console.log('AskView: IPC 이벤트 리스너 등록 완료');
         }
     }
 
@@ -914,6 +919,9 @@ export class AskView extends LitElement {
         this.isStreaming = false;
         this.headerText = 'AI Response';
         this.showTextInput = true;
+        this.lastProcessedLength = 0;
+        this.smdParser = null;
+        this.smdContainer = null;
     }
 
     handleInputFocus() {
@@ -985,7 +993,7 @@ export class AskView extends LitElement {
         const responseContainer = this.shadowRoot.getElementById('responseContainer');
         if (!responseContainer) return;
     
-        // ✨ 로딩 상태를 먼저 확인
+        // Check loading state
         if (this.isLoading) {
             responseContainer.innerHTML = `
               <div class="loading-dots">
@@ -993,19 +1001,81 @@ export class AskView extends LitElement {
                 <div class="loading-dot"></div>
                 <div class="loading-dot"></div>
               </div>`;
-            return;
-          }
-        
-        // ✨ 응답이 없을 때의 처리
-        if (!this.currentResponse) {
-            responseContainer.innerHTML = `<div class="empty-state">...</div>`;
+            this.resetStreamingParser();
             return;
         }
         
-        let textToRender = this.fixIncompleteMarkdown(this.currentResponse);
-        textToRender = this.fixIncompleteCodeBlocks(textToRender);
-    
+        // If there is no response, show empty state
+        if (!this.currentResponse) {
+            responseContainer.innerHTML = `<div class="empty-state">...</div>`;
+            this.resetStreamingParser();
+            return;
+        }
+        
+        // Set streaming markdown parser
+        this.renderStreamingMarkdown(responseContainer);
 
+        // After updating content, recalculate window height
+        this.adjustWindowHeightThrottled();
+    }
+
+    resetStreamingParser() {
+        this.smdParser = null;
+        this.smdContainer = null;
+        this.lastProcessedLength = 0;
+    }
+
+    renderStreamingMarkdown(responseContainer) {
+        try {
+            // 파서가 없거나 컨테이너가 변경되었으면 새로 생성
+            if (!this.smdParser || this.smdContainer !== responseContainer) {
+                this.smdContainer = responseContainer;
+                this.smdContainer.innerHTML = '';
+                
+                // smd.js의 default_renderer 사용
+                const renderer = default_renderer(this.smdContainer);
+                this.smdParser = parser(renderer);
+                this.lastProcessedLength = 0;
+            }
+
+            // 새로운 텍스트만 처리 (스트리밍 최적화)
+            const currentText = this.currentResponse;
+            const newText = currentText.slice(this.lastProcessedLength);
+            
+            if (newText.length > 0) {
+                // 새로운 텍스트 청크를 파서에 전달
+                parser_write(this.smdParser, newText);
+                this.lastProcessedLength = currentText.length;
+            }
+
+            // 스트리밍이 완료되면 파서 종료
+            if (!this.isStreaming && !this.isLoading) {
+                parser_end(this.smdParser);
+            }
+
+            // 코드 하이라이팅 적용
+            if (this.hljs) {
+                responseContainer.querySelectorAll('pre code').forEach(block => {
+                    if (!block.hasAttribute('data-highlighted')) {
+                        this.hljs.highlightElement(block);
+                        block.setAttribute('data-highlighted', 'true');
+                    }
+                });
+            }
+
+            // 스크롤을 맨 아래로
+            responseContainer.scrollTop = responseContainer.scrollHeight;
+            
+        } catch (error) {
+            console.error('Error rendering streaming markdown:', error);
+            // 에러 발생 시 기본 텍스트 렌더링으로 폴백
+            this.renderFallbackContent(responseContainer);
+        }
+    }
+
+    renderFallbackContent(responseContainer) {
+        const textToRender = this.currentResponse || '';
+        
         if (this.isLibrariesLoaded && this.marked && this.DOMPurify) {
             try {
                 // 마크다운 파싱
@@ -1014,42 +1084,13 @@ export class AskView extends LitElement {
                 // DOMPurify로 정제
                 const cleanHtml = this.DOMPurify.sanitize(parsedHtml, {
                     ALLOWED_TAGS: [
-                        'h1',
-                        'h2',
-                        'h3',
-                        'h4',
-                        'h5',
-                        'h6',
-                        'p',
-                        'br',
-                        'strong',
-                        'b',
-                        'em',
-                        'i',
-                        'ul',
-                        'ol',
-                        'li',
-                        'blockquote',
-                        'code',
-                        'pre',
-                        'a',
-                        'img',
-                        'table',
-                        'thead',
-                        'tbody',
-                        'tr',
-                        'th',
-                        'td',
-                        'hr',
-                        'sup',
-                        'sub',
-                        'del',
-                        'ins',
+                        'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'br', 'strong', 'b', 'em', 'i',
+                        'ul', 'ol', 'li', 'blockquote', 'code', 'pre', 'a', 'img', 'table', 'thead',
+                        'tbody', 'tr', 'th', 'td', 'hr', 'sup', 'sub', 'del', 'ins',
                     ],
                     ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'class', 'id', 'target', 'rel'],
                 });
 
-                // HTML 적용
                 responseContainer.innerHTML = cleanHtml;
 
                 // 코드 하이라이팅 적용
@@ -1058,12 +1099,8 @@ export class AskView extends LitElement {
                         this.hljs.highlightElement(block);
                     });
                 }
-
-                // 스크롤을 맨 아래로
-                responseContainer.scrollTop = responseContainer.scrollHeight;
             } catch (error) {
-                console.error('Error rendering markdown:', error);
-                // 에러 발생 시 일반 텍스트로 표시
+                console.error('Error in fallback rendering:', error);
                 responseContainer.textContent = textToRender;
             }
         } else {
@@ -1080,9 +1117,6 @@ export class AskView extends LitElement {
 
             responseContainer.innerHTML = `<p>${basicHtml}</p>`;
         }
-
-        // 🚀 After updating content, recalculate window height
-        this.adjustWindowHeightThrottled();
     }
 
 
