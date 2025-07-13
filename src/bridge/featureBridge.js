@@ -76,7 +76,8 @@ module.exports = {
     ipcMain.handle('ask:sendQuestionFromAsk', async (event, userPrompt) => await askService.sendMessage(userPrompt));
     ipcMain.handle('ask:sendQuestionFromSummary', async (event, userPrompt) => await askService.sendMessage(userPrompt));
     ipcMain.handle('ask:toggleAskButton', async () => await askService.toggleAskButton());
-
+    ipcMain.handle('ask:closeAskWindow',  async () => await askService.closeAskWindow());
+    
     // Listen
     ipcMain.handle('listen:sendMicAudio', async (event, { data, mimeType }) => await listenService.handleSendMicAudioContent(data, mimeType));
     ipcMain.handle('listen:sendSystemAudio', async (event, { data, mimeType }) => {

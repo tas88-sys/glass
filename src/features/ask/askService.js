@@ -2,6 +2,8 @@ const { BrowserWindow } = require('electron');
 const { createStreamingLLM } = require('../common/ai/factory');
 // Lazy require helper to avoid circular dependency issues
 const getWindowManager = () => require('../../window/windowManager');
+const internalBridge = require('../../bridge/internalBridge');
+const { EVENTS } = internalBridge;
 
 const getWindowPool = () => {
     try {
@@ -10,8 +12,6 @@ const getWindowPool = () => {
         return null;
     }
 };
-const updateLayout = () => getWindowManager().updateLayout();
-const ensureAskWindowVisible = () => getWindowManager().ensureAskWindowVisible();
 
 const sessionRepository = require('../common/repositories/session');
 const askRepository = require('./repositories');
@@ -148,32 +148,47 @@ class AskService {
     async toggleAskButton() {
         const askWindow = getWindowPool()?.get('ask');
 
-        // 답변이 있거나 스트리밍 중일 때
         const hasContent = this.state.isStreaming || (this.state.currentResponse && this.state.currentResponse.length > 0);
 
         if (askWindow && askWindow.isVisible() && hasContent) {
-            // 창을 닫는 대신, 텍스트 입력창만 토글합니다.
             this.state.showTextInput = !this.state.showTextInput;
-            this._broadcastState(); // 변경된 상태 전파
+            this._broadcastState();
         } else {
-            // 기존의 창 보이기/숨기기 로직
             if (askWindow && askWindow.isVisible()) {
-                askWindow.webContents.send('window-hide-animation');
+                internalBridge.emit('request-window-visibility', { name: 'ask', visible: false });
                 this.state.isVisible = false;
             } else {
                 console.log('[AskService] Showing hidden Ask window');
+                internalBridge.emit('request-window-visibility', { name: 'ask', visible: true });
                 this.state.isVisible = true;
-                askWindow?.show();
-                updateLayout();
-                askWindow?.webContents.send('window-show-animation');
             }
-            // 창이 다시 열릴 때를 대비해 상태를 초기화하고 전파합니다.
             if (this.state.isVisible) {
                 this.state.showTextInput = true;
                 this._broadcastState();
             }
         }
     }
+
+    async closeAskWindow () {
+            if (this.abortController) {
+                this.abortController.abort('Window closed by user');
+                this.abortController = null;
+            }
+    
+            this.state = {
+                isVisible      : false,
+                isLoading      : false,
+                isStreaming    : false,
+                currentQuestion: '',
+                currentResponse: '',
+                showTextInput  : true,
+            };
+            this._broadcastState();
+    
+            internalBridge.emit('request-window-visibility', { name: 'ask', visible: false });
+    
+            return { success: true };
+        }
     
 
     /**
@@ -195,7 +210,7 @@ class AskService {
      * @returns {Promise<{success: boolean, response?: string, error?: string}>}
      */
     async sendMessage(userPrompt, conversationHistoryRaw=[]) {
-        ensureAskWindowVisible();
+        // ensureAskWindowVisible();
 
         if (this.abortController) {
             this.abortController.abort('New request received.');

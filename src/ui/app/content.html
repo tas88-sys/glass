@@ -99,62 +99,6 @@
                 transition: transform 0.25s cubic-bezier(0.23, 1, 0.32, 1), opacity 0.25s ease-out;
             }
 
-            .window-sliding-down {
-                animation: slideDownFromHeader 0.12s cubic-bezier(0.23, 1, 0.32, 1) forwards;
-                will-change: transform, opacity;
-                transform-style: preserve-3d;
-            }
-
-            .window-sliding-up {
-                animation: slideUpToHeader 0.10s cubic-bezier(0.55, 0.085, 0.68, 0.53) forwards;
-                will-change: transform, opacity;
-                transform-style: preserve-3d;
-            }
-
-            .window-hidden {
-                opacity: 0;
-                transform: translate3d(0, -18px, 0) scale3d(0.96, 0.96, 1);
-                pointer-events: none;
-                will-change: auto;
-                contain: layout style paint;
-            }
-
-            .listen-window-moving {
-                transition: transform 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-                will-change: transform;
-            }
-
-            .listen-window-center {
-                transform: translate3d(0, 0, 0);
-            }
-
-            .listen-window-left {
-                transform: translate3d(-110px, 0, 0);
-            }
-
-            @keyframes slideDownFromHeader {
-                0% {
-                    opacity: 0;
-                    transform: translate3d(0, -18px, 0) scale3d(0.96, 0.96, 1);
-                }
-                25% {
-                    opacity: 0.4;
-                    transform: translate3d(0, -10px, 0) scale3d(0.98, 0.98, 1);
-                }
-                50% {
-                    opacity: 0.7;
-                    transform: translate3d(0, -3px, 0) scale3d(1.01, 1.01, 1);
-                }
-                75% {
-                    opacity: 0.9;
-                    transform: translate3d(0, -0.5px, 0) scale3d(1.005, 1.005, 1);
-                }
-                100% {
-                    opacity: 1;
-                    transform: translate3d(0, 0, 0) scale3d(1, 1, 1);
-                }
-            }
-
             .settings-window-show {
                 animation: settingsPopFromButton 0.12s cubic-bezier(0.23, 1, 0.32, 1) forwards;
                 transform-origin: 85% 0%;
@@ -206,25 +150,6 @@
                     transform: translate3d(0, -8px, 0) scale3d(0.5, 0.5, 1);
                 }
             }
-
-            @keyframes slideUpToHeader {
-                0% {
-                    opacity: 1;
-                    transform: translate3d(0, 0, 0) scale3d(1, 1, 1);
-                }
-                30% {
-                    opacity: 0.6;
-                    transform: translate3d(0, -6px, 0) scale3d(0.98, 0.98, 1);
-                }
-                65% {
-                    opacity: 0.2;
-                    transform: translate3d(0, -14px, 0) scale3d(0.95, 0.95, 1);
-                }
-                100% {
-                    opacity: 0;
-                    transform: translate3d(0, -18px, 0) scale3d(0.93, 0.93, 1);
-                }
-            }
         </style>
     </head>
     <body>
@@ -239,61 +164,23 @@
                 const app = document.getElementById('pickle-glass');
         
                 if (window.api) {
-                    // --- REFACTORED: Event-driven animation handling ---
                     app.addEventListener('animationend', (event) => {
-                        // 숨김 애니메이션이 끝나면 main 프로세스에 알려 창을 실제로 숨깁니다.
-                        if (event.animationName === 'slideUpToHeader' || event.animationName === 'settingsCollapseToButton') {
-                            console.log(`Animation finished: ${event.animationName}. Notifying main process.`);
+                        if (event.animationName === 'settingsCollapseToButton') {
+                            console.log('Settings hide animation finished. Notifying main process.');
                             window.api.content.sendAnimationFinished();
-        
-                            // 완료 후 애니메이션 클래스 정리
-                            app.classList.remove('window-sliding-up', 'settings-window-hide');
-                            app.classList.add('window-hidden');
-                        } else if (event.animationName === 'slideDownFromHeader' || event.animationName === 'settingsPopFromButton') {
-                             // 보이기 애니메이션 완료 후 클래스 정리
-                            app.classList.remove('window-sliding-down', 'settings-window-show');
+                            
+                            app.classList.remove('settings-window-hide');
+                            app.classList.add('hidden');
+                        } 
+                        else if (event.animationName === 'settingsPopFromButton') {
+                            app.classList.remove('settings-window-show');
                         }
-                    });
-        
-                    window.api.content.onWindowShowAnimation(() => {
-                        console.log('Starting window show animation');
-                        app.classList.remove('window-hidden', 'window-sliding-up', 'settings-window-hide');
-                        app.classList.add('window-sliding-down');
-                    });
-        
-                    window.api.content.onWindowHideAnimation(() => {
-                        console.log('Starting window hide animation');
-                        app.classList.remove('window-sliding-down', 'settings-window-show');
-                        app.classList.add('window-sliding-up');
                     });
         
                     window.api.content.onSettingsWindowHideAnimation(() => {
                         console.log('Starting settings window hide animation');
-                        app.classList.remove('window-sliding-down', 'settings-window-show');
+                        app.classList.remove('settings-window-show');
                         app.classList.add('settings-window-hide');
-                    });
-        
-                    // --- UNCHANGED: Existing logic for listen window movement ---
-                    window.api.content.onListenWindowMoveToCenter(() => {
-                        console.log('Moving listen window to center');
-                        app.classList.add('listen-window-moving');
-                        app.classList.remove('listen-window-left');
-                        app.classList.add('listen-window-center');
-        
-                        setTimeout(() => {
-                            app.classList.remove('listen-window-moving');
-                        }, 350);
-                    });
-        
-                    window.api.content.onListenWindowMoveToLeft(() => {
-                        console.log('Moving listen window to left');
-                        app.classList.add('listen-window-moving');
-                        app.classList.remove('listen-window-center');
-                        app.classList.add('listen-window-left');
-        
-                        setTimeout(() => {
-                            app.classList.remove('listen-window-moving');
-                        }, 350);
                     });
                 }
             });

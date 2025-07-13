@@ -1,9 +1,9 @@
 const { screen } = require('electron');
 
 /**
- * 주어진 창이 현재 어느 디스플레이에 속해 있는지 반환합니다.
- * @param {BrowserWindow} window - 확인할 창 객체
- * @returns {Display} Electron의 Display 객체
+ * 
+ * @param {BrowserWindow} window 
+ * @returns {Display}
  */
 function getCurrentDisplay(window) {
     if (!window || window.isDestroyed()) return screen.getPrimaryDisplay();
@@ -27,10 +27,6 @@ class WindowLayoutManager {
         this.PADDING = 80;
     }
 
-    /**
-     * 모든 창의 레이아웃 업데이트를 요청합니다.
-     * 중복 실행을 방지하기 위해 isUpdating 플래그를 사용합니다.
-     */
     updateLayout() {
         if (this.isUpdating) return;
         this.isUpdating = true;
@@ -42,8 +38,112 @@ class WindowLayoutManager {
     }
 
     /**
-     * 헤더 창을 기준으로 모든 기능 창들의 위치를 계산하고 배치합니다.
+     * 
+     * @param {object} [visibilityOverride] - { listen: true, ask: true }
+     * @returns {{listen: {x:number, y:number}|null, ask: {x:number, y:number}|null}}
      */
+    getTargetBoundsForFeatureWindows(visibilityOverride = {}) {
+        const header = this.windowPool.get('header');
+        if (!header?.getBounds) return {};
+ 
+        const headerBounds = header.getBounds();
+        const display = getCurrentDisplay(header);
+        const { width: screenWidth, height: screenHeight } = display.workAreaSize;
+        const { x: workAreaX, y: workAreaY } = display.workArea;
+ 
+        const ask = this.windowPool.get('ask');
+        const listen = this.windowPool.get('listen');
+ 
+        const askVis = visibilityOverride.ask !== undefined ?
+            visibilityOverride.ask :
+            (ask && ask.isVisible() && !ask.isDestroyed());
+        const listenVis = visibilityOverride.listen !== undefined ?
+            visibilityOverride.listen :
+            (listen && listen.isVisible() && !listen.isDestroyed());
+ 
+        if (!askVis && !listenVis) return {};
+ 
+        const PAD = 8;
+        const headerCenterXRel = headerBounds.x - workAreaX + headerBounds.width / 2;
+        
+        const relativeX = headerCenterXRel / screenWidth;
+        const relativeY = (headerBounds.y - workAreaY) / screenHeight;
+        const strategy = this.determineLayoutStrategy(headerBounds, screenWidth, screenHeight, relativeX, relativeY, workAreaX, workAreaY);
+ 
+        const askB = ask ? ask.getBounds() : null;
+        const listenB = listen ? listen.getBounds() : null;
+ 
+        const result = { listen: null, ask: null };
+ 
+        if (askVis && listenVis) {
+            let askXRel = headerCenterXRel - (askB.width / 2);
+            let listenXRel = askXRel - listenB.width - PAD;
+ 
+            if (listenXRel < PAD) {
+                listenXRel = PAD;
+                askXRel = listenXRel + listenB.width + PAD;
+            }
+            if (askXRel + askB.width > screenWidth - PAD) {
+                askXRel = screenWidth - PAD - askB.width;
+                listenXRel = askXRel - listenB.width - PAD;
+            }
+ 
+            const yPos = (strategy.primary === 'above') ?
+                (headerBounds.y - workAreaY) - Math.max(askB.height, listenB.height) - PAD :
+                (headerBounds.y - workAreaY) + headerBounds.height + PAD;
+            const yAbs = yPos + workAreaY;
+ 
+            result.listen = { x: Math.round(listenXRel + workAreaX), y: Math.round(yAbs) };
+            result.ask = { x: Math.round(askXRel + workAreaX), y: Math.round(yAbs) };
+ 
+        } else {
+            const winB = askVis ? askB : listenB;
+            let xRel = headerCenterXRel - winB.width / 2;
+            
+            let yPos = (strategy.primary === 'above') ?
+                (headerBounds.y - workAreaY) - winB.height - PAD :
+                (headerBounds.y - workAreaY) + headerBounds.height + PAD;
+            
+            xRel = Math.max(PAD, Math.min(screenWidth - winB.width - PAD, xRel));
+            
+            const abs = { x: Math.round(xRel + workAreaX), y: Math.round(yPos + workAreaY) };
+            if (askVis) result.ask = abs;
+            if (listenVis) result.listen = abs;
+        }
+        return result;
+    }
+
+   /**
+    * 
+    * @returns {{listen: {x:number, y:number}}}
+    */
+   getTargetBoundsForListenNextToAsk() {
+       const ask = this.windowPool.get('ask');
+       const listen = this.windowPool.get('listen');
+       const header = this.windowPool.get('header');
+
+       if (!ask || !listen || !header || !ask.isVisible() || ask.isDestroyed() || listen.isDestroyed()) {
+           return {};
+       }
+
+       const askB = ask.getBounds();
+       const listenB = listen.getBounds();
+       const PAD = 8;
+
+       const listenX = askB.x - listenB.width - PAD;
+       const listenY = askB.y;
+
+       const display = getCurrentDisplay(header);
+       const { x: workAreaX } = display.workArea;
+
+       return {
+           listen: {
+               x: Math.max(workAreaX + PAD, listenX),
+               y: listenY
+           }
+       };
+   }
+
     positionWindows() {
         const header = this.windowPool.get('header');
         if (!header?.getBounds) return;
@@ -59,21 +159,24 @@ class WindowLayoutManager {
         const relativeX = headerCenterX / screenWidth;
         const relativeY = headerCenterY / screenHeight;
 
-        const strategy = this.determineLayoutStrategy(headerBounds, screenWidth, screenHeight, relativeX, relativeY);
+        const strategy = this.determineLayoutStrategy(headerBounds, screenWidth, screenHeight, relativeX, relativeY, workAreaX, workAreaY);
 
         this.positionFeatureWindows(headerBounds, strategy, screenWidth, screenHeight, workAreaX, workAreaY);
         this.positionSettingsWindow(headerBounds, strategy, screenWidth, screenHeight, workAreaX, workAreaY);
     }
 
     /**
-     * 헤더 창의 위치에 따라 기능 창들을 배치할 최적의 전략을 결정합니다.
-     * @returns {{name: string, primary: string, secondary: string}} 레이아웃 전략
+     * 
+     * @returns {{name: string, primary: string, secondary: string}}
      */
-    determineLayoutStrategy(headerBounds, screenWidth, screenHeight, relativeX, relativeY) {
-        const spaceBelow = screenHeight - (headerBounds.y + headerBounds.height);
-        const spaceAbove = headerBounds.y;
-        const spaceLeft = headerBounds.x;
-        const spaceRight = screenWidth - (headerBounds.x + headerBounds.width);
+    determineLayoutStrategy(headerBounds, screenWidth, screenHeight, relativeX, relativeY, workAreaX, workAreaY) {
+        const headerRelX = headerBounds.x - workAreaX;
+        const headerRelY = headerBounds.y - workAreaY;
+
+        const spaceBelow = screenHeight - (headerRelY + headerBounds.height);
+        const spaceAbove = headerRelY;
+        const spaceLeft = headerRelX;
+        const spaceRight = screenWidth - (headerRelX + headerBounds.width);
 
         if (spaceBelow >= 400) {
             return { name: 'below', primary: 'below', secondary: relativeX < 0.5 ? 'right' : 'left' };
@@ -88,9 +191,7 @@ class WindowLayoutManager {
         }
     }
 
-    /**
-     * 'ask'와 'listen' 창의 위치를 조정합니다.
-     */
+
     positionFeatureWindows(headerBounds, strategy, screenWidth, screenHeight, workAreaX, workAreaY) {
         const ask = this.windowPool.get('ask');
         const listen = this.windowPool.get('listen');
@@ -105,10 +206,8 @@ class WindowLayoutManager {
         let listenBounds = listenVisible ? listen.getBounds() : null;
 
         if (askVisible && listenVisible) {
-            const combinedWidth = listenBounds.width + PAD + askBounds.width;
-            let groupStartXRel = headerCenterXRel - combinedWidth / 2;
-            let listenXRel = groupStartXRel;
-            let askXRel = groupStartXRel + listenBounds.width + PAD;
+            let askXRel = headerCenterXRel - (askBounds.width / 2);
+            let listenXRel = askXRel - listenBounds.width - PAD;
 
             if (listenXRel < PAD) {
                 listenXRel = PAD;
@@ -119,30 +218,28 @@ class WindowLayoutManager {
                 listenXRel = askXRel - listenBounds.width - PAD;
             }
 
-            let yRel = (strategy.primary === 'above')
-                ? headerBounds.y - workAreaY - Math.max(askBounds.height, listenBounds.height) - PAD
-                : headerBounds.y - workAreaY + headerBounds.height + PAD;
+            const yPos = (strategy.primary === 'above')
+                ? (headerBounds.y - workAreaY) - Math.max(askBounds.height, listenBounds.height) - PAD
+                : (headerBounds.y - workAreaY) + headerBounds.height + PAD;
+            const yAbs = yPos + workAreaY;
 
-            listen.setBounds({ x: Math.round(listenXRel + workAreaX), y: Math.round(yRel + workAreaY), width: listenBounds.width, height: listenBounds.height });
-            ask.setBounds({ x: Math.round(askXRel + workAreaX), y: Math.round(yRel + workAreaY), width: askBounds.width, height: askBounds.height });
+            listen.setBounds({ x: Math.round(listenXRel + workAreaX), y: Math.round(yAbs), width: listenBounds.width, height: listenBounds.height });
+            ask.setBounds({ x: Math.round(askXRel + workAreaX), y: Math.round(yAbs), width: askBounds.width, height: askBounds.height });
         } else {
             const win = askVisible ? ask : listen;
             const winBounds = askVisible ? askBounds : listenBounds;
             let xRel = headerCenterXRel - winBounds.width / 2;
-            let yRel = (strategy.primary === 'above')
-                ? headerBounds.y - workAreaY - winBounds.height - PAD
-                : headerBounds.y - workAreaY + headerBounds.height + PAD;
+            let yPos = (strategy.primary === 'above')
+                ? (headerBounds.y - workAreaY) - winBounds.height - PAD
+                : (headerBounds.y - workAreaY) + headerBounds.height + PAD;
 
             xRel = Math.max(PAD, Math.min(screenWidth - winBounds.width - PAD, xRel));
-            yRel = Math.max(PAD, Math.min(screenHeight - winBounds.height - PAD, yRel));
+            const yAbs = yPos + workAreaY;
 
-            win.setBounds({ x: Math.round(xRel + workAreaX), y: Math.round(yRel + workAreaY), width: winBounds.width, height: winBounds.height });
+            win.setBounds({ x: Math.round(xRel + workAreaX), y: Math.round(yAbs), width: winBounds.width, height: winBounds.height });
         }
     }
 
-    /**
-     * 'settings' 창의 위치를 조정합니다.
-     */
     positionSettingsWindow(headerBounds, strategy, screenWidth, screenHeight, workAreaX, workAreaY) {
         const settings = this.windowPool.get('settings');
         if (!settings?.getBounds || !settings.isVisible()) return;
@@ -198,10 +295,9 @@ class WindowLayoutManager {
     }
     
     /**
-     * 두 사각형 영역이 겹치는지 확인합니다.
      * @param {Rectangle} bounds1
      * @param {Rectangle} bounds2
-     * @returns {boolean} 겹침 여부
+     * @returns {boolean}
      */
     boundsOverlap(bounds1, bounds2) {
         const margin = 10;

@@ -5,6 +5,7 @@ const path = require('node:path');
 const os = require('os');
 const shortcutsService = require('../features/shortcuts/shortcutsService');
 const internalBridge = require('../bridge/internalBridge');
+const { EVENTS } = internalBridge;
 const permissionRepository = require('../features/common/repositories/permission');
 
 /* ────────────────[ GLASS BYPASS ]─────────────── */
@@ -53,6 +54,145 @@ function updateLayout() {
 }
 
 let movementManager = null;
+
+
+
+function setupAnimationController(windowPool, layoutManager, movementManager) {
+    internalBridge.on('request-window-visibility', ({ name, visible }) => {
+        handleWindowVisibilityRequest(windowPool, layoutManager, movementManager, name, visible);
+    });
+}
+
+
+/**
+ * 
+ * @param {Map<string, BrowserWindow>} windowPool
+ * @param {WindowLayoutManager} layoutManager 
+ * @param {SmoothMovementManager} movementManager
+ * @param {'listen' | 'ask'} name 
+ * @param {boolean} shouldBeVisible 
+ */
+async function handleWindowVisibilityRequest(windowPool, layoutManager, movementManager, name, shouldBeVisible) {
+    console.log(`[WindowManager] Request: set '${name}' visibility to ${shouldBeVisible}`);
+    const win = windowPool.get(name);
+
+    if (!win || win.isDestroyed()) {
+        console.warn(`[WindowManager] Window '${name}' not found or destroyed.`);
+        return;
+    }
+
+    const isCurrentlyVisible = win.isVisible();
+    if (isCurrentlyVisible === shouldBeVisible) {
+        console.log(`[WindowManager] Window '${name}' is already in the desired state.`);
+        return;
+    }
+
+    const otherName = name === 'listen' ? 'ask' : 'listen';
+    const otherWin = windowPool.get(otherName);
+    const isOtherWinVisible = otherWin && !otherWin.isDestroyed() && otherWin.isVisible();
+
+    const ANIM_OFFSET_X = 100; 
+    const ANIM_OFFSET_Y = 100; 
+
+    if (shouldBeVisible) {
+        win.setOpacity(0);
+
+        if (name === 'listen') {
+            if (!isOtherWinVisible) {
+                const targets = layoutManager.getTargetBoundsForFeatureWindows({ listen: true, ask: false });
+                if (!targets.listen) return;
+
+                const startPos = { x: targets.listen.x - ANIM_OFFSET_X, y: targets.listen.y };
+                win.setBounds(startPos);
+                win.show();
+                win.setOpacity(1);
+                movementManager.animateWindow(win, targets.listen.x, targets.listen.y);
+
+            } else {
+                const targets = layoutManager.getTargetBoundsForListenNextToAsk();
+                if (!targets.listen) return;
+
+                const startPos = { x: targets.listen.x - ANIM_OFFSET_X, y: targets.listen.y };
+                win.setBounds(startPos);
+                win.show();
+                win.setOpacity(1);
+                movementManager.animateWindow(win, targets.listen.x, targets.listen.y);
+            }
+        } else if (name === 'ask') {
+            if (!isOtherWinVisible) {
+                const targets = layoutManager.getTargetBoundsForFeatureWindows({ listen: false, ask: true });
+                if (!targets.ask) return;
+
+                const startPos = { x: targets.ask.x, y: targets.ask.y - ANIM_OFFSET_Y };
+                win.setBounds(startPos);
+                win.show();
+                win.setOpacity(1);
+                movementManager.animateWindow(win, targets.ask.x, targets.ask.y);
+
+            } else {
+                const targets = layoutManager.getTargetBoundsForFeatureWindows({ listen: true, ask: true });
+                if (!targets.listen || !targets.ask) return;
+
+                const startAskPos = { x: targets.ask.x, y: targets.ask.y - ANIM_OFFSET_Y };
+                win.setBounds(startAskPos);
+
+                win.show();
+                win.setOpacity(1);
+                movementManager.animateWindow(otherWin, targets.listen.x, targets.listen.y);
+                movementManager.animateWindow(win, targets.ask.x, targets.ask.y);
+            }
+        }
+    } else {
+        const currentBounds = win.getBounds();
+
+        if (name === 'listen') {
+            if (!isOtherWinVisible) {
+                const targetX = currentBounds.x - ANIM_OFFSET_X;
+                movementManager.animateWindow(win, targetX, currentBounds.y, {
+                    onComplete: () => win.hide()
+                });
+            } else {
+                const targetX = currentBounds.x - currentBounds.width;
+                movementManager.animateWindow(win, targetX, currentBounds.y, {
+                    onComplete: () => win.hide()
+                });
+            }
+        } else if (name === 'ask') {
+            if (!isOtherWinVisible) {
+                 const targetY = currentBounds.y - ANIM_OFFSET_Y;
+                 movementManager.animateWindow(win, currentBounds.x, targetY, {
+                     onComplete: () => win.hide()
+                 });
+            } else {
+                const targetAskY = currentBounds.y - ANIM_OFFSET_Y;
+                movementManager.animateWindow(win, currentBounds.x, targetAskY, {
+                    onComplete: () => win.hide()
+                });
+
+                const targets = layoutManager.getTargetBoundsForFeatureWindows({ listen: true, ask: false });
+                if (targets.listen) {
+                    movementManager.animateWindow(otherWin, targets.listen.x, targets.listen.y);
+                }
+            }
+        }
+    }
+}
+
+const handleAnimationFinished = (sender) => {
+    const win = BrowserWindow.fromWebContents(sender);
+    if (win && !win.isDestroyed()) {
+        console.log(`[WindowManager] Hiding window after animation.`);
+        win.hide();
+        const listenWin = windowPool.get('listen');
+        const askWin = windowPool.get('ask');
+
+        if (win === askWin && listenWin && !listenWin.isDestroyed() && listenWin.isVisible()) {
+            console.log('[WindowManager] Ask window hidden, moving listen window to center.');
+            listenWin.webContents.send('listen-window-move-to-center');
+            updateLayout();
+        }
+    }
+};
 
 const setContentProtection = (status) => {
     isContentProtectionOn = status;
@@ -531,6 +671,7 @@ function createWindows() {
     });
 
     setupIpcHandlers(movementManager);
+    setupAnimationController(windowPool, layoutManager, movementManager);
 
     if (currentHeaderState === 'main') {
         createFeatureWindows(header, ['listen', 'ask', 'settings', 'shortcut-settings']);
@@ -689,45 +830,6 @@ const adjustWindowHeight = (sender, targetHeight) => {
     }
 };
 
-const handleAnimationFinished = (sender) => {
-    const win = BrowserWindow.fromWebContents(sender);
-    if (win && !win.isDestroyed()) {
-        console.log(`[WindowManager] Hiding window after animation.`);
-        win.hide();
-    }
-};
-
-const closeAskWindow = () => {
-    const askWindow = windowPool.get('ask');
-    if (askWindow) {
-        askWindow.webContents.send('window-hide-animation');
-    }
-};
-
-async function ensureAskWindowVisible() {
-    if (currentHeaderState !== 'main') {
-        console.log('[WindowManager] Not in main state, skipping ensureAskWindowVisible');
-        return;
-    }
-
-    let askWindow = windowPool.get('ask');
-
-    if (!askWindow || askWindow.isDestroyed()) {
-        console.log('[WindowManager] Ask window not found, creating new one');
-        createFeatureWindows(windowPool.get('header'), 'ask');
-        askWindow = windowPool.get('ask');
-    }
-
-    if (!askWindow.isVisible()) {
-        console.log('[WindowManager] Showing hidden Ask window');
-        askWindow.show();
-        updateLayout();
-        askWindow.webContents.send('window-show-animation');
-    }
-}
-
-
-//////// after_modelStateService ////////
 
 const closeWindow = (windowName) => {
     const win = windowPool.get(windowName);
@@ -759,6 +861,4 @@ module.exports = {
     moveHeaderTo,
     adjustWindowHeight,
     handleAnimationFinished,
-    closeAskWindow,
-    ensureAskWindowVisible,
 };

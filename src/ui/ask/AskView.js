@@ -878,7 +878,7 @@ export class AskView extends LitElement {
     }
 
     handleCloseAskWindow() {
-        this.clearResponseContent();
+        // this.clearResponseContent();
         window.api.askView.closeAskWindow();
     }
 

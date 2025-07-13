@@ -170,6 +170,56 @@ class SmoothMovementManager {
         this.animateToPosition(header, clampedX, clampedY, windowSize);
     }
 
+    /**
+     * [수정됨] 창을 목표 지점으로 부드럽게 애니메이션합니다.
+     * 완료 콜백 및 기타 옵션을 지원합니다.
+     * @param {BrowserWindow} win - 애니메이션할 창
+     * @param {number} targetX - 목표 X 좌표
+     * @param {number} targetY - 목표 Y 좌표
+     * @param {object} [options] - 추가 옵션
+     * @param {object} [options.sizeOverride] - 애니메이션 중 사용할 창 크기
+     * @param {function} [options.onComplete] - 애니메이션 완료 후 실행할 콜백
+     * @param {number} [options.duration] - 애니메이션 지속 시간 (ms)
+     */
+    animateWindow(win, targetX, targetY, options = {}) {
+        if (!this._isWindowValid(win)) {
+            if (options.onComplete) options.onComplete();
+            return;
+        }
+
+        const { sizeOverride, onComplete, duration: animDuration } = options;
+        const start = win.getBounds();
+        const startTime = Date.now();
+        const duration = animDuration || this.animationDuration;
+        const { width, height } = sizeOverride || start;
+
+        const step = () => {
+            // 애니메이션 중간에 창이 파괴될 경우 콜백을 실행하고 중단
+            if (!this._isWindowValid(win)) {
+                if (onComplete) onComplete();
+                return;
+            }
+
+            const p = Math.min((Date.now() - startTime) / duration, 1);
+            const eased = 1 - Math.pow(1 - p, 3); // ease-out-cubic
+            const x = start.x + (targetX - start.x) * eased;
+            const y = start.y + (targetY - start.y) * eased;
+
+            win.setBounds({ x: Math.round(x), y: Math.round(y), width, height });
+
+            if (p < 1) {
+                setTimeout(step, 8); // requestAnimationFrame 대신 setTimeout으로 간결하게 처리
+            } else {
+                // 애니메이션 종료
+                this.updateLayout(); // 레이아웃 재정렬
+                if (onComplete) {
+                    onComplete(); // 완료 콜백 실행
+                }
+            }
+        };
+        step();
+    }
+
     animateToPosition(header, targetX, targetY, windowSize) {
         if (!this._isWindowValid(header)) return;
         

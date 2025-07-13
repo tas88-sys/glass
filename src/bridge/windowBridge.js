@@ -24,7 +24,7 @@ module.exports = {
     ipcMain.handle('adjust-window-height', (event, targetHeight) => windowManager.adjustWindowHeight(event.sender, targetHeight));
     ipcMain.handle('toggle-all-windows-visibility', () => windowManager.toggleAllWindowsVisibility());
     ipcMain.on('animation-finished', (event) => windowManager.handleAnimationFinished(event.sender));
-    ipcMain.handle('ask:closeAskWindow', () => windowManager.closeAskWindow());
+    // ipcMain.handle('ask:closeAskWindow', () => windowManager.closeAskWindow());
   },
 
   notifyFocusChange(win, isFocused) {

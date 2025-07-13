@@ -256,16 +256,8 @@ contextBridge.exposeInMainWorld('api', {
     sendAnimationFinished: () => ipcRenderer.send('animation-finished'),
     
     // Listeners
-    onWindowShowAnimation: (callback) => ipcRenderer.on('window-show-animation', callback),
-    removeOnWindowShowAnimation: (callback) => ipcRenderer.removeListener('window-show-animation', callback),
-    onWindowHideAnimation: (callback) => ipcRenderer.on('window-hide-animation', callback),
-    removeOnWindowHideAnimation: (callback) => ipcRenderer.removeListener('window-hide-animation', callback),
     onSettingsWindowHideAnimation: (callback) => ipcRenderer.on('settings-window-hide-animation', callback),
-    removeOnSettingsWindowHideAnimation: (callback) => ipcRenderer.removeListener('settings-window-hide-animation', callback),
-    onListenWindowMoveToCenter: (callback) => ipcRenderer.on('listen-window-move-to-center', callback),
-    removeOnListenWindowMoveToCenter: (callback) => ipcRenderer.removeListener('listen-window-move-to-center', callback),
-    onListenWindowMoveToLeft: (callback) => ipcRenderer.on('listen-window-move-to-left', callback),
-    removeOnListenWindowMoveToLeft: (callback) => ipcRenderer.removeListener('listen-window-move-to-left', callback)
+    removeOnSettingsWindowHideAnimation: (callback) => ipcRenderer.removeListener('settings-window-hide-animation', callback),    
   },
 
   // src/ui/listen/audioCore/listenCapture.js
