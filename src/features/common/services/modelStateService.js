@@ -17,10 +17,6 @@ class ModelStateService extends EventEmitter {
         this.store = new Store({ name: 'pickle-glass-model-state' });
         this.state = {};
         this.hasMigrated = false;
-        
-        // Set auth service for repositories
-        providerSettingsRepository.setAuthService(authService);
-        userModelSelectionsRepository.setAuthService(authService);
     }
 
     // 모든 윈도우에 이벤트 브로드캐스트

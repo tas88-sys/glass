@@ -4,6 +4,7 @@ const { getFirebaseAuth } = require('./firebaseClient');
 const fetch = require('node-fetch');
 const encryptionService = require('./encryptionService');
 const migrationService = require('./migrationService');
+const userRepository = require('../repositories/user');
 const sessionRepository = require('../repositories/session');
 const providerSettingsRepository = require('../repositories/providerSettings');
 const userModelSelectionsRepository = require('../repositories/userModelSelections');
@@ -46,6 +47,7 @@ class AuthService {
         encryptionService.initializeKey(this.currentUserId);
         this.initializationPromise = null;
 
+        userRepository.setAuthService(this);
         sessionRepository.setAuthService(this);
         providerSettingsRepository.setAuthService(this);
         userModelSelectionsRepository.setAuthService(this);
