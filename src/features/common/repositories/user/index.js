@@ -3,15 +3,19 @@ const firebaseRepository = require('./firebase.repository');
 
 let authService = null;
 
-function setAuthService(service) {
-    authService = service;
+function getAuthService() {
+    if (!authService) {
+        authService = require('../../services/authService');
+    }
+    return authService;
 }
 
 function getBaseRepository() {
-    if (!authService) {
-        throw new Error('AuthService has not been set for the user repository.');
+    const service = getAuthService();
+    if (!service) {
+        throw new Error('AuthService could not be loaded for the user repository.');
     }
-    const user = authService.getCurrentUser();
+    const user = service.getCurrentUser();
     if (user && user.isLoggedIn) {
         return firebaseRepository;
     }
@@ -25,24 +29,23 @@ const userRepositoryAdapter = {
     },
     
     getById: () => {
-        const uid = authService.getCurrentUserId();
+        const uid = getAuthService().getCurrentUserId();
         return getBaseRepository().getById(uid);
     },
 
 
 
     update: (updateData) => {
-        const uid = authService.getCurrentUserId();
+        const uid = getAuthService().getCurrentUserId();
         return getBaseRepository().update({ uid, ...updateData });
     },
 
     deleteById: () => {
-        const uid = authService.getCurrentUserId();
+        const uid = getAuthService().getCurrentUserId();
         return getBaseRepository().deleteById(uid);
     }
 };
 
 module.exports = {
-    ...userRepositoryAdapter,
-    setAuthService
+    ...userRepositoryAdapter
 }; 
