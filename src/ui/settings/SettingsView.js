@@ -1,5 +1,5 @@
 import { html, css, LitElement } from '../assets/lit-core-2.7.4.min.js';
-import { getOllamaProgressTracker } from '../../features/common/services/localProgressTracker.js';
+// import { getOllamaProgressTracker } from '../../features/common/services/localProgressTracker.js'; // 제거됨
 
 export class SettingsView extends LitElement {
     static styles = css`
@@ -531,7 +531,6 @@ export class SettingsView extends LitElement {
         this.ollamaStatus = { installed: false, running: false };
         this.ollamaModels = [];
         this.installingModels = {}; // { modelName: progress }
-        this.progressTracker = getOllamaProgressTracker();
         // Whisper related
         this.whisperModels = [];
         this.whisperProgressTracker = null; // Will be initialized when needed
@@ -775,31 +774,42 @@ export class SettingsView extends LitElement {
     }
     
     async installOllamaModel(modelName) {
-        // Mark as installing
-        this.installingModels = { ...this.installingModels, [modelName]: 0 };
-        this.requestUpdate();
-        
         try {
-            // Use the clean progress tracker - no manual event management needed
-            const success = await this.progressTracker.installModel(modelName, (progress) => {
-                this.installingModels = { ...this.installingModels, [modelName]: progress };
-                this.requestUpdate();
-            });
-            
-            if (success) {
-                // Refresh status after installation
-                await this.refreshOllamaStatus();
-                await this.refreshModelData();
-                // Auto-select the model after installation
-                await this.selectModel('llm', modelName);
-            } else {
-                alert(`Installation of ${modelName} was cancelled`);
+            // Ollama 모델 다운로드 시작
+            this.installingModels = { ...this.installingModels, [modelName]: 0 };
+            this.requestUpdate();
+
+            // 진행률 이벤트 리스너 설정
+            const progressHandler = (event, data) => {
+                if (data.modelId === modelName) {
+                    this.installingModels = { ...this.installingModels, [modelName]: data.progress };
+                    this.requestUpdate();
+                }
+            };
+
+            // 진행률 이벤트 리스너 등록
+            window.api.settingsView.onOllamaPullProgress(progressHandler);
+
+            try {
+                const result = await window.api.settingsView.pullOllamaModel(modelName);
+                
+                if (result.success) {
+                    console.log(`[SettingsView] Model ${modelName} installed successfully`);
+                    delete this.installingModels[modelName];
+                    this.requestUpdate();
+                    
+                    // 상태 새로고침
+                    await this.refreshOllamaStatus();
+                    await this.refreshModelData();
+                } else {
+                    throw new Error(result.error || 'Installation failed');
+                }
+            } finally {
+                // 진행률 이벤트 리스너 제거
+                window.api.settingsView.removeOnOllamaPullProgress(progressHandler);
             }
         } catch (error) {
             console.error(`[SettingsView] Error installing model ${modelName}:`, error);
-            alert(`Error installing ${modelName}: ${error.message}`);
-        } finally {
-            // Automatic cleanup - no manual event listener management
             delete this.installingModels[modelName];
             this.requestUpdate();
         }
@@ -891,7 +901,7 @@ export class SettingsView extends LitElement {
         const installingModels = Object.keys(this.installingModels);
         if (installingModels.length > 0) {
             installingModels.forEach(modelName => {
-                this.progressTracker.cancelInstallation(modelName);
+                window.api.settingsView.cancelOllamaInstallation(modelName);
             });
         }
     }

@@ -1,19 +1,41 @@
 const sqliteClient = require('../../services/sqliteClient');
+const encryptionService = require('../../services/encryptionService');
 
 function getByProvider(uid, provider) {
     const db = sqliteClient.getDb();
     const stmt = db.prepare('SELECT * FROM provider_settings WHERE uid = ? AND provider = ?');
-    return stmt.get(uid, provider) || null;
+    const result = stmt.get(uid, provider) || null;
+    
+    if (result && result.api_key) {
+        // Decrypt API key if it exists
+        result.api_key = encryptionService.decrypt(result.api_key);
+    }
+    
+    return result;
 }
 
 function getAllByUid(uid) {
     const db = sqliteClient.getDb();
     const stmt = db.prepare('SELECT * FROM provider_settings WHERE uid = ? ORDER BY provider');
-    return stmt.all(uid);
+    const results = stmt.all(uid);
+    
+    // Decrypt API keys for all results
+    return results.map(result => {
+        if (result.api_key) {
+            result.api_key = encryptionService.decrypt(result.api_key);
+        }
+        return result;
+    });
 }
 
 function upsert(uid, provider, settings) {
     const db = sqliteClient.getDb();
+    
+    // Encrypt API key if it exists
+    const encryptedSettings = { ...settings };
+    if (encryptedSettings.api_key) {
+        encryptedSettings.api_key = encryptionService.encrypt(encryptedSettings.api_key);
+    }
     
     // Use SQLite's UPSERT syntax (INSERT ... ON CONFLICT ... DO UPDATE)
     const stmt = db.prepare(`
@@ -29,11 +51,11 @@ function upsert(uid, provider, settings) {
     const result = stmt.run(
         uid,
         provider,
-        settings.api_key || null,
-        settings.selected_llm_model || null,
-        settings.selected_stt_model || null,
-        settings.created_at || Date.now(),
-        settings.updated_at
+        encryptedSettings.api_key || null,
+        encryptedSettings.selected_llm_model || null,
+        encryptedSettings.selected_stt_model || null,
+        encryptedSettings.created_at || Date.now(),
+        encryptedSettings.updated_at
     );
     
     return { changes: result.changes };

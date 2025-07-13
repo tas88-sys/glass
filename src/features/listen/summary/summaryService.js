@@ -28,11 +28,12 @@ class SummaryService {
     }
 
     sendToRenderer(channel, data) {
-        BrowserWindow.getAllWindows().forEach(win => {
-            if (!win.isDestroyed()) {
-                win.webContents.send(channel, data);
-            }
-        });
+        const { windowPool } = require('../../../window/windowManager');
+        const listenWindow = windowPool?.get('listen');
+        
+        if (listenWindow && !listenWindow.isDestroyed()) {
+            listenWindow.webContents.send(channel, data);
+        }
     }
 
     addConversationTurn(speaker, text) {
@@ -304,25 +305,20 @@ Keep all points concise and build upon previous analysis if provided.`,
      */
     async triggerAnalysisIfNeeded() {
         if (this.conversationHistory.length >= 5 && this.conversationHistory.length % 5 === 0) {
-            console.log(`🚀 Triggering analysis (non-blocking) - ${this.conversationHistory.length} conversation texts accumulated`);
+            console.log(`Triggering analysis - ${this.conversationHistory.length} conversation texts accumulated`);
 
-            this.makeOutlineAndRequests(this.conversationHistory)
-                .then(data => {
-                    if (data) {
-                        console.log('📤 Sending structured data to renderer');
-                        this.sendToRenderer('summary-update', data);
-                        
-                        // Notify callback
-                        if (this.onAnalysisComplete) {
-                            this.onAnalysisComplete(data);
-                        }
-                    } else {
-                        console.log('❌ No analysis data returned from non-blocking call');
-                    }
-                })
-                .catch(error => {
-                    console.error('❌ Error in non-blocking analysis:', error);
-                });
+            const data = await this.makeOutlineAndRequests(this.conversationHistory);
+            if (data) {
+                console.log('Sending structured data to renderer');
+                this.sendToRenderer('summary-update', data);
+                
+                // Notify callback
+                if (this.onAnalysisComplete) {
+                    this.onAnalysisComplete(data);
+                }
+            } else {
+                console.log('No analysis data returned');
+            }
         }
     }
 

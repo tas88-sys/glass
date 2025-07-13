@@ -68,7 +68,8 @@ const PROVIDERS = {
       handler: () => {
           // This needs to remain a function due to its conditional logic for renderer/main process
           if (typeof window === 'undefined') {
-              return require("./providers/whisper");
+              const { WhisperProvider } = require("./providers/whisper");
+              return new WhisperProvider();
           }
           // Return a dummy object for the renderer process
           return {

@@ -1,6 +1,7 @@
 const { exec } = require('child_process');
 const { promisify } = require('util');
 const { EventEmitter } = require('events');
+const { BrowserWindow } = require('electron');
 const path = require('path');
 const os = require('os');
 const https = require('https');
@@ -15,6 +16,19 @@ class LocalAIServiceBase extends EventEmitter {
         this.serviceName = serviceName;
         this.baseUrl = null;
         this.installationProgress = new Map();
+    }
+
+    // 모든 윈도우에 이벤트 브로드캐스트
+    _broadcastToAllWindows(eventName, data = null) {
+        BrowserWindow.getAllWindows().forEach(win => {
+            if (win && !win.isDestroyed()) {
+                if (data !== null) {
+                    win.webContents.send(eventName, data);
+                } else {
+                    win.webContents.send(eventName);
+                }
+            }
+        });
     }
 
     getPlatform() {
@@ -65,7 +79,7 @@ class LocalAIServiceBase extends EventEmitter {
 
     setInstallProgress(modelName, progress) {
         this.installationProgress.set(modelName, progress);
-        this.emit('install-progress', { model: modelName, progress });
+        // 각 서비스에서 직접 브로드캐스트하도록 변경
     }
 
     clearInstallProgress(modelName) {
@@ -152,7 +166,8 @@ class LocalAIServiceBase extends EventEmitter {
         const { 
             onProgress = null,
             headers = { 'User-Agent': 'Glass-App' },
-            timeout = 300000 // 5 minutes default
+            timeout = 300000, // 5 minutes default
+            modelId = null // 모델 ID를 위한 추가 옵션
         } = options;
 
         return new Promise((resolve, reject) => {
@@ -190,9 +205,15 @@ class LocalAIServiceBase extends EventEmitter {
                 response.on('data', (chunk) => {
                     downloadedSize += chunk.length;
                     
-                    if (onProgress && totalSize > 0) {
+                    if (totalSize > 0) {
                         const progress = Math.round((downloadedSize / totalSize) * 100);
-                        onProgress(progress, downloadedSize, totalSize);
+                        
+                        // 이벤트 기반 진행률 보고는 각 서비스에서 직접 처리
+                        
+                        // 기존 콜백 지원 (호환성 유지)
+                        if (onProgress) {
+                            onProgress(progress, downloadedSize, totalSize);
+                        }
                     }
                 });
 
@@ -200,7 +221,7 @@ class LocalAIServiceBase extends EventEmitter {
 
                 file.on('finish', () => {
                     file.close(() => {
-                        this.emit('download-complete', { url, destination, size: downloadedSize });
+                        // download-complete 이벤트는 각 서비스에서 직접 처리
                         resolve({ success: true, size: downloadedSize });
                     });
                 });
@@ -216,7 +237,7 @@ class LocalAIServiceBase extends EventEmitter {
             request.on('error', (err) => {
                 file.close();
                 fs.unlink(destination, () => {});
-                this.emit('download-error', { url, error: err });
+                this.emit('download-error', { url, error: err, modelId });
                 reject(err);
             });
 
@@ -230,11 +251,20 @@ class LocalAIServiceBase extends EventEmitter {
     }
 
     async downloadWithRetry(url, destination, options = {}) {
-        const { maxRetries = 3, retryDelay = 1000, expectedChecksum = null, ...downloadOptions } = options;
+        const { 
+            maxRetries = 3, 
+            retryDelay = 1000, 
+            expectedChecksum = null,
+            modelId = null, // 모델 ID를 위한 추가 옵션
+            ...downloadOptions 
+        } = options;
         
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                const result = await this.downloadFile(url, destination, downloadOptions);
+                const result = await this.downloadFile(url, destination, { 
+                    ...downloadOptions, 
+                    modelId 
+                });
                 
                 if (expectedChecksum) {
                     const isValid = await this.verifyChecksum(destination, expectedChecksum);
@@ -248,6 +278,7 @@ class LocalAIServiceBase extends EventEmitter {
                 return result;
             } catch (error) {
                 if (attempt === maxRetries) {
+                    // download-error 이벤트는 각 서비스에서 직접 처리
                     throw error;
                 }
                 

@@ -184,9 +184,10 @@ class WhisperProvider {
 
     async initialize() {
         if (!this.whisperService) {
-            const { WhisperService } = require('../../services/whisperService');
-            this.whisperService = new WhisperService();
-            await this.whisperService.initialize();
+            this.whisperService = require('../../services/whisperService');
+            if (!this.whisperService.isInitialized) {
+                await this.whisperService.initialize();
+            }
         }
     }
 
