@@ -98,58 +98,6 @@
                 contain: layout style paint;
                 transition: transform 0.25s cubic-bezier(0.23, 1, 0.32, 1), opacity 0.25s ease-out;
             }
-
-            .settings-window-show {
-                animation: settingsPopFromButton 0.12s cubic-bezier(0.23, 1, 0.32, 1) forwards;
-                transform-origin: 85% 0%;
-                will-change: transform, opacity;
-                transform-style: preserve-3d;
-            }
-
-            .settings-window-hide {
-                animation: settingsCollapseToButton 0.10s cubic-bezier(0.55, 0.085, 0.68, 0.53) forwards;
-                transform-origin: 85% 0%;
-                will-change: transform, opacity;
-                transform-style: preserve-3d;
-            }
-
-            @keyframes settingsPopFromButton {
-                0% {
-                    opacity: 0;
-                    transform: translate3d(0, -8px, 0) scale3d(0.5, 0.5, 1);
-                }
-                40% {
-                    opacity: 0.8;
-                    transform: translate3d(0, -2px, 0) scale3d(1.05, 1.05, 1);
-                }
-                70% {
-                    opacity: 0.95;
-                    transform: translate3d(0, 0, 0) scale3d(1.02, 1.02, 1);
-                }
-                100% {
-                    opacity: 1;
-                    transform: translate3d(0, 0, 0) scale3d(1, 1, 1);
-                }
-            }
-
-            @keyframes settingsCollapseToButton {
-                0% {
-                    opacity: 1;
-                    transform: translate3d(0, 0, 0) scale3d(1, 1, 1);
-                }
-                30% {
-                    opacity: 0.8;
-                    transform: translate3d(0, -1px, 0) scale3d(0.9, 0.9, 1);
-                }
-                70% {
-                    opacity: 0.3;
-                    transform: translate3d(0, -5px, 0) scale3d(0.7, 0.7, 1);
-                }
-                100% {
-                    opacity: 0;
-                    transform: translate3d(0, -8px, 0) scale3d(0.5, 0.5, 1);
-                }
-            }
         </style>
     </head>
     <body>
@@ -162,27 +110,7 @@
         <script>
             window.addEventListener('DOMContentLoaded', () => {
                 const app = document.getElementById('pickle-glass');
-        
-                if (window.api) {
-                    app.addEventListener('animationend', (event) => {
-                        if (event.animationName === 'settingsCollapseToButton') {
-                            console.log('Settings hide animation finished. Notifying main process.');
-                            window.api.content.sendAnimationFinished();
-                            
-                            app.classList.remove('settings-window-hide');
-                            app.classList.add('hidden');
-                        } 
-                        else if (event.animationName === 'settingsPopFromButton') {
-                            app.classList.remove('settings-window-show');
-                        }
-                    });
-        
-                    window.api.content.onSettingsWindowHideAnimation(() => {
-                        console.log('Starting settings window hide animation');
-                        app.classList.remove('settings-window-show');
-                        app.classList.add('settings-window-hide');
-                    });
-                }
+
             });
         </script>
         <script>

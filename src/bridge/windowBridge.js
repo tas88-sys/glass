@@ -23,7 +23,7 @@ module.exports = {
     ipcMain.handle('move-header-to', (event, newX, newY) => windowManager.moveHeaderTo(newX, newY));
     ipcMain.handle('adjust-window-height', (event, targetHeight) => windowManager.adjustWindowHeight(event.sender, targetHeight));
     ipcMain.handle('toggle-all-windows-visibility', () => windowManager.toggleAllWindowsVisibility());
-    ipcMain.on('animation-finished', (event) => windowManager.handleAnimationFinished(event.sender));
+    // ipcMain.on('animation-finished', (event) => windowManager.handleAnimationFinished(event.sender));
     // ipcMain.handle('ask:closeAskWindow', () => windowManager.closeAskWindow());
   },
 

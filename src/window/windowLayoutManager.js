@@ -64,6 +64,8 @@ class WindowLayoutManager {
         if (!askVis && !listenVis) return {};
  
         const PAD = 8;
+        const headerTopRel = headerBounds.y - workAreaY;
+        const headerBottomRel = headerTopRel + headerBounds.height;
         const headerCenterXRel = headerBounds.x - workAreaX + headerBounds.width / 2;
         
         const relativeX = headerCenterXRel / screenWidth;
@@ -87,24 +89,33 @@ class WindowLayoutManager {
                 askXRel = screenWidth - PAD - askB.width;
                 listenXRel = askXRel - listenB.width - PAD;
             }
+            
+            // [수정] 'above'일 경우 하단 정렬, 'below'일 경우 상단 정렬
+            if (strategy.primary === 'above') {
+                const windowBottomAbs = headerBounds.y - PAD;
+                const askY = windowBottomAbs - askB.height;
+                const listenY = windowBottomAbs - listenB.height;
+                result.ask = { x: Math.round(askXRel + workAreaX), y: Math.round(askY) };
+                result.listen = { x: Math.round(listenXRel + workAreaX), y: Math.round(listenY) };
+            } else { // 'below'
+                const yPos = headerBottomRel + PAD;
+                const yAbs = yPos + workAreaY;
+                result.ask = { x: Math.round(askXRel + workAreaX), y: Math.round(yAbs) };
+                result.listen = { x: Math.round(listenXRel + workAreaX), y: Math.round(yAbs) };
+            }
  
-            const yPos = (strategy.primary === 'above') ?
-                (headerBounds.y - workAreaY) - Math.max(askB.height, listenB.height) - PAD :
-                (headerBounds.y - workAreaY) + headerBounds.height + PAD;
-            const yAbs = yPos + workAreaY;
- 
-            result.listen = { x: Math.round(listenXRel + workAreaX), y: Math.round(yAbs) };
-            result.ask = { x: Math.round(askXRel + workAreaX), y: Math.round(yAbs) };
- 
-        } else {
+        } else { // 한 창만 보일 때는 기존 로직 유지 (정상 동작 확인)
             const winB = askVis ? askB : listenB;
             let xRel = headerCenterXRel - winB.width / 2;
-            
-            let yPos = (strategy.primary === 'above') ?
-                (headerBounds.y - workAreaY) - winB.height - PAD :
-                (headerBounds.y - workAreaY) + headerBounds.height + PAD;
-            
             xRel = Math.max(PAD, Math.min(screenWidth - winB.width - PAD, xRel));
+
+            let yPos;
+            if (strategy.primary === 'above') {
+                const windowBottomRel = headerTopRel - PAD;
+                yPos = windowBottomRel - winB.height;
+            } else { // 'below'
+                yPos = headerBottomRel + PAD;
+            }
             
             const abs = { x: Math.round(xRel + workAreaX), y: Math.round(yPos + workAreaY) };
             if (askVis) result.ask = abs;
@@ -112,37 +123,6 @@ class WindowLayoutManager {
         }
         return result;
     }
-
-   /**
-    * 
-    * @returns {{listen: {x:number, y:number}}}
-    */
-   getTargetBoundsForListenNextToAsk() {
-       const ask = this.windowPool.get('ask');
-       const listen = this.windowPool.get('listen');
-       const header = this.windowPool.get('header');
-
-       if (!ask || !listen || !header || !ask.isVisible() || ask.isDestroyed() || listen.isDestroyed()) {
-           return {};
-       }
-
-       const askB = ask.getBounds();
-       const listenB = listen.getBounds();
-       const PAD = 8;
-
-       const listenX = askB.x - listenB.width - PAD;
-       const listenY = askB.y;
-
-       const display = getCurrentDisplay(header);
-       const { x: workAreaX } = display.workArea;
-
-       return {
-           listen: {
-               x: Math.max(workAreaX + PAD, listenX),
-               y: listenY
-           }
-       };
-   }
 
     positionWindows() {
         const header = this.windowPool.get('header');
@@ -201,7 +181,10 @@ class WindowLayoutManager {
         if (!askVisible && !listenVisible) return;
 
         const PAD = 8;
+        const headerTopRel = headerBounds.y - workAreaY;
+        const headerBottomRel = headerTopRel + headerBounds.height;
         const headerCenterXRel = headerBounds.x - workAreaX + headerBounds.width / 2;
+        
         let askBounds = askVisible ? ask.getBounds() : null;
         let listenBounds = listenVisible ? listen.getBounds() : null;
 
@@ -218,22 +201,33 @@ class WindowLayoutManager {
                 listenXRel = askXRel - listenBounds.width - PAD;
             }
 
-            const yPos = (strategy.primary === 'above')
-                ? (headerBounds.y - workAreaY) - Math.max(askBounds.height, listenBounds.height) - PAD
-                : (headerBounds.y - workAreaY) + headerBounds.height + PAD;
-            const yAbs = yPos + workAreaY;
-
-            listen.setBounds({ x: Math.round(listenXRel + workAreaX), y: Math.round(yAbs), width: listenBounds.width, height: listenBounds.height });
-            ask.setBounds({ x: Math.round(askXRel + workAreaX), y: Math.round(yAbs), width: askBounds.width, height: askBounds.height });
-        } else {
+            // [수정] 'above'일 경우 하단 정렬, 'below'일 경우 상단 정렬
+            if (strategy.primary === 'above') {
+                const windowBottomAbs = headerBounds.y - PAD;
+                const askY = windowBottomAbs - askBounds.height;
+                const listenY = windowBottomAbs - listenBounds.height;
+                ask.setBounds({ x: Math.round(askXRel + workAreaX), y: Math.round(askY), width: askBounds.width, height: askBounds.height });
+                listen.setBounds({ x: Math.round(listenXRel + workAreaX), y: Math.round(listenY), width: listenBounds.width, height: listenBounds.height });
+            } else { // 'below'
+                const yPos = headerBottomRel + PAD;
+                const yAbs = yPos + workAreaY;
+                ask.setBounds({ x: Math.round(askXRel + workAreaX), y: Math.round(yAbs), width: askBounds.width, height: askBounds.height });
+                listen.setBounds({ x: Math.round(listenXRel + workAreaX), y: Math.round(yAbs), width: listenBounds.width, height: listenBounds.height });
+            }
+        
+        } else { // 한 창만 보일 때는 기존 로직 유지 (정상 동작 확인)
             const win = askVisible ? ask : listen;
             const winBounds = askVisible ? askBounds : listenBounds;
             let xRel = headerCenterXRel - winBounds.width / 2;
-            let yPos = (strategy.primary === 'above')
-                ? (headerBounds.y - workAreaY) - winBounds.height - PAD
-                : (headerBounds.y - workAreaY) + headerBounds.height + PAD;
-
             xRel = Math.max(PAD, Math.min(screenWidth - winBounds.width - PAD, xRel));
+
+            let yPos;
+            if (strategy.primary === 'above') {
+                const windowBottomRel = headerTopRel - PAD;
+                yPos = windowBottomRel - winBounds.height;
+            } else { // 'below'
+                yPos = headerBottomRel + PAD;
+            }
             const yAbs = yPos + workAreaY;
 
             win.setBounds({ x: Math.round(xRel + workAreaX), y: Math.round(yAbs), width: winBounds.width, height: winBounds.height });

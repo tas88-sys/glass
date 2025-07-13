@@ -253,7 +253,7 @@ contextBridge.exposeInMainWorld('api', {
   // src/ui/app/content.html inline scripts
   content: {
     // Animation Management
-    sendAnimationFinished: () => ipcRenderer.send('animation-finished'),
+    // sendAnimationFinished: () => ipcRenderer.send('animation-finished'),
     
     // Listeners
     onSettingsWindowHideAnimation: (callback) => ipcRenderer.on('settings-window-hide-animation', callback),

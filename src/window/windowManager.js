@@ -39,7 +39,6 @@ const DEFAULT_WINDOW_WIDTH = 353;
 
 let currentHeaderState = 'apikey';
 const windowPool = new Map();
-let fixedYPosition = 0;
 
 let settingsHideTimer = null;
 
@@ -109,14 +108,18 @@ async function handleWindowVisibilityRequest(windowPool, layoutManager, movement
                 movementManager.animateWindow(win, targets.listen.x, targets.listen.y);
 
             } else {
-                const targets = layoutManager.getTargetBoundsForListenNextToAsk();
-                if (!targets.listen) return;
+                const targets = layoutManager.getTargetBoundsForFeatureWindows({ listen: true, ask: true });
+                if (!targets.listen || !targets.ask) return;
 
-                const startPos = { x: targets.listen.x - ANIM_OFFSET_X, y: targets.listen.y };
-                win.setBounds(startPos);
+                // 'listen'은 목표 위치의 왼쪽에서 시작
+                const startListenPos = { x: targets.listen.x - ANIM_OFFSET_X, y: targets.listen.y };
+                win.setBounds(startListenPos);
+
+                // 'listen'을 보여주고 두 창을 동시에 애니메이션
                 win.show();
                 win.setOpacity(1);
-                movementManager.animateWindow(win, targets.listen.x, targets.listen.y);
+                movementManager.animateWindow(otherWin, targets.ask.x, targets.ask.y); // 'ask' 창을 새 위치로 이동
+                movementManager.animateWindow(win, targets.listen.x, targets.listen.y); // 'listen' 창을 새 위치로 이동
             }
         } else if (name === 'ask') {
             if (!isOtherWinVisible) {
@@ -178,21 +181,6 @@ async function handleWindowVisibilityRequest(windowPool, layoutManager, movement
     }
 }
 
-const handleAnimationFinished = (sender) => {
-    const win = BrowserWindow.fromWebContents(sender);
-    if (win && !win.isDestroyed()) {
-        console.log(`[WindowManager] Hiding window after animation.`);
-        win.hide();
-        const listenWin = windowPool.get('listen');
-        const askWin = windowPool.get('ask');
-
-        if (win === askWin && listenWin && !listenWin.isDestroyed() && listenWin.isVisible()) {
-            console.log('[WindowManager] Ask window hidden, moving listen window to center.');
-            listenWin.webContents.send('listen-window-move-to-center');
-            updateLayout();
-        }
-    }
-};
 
 const setContentProtection = (status) => {
     isContentProtectionOn = status;
@@ -842,7 +830,6 @@ module.exports = {
     updateLayout,
     createWindows,
     windowPool,
-    fixedYPosition,
     toggleContentProtection,
     resizeHeaderWindow,
     getContentProtectionStatus,
@@ -860,5 +847,4 @@ module.exports = {
     moveHeader,
     moveHeaderTo,
     adjustWindowHeight,
-    handleAnimationFinished,
 };
