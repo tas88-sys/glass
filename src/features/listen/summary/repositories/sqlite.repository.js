@@ -1,4 +1,4 @@
-const sqliteClient = require('../../../../common/services/sqliteClient');
+const sqliteClient = require('../../../common/services/sqliteClient');
 
 function saveSummary({ uid, sessionId, tldr, text, bullet_json, action_json, model = 'unknown' }) {
     // uid is ignored in the SQLite implementation

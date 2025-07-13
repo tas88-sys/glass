@@ -1,8 +1,8 @@
-const { BrowserWindow, app } = require('electron');
+const { BrowserWindow } = require('electron');
 const SttService = require('./stt/sttService');
 const SummaryService = require('./summary/summaryService');
-const authService = require('../../common/services/authService');
-const sessionRepository = require('../../common/repositories/session');
+const authService = require('../common/services/authService');
+const sessionRepository = require('../common/repositories/session');
 const sttRepository = require('./stt/repositories');
 
 class ListenService {
@@ -11,8 +11,9 @@ class ListenService {
         this.summaryService = new SummaryService();
         this.currentSessionId = null;
         this.isInitializingSession = false;
-        
+
         this.setupServiceCallbacks();
+        console.log('[ListenService] Service instance created.');
     }
 
     setupServiceCallbacks() {
@@ -43,6 +44,52 @@ class ListenService {
                 win.webContents.send(channel, data);
             }
         });
+    }
+
+    initialize() {
+        this.setupIpcHandlers();
+        console.log('[ListenService] Initialized and ready.');
+    }
+
+    async handleListenRequest(listenButtonText) {
+        const { windowPool, updateLayout } = require('../../window/windowManager');
+        const listenWindow = windowPool.get('listen');
+        const header = windowPool.get('header');
+
+        try {
+            switch (listenButtonText) {
+                case 'Listen':
+                    console.log('[ListenService] changeSession to "Listen"');
+                    listenWindow.show();
+                    updateLayout();
+                    listenWindow.webContents.send('window-show-animation');
+                    await this.initializeSession();
+                    listenWindow.webContents.send('session-state-changed', { isActive: true });
+                    break;
+        
+                case 'Stop':
+                    console.log('[ListenService] changeSession to "Stop"');
+                    await this.closeSession();
+                    listenWindow.webContents.send('session-state-changed', { isActive: false });
+                    break;
+        
+                case 'Done':
+                    console.log('[ListenService] changeSession to "Done"');
+                    listenWindow.webContents.send('window-hide-animation');
+                    listenWindow.webContents.send('session-state-changed', { isActive: false });
+                    break;
+        
+                default:
+                    throw new Error(`[ListenService] unknown listenButtonText: ${listenButtonText}`);
+            }
+            
+            header.webContents.send('listen:changeSessionResult', { success: true });
+
+        } catch (error) {
+            console.error('[ListenService] error in handleListenRequest:', error);
+            header.webContents.send('listen:changeSessionResult', { success: false });
+            throw error; 
+        }
     }
 
     async handleTranscriptionComplete(speaker, text) {
@@ -158,8 +205,8 @@ class ListenService {
         }
     }
 
-    async sendAudioContent(data, mimeType) {
-        return await this.sttService.sendAudioContent(data, mimeType);
+    async sendMicAudioContent(data, mimeType) {
+        return await this.sttService.sendMicAudioContent(data, mimeType);
     }
 
     async startMacOSAudioCapture() {
@@ -183,6 +230,8 @@ class ListenService {
             // Close STT sessions
             await this.sttService.closeSessions();
 
+            await this.stopMacOSAudioCapture();
+
             // End database session
             if (this.currentSessionId) {
                 await sessionRepository.end(this.currentSessionId);
@@ -192,8 +241,6 @@ class ListenService {
             // Reset state
             this.currentSessionId = null;
             this.summaryService.resetConversationHistory();
-
-            this.sendToRenderer('session-did-close');
 
             console.log('Listen service session closed.');
             return { success: true };
@@ -216,88 +263,58 @@ class ListenService {
         return this.summaryService.getConversationHistory();
     }
 
-    setupIpcHandlers() {
-        const { ipcMain } = require('electron');
-
-        ipcMain.handle('is-session-active', async () => {
-            const isActive = this.isSessionActive();
-            console.log(`Checking session status. Active: ${isActive}`);
-            return isActive;
-        });
-
-        ipcMain.handle('initialize-openai', async (event, profile = 'interview', language = 'en') => {
-            console.log(`Received initialize-openai request with profile: ${profile}, language: ${language}`);
-            const success = await this.initializeSession(language);
-            return success;
-        });
-
-        ipcMain.handle('send-audio-content', async (event, { data, mimeType }) => {
+    _createHandler(asyncFn, successMessage, errorMessage) {
+        return async (...args) => {
             try {
-                await this.sendAudioContent(data, mimeType);
-                return { success: true };
+                const result = await asyncFn.apply(this, args);
+                if (successMessage) console.log(successMessage);
+                // `startMacOSAudioCapture`는 성공 시 { success, error } 객체를 반환하지 않으므로,
+                // 핸들러가 일관된 응답을 보내도록 여기서 success 객체를 반환합니다.
+                // 다른 함수들은 이미 success 객체를 반환합니다.
+                return result && typeof result.success !== 'undefined' ? result : { success: true };
             } catch (e) {
-                console.error('Error sending user audio:', e);
+                console.error(errorMessage, e);
                 return { success: false, error: e.message };
             }
-        });
+        };
+    }
 
-        ipcMain.handle('send-system-audio-content', async (event, { data, mimeType }) => {
-            try {
-                await this.sttService.sendSystemAudioContent(data, mimeType);
-                
-                // Send system audio data back to renderer for AEC reference (like macOS does)
-                this.sendToRenderer('system-audio-data', { data });
-                
-                return { success: true };
-            } catch (error) {
-                console.error('Error sending system audio:', error);
-                return { success: false, error: error.message };
-            }
-        });
+    // `_createHandler`를 사용하여 핸들러들을 동적으로 생성합니다.
+    handleSendMicAudioContent = this._createHandler(
+        this.sendMicAudioContent,
+        null,
+        'Error sending user audio:'
+    );
 
-        ipcMain.handle('start-macos-audio', async () => {
+    handleStartMacosAudio = this._createHandler(
+        async () => {
             if (process.platform !== 'darwin') {
                 return { success: false, error: 'macOS audio capture only available on macOS' };
             }
             if (this.sttService.isMacOSAudioRunning?.()) {
                 return { success: false, error: 'already_running' };
             }
+            await this.startMacOSAudioCapture();
+            return { success: true, error: null };
+        },
+        'macOS audio capture started.',
+        'Error starting macOS audio capture:'
+    );
+    
+    handleStopMacosAudio = this._createHandler(
+        this.stopMacOSAudioCapture,
+        'macOS audio capture stopped.',
+        'Error stopping macOS audio capture:'
+    );
 
-            try {
-                const success = await this.startMacOSAudioCapture();
-                return { success, error: null };
-            } catch (error) {
-                console.error('Error starting macOS audio capture:', error);
-                return { success: false, error: error.message };
-            }
-        });
-
-        ipcMain.handle('stop-macos-audio', async () => {
-            try {
-                this.stopMacOSAudioCapture();
-                return { success: true };
-            } catch (error) {
-                console.error('Error stopping macOS audio capture:', error);
-                return { success: false, error: error.message };
-            }
-        });
-
-        // ipcMain.handle('close-session', async () => {
-        //     return await this.closeSession();
-        // });
-
-        ipcMain.handle('update-google-search-setting', async (event, enabled) => {
-            try {
-                console.log('Google Search setting updated to:', enabled);
-                return { success: true };
-            } catch (error) {
-                console.error('Error updating Google Search setting:', error);
-                return { success: false, error: error.message };
-            }
-        });
-
-        console.log('✅ Listen service IPC handlers registered');
-    }
+    handleUpdateGoogleSearchSetting = this._createHandler(
+        async (enabled) => {
+            console.log('Google Search setting updated to:', enabled);
+        },
+        null,
+        'Error updating Google Search setting:'
+    );
 }
 
-module.exports = ListenService;
+const listenService = new ListenService();
+module.exports = listenService;

@@ -1,4 +1,4 @@
-const sqliteClient = require('../../../../common/services/sqliteClient');
+const sqliteClient = require('../../../common/services/sqliteClient');
 
 function addTranscript({ uid, sessionId, speaker, text }) {
     // uid is ignored in the SQLite implementation

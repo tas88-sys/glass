@@ -1,10 +1,10 @@
 const { BrowserWindow } = require('electron');
-const { getSystemPrompt } = require('../../../common/prompts/promptBuilder.js');
-const { createLLM } = require('../../../common/ai/factory');
-const authService = require('../../../common/services/authService');
-const sessionRepository = require('../../../common/repositories/session');
+const { getSystemPrompt } = require('../../common/prompts/promptBuilder.js');
+const { createLLM } = require('../../common/ai/factory');
+const sessionRepository = require('../../common/repositories/session');
 const summaryRepository = require('./repositories');
-const { getStoredApiKey, getStoredProvider, getCurrentModelInfo } = require('../../../electron/windowManager');
+const modelStateService = require('../../common/services/modelStateService');
+// const { getStoredApiKey, getStoredProvider, getCurrentModelInfo } = require('../../../window/windowManager.js');
 
 class SummaryService {
     constructor() {
@@ -98,7 +98,7 @@ Please build upon this context while analyzing the new conversation segments.
                 await sessionRepository.touch(this.currentSessionId);
             }
 
-            const modelInfo = await getCurrentModelInfo(null, { type: 'llm' });
+            const modelInfo = modelStateService.getCurrentModelInfo('llm');
             if (!modelInfo || !modelInfo.apiKey) {
                 throw new Error('AI model or API key is not configured.');
             }

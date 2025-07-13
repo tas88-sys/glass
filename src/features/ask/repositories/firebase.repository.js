@@ -1,6 +1,6 @@
 const { collection, addDoc, query, getDocs, orderBy, Timestamp } = require('firebase/firestore');
-const { getFirestoreInstance } = require('../../../common/services/firebaseClient');
-const { createEncryptedConverter } = require('../../../common/repositories/firestoreConverter');
+const { getFirestoreInstance } = require('../../common/services/firebaseClient');
+const { createEncryptedConverter } = require('../../common/repositories/firestoreConverter');
 
 const aiMessageConverter = createEncryptedConverter(['content']);
 

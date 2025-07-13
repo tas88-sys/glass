@@ -33,7 +33,7 @@ extraResources:
       to: out
 
 asarUnpack:
-    - "src/assets/SystemAudioDump"
+    - "src/ui/assets/SystemAudioDump"
     - "**/node_modules/sharp/**/*"
     - "**/node_modules/@img/**/*"
 

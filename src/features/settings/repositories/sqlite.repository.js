@@ -1,4 +1,4 @@
-const sqliteClient = require('../../../common/services/sqliteClient');
+const sqliteClient = require('../../common/services/sqliteClient');
 
 function getPresets(uid) {
     const db = sqliteClient.getDb();

@@ -1,7 +1,8 @@
 const { BrowserWindow } = require('electron');
 const { spawn } = require('child_process');
-const { createSTT } = require('../../../common/ai/factory');
-const { getStoredApiKey, getStoredProvider, getCurrentModelInfo } = require('../../../electron/windowManager');
+const { createSTT } = require('../../common/ai/factory');
+const modelStateService = require('../../common/services/modelStateService');
+// const { getStoredApiKey, getStoredProvider, getCurrentModelInfo } = require('../../../window/windowManager');
 
 const COMPLETION_DEBOUNCE_MS = 2000;
 
@@ -39,6 +40,17 @@ class SttService {
                 win.webContents.send(channel, data);
             }
         });
+    }
+
+    async handleSendSystemAudioContent(data, mimeType) {
+        try {
+            await this.sendSystemAudioContent(data, mimeType);
+            this.sendToRenderer('system-audio-data', { data });
+            return { success: true };
+        } catch (error) {
+            console.error('Error sending system audio:', error);
+            return { success: false, error: error.message };
+        }
     }
 
     flushMyCompletion() {
@@ -120,7 +132,7 @@ class SttService {
     async initializeSttSessions(language = 'en') {
         const effectiveLanguage = process.env.OPENAI_TRANSCRIBE_LANG || language || 'en';
 
-        const modelInfo = await getCurrentModelInfo(null, { type: 'stt' });
+        const modelInfo = modelStateService.getCurrentModelInfo('stt');
         if (!modelInfo || !modelInfo.apiKey) {
             throw new Error('AI model or API key is not configured.');
         }
@@ -132,6 +144,7 @@ class SttService {
                 console.log('[SttService] Ignoring message - session already closed');
                 return;
             }
+            console.log('[SttService] handleMyMessage', message);
             
             if (this.modelInfo.provider === 'whisper') {
                 // Whisper STT emits 'transcription' events with different structure
@@ -367,11 +380,6 @@ class SttService {
                 onclose: event => console.log('Their STT session closed:', event.reason),
             },
         };
-
-        // Determine auth options for providers that support it
-        // const authService = require('../../../common/services/authService');
-        // const userState = authService.getCurrentUser();
-        // const loggedIn = userState.isLoggedIn;
         
         const sttOptions = {
             apiKey: this.modelInfo.apiKey,
@@ -393,7 +401,7 @@ class SttService {
         return true;
     }
 
-    async sendAudioContent(data, mimeType) {
+    async sendMicAudioContent(data, mimeType) {
         // const provider = await this.getAiProvider();
         // const isGemini = provider === 'gemini';
         
@@ -404,7 +412,7 @@ class SttService {
         let modelInfo = this.modelInfo;
         if (!modelInfo) {
             console.warn('[SttService] modelInfo not found, fetching on-the-fly as a fallback...');
-            modelInfo = await getCurrentModelInfo(null, { type: 'stt' });
+            modelInfo = modelStateService.getCurrentModelInfo('stt');
         }
         if (!modelInfo) {
             throw new Error('STT model info could not be retrieved.');
@@ -425,7 +433,7 @@ class SttService {
         let modelInfo = this.modelInfo;
         if (!modelInfo) {
             console.warn('[SttService] modelInfo not found, fetching on-the-fly as a fallback...');
-            modelInfo = await getCurrentModelInfo(null, { type: 'stt' });
+            modelInfo = modelStateService.getCurrentModelInfo('stt');
         }
         if (!modelInfo) {
             throw new Error('STT model info could not be retrieved.');
@@ -476,8 +484,8 @@ class SttService {
         const { app } = require('electron');
         const path = require('path');
         const systemAudioPath = app.isPackaged
-            ? path.join(process.resourcesPath, 'app.asar.unpacked', 'src', 'assets', 'SystemAudioDump')
-            : path.join(app.getAppPath(), 'src', 'assets', 'SystemAudioDump');
+            ? path.join(process.resourcesPath, 'app.asar.unpacked', 'src', 'ui', 'assets', 'SystemAudioDump')
+            : path.join(app.getAppPath(), 'src', 'ui', 'assets', 'SystemAudioDump');
 
         console.log('SystemAudioDump path:', systemAudioPath);
 
@@ -506,7 +514,7 @@ class SttService {
         let modelInfo = this.modelInfo;
         if (!modelInfo) {
             console.warn('[SttService] modelInfo not found, fetching on-the-fly as a fallback...');
-            modelInfo = await getCurrentModelInfo(null, { type: 'stt' });
+            modelInfo = modelStateService.getCurrentModelInfo('stt');
         }
         if (!modelInfo) {
             throw new Error('STT model info could not be retrieved.');

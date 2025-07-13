@@ -1,4 +1,4 @@
-const sqliteClient = require('../../../common/services/sqliteClient');
+const sqliteClient = require('../../common/services/sqliteClient');
 
 function addAiMessage({ uid, sessionId, role, content, model = 'unknown' }) {
     // uid is ignored in the SQLite implementation

@@ -1,8 +1,13 @@
 const { ipcMain, BrowserWindow } = require('electron');
 const Store = require('electron-store');
-const authService = require('../../common/services/authService');
+const authService = require('../common/services/authService');
 const settingsRepository = require('./repositories');
-const { getStoredApiKey, getStoredProvider, windowPool } = require('../../electron/windowManager');
+const { getStoredApiKey, getStoredProvider, windowPool } = require('../../window/windowManager');
+
+// New imports for common services
+const modelStateService = require('../common/services/modelStateService');
+const ollamaService = require('../common/services/ollamaService');
+const whisperService = require('../common/services/whisperService');
 
 const store = new Store({
     name: 'pickle-glass-settings',
@@ -18,6 +23,51 @@ const NOTIFICATION_CONFIG = {
     MAX_RETRY_ATTEMPTS: 3,
     RETRY_BASE_DELAY: 1000, // exponential backoff base (ms)
 };
+
+// New facade functions for model state management
+async function getModelSettings() {
+    try {
+        const [config, storedKeys, availableLlm, availableStt, selectedModels] = await Promise.all([
+            modelStateService.getProviderConfig(),
+            modelStateService.getAllApiKeys(),
+            modelStateService.getAvailableModels('llm'),
+            modelStateService.getAvailableModels('stt'),
+            modelStateService.getSelectedModels(),
+        ]);
+        return { success: true, data: { config, storedKeys, availableLlm, availableStt, selectedModels } };
+    } catch (error) {
+        console.error('[SettingsService] Error getting model settings:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+async function validateAndSaveKey(provider, key) {
+    return modelStateService.handleValidateKey(provider, key);
+}
+
+async function clearApiKey(provider) {
+    const success = await modelStateService.handleRemoveApiKey(provider);
+    return { success };
+}
+
+async function setSelectedModel(type, modelId) {
+    const success = await modelStateService.handleSetSelectedModel(type, modelId);
+    return { success };
+}
+
+// Ollama facade functions
+async function getOllamaStatus() {
+    return ollamaService.getStatus();
+}
+
+async function ensureOllamaReady() {
+    return ollamaService.ensureReady();
+}
+
+async function shutdownOllama() {
+    return ollamaService.shutdown(false); // false for graceful shutdown
+}
+
 
 // window targeting system
 class WindowNotificationManager {
@@ -324,6 +374,7 @@ async function removeApiKey() {
             }
         });
         
+        console.log('[SettingsService] API key removed for all providers');
         return { success: true };
     } catch (error) {
         console.error('[SettingsService] Error removing API key:', error);
@@ -373,57 +424,6 @@ function initialize() {
     // cleanup 
     windowNotificationManager.cleanup();
     
-    // IPC handlers for settings
-    ipcMain.handle('settings:getSettings', async () => {
-        return await getSettings();
-    });
-    
-    ipcMain.handle('settings:saveSettings', async (event, settings) => {
-        return await saveSettings(settings);
-    });
-    
-    // IPC handlers for presets
-    ipcMain.handle('settings:getPresets', async () => {
-        return await getPresets();
-    });
-    
-    ipcMain.handle('settings:getPresetTemplates', async () => {
-        return await getPresetTemplates();
-    });
-    
-    ipcMain.handle('settings:createPreset', async (event, title, prompt) => {
-        return await createPreset(title, prompt);
-    });
-    
-    ipcMain.handle('settings:updatePreset', async (event, id, title, prompt) => {
-        return await updatePreset(id, title, prompt);
-    });
-    
-    ipcMain.handle('settings:deletePreset', async (event, id) => {
-        return await deletePreset(id);
-    });
-    
-    ipcMain.handle('settings:saveApiKey', async (event, apiKey, provider) => {
-        return await saveApiKey(apiKey, provider);
-    });
-    
-    ipcMain.handle('settings:removeApiKey', async () => {
-        return await removeApiKey();
-    });
-    
-    ipcMain.handle('settings:updateContentProtection', async (event, enabled) => {
-        return await updateContentProtection(enabled);
-    });
-
-    ipcMain.handle('settings:get-auto-update', async () => {
-        return await getAutoUpdateSetting();
-    });
-
-    ipcMain.handle('settings:set-auto-update', async (event, isEnabled) => {
-        console.log('[SettingsService] Setting auto update setting:', isEnabled);
-        return await setAutoUpdateSetting(isEnabled);
-    });
-    
     console.log('[SettingsService] Initialized and ready.');
 }
 
@@ -455,4 +455,14 @@ module.exports = {
     removeApiKey,
     updateContentProtection,
     getAutoUpdateSetting,
+    setAutoUpdateSetting,
+    // Model settings facade
+    getModelSettings,
+    validateAndSaveKey,
+    clearApiKey,
+    setSelectedModel,
+    // Ollama facade
+    getOllamaStatus,
+    ensureOllamaReady,
+    shutdownOllama
 };

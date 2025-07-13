@@ -12,11 +12,11 @@ if (require('electron-squirrel-startup')) {
 }
 
 const { app, BrowserWindow, shell, ipcMain, dialog, desktopCapturer, session } = require('electron');
-const { createWindows } = require('./electron/windowManager.js');
-const ListenService = require('./features/listen/listenService');
-const { initializeFirebase } = require('./common/services/firebaseClient');
-const databaseInitializer = require('./common/services/databaseInitializer');
-const authService = require('./common/services/authService');
+const { createWindows } = require('./window/windowManager.js');
+const listenService = require('./features/listen/listenService');
+const { initializeFirebase } = require('./features/common/services/firebaseClient');
+const databaseInitializer = require('./features/common/services/databaseInitializer');
+const authService = require('./features/common/services/authService');
 const path = require('node:path');
 const express = require('express');
 const fetch = require('node-fetch');
@@ -24,27 +24,23 @@ const { autoUpdater } = require('electron-updater');
 const { EventEmitter } = require('events');
 const askService = require('./features/ask/askService');
 const settingsService = require('./features/settings/settingsService');
-const sessionRepository = require('./common/repositories/session');
-const ModelStateService = require('./common/services/modelStateService');
-const sqliteClient = require('./common/services/sqliteClient');
+const sessionRepository = require('./features/common/repositories/session');
+const modelStateService = require('./features/common/services/modelStateService');
+const featureBridge = require('./bridge/featureBridge');
+const windowBridge = require('./bridge/windowBridge');
 
 // Global variables
 const eventBridge = new EventEmitter();
 let WEB_PORT = 3000;
 let isShuttingDown = false; // Flag to prevent infinite shutdown loop
 
-const listenService = new ListenService();
-// Make listenService globally accessible so other modules (e.g., windowManager, askService) can reuse the same instance
-global.listenService = listenService;
-
 //////// after_modelStateService ////////
-const modelStateService = new ModelStateService(authService);
 global.modelStateService = modelStateService;
 //////// after_modelStateService ////////
 
 // Import and initialize OllamaService
-const ollamaService = require('./common/services/ollamaService');
-const ollamaModelRepository = require('./common/repositories/ollamaModel');
+const ollamaService = require('./features/common/services/ollamaService');
+const ollamaModelRepository = require('./features/common/repositories/ollamaModel');
 
 // Native deep link handling - cross-platform compatible
 let pendingDeepLinkUrl = null;
@@ -123,7 +119,7 @@ function setupProtocolHandling() {
 }
 
 function focusMainWindow() {
-    const { windowPool } = require('./electron/windowManager');
+    const { windowPool } = require('./window/windowManager.js');
     if (windowPool) {
         const header = windowPool.get('header');
         if (header && !header.isDestroyed()) {
@@ -202,12 +198,9 @@ app.whenReady().then(async () => {
         await modelStateService.initialize();
         //////// after_modelStateService ////////
 
-        listenService.setupIpcHandlers();
-        askService.initialize();
-        settingsService.initialize();
-        setupGeneralIpcHandlers();
-        setupOllamaIpcHandlers();
-        setupWhisperIpcHandlers();
+        featureBridge.initialize();  // 추가: featureBridge 초기화
+        windowBridge.initialize();
+        setupWebDataHandlers();
 
         // Initialize Ollama models in database
         await ollamaModelRepository.initializeDefaultModels();
@@ -248,13 +241,6 @@ app.whenReady().then(async () => {
     }
 });
 
-app.on('window-all-closed', () => {
-    listenService.stopMacOSAudioCapture();
-    if (process.platform !== 'darwin') {
-        app.quit();
-    }
-});
-
 app.on('before-quit', async (event) => {
     // Prevent infinite loop by checking if shutdown is already in progress
     if (isShuttingDown) {
@@ -272,7 +258,7 @@ app.on('before-quit', async (event) => {
     
     try {
         // 1. Stop audio capture first (immediate)
-        listenService.stopMacOSAudioCapture();
+        await listenService.closeSession();
         console.log('[Shutdown] Audio capture stopped');
         
         // 2. End all active sessions (database operations) - with error handling
@@ -328,309 +314,13 @@ app.on('activate', () => {
     }
 });
 
-function setupWhisperIpcHandlers() {
-    const { WhisperService } = require('./common/services/whisperService');
-    const whisperService = new WhisperService();
-    
-    // Forward download progress events to renderer
-    whisperService.on('downloadProgress', (data) => {
-        const windows = BrowserWindow.getAllWindows();
-        windows.forEach(window => {
-            window.webContents.send('whisper:download-progress', data);
-        });
-    });
-    
-    // IPC handlers for Whisper operations
-    ipcMain.handle('whisper:download-model', async (event, modelId) => {
-        try {
-            console.log(`[Whisper IPC] Starting download for model: ${modelId}`);
-            
-            // Ensure WhisperService is initialized first
-            if (!whisperService.isInitialized) {
-                console.log('[Whisper IPC] Initializing WhisperService...');
-                await whisperService.initialize();
-            }
-            
-            // Set up progress listener
-            const progressHandler = (data) => {
-                if (data.modelId === modelId) {
-                    event.sender.send('whisper:download-progress', data);
-                }
-            };
-            
-            whisperService.on('downloadProgress', progressHandler);
-            
-            try {
-                await whisperService.ensureModelAvailable(modelId);
-                console.log(`[Whisper IPC] Model ${modelId} download completed successfully`);
-            } finally {
-                // Cleanup listener
-                whisperService.removeListener('downloadProgress', progressHandler);
-            }
-            
-            return { success: true };
-        } catch (error) {
-            console.error(`[Whisper IPC] Failed to download model ${modelId}:`, error);
-            return { success: false, error: error.message };
-        }
-    });
-    
-    ipcMain.handle('whisper:get-installed-models', async () => {
-        try {
-            // Ensure WhisperService is initialized first
-            if (!whisperService.isInitialized) {
-                console.log('[Whisper IPC] Initializing WhisperService for model list...');
-                await whisperService.initialize();
-            }
-            
-            const models = await whisperService.getInstalledModels();
-            return { success: true, models };
-        } catch (error) {
-            console.error('[Whisper IPC] Failed to get installed models:', error);
-            return { success: false, error: error.message };
-        }
-    });
-}
-
-function setupGeneralIpcHandlers() {
-    const userRepository = require('./common/repositories/user');
-    const presetRepository = require('./common/repositories/preset');
-
-    ipcMain.handle('get-user-presets', () => {
-        // The adapter injects the UID.
-        return presetRepository.getPresets();
-    });
-
-    ipcMain.handle('get-preset-templates', () => {
-        return presetRepository.getPresetTemplates();
-    });
-
-    ipcMain.handle('start-firebase-auth', async () => {
-        try {
-            const authUrl = `http://localhost:${WEB_PORT}/login?mode=electron`;
-            console.log(`[Auth] Opening Firebase auth URL in browser: ${authUrl}`);
-            await shell.openExternal(authUrl);
-            return { success: true };
-        } catch (error) {
-            console.error('[Auth] Failed to open Firebase auth URL:', error);
-            return { success: false, error: error.message };
-        }
-    });
-
-    ipcMain.handle('get-web-url', () => {
-        return process.env.pickleglass_WEB_URL || 'http://localhost:3000';
-    });
-
-    ipcMain.handle('get-current-user', () => {
-        return authService.getCurrentUser();
-    });
-
-    // --- Web UI Data Handlers (New) ---
-    setupWebDataHandlers();
-}
-
-function setupOllamaIpcHandlers() {
-    // Ollama status and installation
-    ipcMain.handle('ollama:get-status', async () => {
-        try {
-            const installed = await ollamaService.isInstalled();
-            const running = installed ? await ollamaService.isServiceRunning() : false;
-            const models = await ollamaService.getAllModelsWithStatus();
-            
-            return { 
-                installed, 
-                running, 
-                models,
-                success: true 
-            };
-        } catch (error) {
-            console.error('[Ollama IPC] Failed to get status:', error);
-            return { success: false, error: error.message };
-        }
-    });
-
-    ipcMain.handle('ollama:install', async (event) => {
-        try {
-            const onProgress = (data) => {
-                event.sender.send('ollama:install-progress', data);
-            };
-
-            await ollamaService.autoInstall(onProgress);
-            
-            if (!await ollamaService.isServiceRunning()) {
-                onProgress({ stage: 'starting', message: 'Starting Ollama service...', progress: 0 });
-                await ollamaService.startService();
-                onProgress({ stage: 'starting', message: 'Ollama service started.', progress: 100 });
-            }
-            event.sender.send('ollama:install-complete', { success: true });
-            return { success: true };
-        } catch (error) {
-            console.error('[Ollama IPC] Failed to install:', error);
-            event.sender.send('ollama:install-complete', { success: false, error: error.message });
-            return { success: false, error: error.message };
-        }
-    });
-
-    ipcMain.handle('ollama:start-service', async (event) => {
-        try {
-            if (!await ollamaService.isServiceRunning()) {
-                console.log('[Ollama IPC] Starting Ollama service...');
-                await ollamaService.startService();
-            }
-            event.sender.send('ollama:install-complete', { success: true });
-            return { success: true };
-        } catch (error) {
-            console.error('[Ollama IPC] Failed to start service:', error);
-            event.sender.send('ollama:install-complete', { success: false, error: error.message });
-            return { success: false, error: error.message };
-        }
-    });
-
-    // Ensure Ollama is ready (starts service if installed but not running)
-    ipcMain.handle('ollama:ensure-ready', async () => {
-        try {
-            if (await ollamaService.isInstalled() && !await ollamaService.isServiceRunning()) {
-                console.log('[Ollama IPC] Ollama installed but not running, starting service...');
-                await ollamaService.startService();
-            }
-            return { success: true };
-        } catch (error) {
-            console.error('[Ollama IPC] Failed to ensure ready:', error);
-            return { success: false, error: error.message };
-        }
-    });
-
-    // Get all models with their status
-    ipcMain.handle('ollama:get-models', async () => {
-        try {
-            const models = await ollamaService.getAllModelsWithStatus();
-            return { success: true, models };
-        } catch (error) {
-            console.error('[Ollama IPC] Failed to get models:', error);
-            return { success: false, error: error.message };
-        }
-    });
-
-    // Get model suggestions for autocomplete
-    ipcMain.handle('ollama:get-model-suggestions', async () => {
-        try {
-            const suggestions = await ollamaService.getModelSuggestions();
-            return { success: true, suggestions };
-        } catch (error) {
-            console.error('[Ollama IPC] Failed to get model suggestions:', error);
-            return { success: false, error: error.message };
-        }
-    });
-
-    // Pull/install a specific model
-    ipcMain.handle('ollama:pull-model', async (event, modelName) => {
-        try {
-            console.log(`[Ollama IPC] Starting model pull: ${modelName}`);
-            
-            // Update DB status to installing
-            await ollamaModelRepository.updateInstallStatus(modelName, false, true);
-            
-            // Set up progress listener for real-time updates
-            const progressHandler = (data) => {
-                if (data.model === modelName) {
-                    event.sender.send('ollama:pull-progress', data);
-                }
-            };
-            
-            const completeHandler = (data) => {
-                if (data.model === modelName) {
-                    console.log(`[Ollama IPC] Model ${modelName} pull completed`);
-                    // Clean up listeners
-                    ollamaService.removeListener('pull-progress', progressHandler);
-                    ollamaService.removeListener('pull-complete', completeHandler);
-                }
-            };
-            
-            ollamaService.on('pull-progress', progressHandler);
-            ollamaService.on('pull-complete', completeHandler);
-            
-            // Pull the model using REST API
-            await ollamaService.pullModel(modelName);
-            
-            // Update DB status to installed
-            await ollamaModelRepository.updateInstallStatus(modelName, true, false);
-            
-            console.log(`[Ollama IPC] Model ${modelName} pull successful`);
-            return { success: true };
-        } catch (error) {
-            console.error('[Ollama IPC] Failed to pull model:', error);
-            // Reset status on error
-            await ollamaModelRepository.updateInstallStatus(modelName, false, false);
-            return { success: false, error: error.message };
-        }
-    });
-
-    // Check if a specific model is installed
-    ipcMain.handle('ollama:is-model-installed', async (event, modelName) => {
-        try {
-            const installed = await ollamaService.isModelInstalled(modelName);
-            return { success: true, installed };
-        } catch (error) {
-            console.error('[Ollama IPC] Failed to check model installation:', error);
-            return { success: false, error: error.message };
-        }
-    });
-
-    // Warm up a specific model
-    ipcMain.handle('ollama:warm-up-model', async (event, modelName) => {
-        try {
-            const success = await ollamaService.warmUpModel(modelName);
-            return { success };
-        } catch (error) {
-            console.error('[Ollama IPC] Failed to warm up model:', error);
-            return { success: false, error: error.message };
-        }
-    });
-
-    // Auto warm-up currently selected model
-    ipcMain.handle('ollama:auto-warm-up', async () => {
-        try {
-            const success = await ollamaService.autoWarmUpSelectedModel();
-            return { success };
-        } catch (error) {
-            console.error('[Ollama IPC] Failed to auto warm-up:', error);
-            return { success: false, error: error.message };
-        }
-    });
-
-    // Get warm-up status for debugging
-    ipcMain.handle('ollama:get-warm-up-status', async () => {
-        try {
-            const status = ollamaService.getWarmUpStatus();
-            return { success: true, status };
-        } catch (error) {
-            console.error('[Ollama IPC] Failed to get warm-up status:', error);
-            return { success: false, error: error.message };
-        }
-    });
-
-    // Shutdown Ollama service manually
-    ipcMain.handle('ollama:shutdown', async (event, force = false) => {
-        try {
-            console.log(`[Ollama IPC] Manual shutdown requested (force: ${force})`);
-            const success = await ollamaService.shutdown(force);
-            return { success };
-        } catch (error) {
-            console.error('[Ollama IPC] Failed to shutdown Ollama:', error);
-            return { success: false, error: error.message };
-        }
-    });
-
-    console.log('[Ollama IPC] Handlers registered');
-}
-
 function setupWebDataHandlers() {
-    const sessionRepository = require('./common/repositories/session');
+    const sessionRepository = require('./features/common/repositories/session');
     const sttRepository = require('./features/listen/stt/repositories');
     const summaryRepository = require('./features/listen/summary/repositories');
     const askRepository = require('./features/ask/repositories');
-    const userRepository = require('./common/repositories/user');
-    const presetRepository = require('./common/repositories/preset');
+    const userRepository = require('./features/common/repositories/user');
+    const presetRepository = require('./features/common/repositories/preset');
 
     const handleRequest = async (channel, responseChannel, payload) => {
         let result;
@@ -788,7 +478,7 @@ async function handleCustomUrl(url) {
                 handlePersonalizeFromUrl(params);
                 break;
             default:
-                const { windowPool } = require('./electron/windowManager');
+                const { windowPool } = require('./window/windowManager.js');
                 const header = windowPool.get('header');
                 if (header) {
                     if (header.isMinimized()) header.restore();
@@ -806,7 +496,7 @@ async function handleCustomUrl(url) {
 }
 
 async function handleFirebaseAuthCallback(params) {
-    const userRepository = require('./common/repositories/user');
+    const userRepository = require('./features/common/repositories/user');
     const { token: idToken } = params;
 
     if (!idToken) {
@@ -850,7 +540,7 @@ async function handleFirebaseAuthCallback(params) {
         console.log('[Auth] Main process sign-in initiated. Waiting for onAuthStateChanged...');
 
         // 3. Focus the app window
-        const { windowPool } = require('./electron/windowManager');
+        const { windowPool } = require('./window/windowManager.js');
         const header = windowPool.get('header');
         if (header) {
             if (header.isMinimized()) header.restore();
@@ -863,7 +553,7 @@ async function handleFirebaseAuthCallback(params) {
         console.error('[Auth] Error during custom token exchange or sign-in:', error);
         // The UI will not change, and the user can try again.
         // Optionally, send a generic error event to the renderer.
-        const { windowPool } = require('./electron/windowManager');
+        const { windowPool } = require('./window/windowManager.js');
         const header = windowPool.get('header');
         if (header) {
             header.webContents.send('auth-failed', { message: error.message });
@@ -874,7 +564,7 @@ async function handleFirebaseAuthCallback(params) {
 function handlePersonalizeFromUrl(params) {
     console.log('[Custom URL] Personalize params:', params);
     
-    const { windowPool } = require('./electron/windowManager');
+    const { windowPool } = require('./window/windowManager.js');
     const header = windowPool.get('header');
     
     if (header) {

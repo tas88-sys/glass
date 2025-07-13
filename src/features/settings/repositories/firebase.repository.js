@@ -1,7 +1,7 @@
 const { collection, doc, addDoc, getDoc, getDocs, updateDoc, deleteDoc, query, where, orderBy } = require('firebase/firestore');
-const { getFirestoreInstance } = require('../../../common/services/firebaseClient');
-const { createEncryptedConverter } = require('../../../common/repositories/firestoreConverter');
-const encryptionService = require('../../../common/services/encryptionService');
+const { getFirestoreInstance } = require('../../common/services/firebaseClient');
+const { createEncryptedConverter } = require('../../common/repositories/firestoreConverter');
+const encryptionService = require('../../common/services/encryptionService');
 
 const userPresetConverter = createEncryptedConverter(['prompt', 'title']);
 
