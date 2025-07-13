@@ -772,8 +772,10 @@ export class AskView extends LitElement {
                 console.log('📤 Show text input signal received');
                 if (!this.showTextInput) {
                     this.showTextInput = true;
-                    this.requestUpdate();
-                }
+                    this.updateComplete.then(() => this.focusTextInput());
+                  } else {
+                    this.focusTextInput();
+                  }
             });
 
             window.api.askView.onScrollResponseUp(() => this.handleScroll('up'));
@@ -781,10 +783,20 @@ export class AskView extends LitElement {
             window.api.askView.onAskStateUpdate((event, newState) => {
                 this.currentResponse = newState.currentResponse;
                 this.currentQuestion = newState.currentQuestion;
-                this.isLoading = newState.isLoading;
-                this.isStreaming = newState.isStreaming;
+                this.isLoading       = newState.isLoading;
+                this.isStreaming     = newState.isStreaming;
+              
+                const wasHidden = !this.showTextInput;
                 this.showTextInput = newState.showTextInput;
-            });
+              
+                if (newState.showTextInput) {
+                  if (wasHidden) {
+                    this.updateComplete.then(() => this.focusTextInput());
+                  } else {
+                    this.focusTextInput();
+                  }
+                }
+              });
             console.log('✅ AskView: IPC 이벤트 리스너 등록 완료');
         }
     }

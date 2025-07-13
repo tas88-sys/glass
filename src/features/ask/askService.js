@@ -148,7 +148,7 @@ class AskService {
     async toggleAskButton() {
         const askWindow = getWindowPool()?.get('ask');
 
-        const hasContent = this.state.isStreaming || (this.state.currentResponse && this.state.currentResponse.length > 0);
+        const hasContent = this.state.isLoading || this.state.isStreaming || (this.state.currentResponse && this.state.currentResponse.length > 0);
 
         if (askWindow && askWindow.isVisible() && hasContent) {
             this.state.showTextInput = !this.state.showTextInput;
