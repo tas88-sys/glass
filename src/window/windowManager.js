@@ -51,9 +51,46 @@ function updateLayout() {
         layoutManager.updateLayout();
     }
 }
-
 let movementManager = null;
 
+
+const FADE_DURATION = 250;
+const FADE_FPS      = 60;
+
+/**
+ * 윈도우 투명도를 서서히 변경한다.
+ * @param {BrowserWindow} win
+ * @param {number} from
+ * @param {number} to
+ * @param {number} duration
+ * @param {Function=} onComplete 
+ */
+function fadeWindow(win, from, to, duration = FADE_DURATION, onComplete) {
+  if (!win || win.isDestroyed()) return;
+
+  const steps       = Math.max(1, Math.round(duration / (1000 / FADE_FPS)));
+  let   currentStep = 0;
+
+  win.setOpacity(from);
+
+  const timer = setInterval(() => {
+    if (win.isDestroyed()) { clearInterval(timer); return; }
+
+    currentStep += 1;
+    const progress = currentStep / steps;
+    const eased    = progress < 1
+      ? 1 - Math.pow(1 - progress, 3)
+      : 1;
+
+    win.setOpacity(from + (to - from) * eased);
+
+    if (currentStep >= steps) {
+      clearInterval(timer);
+      win.setOpacity(to);
+      onComplete && onComplete();
+    }
+  }, 1000 / FADE_FPS);
+}
 
 
 function setupAnimationController(windowPool, layoutManager, movementManager) {
@@ -91,7 +128,7 @@ async function handleWindowVisibilityRequest(windowPool, layoutManager, movement
     const isOtherWinVisible = otherWin && !otherWin.isDestroyed() && otherWin.isVisible();
 
     const ANIM_OFFSET_X = 100; 
-    const ANIM_OFFSET_Y = 100; 
+    const ANIM_OFFSET_Y = 20; 
 
     if (shouldBeVisible) {
         win.setOpacity(0);
@@ -104,22 +141,20 @@ async function handleWindowVisibilityRequest(windowPool, layoutManager, movement
                 const startPos = { x: targets.listen.x - ANIM_OFFSET_X, y: targets.listen.y };
                 win.setBounds(startPos);
                 win.show();
-                win.setOpacity(1);
+                fadeWindow(win, 0, 1);
                 movementManager.animateWindow(win, targets.listen.x, targets.listen.y);
 
             } else {
                 const targets = layoutManager.getTargetBoundsForFeatureWindows({ listen: true, ask: true });
                 if (!targets.listen || !targets.ask) return;
 
-                // 'listen'은 목표 위치의 왼쪽에서 시작
                 const startListenPos = { x: targets.listen.x - ANIM_OFFSET_X, y: targets.listen.y };
                 win.setBounds(startListenPos);
 
-                // 'listen'을 보여주고 두 창을 동시에 애니메이션
                 win.show();
-                win.setOpacity(1);
-                movementManager.animateWindow(otherWin, targets.ask.x, targets.ask.y); // 'ask' 창을 새 위치로 이동
-                movementManager.animateWindow(win, targets.listen.x, targets.listen.y); // 'listen' 창을 새 위치로 이동
+                fadeWindow(win, 0, 1);
+                movementManager.animateWindow(otherWin, targets.ask.x, targets.ask.y);
+                movementManager.animateWindow(win, targets.listen.x, targets.listen.y);
             }
         } else if (name === 'ask') {
             if (!isOtherWinVisible) {
@@ -129,7 +164,7 @@ async function handleWindowVisibilityRequest(windowPool, layoutManager, movement
                 const startPos = { x: targets.ask.x, y: targets.ask.y - ANIM_OFFSET_Y };
                 win.setBounds(startPos);
                 win.show();
-                win.setOpacity(1);
+                fadeWindow(win, 0, 1);
                 movementManager.animateWindow(win, targets.ask.x, targets.ask.y);
 
             } else {
@@ -140,37 +175,32 @@ async function handleWindowVisibilityRequest(windowPool, layoutManager, movement
                 win.setBounds(startAskPos);
 
                 win.show();
-                win.setOpacity(1);
+                fadeWindow(win, 0, 1);
                 movementManager.animateWindow(otherWin, targets.listen.x, targets.listen.y);
                 movementManager.animateWindow(win, targets.ask.x, targets.ask.y);
             }
         }
     } else {
         const currentBounds = win.getBounds();
-
+        fadeWindow(
+            win, 1, 0, FADE_DURATION,
+            () => win.hide()
+          );
         if (name === 'listen') {
             if (!isOtherWinVisible) {
                 const targetX = currentBounds.x - ANIM_OFFSET_X;
-                movementManager.animateWindow(win, targetX, currentBounds.y, {
-                    onComplete: () => win.hide()
-                });
+                movementManager.animateWindow(win, targetX, currentBounds.y);
             } else {
                 const targetX = currentBounds.x - currentBounds.width;
-                movementManager.animateWindow(win, targetX, currentBounds.y, {
-                    onComplete: () => win.hide()
-                });
+                movementManager.animateWindow(win, targetX, currentBounds.y);
             }
         } else if (name === 'ask') {
             if (!isOtherWinVisible) {
                  const targetY = currentBounds.y - ANIM_OFFSET_Y;
-                 movementManager.animateWindow(win, currentBounds.x, targetY, {
-                     onComplete: () => win.hide()
-                 });
+                 movementManager.animateWindow(win, currentBounds.x, targetY);
             } else {
                 const targetAskY = currentBounds.y - ANIM_OFFSET_Y;
-                movementManager.animateWindow(win, currentBounds.x, targetAskY, {
-                    onComplete: () => win.hide()
-                });
+                movementManager.animateWindow(win, currentBounds.x, targetAskY);
 
                 const targets = layoutManager.getTargetBoundsForFeatureWindows({ listen: true, ask: false });
                 if (targets.listen) {
