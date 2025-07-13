@@ -41,11 +41,58 @@ class ListenService {
     }
 
     sendToRenderer(channel, data) {
-        BrowserWindow.getAllWindows().forEach(win => {
-            if (!win.isDestroyed()) {
-                win.webContents.send(channel, data);
+        const { windowPool } = require('../../window/windowManager');
+        const listenWindow = windowPool?.get('listen');
+        
+        if (listenWindow && !listenWindow.isDestroyed()) {
+            listenWindow.webContents.send(channel, data);
+        }
+    }
+
+    initialize() {
+        this.setupIpcHandlers();
+        console.log('[ListenService] Initialized and ready.');
+    }
+
+    async handleListenRequest(listenButtonText) {
+        const { windowPool, updateLayout } = require('../../window/windowManager');
+        const listenWindow = windowPool.get('listen');
+        const header = windowPool.get('header');
+
+        try {
+            switch (listenButtonText) {
+                case 'Listen':
+                    console.log('[ListenService] changeSession to "Listen"');
+                    listenWindow.show();
+                    updateLayout();
+                    listenWindow.webContents.send('window-show-animation');
+                    await this.initializeSession();
+                    listenWindow.webContents.send('session-state-changed', { isActive: true });
+                    break;
+        
+                case 'Stop':
+                    console.log('[ListenService] changeSession to "Stop"');
+                    await this.closeSession();
+                    listenWindow.webContents.send('session-state-changed', { isActive: false });
+                    break;
+        
+                case 'Done':
+                    console.log('[ListenService] changeSession to "Done"');
+                    listenWindow.webContents.send('window-hide-animation');
+                    listenWindow.webContents.send('session-state-changed', { isActive: false });
+                    break;
+        
+                default:
+                    throw new Error(`[ListenService] unknown listenButtonText: ${listenButtonText}`);
             }
-        });
+            
+            header.webContents.send('listen:changeSessionResult', { success: true });
+
+        } catch (error) {
+            console.error('[ListenService] error in handleListenRequest:', error);
+            header.webContents.send('listen:changeSessionResult', { success: false });
+            throw error; 
+        }
     }
 
     initialize() {

@@ -6,15 +6,15 @@ const whisperService = require('../features/common/services/whisperService');
 const ollamaService = require('../features/common/services/ollamaService');
 const modelStateService = require('../features/common/services/modelStateService');
 const shortcutsService = require('../features/shortcuts/shortcutsService');
+const presetRepository = require('../features/common/repositories/preset');
 
 const askService = require('../features/ask/askService');
 const listenService = require('../features/listen/listenService');
 const permissionService = require('../features/common/services/permissionService');
 
 module.exports = {
-  // Renderer로부터의 요청을 수신
+  // Renderer로부터의 요청을 수신하고 서비스로 전달
   initialize() {
-    
     // Settings Service
     ipcMain.handle('settings:getPresets', async () => await settingsService.getPresets());
     ipcMain.handle('settings:get-auto-update', async () => await settingsService.getAutoUpdateSetting());
@@ -33,14 +33,12 @@ module.exports = {
     ipcMain.handle('get-default-shortcuts', async () => await shortcutsService.handleRestoreDefaults());
     ipcMain.handle('save-shortcuts', async (event, newKeybinds) => await shortcutsService.handleSaveShortcuts(newKeybinds));
 
-
     // Permissions
     ipcMain.handle('check-system-permissions', async () => await permissionService.checkSystemPermissions());
     ipcMain.handle('request-microphone-permission', async () => await permissionService.requestMicrophonePermission());
     ipcMain.handle('open-system-preferences', async (event, section) => await permissionService.openSystemPreferences(section));
     ipcMain.handle('mark-permissions-completed', async () => await permissionService.markPermissionsAsCompleted());
     ipcMain.handle('check-permissions-completed', async () => await permissionService.checkPermissionsCompleted());
-    
 
     // User/Auth
     ipcMain.handle('get-current-user', () => authService.getCurrentUser());
@@ -51,7 +49,7 @@ module.exports = {
     ipcMain.handle('quit-application', () => app.quit());
 
     // Whisper
-    ipcMain.handle('whisper:download-model', async (event, modelId) => await whisperService.handleDownloadModel(event, modelId));
+    ipcMain.handle('whisper:download-model', async (event, modelId) => await whisperService.handleDownloadModel(modelId));
     ipcMain.handle('whisper:get-installed-models', async () => await whisperService.handleGetInstalledModels());
        
     // General
@@ -60,17 +58,17 @@ module.exports = {
 
     // Ollama
     ipcMain.handle('ollama:get-status', async () => await ollamaService.handleGetStatus());
-    ipcMain.handle('ollama:install', async (event) => await ollamaService.handleInstall(event));
-    ipcMain.handle('ollama:start-service', async (event) => await ollamaService.handleStartService(event));
+    ipcMain.handle('ollama:install', async () => await ollamaService.handleInstall());
+    ipcMain.handle('ollama:start-service', async () => await ollamaService.handleStartService());
     ipcMain.handle('ollama:ensure-ready', async () => await ollamaService.handleEnsureReady());
     ipcMain.handle('ollama:get-models', async () => await ollamaService.handleGetModels());
     ipcMain.handle('ollama:get-model-suggestions', async () => await ollamaService.handleGetModelSuggestions());
-    ipcMain.handle('ollama:pull-model', async (event, modelName) => await ollamaService.handlePullModel(event, modelName));
+    ipcMain.handle('ollama:pull-model', async (event, modelName) => await ollamaService.handlePullModel(modelName));
     ipcMain.handle('ollama:is-model-installed', async (event, modelName) => await ollamaService.handleIsModelInstalled(modelName));
     ipcMain.handle('ollama:warm-up-model', async (event, modelName) => await ollamaService.handleWarmUpModel(modelName));
     ipcMain.handle('ollama:auto-warm-up', async () => await ollamaService.handleAutoWarmUp());
     ipcMain.handle('ollama:get-warm-up-status', async () => await ollamaService.handleGetWarmUpStatus());
-    ipcMain.handle('ollama:shutdown', async (event, force = false) => await ollamaService.handleShutdown(event, force));
+    ipcMain.handle('ollama:shutdown', async (event, force = false) => await ollamaService.handleShutdown(force));
 
     // Ask
     ipcMain.handle('ask:sendQuestionFromAsk', async (event, userPrompt) => await askService.sendMessage(userPrompt));
@@ -101,9 +99,7 @@ module.exports = {
       }
     });
 
-
-
-     // ModelStateService
+    // ModelStateService
     ipcMain.handle('model:validate-key', async (e, { provider, key }) => await modelStateService.handleValidateKey(provider, key));
     ipcMain.handle('model:get-all-keys', () => modelStateService.getAllApiKeys());
     ipcMain.handle('model:set-api-key', async (e, { provider, key }) => await modelStateService.setApiKey(provider, key));
@@ -113,8 +109,6 @@ module.exports = {
     ipcMain.handle('model:get-available-models', (e, { type }) => modelStateService.getAvailableModels(type));
     ipcMain.handle('model:are-providers-configured', () => modelStateService.areProvidersConfigured());
     ipcMain.handle('model:get-provider-config', () => modelStateService.getProviderConfig());
-
-
 
     console.log('[FeatureBridge] Initialized with all feature handlers.');
   },

@@ -136,6 +136,9 @@ contextBridge.exposeInMainWorld('api', {
     // Listeners
     onAskStateUpdate: (callback) => ipcRenderer.on('ask:stateUpdate', callback),
     removeOnAskStateUpdate: (callback) => ipcRenderer.removeListener('ask:stateUpdate', callback),
+    
+    onAskStreamError: (callback) => ipcRenderer.on('ask-response-stream-error', callback),
+    removeOnAskStreamError: (callback) => ipcRenderer.removeListener('ask-response-stream-error', callback),
 
     // Listeners
     onShowTextInput: (callback) => ipcRenderer.on('ask:showTextInput', callback),

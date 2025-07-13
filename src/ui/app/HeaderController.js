@@ -1,18 +1,20 @@
 import './MainHeader.js';
 import './ApiKeyHeader.js';
 import './PermissionHeader.js';
+import './WelcomeHeader.js';
 
 class HeaderTransitionManager {
     constructor() {
         this.headerContainer      = document.getElementById('header-container');
-        this.currentHeaderType    = null;   // 'apikey' | 'main' | 'permission'
+        this.currentHeaderType    = null;   // 'welcome' | 'apikey' | 'main' | 'permission'
+        this.welcomeHeader        = null;
         this.apiKeyHeader         = null;
         this.mainHeader            = null;
         this.permissionHeader      = null;
 
         /**
          * only one header window is allowed
-         * @param {'apikey'|'main'|'permission'} type
+         * @param {'welcome'|'apikey'|'main'|'permission'} type
          */
         this.ensureHeader = (type) => {
             console.log('[HeaderController] ensureHeader: Ensuring header of type:', type);
@@ -23,14 +25,25 @@ class HeaderTransitionManager {
 
             this.headerContainer.innerHTML = '';
             
+            this.welcomeHeader = null;
             this.apiKeyHeader = null;
             this.mainHeader = null;
             this.permissionHeader = null;
 
             // Create new header element
-            if (type === 'apikey') {
+            if (type === 'welcome') {
+                this.welcomeHeader = document.createElement('welcome-header');
+                this.welcomeHeader.loginCallback = () => this.handleLoginOption();
+                this.welcomeHeader.apiKeyCallback = () => this.handleApiKeyOption();
+                this.headerContainer.appendChild(this.welcomeHeader);
+                console.log('[HeaderController] ensureHeader: Header of type:', type, 'created.');
+            } else if (type === 'apikey') {
                 this.apiKeyHeader = document.createElement('apikey-header');
                 this.apiKeyHeader.stateUpdateCallback = (userState) => this.handleStateUpdate(userState);
+                this.apiKeyHeader.backCallback = () => this.transitionToWelcomeHeader();
+                this.apiKeyHeader.addEventListener('request-resize', e => {
+                    this._resizeForApiKey(e.detail.height); 
+                });
                 this.headerContainer.appendChild(this.apiKeyHeader);
                 console.log('[HeaderController] ensureHeader: Header of type:', type, 'created.');
             } else if (type === 'permission') {
@@ -49,6 +62,10 @@ class HeaderTransitionManager {
 
         console.log('[HeaderController] Manager initialized');
 
+        // WelcomeHeader 콜백 메서드들
+        this.handleLoginOption = this.handleLoginOption.bind(this);
+        this.handleApiKeyOption = this.handleApiKeyOption.bind(this);
+
         this._bootstrap();
 
         if (window.api) {
@@ -66,8 +83,14 @@ class HeaderTransitionManager {
             });
             window.api.headerController.onForceShowApiKeyHeader(async () => {
                 console.log('[HeaderController] Received broadcast to show apikey header. Switching now.');
-                await this._resizeForApiKey();
-                this.ensureHeader('apikey');
+                const isConfigured = await window.api.apiKeyHeader.areProvidersConfigured();
+                if (!isConfigured) {
+                    await this._resizeForWelcome();
+                    this.ensureHeader('welcome');
+                } else {
+                    await this._resizeForApiKey();
+                    this.ensureHeader('apikey');
+                }
             });            
         }
     }
@@ -88,7 +111,7 @@ class HeaderTransitionManager {
             this.handleStateUpdate(userState);
         } else {
             // Fallback for non-electron environment (testing/web)
-            this.ensureHeader('apikey');
+            this.ensureHeader('welcome');
         }
     }
 
@@ -110,9 +133,37 @@ class HeaderTransitionManager {
                 this.transitionToMainHeader();
             }
         } else {
-            await this._resizeForApiKey();
-            this.ensureHeader('apikey');
+            // 프로바이더가 설정되지 않았으면 WelcomeHeader 먼저 표시
+            await this._resizeForWelcome();
+            this.ensureHeader('welcome');
         }
+    }
+
+    // WelcomeHeader 콜백 메서드들
+    async handleLoginOption() {
+        console.log('[HeaderController] Login option selected');
+        if (window.api) {
+            await window.api.common.startFirebaseAuth();
+        }
+    }
+
+    async handleApiKeyOption() {
+        console.log('[HeaderController] API key option selected');
+        await this._resizeForApiKey(400);
+        this.ensureHeader('apikey');
+        // ApiKeyHeader에 뒤로가기 콜백 설정
+        if (this.apiKeyHeader) {
+            this.apiKeyHeader.backCallback = () => this.transitionToWelcomeHeader();
+        }
+    }
+
+    async transitionToWelcomeHeader() {
+        if (this.currentHeaderType === 'welcome') {
+            return this._resizeForWelcome();
+        }
+
+        await this._resizeForWelcome();
+        this.ensureHeader('welcome');
     }
     //////// after_modelStateService ////////
 
@@ -161,20 +212,25 @@ class HeaderTransitionManager {
     async _resizeForMain() {
         if (!window.api) return;
         console.log('[HeaderController] _resizeForMain: Resizing window to 353x47');
-        return window.api.headerController.resizeHeaderWindow({ width: 353, height: 47 })
-            .catch(() => {});
+        return window.api.headerController.resizeHeaderWindow({ width: 353, height: 47 }).catch(() => {});
     }
 
-    async _resizeForApiKey() {
+    async _resizeForApiKey(height = 370) {
         if (!window.api) return;
-        console.log('[HeaderController] _resizeForApiKey: Resizing window to 350x300');
-        return window.api.headerController.resizeHeaderWindow({ width: 350, height: 300 })
-            .catch(() => {});
+        console.log(`[HeaderController] _resizeForApiKey: Resizing window to 456x${height}`);
+        return window.api.headerController.resizeHeaderWindow({ width: 456, height: height }).catch(() => {});
     }
 
     async _resizeForPermissionHeader() {
         if (!window.api) return;
         return window.api.headerController.resizeHeaderWindow({ width: 285, height: 220 })
+            .catch(() => {});
+    }
+
+    async _resizeForWelcome() {
+        if (!window.api) return;
+        console.log('[HeaderController] _resizeForWelcome: Resizing window to 456x370');
+        return window.api.headerController.resizeHeaderWindow({ width: 456, height: 364 })
             .catch(() => {});
     }
 

@@ -532,6 +532,7 @@ async function handleFirebaseAuthCallback(params) {
         };
 
         // 1. Sync user data to local DB
+        userRepository.setAuthService(authService);
         userRepository.findOrCreate(firebaseUser);
         console.log('[Auth] User data synced with local DB.');
 

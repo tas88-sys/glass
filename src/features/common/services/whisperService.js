@@ -2,6 +2,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { BrowserWindow } = require('electron');
 const LocalAIServiceBase = require('./localAIServiceBase');
 const { spawnAsync } = require('../utils/spawnHelper');
 const { DOWNLOAD_CHECKSUMS } = require('../config/checksums');
@@ -37,6 +38,19 @@ class WhisperService extends LocalAIServiceBase {
                 url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin'
             }
         };
+    }
+
+    // 모든 윈도우에 이벤트 브로드캐스트
+    _broadcastToAllWindows(eventName, data = null) {
+        BrowserWindow.getAllWindows().forEach(win => {
+            if (win && !win.isDestroyed()) {
+                if (data !== null) {
+                    win.webContents.send(eventName, data);
+                } else {
+                    win.webContents.send(eventName);
+                }
+            }
+        });
     }
 
     async initialize() {
@@ -157,19 +171,21 @@ class WhisperService extends LocalAIServiceBase {
         const modelPath = await this.getModelPath(modelId);
         const checksumInfo = DOWNLOAD_CHECKSUMS.whisper.models[modelId];
         
-        this.emit('downloadProgress', { modelId, progress: 0 });
+        this._broadcastToAllWindows('whisper:download-progress', { modelId, progress: 0 });
         
         await this.downloadWithRetry(modelInfo.url, modelPath, {
             expectedChecksum: checksumInfo?.sha256,
+            modelId, // modelId를 전달하여 LocalAIServiceBase에서 이벤트 발생 시 사용
             onProgress: (progress) => {
-                this.emit('downloadProgress', { modelId, progress });
+                this._broadcastToAllWindows('whisper:download-progress', { modelId, progress });
             }
         });
         
         console.log(`[WhisperService] Model ${modelId} downloaded successfully`);
+        this._broadcastToAllWindows('whisper:download-complete', { modelId });
     }
 
-    async handleDownloadModel(event, modelId) {
+    async handleDownloadModel(modelId) {
         try {
             console.log(`[WhisperService] Handling download for model: ${modelId}`);
 
@@ -177,19 +193,7 @@ class WhisperService extends LocalAIServiceBase {
                 await this.initialize();
             }
 
-            const progressHandler = (data) => {
-                if (data.modelId === modelId && event && event.sender) {
-                    event.sender.send('whisper:download-progress', data);
-                }
-            };
-            
-            this.on('downloadProgress', progressHandler);
-            
-            try {
-                await this.ensureModelAvailable(modelId);
-            } finally {
-                this.removeListener('downloadProgress', progressHandler);
-            }
+            await this.ensureModelAvailable(modelId);
             
             return { success: true };
         } catch (error) {

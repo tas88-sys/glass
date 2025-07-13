@@ -35,11 +35,24 @@ class SttService {
     }
 
     sendToRenderer(channel, data) {
-        BrowserWindow.getAllWindows().forEach(win => {
-            if (!win.isDestroyed()) {
-                win.webContents.send(channel, data);
-            }
-        });
+        // Listen 관련 이벤트는 Listen 윈도우에만 전송 (Ask 윈도우 충돌 방지)
+        const { windowPool } = require('../../../window/windowManager');
+        const listenWindow = windowPool?.get('listen');
+        
+        if (listenWindow && !listenWindow.isDestroyed()) {
+            listenWindow.webContents.send(channel, data);
+        }
+    }
+
+    async handleSendSystemAudioContent(data, mimeType) {
+        try {
+            await this.sendSystemAudioContent(data, mimeType);
+            this.sendToRenderer('system-audio-data', { data });
+            return { success: true };
+        } catch (error) {
+            console.error('Error sending system audio:', error);
+            return { success: false, error: error.message };
+        }
     }
 
     async handleSendSystemAudioContent(data, mimeType) {
