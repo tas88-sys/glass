@@ -987,9 +987,14 @@ export class AskView extends LitElement {
     
         // ✨ 로딩 상태를 먼저 확인
         if (this.isLoading) {
-            responseContainer.innerHTML = `<div class="loading-dots">...</div>`;
+            responseContainer.innerHTML = `
+              <div class="loading-dots">
+                <div class="loading-dot"></div>
+                <div class="loading-dot"></div>
+                <div class="loading-dot"></div>
+              </div>`;
             return;
-        }
+          }
         
         // ✨ 응답이 없을 때의 처리
         if (!this.currentResponse) {
@@ -1232,7 +1237,7 @@ export class AskView extends LitElement {
     async handleSendText(e, overridingText = '') {
         const textInput = this.shadowRoot?.getElementById('textInput');
         const text = (overridingText || textInput?.value || '').trim();
-        if (!text) return;
+        // if (!text) return;
 
         textInput.value = '';
 

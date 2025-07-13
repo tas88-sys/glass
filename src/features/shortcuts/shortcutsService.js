@@ -211,7 +211,7 @@ class ShortcutsService {
                     callback = () => this.toggleAllWindowsVisibility(this.windowPool);
                     break;
                 case 'nextStep':
-                    callback = () => askService.toggleAskButton();
+                    callback = () => askService.toggleAskButton(true);
                     break;
                 case 'scrollUp':
                     callback = () => {

@@ -145,8 +145,15 @@ class AskService {
         }
     }
 
-    async toggleAskButton() {
+    async toggleAskButton(inputScreenOnly = false) {
         const askWindow = getWindowPool()?.get('ask');
+
+        let shouldSendScreenOnly = false;
+        if (inputScreenOnly && this.state.showTextInput && askWindow && askWindow.isVisible()) {
+            shouldSendScreenOnly = true;
+            await this.sendMessage('', []);
+            return;
+        }
 
         const hasContent = this.state.isLoading || this.state.isStreaming || (this.state.currentResponse && this.state.currentResponse.length > 0);
 
@@ -218,10 +225,12 @@ class AskService {
         this.abortController = new AbortController();
         const { signal } = this.abortController;
 
-        if (!userPrompt || userPrompt.trim().length === 0) {
-            console.warn('[AskService] Cannot process empty message');
-            return { success: false, error: 'Empty message' };
-        }
+
+        // if (!userPrompt || userPrompt.trim().length === 0) {
+        //     console.warn('[AskService] Cannot process empty message');
+        //     return { success: false, error: 'Empty message' };
+        // }
+        
 
         let sessionId;
 
