@@ -256,6 +256,7 @@ export class ApiKeyHeader extends LitElement {
         .footer-link {
             text-decoration: underline;
             cursor: pointer;
+            -webkit-app-region: no-drag;
         }
         .error-message,
         .success-message {
@@ -1904,8 +1905,9 @@ export class ApiKeyHeader extends LitElement {
     }
 
     openPrivacyPolicy() {
-        if (window.require) {
-            window.require('electron').shell.openExternal('https://pickleglass.com/privacy');
+        console.log('🔊 openPrivacyPolicy ApiKeyHeader');
+        if (window.api?.common) {
+            window.api.common.openExternal('https://pickle.com/privacy-policy');
         }
     }
 
