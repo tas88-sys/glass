@@ -156,6 +156,7 @@ export class WelcomeHeader extends LitElement {
         .footer-link {
             text-decoration: underline;
             cursor: pointer;
+            -webkit-app-region: no-drag;
         }
     `;
 
@@ -177,8 +178,8 @@ export class WelcomeHeader extends LitElement {
     }
 
     handleClose() {
-        if (window.require) {
-            window.require('electron').ipcRenderer.invoke('quit-application');
+        if (window.api?.common) {
+            window.api.common.quitApplication();
         }
     }
 
@@ -225,8 +226,9 @@ export class WelcomeHeader extends LitElement {
     }
 
     openPrivacyPolicy() {
-        if (window.require) {
-            window.require('electron').shell.openExternal('https://pickleglass.com/privacy');
+        console.log('🔊 openPrivacyPolicy WelcomeHeader');
+        if (window.api?.common) {
+            window.api.common.openExternal('https://pickle.com/privacy-policy');
         }
     }
 }

@@ -39,7 +39,7 @@ asarUnpack:
 
 # Windows configuration
 win:
-    icon: src/assets/logo.ico
+    icon: src/ui/assets/logo.ico
     target:
         - target: nsis
           arch: x64
@@ -67,7 +67,7 @@ mac:
     # The application category type
     category: public.app-category.utilities
     # Path to the .icns icon file
-    icon: src/assets/logo.icns
+    icon: src/ui/assets/logo.icns
     # Minimum macOS version (supports both Intel and Apple Silicon)
     minimumSystemVersion: '11.0'
     hardenedRuntime: true

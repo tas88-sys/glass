@@ -1,5 +1,5 @@
 // src/bridge/windowBridge.js
-const { ipcMain, BrowserWindow } = require('electron');
+const { ipcMain, shell } = require('electron');
 const windowManager = require('../window/windowManager');
 
 module.exports = {
@@ -15,6 +15,7 @@ module.exports = {
     ipcMain.handle('open-personalize-page', () => windowManager.openLoginPage());
     ipcMain.handle('move-window-step', (event, direction) => windowManager.moveWindowStep(direction));
     ipcMain.on('close-shortcut-editor', () => windowManager.closeWindow('shortcut-settings'));
+    ipcMain.handle('open-external', (event, url) => shell.openExternal(url));
 
     // Newly moved handlers from windowManager
     ipcMain.on('header-state-changed', (event, state) => windowManager.handleHeaderStateChanged(state));

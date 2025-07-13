@@ -640,6 +640,7 @@ function createWindows() {
         frame: false,
         transparent: true,
         vibrancy: false,
+        hasShadow: false,
         alwaysOnTop: true,
         skipTaskbar: true,
         hiddenInMissionControl: true,

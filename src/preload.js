@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('api', {
     
     // App Control
       quitApplication: () => ipcRenderer.invoke('quit-application'),
+      openExternal: (url) => ipcRenderer.invoke('open-external', url),
 
     // User state listener (used by multiple components)
       onUserStateChanged: (callback) => ipcRenderer.on('user-state-changed', callback),
