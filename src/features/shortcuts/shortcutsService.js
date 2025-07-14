@@ -10,6 +10,7 @@ class ShortcutsService {
         this.mouseEventsIgnored = false;
         this.movementManager = null;
         this.windowPool = null;
+        this.allWindowVisibility = true;
     }
 
     initialize(movementManager, windowPool) {
@@ -20,6 +21,41 @@ class ShortcutsService {
             this.registerShortcuts();
         });
         console.log('[ShortcutsService] Initialized with dependencies and event listener.');
+    }
+
+    async openShortcutSettingsWindow () {
+        const keybinds = await this.loadKeybinds();
+        const shortcutWin = this.windowPool.get('shortcut-settings');
+        shortcutWin.webContents.send('shortcut:loadShortcuts', keybinds);
+
+        globalShortcut.unregisterAll();
+        internalBridge.emit('window:requestVisibility', { name: 'shortcut-settings', visible: true });
+        console.log('[ShortcutsService] Shortcut settings window opened.');
+        return { success: true };
+    }
+
+    async closeShortcutSettingsWindow () {
+        await this.registerShortcuts();
+        internalBridge.emit('window:requestVisibility', { name: 'shortcut-settings', visible: false });
+        console.log('[ShortcutsService] Shortcut settings window closed.');
+        return { success: true };
+    }
+
+    async handleSaveShortcuts(newKeybinds) {
+        try {
+            await this.saveKeybinds(newKeybinds);
+            await this.closeShortcutSettingsWindow();
+            return { success: true };
+        } catch (error) {
+            console.error("Failed to save shortcuts:", error);
+            await this.closeShortcutSettingsWindow();
+            return { success: false, error: error.message };
+        }
+    }
+
+    async handleRestoreDefaults() {
+        const defaults = this.getDefaultKeybinds();
+        return defaults;
     }
 
     getDefaultKeybinds() {
@@ -72,32 +108,6 @@ class ShortcutsService {
         return keybinds;
     }
 
-    async handleSaveShortcuts(newKeybinds) {
-        try {
-            await this.saveKeybinds(newKeybinds);
-            const shortcutEditor = this.windowPool.get('shortcut-settings');
-            if (shortcutEditor && !shortcutEditor.isDestroyed()) {
-                shortcutEditor.close(); // This will trigger re-registration on 'closed' event in windowManager
-            } else {
-                // If editor wasn't open, re-register immediately
-                await this.registerShortcuts();
-            }
-            return { success: true };
-        } catch (error) {
-            console.error("Failed to save shortcuts:", error);
-            // On failure, re-register old shortcuts to be safe
-            await this.registerShortcuts();
-            return { success: false, error: error.message };
-        }
-    }
-
-    async handleRestoreDefaults() {
-        const defaults = this.getDefaultKeybinds();
-        await this.saveKeybinds(defaults);
-        await this.registerShortcuts();
-        return defaults;
-    }
-
     async saveKeybinds(newKeybinds) {
         const keybindsToSave = [];
         for (const action in newKeybinds) {
@@ -112,38 +122,22 @@ class ShortcutsService {
         console.log(`[Shortcuts] Saved keybinds.`);
     }
 
-    toggleAllWindowsVisibility(windowPool) {
-        const header = windowPool.get('header');
-        if (!header) return;
-      
-        if (header.isVisible()) {
-            this.lastVisibleWindows.clear();
-      
-            windowPool.forEach((win, name) => {
-                if (win && !win.isDestroyed() && win.isVisible()) {
-                    this.lastVisibleWindows.add(name);
-                }
-            });
-      
-            this.lastVisibleWindows.forEach(name => {
-                if (name === 'header') return;
-                const win = windowPool.get(name);
-                if (win && !win.isDestroyed()) win.hide();
-            });
-            header.hide();
-      
-            return;
-        }
-      
-        this.lastVisibleWindows.forEach(name => {
-            const win = windowPool.get(name);
-            if (win && !win.isDestroyed()) {
-                win.show();
-            }
+    async toggleAllWindowsVisibility() {
+        const targetVisibility = !this.allWindowVisibility;
+        internalBridge.emit('window:requestToggleAllWindowsVisibility', {
+            targetVisibility: targetVisibility
         });
+
+        if (this.allWindowVisibility) {
+            await this.registerShortcuts(true);
+        } else {
+            await this.registerShortcuts();
+        }
+
+        this.allWindowVisibility = !this.allWindowVisibility;
     }
 
-    async registerShortcuts() {
+    async registerShortcuts(registerOnlyToggleVisibility = false) {
         if (!this.movementManager || !this.windowPool) {
             console.error('[Shortcuts] Service not initialized. Cannot register shortcuts.');
             return;
@@ -167,6 +161,14 @@ class ShortcutsService {
         };
         
         sendToRenderer('shortcuts-updated', keybinds);
+
+        if (registerOnlyToggleVisibility) {
+            if (keybinds.toggleVisibility) {
+                globalShortcut.register(keybinds.toggleVisibility, () => this.toggleAllWindowsVisibility());
+            }
+            console.log('[Shortcuts] registerOnlyToggleVisibility, only toggleVisibility shortcut is registered.');
+            return;
+        }
 
         // --- Hardcoded shortcuts ---
         const isMac = process.platform === 'darwin';
@@ -195,7 +197,7 @@ class ShortcutsService {
         // --- User-configurable shortcuts ---
         if (header?.currentHeaderState === 'apikey') {
             if (keybinds.toggleVisibility) {
-                globalShortcut.register(keybinds.toggleVisibility, () => this.toggleAllWindowsVisibility(this.windowPool));
+                globalShortcut.register(keybinds.toggleVisibility, () => this.toggleAllWindowsVisibility());
             }
             console.log('[Shortcuts] ApiKeyHeader is active, only toggleVisibility shortcut is registered.');
             return;
@@ -208,7 +210,7 @@ class ShortcutsService {
             let callback;
             switch(action) {
                 case 'toggleVisibility':
-                    callback = () => this.toggleAllWindowsVisibility(this.windowPool);
+                    callback = () => this.toggleAllWindowsVisibility();
                     break;
                 case 'nextStep':
                     callback = () => askService.toggleAskButton(true);
@@ -282,4 +284,7 @@ class ShortcutsService {
     }
 }
 
-module.exports = new ShortcutsService(); 
+
+const shortcutsService = new ShortcutsService();
+
+module.exports = shortcutsService;

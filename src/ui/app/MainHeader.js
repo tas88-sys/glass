@@ -2,7 +2,6 @@ import { html, css, LitElement } from '../assets/lit-core-2.7.4.min.js';
 
 export class MainHeader extends LitElement {
     static properties = {
-        // isSessionActive: { type: Boolean, state: true },
         isTogglingSession: { type: Boolean, state: true },
         shortcuts: { type: Object, state: true },
         listenSessionStatus: { type: String, state: true },
@@ -515,30 +514,12 @@ export class MainHeader extends LitElement {
         }
     }
 
-    invoke(channel, ...args) {
-        if (this.wasJustDragged) return;
-        if (window.api) {
-            window.api.mainHeader.invoke(channel, ...args);
-        }
-        // return Promise.resolve();
-    }
-
     showSettingsWindow(element) {
         if (this.wasJustDragged) return;
         if (window.api) {
             console.log(`[MainHeader] showSettingsWindow called at ${Date.now()}`);
-            
-            window.api.mainHeader.cancelHideSettingsWindow();
+            window.api.mainHeader.showSettingsWindow();
 
-            if (element) {
-                const { left, top, width, height } = element.getBoundingClientRect();
-                window.api.mainHeader.showSettingsWindow({
-                    x: left,
-                    y: top,
-                    width,
-                    height,
-                });
-            }
         }
     }
 
@@ -559,9 +540,10 @@ export class MainHeader extends LitElement {
         this.isTogglingSession = true;
 
         try {
-            const channel = 'listen:changeSession';
             const listenButtonText = this._getListenButtonText(this.listenSessionStatus);
-            await this.invoke(channel, listenButtonText);
+            if (window.api) {
+                await window.api.mainHeader.sendListenButtonClick(listenButtonText);
+            }
         } catch (error) {
             console.error('IPC invoke for session change failed:', error);
             this.isTogglingSession = false;
@@ -572,10 +554,23 @@ export class MainHeader extends LitElement {
         if (this.wasJustDragged) return;
 
         try {
-            const channel = 'ask:toggleAskButton';
-            await this.invoke(channel);
+            if (window.api) {
+                await window.api.mainHeader.sendAskButtonClick();
+            }
         } catch (error) {
             console.error('IPC invoke for ask button failed:', error);
+        }
+    }
+
+    async _handleToggleAllWindowsVisibility() {
+        if (this.wasJustDragged) return;
+
+        try {
+            if (window.api) {
+                await window.api.mainHeader.sendToggleAllWindowsVisibility();
+            }
+        } catch (error) {
+            console.error('IPC invoke for all windows visibility button failed:', error);
         }
     }
 
@@ -656,7 +651,7 @@ export class MainHeader extends LitElement {
                     </div>
                 </div>
 
-                <div class="header-actions" @click=${() => this.invoke('toggle-all-windows-visibility')}>
+                <div class="header-actions" @click=${() => this._handleToggleAllWindowsVisibility()}>
                     <div class="action-text">
                         <div class="action-text-content">Show/Hide</div>
                     </div>

@@ -29,9 +29,12 @@ module.exports = {
     ipcMain.handle('settings:shutdown-ollama', async () => await settingsService.shutdownOllama());
 
     // Shortcuts
-    ipcMain.handle('get-current-shortcuts', async () => await shortcutsService.loadKeybinds());
-    ipcMain.handle('get-default-shortcuts', async () => await shortcutsService.handleRestoreDefaults());
-    ipcMain.handle('save-shortcuts', async (event, newKeybinds) => await shortcutsService.handleSaveShortcuts(newKeybinds));
+    ipcMain.handle('settings:getCurrentShortcuts', async () => await shortcutsService.loadKeybinds());
+    ipcMain.handle('shortcut:getDefaultShortcuts', async () => await shortcutsService.handleRestoreDefaults());
+    ipcMain.handle('shortcut:closeShortcutSettingsWindow', async () => await shortcutsService.closeShortcutSettingsWindow());
+    ipcMain.handle('shortcut:openShortcutSettingsWindow', async () => await shortcutsService.openShortcutSettingsWindow());
+    ipcMain.handle('shortcut:saveShortcuts', async (event, newKeybinds) => await shortcutsService.handleSaveShortcuts(newKeybinds));
+    ipcMain.handle('shortcut:toggleAllWindowsVisibility', async () => await shortcutsService.toggleAllWindowsVisibility());
 
     // Permissions
     ipcMain.handle('check-system-permissions', async () => await permissionService.checkSystemPermissions());

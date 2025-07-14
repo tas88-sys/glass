@@ -5,7 +5,6 @@ const path = require('node:path');
 const os = require('os');
 const shortcutsService = require('../features/shortcuts/shortcutsService');
 const internalBridge = require('../bridge/internalBridge');
-const { EVENTS } = internalBridge;
 const permissionRepository = require('../features/common/repositories/permission');
 
 /* ────────────────[ GLASS BYPASS ]─────────────── */
@@ -30,9 +29,6 @@ if (shouldUseLiquidGlass) {
 /* ────────────────[ GLASS BYPASS ]─────────────── */
 
 let isContentProtectionOn = true;
-let currentDisplayId = null;
-
-let mouseEventsIgnored = false;
 let lastVisibleWindows = new Set(['header']);
 const HEADER_HEIGHT = 47;
 const DEFAULT_WINDOW_WIDTH = 353;
@@ -42,9 +38,7 @@ const windowPool = new Map();
 
 let settingsHideTimer = null;
 
-let selectedCaptureSourceId = null;
 
-// let shortcutEditorWindow = null;
 let layoutManager = null;
 function updateLayout() {
     if (layoutManager) {
@@ -92,20 +86,69 @@ function fadeWindow(win, from, to, duration = FADE_DURATION, onComplete) {
   }, 1000 / FADE_FPS);
 }
 
+const showSettingsWindow = () => {
+    internalBridge.emit('window:requestVisibility', { name: 'settings', visible: true });
+};
 
-function setupAnimationController(windowPool, layoutManager, movementManager) {
-    internalBridge.on('request-window-visibility', ({ name, visible }) => {
+const hideSettingsWindow = () => {
+    internalBridge.emit('window:requestVisibility', { name: 'settings', visible: false });
+};
+
+const cancelHideSettingsWindow = () => {
+    internalBridge.emit('window:requestVisibility', { name: 'settings', visible: true });
+};
+
+
+function setupWindowController(windowPool, layoutManager, movementManager) {
+    internalBridge.on('window:requestVisibility', ({ name, visible }) => {
         handleWindowVisibilityRequest(windowPool, layoutManager, movementManager, name, visible);
+    });
+    internalBridge.on('window:requestToggleAllWindowsVisibility', ({ targetVisibility }) => {
+        changeAllWindowsVisibility(windowPool, targetVisibility);
     });
 }
 
+function changeAllWindowsVisibility(windowPool, targetVisibility) {
+    const header = windowPool.get('header');
+    if (!header) return;
+
+    if (typeof targetVisibility === 'boolean' &&
+        header.isVisible() === targetVisibility) {
+        return;
+    }
+  
+    if (header.isVisible()) {
+      lastVisibleWindows.clear();
+  
+      windowPool.forEach((win, name) => {
+        if (win && !win.isDestroyed() && win.isVisible()) {
+          lastVisibleWindows.add(name);
+        }
+      });
+  
+      lastVisibleWindows.forEach(name => {
+        if (name === 'header') return;
+        const win = windowPool.get(name);
+        if (win && !win.isDestroyed()) win.hide();
+      });
+      header.hide();
+  
+      return;
+    }
+  
+    lastVisibleWindows.forEach(name => {
+      const win = windowPool.get(name);
+      if (win && !win.isDestroyed())
+        win.show();
+    });
+  }
 
 /**
  * 
  * @param {Map<string, BrowserWindow>} windowPool
  * @param {WindowLayoutManager} layoutManager 
  * @param {SmoothMovementManager} movementManager
- * @param {'listen' | 'ask'} name 
+ * @param {'listen' | 'ask' | 'settings' | 'shortcut-settings'} name 
  * @param {boolean} shouldBeVisible 
  */
 async function handleWindowVisibilityRequest(windowPool, layoutManager, movementManager, name, shouldBeVisible) {
@@ -117,94 +160,171 @@ async function handleWindowVisibilityRequest(windowPool, layoutManager, movement
         return;
     }
 
-    const isCurrentlyVisible = win.isVisible();
-    if (isCurrentlyVisible === shouldBeVisible) {
-        console.log(`[WindowManager] Window '${name}' is already in the desired state.`);
+    if (name !== 'settings') {
+        const isCurrentlyVisible = win.isVisible();
+        if (isCurrentlyVisible === shouldBeVisible) {
+            console.log(`[WindowManager] Window '${name}' is already in the desired state.`);
+            return;
+        }
+    }
+
+    const disableClicks = (selectedWindow) => {
+        for (const [name, win] of windowPool) {
+            if (win !== selectedWindow && !win.isDestroyed()) {
+                win.setIgnoreMouseEvents(true, { forward: true });
+            }
+        }
+    };
+
+    const restoreClicks = () => {
+        for (const [, win] of windowPool) {
+            if (!win.isDestroyed()) win.setIgnoreMouseEvents(false);
+        }
+    };
+
+    if (name === 'settings') {
+        if (shouldBeVisible) {
+            // Cancel any pending hide operations
+            if (settingsHideTimer) {
+                clearTimeout(settingsHideTimer);
+                settingsHideTimer = null;
+            }
+            const position = layoutManager.calculateSettingsWindowPosition();
+            if (position) {
+                win.setBounds(position);
+                win.__lockedByButton = true;
+                win.show();
+                win.moveTop();
+                win.setAlwaysOnTop(true);
+            } else {
+                console.warn('[WindowManager] Could not calculate settings window position.');
+            }
+        } else {
+            // Hide after a delay
+            if (settingsHideTimer) {
+                clearTimeout(settingsHideTimer);
+            }
+            settingsHideTimer = setTimeout(() => {
+                if (win && !win.isDestroyed()) {
+                    win.setAlwaysOnTop(false);
+                    win.hide();
+                }
+                settingsHideTimer = null;
+            }, 200);
+
+            win.__lockedByButton = false;
+        }
         return;
     }
 
-    const otherName = name === 'listen' ? 'ask' : 'listen';
-    const otherWin = windowPool.get(otherName);
-    const isOtherWinVisible = otherWin && !otherWin.isDestroyed() && otherWin.isVisible();
 
-    const ANIM_OFFSET_X = 100; 
-    const ANIM_OFFSET_Y = 20; 
-
-    if (shouldBeVisible) {
-        win.setOpacity(0);
-
-        if (name === 'listen') {
-            if (!isOtherWinVisible) {
-                const targets = layoutManager.getTargetBoundsForFeatureWindows({ listen: true, ask: false });
-                if (!targets.listen) return;
-
-                const startPos = { x: targets.listen.x - ANIM_OFFSET_X, y: targets.listen.y };
-                win.setBounds(startPos);
-                win.show();
-                fadeWindow(win, 0, 1);
-                movementManager.animateWindow(win, targets.listen.x, targets.listen.y);
-
+    if (name === 'shortcut-settings') {
+        if (shouldBeVisible) {
+            layoutManager.positionShortcutSettingsWindow();
+            if (process.platform === 'darwin') {
+                win.setAlwaysOnTop(true, 'screen-saver');
             } else {
-                const targets = layoutManager.getTargetBoundsForFeatureWindows({ listen: true, ask: true });
-                if (!targets.listen || !targets.ask) return;
-
-                const startListenPos = { x: targets.listen.x - ANIM_OFFSET_X, y: targets.listen.y };
-                win.setBounds(startListenPos);
-
-                win.show();
-                fadeWindow(win, 0, 1);
-                movementManager.animateWindow(otherWin, targets.ask.x, targets.ask.y);
-                movementManager.animateWindow(win, targets.listen.x, targets.listen.y);
+                win.setAlwaysOnTop(true);
             }
-        } else if (name === 'ask') {
-            if (!isOtherWinVisible) {
-                const targets = layoutManager.getTargetBoundsForFeatureWindows({ listen: false, ask: true });
-                if (!targets.ask) return;
-
-                const startPos = { x: targets.ask.x, y: targets.ask.y - ANIM_OFFSET_Y };
-                win.setBounds(startPos);
-                win.show();
-                fadeWindow(win, 0, 1);
-                movementManager.animateWindow(win, targets.ask.x, targets.ask.y);
-
+            // globalShortcut.unregisterAll();
+            disableClicks(win);
+            win.show();
+        } else {
+            if (process.platform === 'darwin') {
+                win.setAlwaysOnTop(false, 'screen-saver');
             } else {
-                const targets = layoutManager.getTargetBoundsForFeatureWindows({ listen: true, ask: true });
-                if (!targets.listen || !targets.ask) return;
-
-                const startAskPos = { x: targets.ask.x, y: targets.ask.y - ANIM_OFFSET_Y };
-                win.setBounds(startAskPos);
-
-                win.show();
-                fadeWindow(win, 0, 1);
-                movementManager.animateWindow(otherWin, targets.listen.x, targets.listen.y);
-                movementManager.animateWindow(win, targets.ask.x, targets.ask.y);
+                win.setAlwaysOnTop(false);
             }
+            restoreClicks();
+            win.hide();
         }
-    } else {
-        const currentBounds = win.getBounds();
-        fadeWindow(
-            win, 1, 0, FADE_DURATION,
-            () => win.hide()
-          );
-        if (name === 'listen') {
-            if (!isOtherWinVisible) {
-                const targetX = currentBounds.x - ANIM_OFFSET_X;
-                movementManager.animateWindow(win, targetX, currentBounds.y);
-            } else {
-                const targetX = currentBounds.x - currentBounds.width;
-                movementManager.animateWindow(win, targetX, currentBounds.y);
-            }
-        } else if (name === 'ask') {
-            if (!isOtherWinVisible) {
-                 const targetY = currentBounds.y - ANIM_OFFSET_Y;
-                 movementManager.animateWindow(win, currentBounds.x, targetY);
-            } else {
-                const targetAskY = currentBounds.y - ANIM_OFFSET_Y;
-                movementManager.animateWindow(win, currentBounds.x, targetAskY);
+        return;
+    }
 
-                const targets = layoutManager.getTargetBoundsForFeatureWindows({ listen: true, ask: false });
-                if (targets.listen) {
+    if (name === 'listen' || name === 'ask') {
+        const otherName = name === 'listen' ? 'ask' : 'listen';
+        const otherWin = windowPool.get(otherName);
+        const isOtherWinVisible = otherWin && !otherWin.isDestroyed() && otherWin.isVisible();
+
+        const ANIM_OFFSET_X = 100; 
+        const ANIM_OFFSET_Y = 20; 
+
+        if (shouldBeVisible) {
+            win.setOpacity(0);
+
+            if (name === 'listen') {
+                if (!isOtherWinVisible) {
+                    const targets = layoutManager.getTargetBoundsForFeatureWindows({ listen: true, ask: false });
+                    if (!targets.listen) return;
+
+                    const startPos = { x: targets.listen.x - ANIM_OFFSET_X, y: targets.listen.y };
+                    win.setBounds(startPos);
+                    win.show();
+                    fadeWindow(win, 0, 1);
+                    movementManager.animateWindow(win, targets.listen.x, targets.listen.y);
+
+                } else {
+                    const targets = layoutManager.getTargetBoundsForFeatureWindows({ listen: true, ask: true });
+                    if (!targets.listen || !targets.ask) return;
+
+                    const startListenPos = { x: targets.listen.x - ANIM_OFFSET_X, y: targets.listen.y };
+                    win.setBounds(startListenPos);
+
+                    win.show();
+                    fadeWindow(win, 0, 1);
+                    movementManager.animateWindow(otherWin, targets.ask.x, targets.ask.y);
+                    movementManager.animateWindow(win, targets.listen.x, targets.listen.y);
+                }
+            } else if (name === 'ask') {
+                if (!isOtherWinVisible) {
+                    const targets = layoutManager.getTargetBoundsForFeatureWindows({ listen: false, ask: true });
+                    if (!targets.ask) return;
+
+                    const startPos = { x: targets.ask.x, y: targets.ask.y - ANIM_OFFSET_Y };
+                    win.setBounds(startPos);
+                    win.show();
+                    fadeWindow(win, 0, 1);
+                    movementManager.animateWindow(win, targets.ask.x, targets.ask.y);
+
+                } else {
+                    const targets = layoutManager.getTargetBoundsForFeatureWindows({ listen: true, ask: true });
+                    if (!targets.listen || !targets.ask) return;
+
+                    const startAskPos = { x: targets.ask.x, y: targets.ask.y - ANIM_OFFSET_Y };
+                    win.setBounds(startAskPos);
+
+                    win.show();
+                    fadeWindow(win, 0, 1);
                     movementManager.animateWindow(otherWin, targets.listen.x, targets.listen.y);
+                    movementManager.animateWindow(win, targets.ask.x, targets.ask.y);
+                }
+            }
+        } else {
+            const currentBounds = win.getBounds();
+            fadeWindow(
+                win, 1, 0, FADE_DURATION,
+                () => win.hide()
+            );
+            if (name === 'listen') {
+                if (!isOtherWinVisible) {
+                    const targetX = currentBounds.x - ANIM_OFFSET_X;
+                    movementManager.animateWindow(win, targetX, currentBounds.y);
+                } else {
+                    const targetX = currentBounds.x - currentBounds.width;
+                    movementManager.animateWindow(win, targetX, currentBounds.y);
+                }
+            } else if (name === 'ask') {
+                if (!isOtherWinVisible) {
+                    const targetY = currentBounds.y - ANIM_OFFSET_Y;
+                    movementManager.animateWindow(win, currentBounds.x, targetY);
+                } else {
+                    const targetAskY = currentBounds.y - ANIM_OFFSET_Y;
+                    movementManager.animateWindow(win, currentBounds.x, targetAskY);
+
+                    const targets = layoutManager.getTargetBoundsForFeatureWindows({ listen: true, ask: false });
+                    if (targets.listen) {
+                        movementManager.animateWindow(otherWin, targets.listen.x, targets.listen.y);
+                    }
                 }
             }
         }
@@ -276,62 +396,6 @@ const resizeHeaderWindow = ({ width, height }) => {
     return { success: false, error: 'Header window not found' };
 };
 
-const openShortcutEditor = () => {
-    const header = windowPool.get('header');
-    if (!header) return;
-    globalShortcut.unregisterAll();
-    createFeatureWindows(header, 'shortcut-settings');
-};
-
-const showSettingsWindow = (bounds) => {
-    if (!bounds) return;
-    const win = windowPool.get('settings');
-    if (win && !win.isDestroyed()) {
-      if (settingsHideTimer) {
-        clearTimeout(settingsHideTimer);
-        settingsHideTimer = null;
-      }
-      const header = windowPool.get('header');
-      const headerBounds = header?.getBounds() ?? { x: 0, y: 0 };
-      const settingsBounds = win.getBounds();
-      const disp = getCurrentDisplay(header);
-      const { x: waX, y: waY, width: waW, height: waH } = disp.workArea;
-      let x = Math.round(headerBounds.x + (bounds?.x ?? 0) + (bounds?.width ?? 0) / 2 - settingsBounds.width / 2);
-      let y = Math.round(headerBounds.y + (bounds?.y ?? 0) + (bounds?.height ?? 0) + 31);
-      x = Math.max(waX + 10, Math.min(waX + waW - settingsBounds.width - 10, x));
-      y = Math.max(waY + 10, Math.min(waY + waH - settingsBounds.height - 10, y));
-      win.setBounds({ x, y });
-      win.__lockedByButton = true;
-      win.show();
-      win.moveTop();
-      win.setAlwaysOnTop(true);
-    }
-};
-
-const hideSettingsWindow = () => {
-    const window = windowPool.get("settings");
-    if (window && !window.isDestroyed()) {
-      if (settingsHideTimer) {
-        clearTimeout(settingsHideTimer);
-      }
-      settingsHideTimer = setTimeout(() => {
-        if (window && !window.isDestroyed()) {
-          window.setAlwaysOnTop(false);
-          window.hide();
-        }
-        settingsHideTimer = null;
-      }, 200);
-      
-      window.__lockedByButton = false;
-    }
-};
-
-const cancelHideSettingsWindow = () => {
-    if (settingsHideTimer) {
-      clearTimeout(settingsHideTimer);
-      settingsHideTimer = null;
-    }
-};
 
 const openLoginPage = () => {
     const webUrl = process.env.pickleglass_WEB_URL || 'http://localhost:3000';
@@ -474,7 +538,7 @@ function createFeatureWindows(header, namesToCreate) {
             case 'shortcut-settings': {
                 const shortcutEditor = new BrowserWindow({
                     ...commonChildOptions,
-                    width: 420,
+                    width: 353,
                     height: 720,
                     modal: false,
                     parent: undefined,
@@ -482,36 +546,11 @@ function createFeatureWindows(header, namesToCreate) {
                     titleBarOverlay: false,
                 });
 
+                shortcutEditor.setContentProtection(isContentProtectionOn);
+                shortcutEditor.setVisibleOnAllWorkspaces(true,{visibleOnFullScreen:true});
                 if (process.platform === 'darwin') {
-                    shortcutEditor.setAlwaysOnTop(true, 'screen-saver');
-                } else {
-                    shortcutEditor.setAlwaysOnTop(true);
+                    shortcutEditor.setWindowButtonVisibility(false);
                 }
-            
-                /* ──────────[ ① 다른 창 클릭 차단 ]────────── */
-                const disableClicks = () => {
-                    for (const [name, win] of windowPool) {
-                        if (win !== shortcutEditor && !win.isDestroyed()) {
-                            win.setIgnoreMouseEvents(true, { forward: true });
-                        }
-                    }
-                };
-                const restoreClicks = () => {
-                    for (const [, win] of windowPool) {
-                        if (!win.isDestroyed()) win.setIgnoreMouseEvents(false);
-                    }
-                };
-
-                const header = windowPool.get('header');
-                if (header && !header.isDestroyed()) {
-                    const { x, y, width } = header.getBounds();
-                    shortcutEditor.setBounds({ x, y, width });
-                }
-
-                shortcutEditor.once('ready-to-show', () => {
-                    disableClicks(); 
-                    shortcutEditor.show();
-                });
 
                 const loadOptions = { query: { view: 'shortcut-settings' } };
                 if (!shouldUseLiquidGlass) {
@@ -526,23 +565,11 @@ function createFeatureWindows(header, namesToCreate) {
                         }
                     });
                 }
-                
-                shortcutEditor.on('closed', () => {
-                    restoreClicks();
-                    windowPool.delete('shortcut-settings');
-                    console.log('[Shortcuts] Re-enabled after editing.');
-                    shortcutsService.registerShortcuts();
-                });
 
-                shortcutEditor.webContents.once('dom-ready', async () => {
-                    const keybinds = await shortcutsService.loadKeybinds();
-                    shortcutEditor.webContents.send('load-shortcuts', keybinds);
-                });
-
+                windowPool.set('shortcut-settings', shortcutEditor);
                 if (!app.isPackaged) {
                     shortcutEditor.webContents.openDevTools({ mode: 'detach' });
                 }
-                windowPool.set('shortcut-settings', shortcutEditor);
                 break;
             }
         }
@@ -556,6 +583,7 @@ function createFeatureWindows(header, namesToCreate) {
         createFeatureWindow('listen');
         createFeatureWindow('ask');
         createFeatureWindow('settings');
+        createFeatureWindow('shortcut-settings');
     }
 }
 
@@ -593,35 +621,7 @@ function getDisplayById(displayId) {
 
 
 
-function toggleAllWindowsVisibility() {
-    const header = windowPool.get('header');
-    if (!header) return;
-  
-    if (header.isVisible()) {
-      lastVisibleWindows.clear();
-  
-      windowPool.forEach((win, name) => {
-        if (win && !win.isDestroyed() && win.isVisible()) {
-          lastVisibleWindows.add(name);
-        }
-      });
-  
-      lastVisibleWindows.forEach(name => {
-        if (name === 'header') return;
-        const win = windowPool.get(name);
-        if (win && !win.isDestroyed()) win.hide();
-      });
-      header.hide();
-  
-      return;
-    }
-  
-    lastVisibleWindows.forEach(name => {
-      const win = windowPool.get(name);
-      if (win && !win.isDestroyed())
-        win.show();
-    });
-  }
+
 
 
 function createWindows() {
@@ -690,7 +690,7 @@ function createWindows() {
     });
 
     setupIpcHandlers(movementManager);
-    setupAnimationController(windowPool, layoutManager, movementManager);
+    setupWindowController(windowPool, layoutManager, movementManager);
 
     if (currentHeaderState === 'main') {
         createFeatureWindows(header, ['listen', 'ask', 'settings', 'shortcut-settings']);
@@ -850,13 +850,6 @@ const adjustWindowHeight = (sender, targetHeight) => {
 };
 
 
-const closeWindow = (windowName) => {
-    const win = windowPool.get(windowName);
-    if (win && !win.isDestroyed()) {
-        win.close();
-    }
-};
-
 module.exports = {
     updateLayout,
     createWindows,
@@ -864,14 +857,11 @@ module.exports = {
     toggleContentProtection,
     resizeHeaderWindow,
     getContentProtectionStatus,
-    openShortcutEditor,
     showSettingsWindow,
     hideSettingsWindow,
     cancelHideSettingsWindow,
     openLoginPage,
     moveWindowStep,
-    closeWindow,
-    toggleAllWindowsVisibility,
     handleHeaderStateChanged,
     handleHeaderAnimationFinished,
     getHeaderPosition,

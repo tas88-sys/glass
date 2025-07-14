@@ -879,7 +879,7 @@ export class SettingsView extends LitElement {
     //////// after_modelStateService ////////
 
     openShortcutEditor() {
-        window.api.settingsView.openShortcutEditor();
+        window.api.settingsView.openShortcutSettingsWindow();
     }
 
     connectedCallback() {
@@ -1019,13 +1019,7 @@ export class SettingsView extends LitElement {
         window.api.settingsView.hideSettingsWindow();
     }
 
-    // getMainShortcuts() {
-    //     return [
-    //         { name: 'Show / Hide', key: '\\' },
-    //         { name: 'Ask Anything', key: '↵' },
-    //         { name: 'Scroll AI Response', key: '↕' }
-    //     ];
-    // }
+
     getMainShortcuts() {
         return [
             { name: 'Show / Hide', accelerator: this.shortcuts.toggleVisibility },

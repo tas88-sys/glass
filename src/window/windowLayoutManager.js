@@ -142,7 +142,14 @@ class WindowLayoutManager {
         const strategy = this.determineLayoutStrategy(headerBounds, screenWidth, screenHeight, relativeX, relativeY, workAreaX, workAreaY);
 
         this.positionFeatureWindows(headerBounds, strategy, screenWidth, screenHeight, workAreaX, workAreaY);
-        this.positionSettingsWindow(headerBounds, strategy, screenWidth, screenHeight, workAreaX, workAreaY);
+        const settings = this.windowPool.get('settings');
+        if (settings && !settings.isDestroyed() && settings.isVisible()) {
+            const settingPos = this.calculateSettingsWindowPosition();
+            if (settingPos) {
+                const { width, height } = settings.getBounds();
+                settings.setBounds({ x: settingPos.x, y: settingPos.y, width, height });
+            }
+        }
     }
 
     /**
@@ -234,58 +241,54 @@ class WindowLayoutManager {
         }
     }
 
-    positionSettingsWindow(headerBounds, strategy, screenWidth, screenHeight, workAreaX, workAreaY) {
+    /**
+     * @returns {{x: number, y: number} | null}
+     */
+    calculateSettingsWindowPosition() {
+        const header = this.windowPool.get('header');
         const settings = this.windowPool.get('settings');
-        if (!settings?.getBounds || !settings.isVisible()) return;
 
-        if (settings.__lockedByButton) {
-            const headerDisplay = getCurrentDisplay(this.windowPool.get('header'));
-            const settingsDisplay = getCurrentDisplay(settings);
-            if (headerDisplay.id !== settingsDisplay.id) {
-                settings.__lockedByButton = false;
-            } else {
-                return;
-            }
+        if (!header || header.isDestroyed() || !settings || settings.isDestroyed()) {
+            return null;
         }
 
+        const headerBounds = header.getBounds();
         const settingsBounds = settings.getBounds();
+        const display = getCurrentDisplay(header);
+        const { x: workAreaX, y: workAreaY, width: screenWidth, height: screenHeight } = display.workArea;
+
         const PAD = 5;
-        const buttonPadding = 17;
-        let x = headerBounds.x + headerBounds.width - settingsBounds.width - buttonPadding;
-        let y = headerBounds.y + headerBounds.height + PAD;
+        const buttonPadding = 170;
 
-        const otherVisibleWindows = [];
-        ['listen', 'ask'].forEach(name => {
-            const win = this.windowPool.get(name);
-            if (win && win.isVisible() && !win.isDestroyed()) {
-                otherVisibleWindows.push({ name, bounds: win.getBounds() });
-            }
-        });
+        const x = headerBounds.x + headerBounds.width - settingsBounds.width + buttonPadding;
+        const y = headerBounds.y + headerBounds.height + PAD;
 
-        const settingsNewBounds = { x, y, width: settingsBounds.width, height: settingsBounds.height };
-        let hasOverlap = otherVisibleWindows.some(otherWin => this.boundsOverlap(settingsNewBounds, otherWin.bounds));
+        const clampedX = Math.max(workAreaX + 10, Math.min(workAreaX + screenWidth - settingsBounds.width - 10, x));
+        const clampedY = Math.max(workAreaY + 10, Math.min(workAreaY + screenHeight - settingsBounds.height - 10, y));
 
-        if (hasOverlap) {
-            x = headerBounds.x + headerBounds.width + PAD;
-            y = headerBounds.y;
-            if (x + settingsBounds.width > screenWidth - 10) {
-                x = headerBounds.x - settingsBounds.width - PAD;
-            }
-            if (x < 10) {
-                x = headerBounds.x + headerBounds.width - settingsBounds.width - buttonPadding;
-                y = headerBounds.y - settingsBounds.height - PAD;
-                if (y < 10) {
-                    x = headerBounds.x + headerBounds.width - settingsBounds.width;
-                    y = headerBounds.y + headerBounds.height + PAD;
-                }
-            }
+        return { x: Math.round(clampedX), y: Math.round(clampedY) };
+    }
+
+    positionShortcutSettingsWindow() {
+        const header = this.windowPool.get('header');
+        const shortcutSettings = this.windowPool.get('shortcut-settings');
+
+        if (!header || header.isDestroyed() || !shortcutSettings || shortcutSettings.isDestroyed()) {
+            return;
         }
 
-        x = Math.max(workAreaX + 10, Math.min(workAreaX + screenWidth - settingsBounds.width - 10, x));
-        y = Math.max(workAreaY + 10, Math.min(workAreaY + screenHeight - settingsBounds.height - 10, y));
+        const headerBounds = header.getBounds();
+        const shortcutBounds = shortcutSettings.getBounds();
+        const display = getCurrentDisplay(header);
+        const { workArea } = display;
 
-        settings.setBounds({ x: Math.round(x), y: Math.round(y) });
-        settings.moveTop();
+        let newX = Math.round(headerBounds.x + (headerBounds.width / 2) - (shortcutBounds.width / 2));
+        let newY = Math.round(headerBounds.y);
+
+        newX = Math.max(workArea.x, Math.min(newX, workArea.x + workArea.width - shortcutBounds.width));
+        newY = Math.max(workArea.y, Math.min(newY, workArea.y + workArea.height - shortcutBounds.height));
+
+        shortcutSettings.setBounds({ x: newX, y: newY, width: shortcutBounds.width, height: shortcutBounds.height });
     }
     
     /**

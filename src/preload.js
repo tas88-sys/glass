@@ -95,11 +95,14 @@ contextBridge.exposeInMainWorld('api', {
 
     // Settings Window Management
     cancelHideSettingsWindow: () => ipcRenderer.send('cancel-hide-settings-window'),
-    showSettingsWindow: (bounds) => ipcRenderer.send('show-settings-window', bounds),
+    showSettingsWindow: () => ipcRenderer.send('show-settings-window'),
     hideSettingsWindow: () => ipcRenderer.send('hide-settings-window'),
     
     // Generic invoke (for dynamic channel names)
-    invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
+    // invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
+    sendListenButtonClick: (listenButtonText) => ipcRenderer.invoke('listen:changeSession', listenButtonText),
+    sendAskButtonClick: () => ipcRenderer.invoke('ask:toggleAskButton'),
+    sendToggleAllWindowsVisibility: () => ipcRenderer.invoke('shortcut:toggleAllWindowsVisibility'),
     
     // Listeners
     onListenChangeSessionResult: (callback) => ipcRenderer.on('listen:changeSessionResult', callback),
@@ -213,8 +216,8 @@ contextBridge.exposeInMainWorld('api', {
     setAutoUpdate: (isEnabled) => ipcRenderer.invoke('settings:set-auto-update', isEnabled),
     getContentProtectionStatus: () => ipcRenderer.invoke('get-content-protection-status'),
     toggleContentProtection: () => ipcRenderer.invoke('toggle-content-protection'),
-    getCurrentShortcuts: () => ipcRenderer.invoke('get-current-shortcuts'),
-    openShortcutEditor: () => ipcRenderer.invoke('open-shortcut-editor'),
+    getCurrentShortcuts: () => ipcRenderer.invoke('settings:getCurrentShortcuts'),
+    openShortcutSettingsWindow: () => ipcRenderer.invoke('shortcut:openShortcutSettingsWindow'),
     
     // Window Management
     moveWindowStep: (direction) => ipcRenderer.invoke('move-window-step', direction),
@@ -245,20 +248,17 @@ contextBridge.exposeInMainWorld('api', {
   // src/ui/settings/ShortCutSettingsView.js
   shortcutSettingsView: {
     // Shortcut Management
-    saveShortcuts: (shortcuts) => ipcRenderer.invoke('save-shortcuts', shortcuts),
-    getDefaultShortcuts: () => ipcRenderer.invoke('get-default-shortcuts'),
-    closeShortcutEditor: () => ipcRenderer.send('close-shortcut-editor'),
+    saveShortcuts: (shortcuts) => ipcRenderer.invoke('shortcut:saveShortcuts', shortcuts),
+    getDefaultShortcuts: () => ipcRenderer.invoke('shortcut:getDefaultShortcuts'),
+    closeShortcutSettingsWindow: () => ipcRenderer.invoke('shortcut:closeShortcutSettingsWindow'),
     
     // Listeners
-    onLoadShortcuts: (callback) => ipcRenderer.on('load-shortcuts', callback),
-    removeOnLoadShortcuts: (callback) => ipcRenderer.removeListener('load-shortcuts', callback)
+    onLoadShortcuts: (callback) => ipcRenderer.on('shortcut:loadShortcuts', callback),
+    removeOnLoadShortcuts: (callback) => ipcRenderer.removeListener('shortcut:loadShortcuts', callback)
   },
 
   // src/ui/app/content.html inline scripts
   content: {
-    // Animation Management
-    // sendAnimationFinished: () => ipcRenderer.send('animation-finished'),
-    
     // Listeners
     onSettingsWindowHideAnimation: (callback) => ipcRenderer.on('settings-window-hide-animation', callback),
     removeOnSettingsWindowHideAnimation: (callback) => ipcRenderer.removeListener('settings-window-hide-animation', callback),    

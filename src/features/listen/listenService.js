@@ -5,7 +5,6 @@ const authService = require('../common/services/authService');
 const sessionRepository = require('../common/repositories/session');
 const sttRepository = require('./stt/repositories');
 const internalBridge = require('../../bridge/internalBridge');
-const { EVENTS } = internalBridge;
 
 class ListenService {
     constructor() {
@@ -109,7 +108,7 @@ class ListenService {
             switch (listenButtonText) {
                 case 'Listen':
                     console.log('[ListenService] changeSession to "Listen"');
-                    internalBridge.emit('request-window-visibility', { name: 'listen', visible: true });
+                    internalBridge.emit('window:requestVisibility', { name: 'listen', visible: true });
                     await this.initializeSession();
                     listenWindow.webContents.send('session-state-changed', { isActive: true });
                     break;
@@ -122,7 +121,7 @@ class ListenService {
         
                 case 'Done':
                     console.log('[ListenService] changeSession to "Done"');
-                    internalBridge.emit('request-window-visibility', { name: 'listen', visible: false });
+                    internalBridge.emit('window:requestVisibility', { name: 'listen', visible: false });
                     listenWindow.webContents.send('session-state-changed', { isActive: false });
                     break;
         
