@@ -1,31 +1,32 @@
 const sqliteClient = require('../../services/sqliteClient');
+const encryptionService = require('../../services/encryptionService');
 
-function getByProvider(uid, provider) {
+function getByProvider(provider) {
     const db = sqliteClient.getDb();
-    const stmt = db.prepare('SELECT * FROM provider_settings WHERE uid = ? AND provider = ?');
-    const result = stmt.get(uid, provider) || null;
+    const stmt = db.prepare('SELECT * FROM provider_settings WHERE provider = ?');
+    const result = stmt.get(provider) || null;
     
-    if (result && result.api_key) {
+    if (result && result.api_key && encryptionService.looksEncrypted(result.api_key)) {
         result.api_key = encryptionService.decrypt(result.api_key);
     }
     
     return result;
 }
 
-function getAllByUid(uid) {
+function getAll() {
     const db = sqliteClient.getDb();
-    const stmt = db.prepare('SELECT * FROM provider_settings WHERE uid = ? ORDER BY provider');
-    const results = stmt.all(uid);
+    const stmt = db.prepare('SELECT * FROM provider_settings ORDER BY provider');
+    const results = stmt.all();
     
     return results.map(result => {
-        if (result.api_key) {
-            result.api_key = result.api_key;
+        if (result.api_key && encryptionService.looksEncrypted(result.api_key)) {
+            result.api_key = encryptionService.decrypt(result.api_key);
         }
         return result;
     });
 }
 
-function upsert(uid, provider, settings) {
+function upsert(provider, settings) {
     // Validate: prevent direct setting of active status
     if (settings.is_active_llm || settings.is_active_stt) {
         console.warn('[ProviderSettings] Warning: is_active_llm/is_active_stt should not be set directly. Use setActiveProvider() instead.');
@@ -35,9 +36,9 @@ function upsert(uid, provider, settings) {
     
     // Use SQLite's UPSERT syntax (INSERT ... ON CONFLICT ... DO UPDATE)
     const stmt = db.prepare(`
-        INSERT INTO provider_settings (uid, provider, api_key, selected_llm_model, selected_stt_model, is_active_llm, is_active_stt, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(uid, provider) DO UPDATE SET
+        INSERT INTO provider_settings (provider, api_key, selected_llm_model, selected_stt_model, is_active_llm, is_active_stt, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(provider) DO UPDATE SET
             api_key = excluded.api_key,
             selected_llm_model = excluded.selected_llm_model,
             selected_stt_model = excluded.selected_stt_model,
@@ -47,7 +48,6 @@ function upsert(uid, provider, settings) {
     `);
     
     const result = stmt.run(
-        uid,
         provider,
         settings.api_key || null,
         settings.selected_llm_model || null,
@@ -61,55 +61,55 @@ function upsert(uid, provider, settings) {
     return { changes: result.changes };
 }
 
-function remove(uid, provider) {
+function remove(provider) {
     const db = sqliteClient.getDb();
-    const stmt = db.prepare('DELETE FROM provider_settings WHERE uid = ? AND provider = ?');
-    const result = stmt.run(uid, provider);
+    const stmt = db.prepare('DELETE FROM provider_settings WHERE provider = ?');
+    const result = stmt.run(provider);
     return { changes: result.changes };
 }
 
-function removeAllByUid(uid) {
+function removeAll() {
     const db = sqliteClient.getDb();
-    const stmt = db.prepare('DELETE FROM provider_settings WHERE uid = ?');
-    const result = stmt.run(uid);
+    const stmt = db.prepare('DELETE FROM provider_settings');
+    const result = stmt.run();
     return { changes: result.changes };
 }
 
-function getRawApiKeysByUid(uid) {
+function getRawApiKeys() {
     const db = sqliteClient.getDb();
-    const stmt = db.prepare('SELECT api_key FROM provider_settings WHERE uid = ?');
-    return stmt.all(uid);
+    const stmt = db.prepare('SELECT api_key FROM provider_settings');
+    return stmt.all();
 }
 
 // Get active provider for a specific type (llm or stt)
-function getActiveProvider(uid, type) {
+function getActiveProvider(type) {
     const db = sqliteClient.getDb();
     const column = type === 'llm' ? 'is_active_llm' : 'is_active_stt';
-    const stmt = db.prepare(`SELECT * FROM provider_settings WHERE uid = ? AND ${column} = 1`);
-    const result = stmt.get(uid) || null;
+    const stmt = db.prepare(`SELECT * FROM provider_settings WHERE ${column} = 1`);
+    const result = stmt.get() || null;
     
-    if (result && result.api_key) {
-        result.api_key = result.api_key;
+    if (result && result.api_key && encryptionService.looksEncrypted(result.api_key)) {
+        result.api_key = encryptionService.decrypt(result.api_key);
     }
     
     return result;
 }
 
 // Set active provider for a specific type
-function setActiveProvider(uid, provider, type) {
+function setActiveProvider(provider, type) {
     const db = sqliteClient.getDb();
     const column = type === 'llm' ? 'is_active_llm' : 'is_active_stt';
     
     // Start transaction to ensure only one provider is active
     db.transaction(() => {
         // First, deactivate all providers for this type
-        const deactivateStmt = db.prepare(`UPDATE provider_settings SET ${column} = 0 WHERE uid = ?`);
-        deactivateStmt.run(uid);
+        const deactivateStmt = db.prepare(`UPDATE provider_settings SET ${column} = 0`);
+        deactivateStmt.run();
         
         // Then activate the specified provider
         if (provider) {
-            const activateStmt = db.prepare(`UPDATE provider_settings SET ${column} = 1 WHERE uid = ? AND provider = ?`);
-            activateStmt.run(uid, provider);
+            const activateStmt = db.prepare(`UPDATE provider_settings SET ${column} = 1 WHERE provider = ?`);
+            activateStmt.run(provider);
         }
     })();
     
@@ -117,14 +117,14 @@ function setActiveProvider(uid, provider, type) {
 }
 
 // Get all active settings (both llm and stt)
-function getActiveSettings(uid) {
+function getActiveSettings() {
     const db = sqliteClient.getDb();
     const stmt = db.prepare(`
         SELECT * FROM provider_settings 
-        WHERE uid = ? AND (is_active_llm = 1 OR is_active_stt = 1)
+        WHERE (is_active_llm = 1 OR is_active_stt = 1)
         ORDER BY provider
     `);
-    const results = stmt.all(uid);
+    const results = stmt.all();
     
     // Decrypt API keys and organize by type
     const activeSettings = {
@@ -133,8 +133,8 @@ function getActiveSettings(uid) {
     };
     
     results.forEach(result => {
-        if (result.api_key) {
-            result.api_key = result.api_key;
+        if (result.api_key && encryptionService.looksEncrypted(result.api_key)) {
+            result.api_key = encryptionService.decrypt(result.api_key);
         }
         if (result.is_active_llm) {
             activeSettings.llm = result;
@@ -149,11 +149,11 @@ function getActiveSettings(uid) {
 
 module.exports = {
     getByProvider,
-    getAllByUid,
+    getAll,
     upsert,
     remove,
-    removeAllByUid,
-    getRawApiKeysByUid,
+    removeAll,
+    getRawApiKeys,
     getActiveProvider,
     setActiveProvider,
     getActiveSettings

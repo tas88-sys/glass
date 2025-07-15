@@ -1066,7 +1066,7 @@ class OllamaService extends EventEmitter {
                 return false;
             }
 
-            const selectedModels = modelStateService.getSelectedModels();
+            const selectedModels = await modelStateService.getSelectedModels();
             const llmModelId = selectedModels.llm;
             
             // Check if it's an Ollama model

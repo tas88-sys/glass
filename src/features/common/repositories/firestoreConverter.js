@@ -33,7 +33,13 @@ function createEncryptedConverter(fieldsToEncrypt = []) {
 
             for (const field of fieldsToEncrypt) {
                  if (Object.prototype.hasOwnProperty.call(appObject, field) && appObject[field] != null) {
-                    appObject[field] = encryptionService.decrypt(appObject[field]);
+                    try {
+                        appObject[field] = encryptionService.decrypt(appObject[field]);
+                    } catch (error) {
+                        console.warn(`[FirestoreConverter] Failed to decrypt field '${field}' (possibly plaintext or key mismatch):`, error.message);
+                        // Keep the original value instead of failing
+                        // appObject[field] remains as is
+                    }
                 }
             }
 

@@ -106,6 +106,9 @@ class PermissionService {
   }
 
   async checkKeychainCompleted(uid) {
+    if (uid === "default_user") {
+      return true;
+    }
     try {
       const completed = permissionRepository.checkKeychainCompleted(uid);
       console.log('[Permissions] Keychain completed status:', completed);

@@ -28,7 +28,7 @@ export class PermissionHeader extends LitElement {
         .container {
             -webkit-app-region: drag;
             width: 285px;
-            height: 220px;
+            /* height is now set dynamically */
             padding: 18px 20px;
             background: rgba(0, 0, 0, 0.3);
             border-radius: 16px;
@@ -101,6 +101,12 @@ export class PermissionHeader extends LitElement {
             align-items: center;
             width: 100%;
             margin-top: auto;
+        }
+
+        .form-content.all-granted {
+            flex-grow: 1;
+            justify-content: center;
+            margin-top: 0;
         }
 
         .subtitle {
@@ -260,7 +266,8 @@ export class PermissionHeader extends LitElement {
         screenGranted: { type: String },
         keychainGranted: { type: String },
         isChecking: { type: String },
-        continueCallback: { type: Function }
+        continueCallback: { type: Function },
+        userMode: { type: String }, // 'local' or 'firebase'
     };
 
     constructor() {
@@ -270,14 +277,47 @@ export class PermissionHeader extends LitElement {
         this.keychainGranted = 'unknown';
         this.isChecking = false;
         this.continueCallback = null;
+        this.userMode = 'local'; // Default to local
+    }
+
+    updated(changedProperties) {
+        super.updated(changedProperties);
+        if (changedProperties.has('userMode')) {
+            const newHeight = this.userMode === 'firebase' ? 280 : 220;
+            console.log(`[PermissionHeader] User mode changed to ${this.userMode}, requesting resize to ${newHeight}px`);
+            this.dispatchEvent(new CustomEvent('request-resize', {
+                detail: { height: newHeight },
+                bubbles: true,
+                composed: true
+            }));
+        }
     }
 
     async connectedCallback() {
         super.connectedCallback();
+
+        if (window.api) {
+            try {
+                const userState = await window.api.common.getCurrentUser();
+                this.userMode = userState.mode;
+            } catch (e) {
+                console.error('[PermissionHeader] Failed to get user state', e);
+                this.userMode = 'local'; // Fallback to local
+            }
+        }
+
         await this.checkPermissions();
         
         // Set up periodic permission check
-        this.permissionCheckInterval = setInterval(() => {
+        this.permissionCheckInterval = setInterval(async () => {
+            if (window.api) {
+                try {
+                    const userState = await window.api.common.getCurrentUser();
+                    this.userMode = userState.mode;
+                } catch (e) {
+                    this.userMode = 'local';
+                }
+            }
             this.checkPermissions();
         }, 1000);
     }
@@ -311,11 +351,14 @@ export class PermissionHeader extends LitElement {
                 console.log('[PermissionHeader] Permission status changed, updating UI');
                 this.requestUpdate();
             }
+
+            const isKeychainRequired = this.userMode === 'firebase';
+            const keychainOk = !isKeychainRequired || this.keychainGranted === 'granted';
             
             // if all permissions granted == automatically continue
             if (this.microphoneGranted === 'granted' && 
                 this.screenGranted === 'granted' && 
-                this.keychainGranted === 'granted' && 
+                keychainOk && 
                 this.continueCallback) {
                 console.log('[PermissionHeader] All permissions granted, proceeding automatically');
                 setTimeout(() => this.handleContinue(), 500);
@@ -405,12 +448,15 @@ export class PermissionHeader extends LitElement {
     }
 
     async handleContinue() {
+        const isKeychainRequired = this.userMode === 'firebase';
+        const keychainOk = !isKeychainRequired || this.keychainGranted === 'granted';
+
         if (this.continueCallback && 
             this.microphoneGranted === 'granted' && 
             this.screenGranted === 'granted' && 
-            this.keychainGranted === 'granted') {
+            keychainOk) {
             // Mark permissions as completed
-            if (window.api) {
+            if (window.api && isKeychainRequired) {
                 try {
                     await window.api.permissionHeader.markKeychainCompleted();
                     console.log('[PermissionHeader] Marked keychain as completed');
@@ -431,10 +477,13 @@ export class PermissionHeader extends LitElement {
     }
 
     render() {
-        const allGranted = this.microphoneGranted === 'granted' && this.screenGranted === 'granted' && this.keychainGranted === 'granted';
+        const isKeychainRequired = this.userMode === 'firebase';
+        const containerHeight = isKeychainRequired ? 280 : 220;
+        const keychainOk = !isKeychainRequired || this.keychainGranted === 'granted';
+        const allGranted = this.microphoneGranted === 'granted' && this.screenGranted === 'granted' && keychainOk;
 
         return html`
-            <div class="container">
+            <div class="container" style="height: ${containerHeight}px">
                 <button class="close-button" @click=${this.handleClose} title="Close application">
                     <svg width="8" height="8" viewBox="0 0 10 10" fill="currentColor">
                         <path d="M1 1L9 9M9 1L1 9" stroke="currentColor" stroke-width="1.2" />
@@ -442,89 +491,92 @@ export class PermissionHeader extends LitElement {
                 </button>
                 <h1 class="title">Permission Setup Required</h1>
 
-                <div class="form-content">
-                    <div class="subtitle">Grant access to microphone, screen recording and keychain to continue</div>
-                    
-                    <div class="permission-status">
-                        <div class="permission-item ${this.microphoneGranted === 'granted' ? 'granted' : ''}">
-                            ${this.microphoneGranted === 'granted' ? html`
-                                <svg class="check-icon" viewBox="0 0 20 20" fill="currentColor">
-                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-                                </svg>
-                                <span>Microphone ✓</span>
-                            ` : html`
-                                <svg class="permission-icon" viewBox="0 0 20 20" fill="currentColor">
-                                    <path fill-rule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z" clip-rule="evenodd" />
-                                </svg>
-                                <span>Microphone</span>
-                            `}
-                        </div>
+                <div class="form-content ${allGranted ? 'all-granted' : ''}">
+                    ${!allGranted ? html`
+                        <div class="subtitle">Grant access to microphone, screen recording${isKeychainRequired ? ' and keychain' : ''} to continue</div>
                         
-                        <div class="permission-item ${this.screenGranted === 'granted' ? 'granted' : ''}">
-                            ${this.screenGranted === 'granted' ? html`
-                                <svg class="check-icon" viewBox="0 0 20 20" fill="currentColor">
-                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-                                </svg>
-                                <span>Screen ✓</span>
-                            ` : html`
-                                <svg class="permission-icon" viewBox="0 0 20 20" fill="currentColor">
-                                    <path fill-rule="evenodd" d="M3 5a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2h-2.22l.123.489.804.804A1 1 0 0113 18H7a1 1 0 01-.707-1.707l.804-.804L7.22 15H5a2 2 0 01-2-2V5zm5.771 7H5V5h10v7H8.771z" clip-rule="evenodd" />
-                                </svg>
-                                <span>Screen Recording</span>
-                            `}
+                        <div class="permission-status">
+                            <div class="permission-item ${this.microphoneGranted === 'granted' ? 'granted' : ''}">
+                                ${this.microphoneGranted === 'granted' ? html`
+                                    <svg class="check-icon" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                                    </svg>
+                                    <span>Microphone ✓</span>
+                                ` : html`
+                                    <svg class="permission-icon" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z" clip-rule="evenodd" />
+                                    </svg>
+                                    <span>Microphone</span>
+                                `}
+                            </div>
+                            
+                            <div class="permission-item ${this.screenGranted === 'granted' ? 'granted' : ''}">
+                                ${this.screenGranted === 'granted' ? html`
+                                    <svg class="check-icon" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                                    </svg>
+                                    <span>Screen ✓</span>
+                                ` : html`
+                                    <svg class="permission-icon" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fill-rule="evenodd" d="M3 5a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2h-2.22l.123.489.804.804A1 1 0 0113 18H7a1 1 0 01-.707-1.707l.804-.804L7.22 15H5a2 2 0 01-2-2V5zm5.771 7H5V5h10v7H8.771z" clip-rule="evenodd" />
+                                    </svg>
+                                    <span>Screen Recording</span>
+                                `}
+                            </div>
+
+                            ${isKeychainRequired ? html`
+                                <div class="permission-item ${this.keychainGranted === 'granted' ? 'granted' : ''}">
+                                    ${this.keychainGranted === 'granted' ? html`
+                                        <svg class="check-icon" viewBox="0 0 20 20" fill="currentColor">
+                                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                                        </svg>
+                                        <span>Data Encryption ✓</span>
+                                    ` : html`
+                                        <svg class="permission-icon" viewBox="0 0 20 20" fill="currentColor">
+                                            <path fill-rule="evenodd" d="M18 8a6 6 0 01-7.744 5.668l-1.649 1.652c-.63.63-1.706.19-1.706-.742V12.18a.75.75 0 00-1.5 0v2.696c0 .932-1.075 1.372-1.706.742l-1.649-1.652A6 6 0 112 8zm-4 0a.75.75 0 00.75-.75A3.75 3.75 0 018.25 4a.75.75 0 000 1.5 2.25 2.25 0 012.25 2.25.75.75 0 00.75.75z" clip-rule="evenodd" />
+                                        </svg>
+                                        <span>Data Encryption</span>
+                                    `}
+                                </div>
+                            ` : ''}
                         </div>
 
-                        <div class="permission-item ${this.keychainGranted === 'granted' ? 'granted' : ''}">
-                            ${this.keychainGranted === 'granted' ? html`
-                                <svg class="check-icon" viewBox="0 0 20 20" fill="currentColor">
-                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-                                </svg>
-                                <span>Keychain ✓</span>
-                            ` : html`
-                                <svg class="permission-icon" viewBox="0 0 20 20" fill="currentColor">
-                                    <path fill-rule="evenodd" d="M18 8a6 6 0 01-7.744 5.668l-1.649 1.652c-.63.63-1.706.19-1.706-.742V12.18a.75.75 0 00-1.5 0v2.696c0 .932-1.075 1.372-1.706.742l-1.649-1.652A6 6 0 112 8zm-4 0a.75.75 0 00.75-.75A3.75 3.75 0 018.25 4a.75.75 0 000 1.5 2.25 2.25 0 012.25 2.25.75.75 0 00.75.75z" clip-rule="evenodd" />
-                                </svg>
-                                <span>Keychain Access</span>
-                            `}
-                        </div>
-                    </div>
-
-                    ${this.microphoneGranted !== 'granted' ? html`
                         <button 
                             class="action-button" 
                             @click=${this.handleMicrophoneClick}
+                            ?disabled=${this.microphoneGranted === 'granted'}
                         >
-                            Grant Microphone Access
+                            ${this.microphoneGranted === 'granted' ? 'Microphone Access Granted' : 'Grant Microphone Access'}
                         </button>
-                    ` : ''}
 
-                    ${this.screenGranted !== 'granted' ? html`
                         <button 
                             class="action-button" 
                             @click=${this.handleScreenClick}
+                            ?disabled=${this.screenGranted === 'granted'}
                         >
-                            Grant Screen Recording Access
+                            ${this.screenGranted === 'granted' ? 'Screen Recording Granted' : 'Grant Screen Recording Access'}
                         </button>
-                    ` : ''}
 
-                    ${this.keychainGranted !== 'granted' ? html`
-                        <button 
-                            class="action-button" 
-                            @click=${this.handleKeychainClick}
-                        >
-                            Grant Keychain Access
-                        </button>
-                        <div class="subtitle">System prompt will appear. Select 'Always Allow' for seamless access.</div>
-                    ` : ''}
-
-                    ${allGranted ? html`
+                        ${isKeychainRequired ? html`
+                            <button 
+                                class="action-button" 
+                                @click=${this.handleKeychainClick}
+                                ?disabled=${this.keychainGranted === 'granted'}
+                            >
+                                ${this.keychainGranted === 'granted' ? 'Encryption Enabled' : 'Enable Encryption'}
+                            </button>
+                            <div class="subtitle" style="visibility: ${this.keychainGranted === 'granted' ? 'hidden' : 'visible'}">
+                                Stores the key to encrypt your data. Press "<b>Always Allow</b>" to continue.
+                            </div>
+                        ` : ''}
+                    ` : html`
                         <button 
                             class="continue-button" 
                             @click=${this.handleContinue}
                         >
                             Continue to Pickle Glass
                         </button>
-                    ` : ''}
+                    `}
                 </div>
             </div>
         `;

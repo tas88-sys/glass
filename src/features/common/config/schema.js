@@ -91,7 +91,6 @@ const LATEST_SCHEMA = {
     },
     provider_settings: {
         columns: [
-            { name: 'uid', type: 'TEXT NOT NULL' },
             { name: 'provider', type: 'TEXT NOT NULL' },
             { name: 'api_key', type: 'TEXT' },
             { name: 'selected_llm_model', type: 'TEXT' },
@@ -101,7 +100,7 @@ const LATEST_SCHEMA = {
             { name: 'created_at', type: 'INTEGER' },
             { name: 'updated_at', type: 'INTEGER' }
         ],
-        constraints: ['PRIMARY KEY (uid, provider)']
+        constraints: ['PRIMARY KEY (provider)']
     },
     shortcuts: {
         columns: [

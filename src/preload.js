@@ -98,8 +98,6 @@ contextBridge.exposeInMainWorld('api', {
     removeOnAuthFailed: (callback) => ipcRenderer.removeListener('auth-failed', callback),
     onForceShowApiKeyHeader: (callback) => ipcRenderer.on('force-show-apikey-header', callback),
     removeOnForceShowApiKeyHeader: (callback) => ipcRenderer.removeListener('force-show-apikey-header', callback),
-    onForceShowPermissionHeader: (callback) => ipcRenderer.on('force-show-permission-header', callback),
-    removeOnForceShowPermissionHeader: (callback) => ipcRenderer.removeListener('force-show-permission-header', callback)
   },
 
   // src/ui/app/MainHeader.js

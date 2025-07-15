@@ -1,12 +1,7 @@
 const sqliteRepository = require('./sqlite.repository');
 
-let authService = null;
-
-function setAuthService(service) {
-    authService = service;
-}
-
 function getBaseRepository() {
+    // For now, we only have sqlite. This could be expanded later.
     return sqliteRepository;
 }
 
@@ -14,71 +9,60 @@ const providerSettingsRepositoryAdapter = {
     // Core CRUD operations
     async getByProvider(provider) {
         const repo = getBaseRepository();
-        const uid = authService.getCurrentUserId();
-        return await repo.getByProvider(uid, provider);
+        return await repo.getByProvider(provider);
     },
 
-    async getAllByUid() {
+    async getAll() {
         const repo = getBaseRepository();
-        const uid = authService.getCurrentUserId();
-        return await repo.getAllByUid(uid);
+        return await repo.getAll();
     },
 
     async upsert(provider, settings) {
         const repo = getBaseRepository();
-        const uid = authService.getCurrentUserId();
         const now = Date.now();
         
         const settingsWithMeta = {
             ...settings,
-            uid,
             provider,
             updated_at: now,
             created_at: settings.created_at || now
         };
         
-        return await repo.upsert(uid, provider, settingsWithMeta);
+        return await repo.upsert(provider, settingsWithMeta);
     },
 
     async remove(provider) {
         const repo = getBaseRepository();
-        const uid = authService.getCurrentUserId();
-        return await repo.remove(uid, provider);
+        return await repo.remove(provider);
     },
 
-    async removeAllByUid() {
+    async removeAll() {
         const repo = getBaseRepository();
-        const uid = authService.getCurrentUserId();
-        return await repo.removeAllByUid(uid);
+        return await repo.removeAll();
     },
 
-    async getRawApiKeysByUid() {
+    async getRawApiKeys() {
         // This function should always target the local sqlite DB,
         // as it's part of the local-first boot sequence.
-        const uid = authService.getCurrentUserId();
-        return await sqliteRepository.getRawApiKeysByUid(uid);
+        return await sqliteRepository.getRawApiKeys();
     },
     
     async getActiveProvider(type) {
         const repo = getBaseRepository();
-        const uid = authService.getCurrentUserId();
-        return await repo.getActiveProvider(uid, type);
+        return await repo.getActiveProvider(type);
     },
     
     async setActiveProvider(provider, type) {
         const repo = getBaseRepository();
-        const uid = authService.getCurrentUserId();
-        return await repo.setActiveProvider(uid, provider, type);
+        return await repo.setActiveProvider(provider, type);
     },
     
     async getActiveSettings() {
         const repo = getBaseRepository();
-        const uid = authService.getCurrentUserId();
-        return await repo.getActiveSettings(uid);
+        return await repo.getActiveSettings();
     }
 };
 
 module.exports = {
-    ...providerSettingsRepositoryAdapter,
-    setAuthService
+    ...providerSettingsRepositoryAdapter
 }; 

@@ -918,6 +918,8 @@ export class SettingsView extends LitElement {
         this.setupIpcListeners();
         this.setupWindowResize();
         this.loadAutoUpdateSetting();
+        // Force one height calculation immediately (innerHeight may be 0 at first)
+        setTimeout(() => this.updateScrollHeight(), 0);
     }
 
     disconnectedCallback() {
@@ -1030,11 +1032,13 @@ export class SettingsView extends LitElement {
     }
 
     updateScrollHeight() {
-        const windowHeight = window.innerHeight;
-        const maxHeight = windowHeight;
-        
+        // Electron 일부 시점에서 window.innerHeight 가 0 으로 보고되는 버그 보호
+        const rawHeight = window.innerHeight || (window.screen ? window.screen.height : 0);
+        const MIN_HEIGHT = 300; // 최소 보장 높이
+        const maxHeight = Math.max(MIN_HEIGHT, rawHeight);
+
         this.style.maxHeight = `${maxHeight}px`;
-        
+
         const container = this.shadowRoot?.querySelector('.settings-container');
         if (container) {
             container.style.maxHeight = `${maxHeight}px`;
@@ -1043,6 +1047,8 @@ export class SettingsView extends LitElement {
 
     handleMouseEnter = () => {
         window.api.settingsView.cancelHideSettingsWindow();
+        // Recalculate height in case it was set to 0 before
+        this.updateScrollHeight();
     }
 
     handleMouseLeave = () => {

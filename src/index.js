@@ -686,75 +686,43 @@ async function startWebStack() {
 
   console.log(`✅ API server started on http://localhost:${apiPort}`);
 
-  console.log(`🚀 All services ready:`);
-  console.log(`   Frontend: http://localhost:${frontendPort}`);
-  console.log(`   API:      http://localhost:${apiPort}`);
+  console.log(`🚀 All services ready:
+   Frontend: http://localhost:${frontendPort}
+   API:      http://localhost:${apiPort}`);
 
   return frontendPort;
 }
 
 // Auto-update initialization
 async function initAutoUpdater() {
+    if (process.env.NODE_ENV === 'development') {
+        console.log('Development environment, skipping auto-updater.');
+        return;
+    }
+
     try {
-        const autoUpdateEnabled = await settingsService.getAutoUpdateSetting();
-        if (!autoUpdateEnabled) {
-            console.log('[AutoUpdater] Skipped because auto-updates are disabled in settings');
-            return;
-        }
-        // Skip auto-updater in development mode
-        if (!app.isPackaged) {
-            console.log('[AutoUpdater] Skipped in development (app is not packaged)');
-            return;
-        }
-
-        autoUpdater.setFeedURL({
-            provider: 'github',
-            owner: 'pickle-com',
-            repo: 'glass',
+        await autoUpdater.checkForUpdates();
+        autoUpdater.on('update-available', () => {
+            console.log('Update available!');
+            autoUpdater.downloadUpdate();
         });
-
-        // Immediately check for updates & notify
-        autoUpdater.checkForUpdatesAndNotify()
-            .catch(err => {
-                console.error('[AutoUpdater] Error checking for updates:', err);
-            });
-
-        autoUpdater.on('checking-for-update', () => {
-            console.log('[AutoUpdater] Checking for updates…');
-        });
-
-        autoUpdater.on('update-available', (info) => {
-            console.log('[AutoUpdater] Update available:', info.version);
-        });
-
-        autoUpdater.on('update-not-available', () => {
-            console.log('[AutoUpdater] Application is up-to-date');
-        });
-
-        autoUpdater.on('error', (err) => {
-            console.error('[AutoUpdater] Error while updating:', err);
-        });
-
-        autoUpdater.on('update-downloaded', (info) => {
-            console.log(`[AutoUpdater] Update downloaded: ${info.version}`);
-
-            const dialogOpts = {
+        autoUpdater.on('update-downloaded', (event, releaseNotes, releaseName, date, url) => {
+            console.log('Update downloaded:', releaseNotes, releaseName, date, url);
+            dialog.showMessageBox({
                 type: 'info',
-                buttons: ['Install now', 'Install on next launch'],
-                title: 'Update Available',
-                message: 'A new version of Glass is ready to be installed.',
-                defaultId: 0,
-                cancelId: 1
-            };
-
-            dialog.showMessageBox(dialogOpts).then((returnValue) => {
-                // returnValue.response 0 is for 'Install Now'
-                if (returnValue.response === 0) {
+                title: 'Application Update',
+                message: `A new version of PickleGlass (${releaseName}) has been downloaded. It will be installed the next time you launch the application.`,
+                buttons: ['Restart', 'Later']
+            }).then(response => {
+                if (response.response === 0) {
                     autoUpdater.quitAndInstall();
                 }
             });
         });
-    } catch (e) {
-        console.error('[AutoUpdater] Failed to initialise:', e);
+        autoUpdater.on('error', (err) => {
+            console.error('Error in auto-updater:', err);
+        });
+    } catch (err) {
+        console.error('Error initializing auto-updater:', err);
     }
 }

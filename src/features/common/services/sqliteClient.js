@@ -40,8 +40,82 @@ class SQLiteClient {
         return `"${identifier}"`;
     }
 
+    _migrateProviderSettings() {
+        const tablesInDb = this.getTablesFromDb();
+        if (!tablesInDb.includes('provider_settings')) {
+            return; // Table doesn't exist, no migration needed.
+        }
+    
+        const providerSettingsInfo = this.db.prepare(`PRAGMA table_info(provider_settings)`).all();
+        const hasUidColumn = providerSettingsInfo.some(col => col.name === 'uid');
+    
+        if (hasUidColumn) {
+            console.log('[DB Migration] Old provider_settings schema detected. Starting robust migration...');
+    
+            try {
+                this.db.transaction(() => {
+                    this.db.exec('ALTER TABLE provider_settings RENAME TO provider_settings_old');
+                    console.log('[DB Migration] Renamed provider_settings to provider_settings_old');
+    
+                    this.createTable('provider_settings', LATEST_SCHEMA.provider_settings);
+                    console.log('[DB Migration] Created new provider_settings table');
+    
+                    // Dynamically build the migration query for robustness
+                    const oldColumnNames = this.db.prepare(`PRAGMA table_info(provider_settings_old)`).all().map(c => c.name);
+                    const newColumnNames = LATEST_SCHEMA.provider_settings.columns.map(c => c.name);
+                    const commonColumns = newColumnNames.filter(name => oldColumnNames.includes(name));
+    
+                    if (!commonColumns.includes('provider')) {
+                        console.warn('[DB Migration] Old table is missing the "provider" column. Aborting migration for this table.');
+                        this.db.exec('DROP TABLE provider_settings_old');
+                        return;
+                    }
+    
+                    const orderParts = [];
+                    if (oldColumnNames.includes('updated_at')) orderParts.push('updated_at DESC');
+                    if (oldColumnNames.includes('created_at')) orderParts.push('created_at DESC');
+                    const orderByClause = orderParts.length > 0 ? `ORDER BY ${orderParts.join(', ')}` : '';
+    
+                    const columnsForInsert = commonColumns.map(c => this._validateAndQuoteIdentifier(c)).join(', ');
+    
+                    const migrationQuery = `
+                        INSERT INTO provider_settings (${columnsForInsert})
+                        SELECT ${columnsForInsert}
+                        FROM (
+                            SELECT *, ROW_NUMBER() OVER(PARTITION BY provider ${orderByClause}) as rn
+                            FROM provider_settings_old
+                        )
+                        WHERE rn = 1
+                    `;
+                    
+                    console.log(`[DB Migration] Executing robust migration query for columns: ${commonColumns.join(', ')}`);
+                    const result = this.db.prepare(migrationQuery).run();
+                    console.log(`[DB Migration] Migrated ${result.changes} rows to the new provider_settings table.`);
+    
+                    this.db.exec('DROP TABLE provider_settings_old');
+                    console.log('[DB Migration] Dropped provider_settings_old table.');
+                })();
+                console.log('[DB Migration] provider_settings migration completed successfully.');
+            } catch (error) {
+                console.error('[DB Migration] Failed to migrate provider_settings table.', error);
+                
+                // Try to recover by dropping the temp table if it exists
+                const oldTableExists = this.getTablesFromDb().includes('provider_settings_old');
+                if (oldTableExists) {
+                    this.db.exec('DROP TABLE provider_settings_old');
+                    console.warn('[DB Migration] Cleaned up temporary old table after failure.');
+                }
+                throw error;
+            }
+        }
+    }
+
     async synchronizeSchema() {
         console.log('[DB Sync] Starting schema synchronization...');
+
+        // Run special migration for provider_settings before the generic sync logic
+        this._migrateProviderSettings();
+
         const tablesInDb = this.getTablesFromDb();
 
         for (const tableName of Object.keys(LATEST_SCHEMA)) {

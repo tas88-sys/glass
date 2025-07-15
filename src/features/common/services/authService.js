@@ -46,7 +46,6 @@ class AuthService {
         this.initializationPromise = null;
 
         sessionRepository.setAuthService(this);
-        providerSettingsRepository.setAuthService(this);
     }
 
     initialize() {
@@ -78,22 +77,21 @@ class AuthService {
                     // No 'await' here, so it runs in the background without blocking startup.
                     migrationService.checkAndRunMigration(user);
 
+                    // ***** CRITICAL: Wait for the virtual key and model state update to complete *****
+                    try {
+                        const idToken = await user.getIdToken(true);
+                        const virtualKey = await getVirtualKeyByEmail(user.email, idToken);
 
-                    // Start background task to fetch and save virtual key
-                    (async () => {
-                        try {
-                            const idToken = await user.getIdToken(true);
-                            const virtualKey = await getVirtualKeyByEmail(user.email, idToken);
-
-                            if (global.modelStateService) {
-                                global.modelStateService.setFirebaseVirtualKey(virtualKey);
-                            }
-                            console.log(`[AuthService] BG: Virtual key for ${user.email} has been processed.`);
-
-                        } catch (error) {
-                            console.error('[AuthService] BG: Failed to fetch or save virtual key:', error);
+                        if (global.modelStateService) {
+                            // The model state service now writes directly to the DB, no in-memory state.
+                            await global.modelStateService.setFirebaseVirtualKey(virtualKey);
                         }
-                    })();
+                        console.log(`[AuthService] Virtual key for ${user.email} has been processed and state updated.`);
+
+                    } catch (error) {
+                        console.error('[AuthService] Failed to fetch or save virtual key:', error);
+                        // This is not critical enough to halt the login, but we should log it.
+                    }
 
                 } else {
                     // User signed OUT
@@ -101,7 +99,8 @@ class AuthService {
                     if (previousUser) {
                         console.log(`[AuthService] Clearing API key for logged-out user: ${previousUser.uid}`);
                         if (global.modelStateService) {
-                            global.modelStateService.setFirebaseVirtualKey(null);
+                            // The model state service now writes directly to the DB.
+                            await global.modelStateService.setFirebaseVirtualKey(null);
                         }
                     }
                     this.currentUser = null;
