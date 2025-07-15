@@ -536,7 +536,7 @@ export class ListenView extends LitElement {
                     `[Height Adjusted] Mode: ${this.viewMode}, TopBar: ${topBarHeight}px, Content: ${contentHeight}px, Ideal: ${idealHeight}px, Target: ${targetHeight}px`
                 );
 
-                window.api.listenView.adjustWindowHeight(targetHeight);
+                window.api.listenView.adjustWindowHeight('listen', targetHeight);
             })
             .catch(error => {
                 console.error('Error in adjustWindowHeight:', error);

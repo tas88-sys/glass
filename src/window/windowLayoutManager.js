@@ -124,6 +124,7 @@ class WindowLayoutManager {
         if (maxHeight > 0) {
             adjustedHeight = Math.min(maxHeight, adjustedHeight);
         }
+        console.log(`[Layout Debug] calculateWindowHeightAdjustment: targetHeight=${targetHeight}`);
         return { ...currentBounds, height: adjustedHeight };
     }
     

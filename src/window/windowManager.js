@@ -42,7 +42,7 @@ let movementManager = null;
 
 
 function updateChildWindowLayouts(animated = true) {
-    if (movementManager.isAnimating) return;
+    // if (movementManager.isAnimating) return;
 
     const visibleWindows = {};
     const listenWin = windowPool.get('listen');
@@ -96,8 +96,8 @@ const moveHeaderTo = (newX, newY) => {
     internalBridge.emit('window:moveHeaderTo', { newX, newY });
 };
 
-const adjustWindowHeight = (sender, targetHeight) => {
-    internalBridge.emit('window:adjustWindowHeight', { sender, targetHeight });
+const adjustWindowHeight = (winName, targetHeight) => {
+    internalBridge.emit('window:adjustWindowHeight', { winName, targetHeight });
 };
 
 
@@ -195,8 +195,9 @@ function setupWindowController(windowPool, layoutManager, movementManager) {
             header.setPosition(newPosition.x, newPosition.y);
         }
     });
-    internalBridge.on('window:adjustWindowHeight', ({ sender, targetHeight }) => {
-        const senderWindow = windowPool.get(sender);
+    internalBridge.on('window:adjustWindowHeight', ({ winName, targetHeight }) => {
+        console.log(`[Layout Debug] adjustWindowHeight: targetHeight=${targetHeight}`);
+        const senderWindow = windowPool.get(winName);
         if (senderWindow) {
             const newBounds = layoutManager.calculateWindowHeightAdjustment(senderWindow, targetHeight);
             

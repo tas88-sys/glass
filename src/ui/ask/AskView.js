@@ -503,6 +503,7 @@ export class AskView extends LitElement {
             padding: 0;
             height: 0;
             overflow: hidden;
+            border-top: none;
         }
 
         .text-input-container.no-response {
@@ -1421,7 +1422,7 @@ export class AskView extends LitElement {
 
             const targetHeight = Math.min(700, idealHeight);
 
-            window.api.askView.adjustWindowHeight(targetHeight);
+            window.api.askView.adjustWindowHeight("ask", targetHeight);
 
         }).catch(err => console.error('AskView adjustWindowHeight error:', err));
     }
