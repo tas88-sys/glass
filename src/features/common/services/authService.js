@@ -72,7 +72,7 @@ class AuthService {
                     // ** Initialize encryption key for the logged-in user if permissions are already granted **
                     if (process.platform === 'darwin' && !(await permissionService.checkKeychainCompleted(this.currentUserId))) {
                         console.warn('[AuthService] Keychain permission not yet completed for this user. Deferring key initialization.');
-                    } else if (process.platform === 'darwin') {
+                    } else {
                         await encryptionService.initializeKey(user.uid);
                     }
 
@@ -113,12 +113,7 @@ class AuthService {
                     // End active sessions for the local/default user as well.
                     await sessionRepository.endAllActiveSessions();
 
-                    // ** Initialize encryption key for the default/local user if permissions are already granted **
-                    if (process.platform === 'darwin' && !(await permissionService.checkKeychainCompleted(this.currentUserId))) {
-                        console.warn('[AuthService] Keychain permission not yet completed for default user. Deferring key initialization.');
-                    } else if (process.platform === 'darwin') {
-                        await encryptionService.initializeKey(this.currentUserId);
-                    }
+                    encryptionService.resetSessionKey();
                 }
                 this.broadcastUserState();
                 

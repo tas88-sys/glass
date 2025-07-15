@@ -6,23 +6,7 @@ const { PROVIDERS, getProviderClass } = require('../ai/factory');
 const encryptionService = require('./encryptionService');
 const providerSettingsRepository = require('../repositories/providerSettings');
 const userModelSelectionsRepository = require('../repositories/userModelSelections');
-
-// Import authService directly (singleton)
 const authService = require('./authService');
-const permissionService = require('./permissionService');
-
-function looksEncrypted(str) {
-    if (!str || typeof str !== 'string') return false;
-    // Base64 chars + optional '=' padding
-    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(str)) return false;
-    try {
-        const buf = Buffer.from(str, 'base64');
-        // Our AES-GCM cipher text must be at least 32 bytes (IV 16 + TAG 16)
-        return buf.length >= 32;
-    } catch {
-        return false;
-    }
-}
 
 class ModelStateService extends EventEmitter {
     constructor() {
@@ -223,7 +207,7 @@ class ModelStateService extends EventEmitter {
         // Conditionally initialize encryption if old encrypted keys are detected
         try {
             const rows = await providerSettingsRepository.getRawApiKeysByUid();
-            if (rows.some(r => looksEncrypted(r.api_key))) {
+            if (rows.some(r => encryptionService.looksEncrypted(r.api_key))) {
                 console.log('[ModelStateService] Encrypted keys detected, initializing encryption...');
                 await encryptionService.initializeKey(userId);
             } else {

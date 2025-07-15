@@ -76,6 +76,10 @@ async function initializeKey(userId) {
     }
 }
 
+function resetSessionKey() {
+    sessionKey = null;
+}
+
 /**
  * Encrypts a given text using AES-256-GCM.
  * @param {string} text The text to encrypt.
@@ -149,8 +153,23 @@ function decrypt(encryptedText) {
     }
 }
 
+function looksEncrypted(str) {
+    if (!str || typeof str !== 'string') return false;
+    // Base64 chars + optional '=' padding
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(str)) return false;
+    try {
+        const buf = Buffer.from(str, 'base64');
+        // Our AES-GCM cipher text must be at least 32 bytes (IV 16 + TAG 16)
+        return buf.length >= 32;
+    } catch {
+        return false;
+    }
+}
+
 module.exports = {
     initializeKey,
+    resetSessionKey,
     encrypt,
     decrypt,
+    looksEncrypted,
 }; 

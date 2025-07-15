@@ -1,4 +1,3 @@
-const firebaseRepository = require('./firebase.repository');
 const sqliteRepository = require('./sqlite.repository');
 
 let authService = null;
@@ -8,12 +7,7 @@ function setAuthService(service) {
 }
 
 function getBaseRepository() {
-    if (!authService) {
-        throw new Error('AuthService not set for providerSettings repository');
-    }
-    
-    const user = authService.getCurrentUser();
-    return user.isLoggedIn ? firebaseRepository : sqliteRepository;
+    return sqliteRepository;
 }
 
 const providerSettingsRepositoryAdapter = {
