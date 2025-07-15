@@ -20,7 +20,6 @@ module.exports = {
     ipcMain.on('header-state-changed', (event, state) => windowManager.handleHeaderStateChanged(state));
     ipcMain.on('header-animation-finished', (event, state) => windowManager.handleHeaderAnimationFinished(state));
     ipcMain.handle('get-header-position', () => windowManager.getHeaderPosition());
-    ipcMain.handle('move-header', (event, newX, newY) => windowManager.moveHeader(newX, newY));
     ipcMain.handle('move-header-to', (event, newX, newY) => windowManager.moveHeaderTo(newX, newY));
     ipcMain.handle('adjust-window-height', (event, targetHeight) => windowManager.adjustWindowHeight(event.sender, targetHeight));
   },

@@ -1,11 +1,27 @@
 const { screen } = require('electron');
 
+
+function getCurrentDisplay(window) {
+    if (!window || window.isDestroyed()) return screen.getPrimaryDisplay();
+
+    const windowBounds = window.getBounds();
+    const windowCenter = {
+        x: windowBounds.x + windowBounds.width / 2,
+        y: windowBounds.y + windowBounds.height / 2,
+    };
+
+    return screen.getDisplayNearestPoint(windowCenter);
+}
+
+function getDisplayById(displayId) {
+    const displays = screen.getAllDisplays();
+    return displays.find(d => d.id === displayId) || screen.getPrimaryDisplay();
+}
+
 class SmoothMovementManager {
-    constructor(windowPool, getDisplayById, getCurrentDisplay, updateLayout) {
+    constructor(windowPool, layoutManager) {
         this.windowPool = windowPool;
-        this.getDisplayById = getDisplayById;
-        this.getCurrentDisplay = getCurrentDisplay;
-        this.updateLayout = updateLayout;
+        this.layoutManager = layoutManager;
         this.stepSize = 80;
         this.animationDuration = 300;
         this.headerPosition = { x: 0, y: 0 };
@@ -39,11 +55,11 @@ class SmoothMovementManager {
         const header = this.windowPool.get('header');
         if (!this._isWindowValid(header) || !header.isVisible() || this.isAnimating) return;
 
-        const targetDisplay = this.getDisplayById(displayId);
+        const targetDisplay = getDisplayById(displayId);
         if (!targetDisplay) return;
 
         const currentBounds = header.getBounds();
-        const currentDisplay = this.getCurrentDisplay(header);
+        const currentDisplay = getCurrentDisplay(header);
 
         if (currentDisplay.id === targetDisplay.id) return;
 
@@ -60,56 +76,6 @@ class SmoothMovementManager {
         this.currentDisplayId = targetDisplay.id;
     }
 
-    hideToEdge(edge, callback, { instant = false } = {}) {
-        const header = this.windowPool.get('header');
-        if (!header || header.isDestroyed()) {
-            if (typeof callback === 'function') callback();
-            return;
-        }
-      
-        const { x, y } = header.getBounds();
-        this.lastVisiblePosition = { x, y };
-        this.hiddenPosition     = { edge };
-      
-        if (instant) {
-            header.hide();
-            if (typeof callback === 'function') callback();
-            return;
-        }
-
-        header.webContents.send('window-hide-animation');
-      
-        setTimeout(() => {
-            if (!header.isDestroyed()) header.hide();
-            if (typeof callback === 'function') callback();
-        }, 5);
-    }
-      
-    showFromEdge(callback) {
-        const header = this.windowPool.get('header');
-        if (!header || header.isDestroyed()) {
-            if (typeof callback === 'function') callback();
-            return;
-        }
-      
-        // 숨기기 전에 기억해둔 위치 복구
-        if (this.lastVisiblePosition) {
-            header.setPosition(
-                this.lastVisiblePosition.x,
-                this.lastVisiblePosition.y,
-                false   // animate: false
-            );
-        }
-      
-        header.show();
-        header.webContents.send('window-show-animation');
-      
-        // 내부 상태 초기화
-        this.hiddenPosition      = null;
-        this.lastVisiblePosition = null;
-      
-        if (typeof callback === 'function') callback();
-    }
 
     moveStep(direction) {
         const header = this.windowPool.get('header');
@@ -211,7 +177,7 @@ class SmoothMovementManager {
                 setTimeout(step, 8); // requestAnimationFrame 대신 setTimeout으로 간결하게 처리
             } else {
                 // 애니메이션 종료
-                this.updateLayout(); // 레이아웃 재정렬
+                this.layoutManager.updateLayout(); // 레이아웃 재정렬
                 if (onComplete) {
                     onComplete(); // 완료 콜백 실행
                 }
@@ -267,7 +233,7 @@ class SmoothMovementManager {
                     // Update header position to the actual final position
                     this.headerPosition = { x: Math.round(targetX), y: Math.round(targetY) };
                 }
-                this.updateLayout();
+                this.layoutManager.updateLayout();
             }
         };
         animate();
@@ -277,7 +243,7 @@ class SmoothMovementManager {
         const header = this.windowPool.get('header');
         if (!this._isWindowValid(header) || !header.isVisible() || this.isAnimating) return;
 
-        const display = this.getCurrentDisplay(header);
+        const display = getCurrentDisplay(header);
         const { width, height } = display.workAreaSize;
         const { x: workAreaX, y: workAreaY } = display.workArea;
         const currentBounds = header.getBounds();
@@ -313,7 +279,7 @@ class SmoothMovementManager {
         });
 
         this.headerPosition = { x: targetX, y: targetY };
-        this.updateLayout();
+        this.layoutManager.updateLayout();
     }
 
     destroy() {

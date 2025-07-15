@@ -38,11 +38,6 @@ let settingsHideTimer = null;
 
 
 let layoutManager = null;
-function updateLayout() {
-    if (layoutManager) {
-        layoutManager.updateLayout();
-    }
-}
 let movementManager = null;
 
 /**
@@ -92,6 +87,30 @@ const cancelHideSettingsWindow = () => {
     internalBridge.emit('window:requestVisibility', { name: 'settings', visible: true });
 };
 
+const moveWindowStep = (direction) => {
+    internalBridge.emit('window:moveStep', { direction });
+};
+
+const resizeHeaderWindow = ({ width, height }) => {
+    internalBridge.emit('window:resizeHeaderWindow', { width, height });
+};
+
+const handleHeaderAnimationFinished = (state) => {
+    internalBridge.emit('window:headerAnimationFinished', state);
+};
+
+const getHeaderPosition = () => {
+    internalBridge.emit('window:getHeaderPosition');
+};
+
+const moveHeaderTo = (newX, newY) => {
+    internalBridge.emit('window:moveHeaderTo', { newX, newY });
+};
+
+const adjustWindowHeight = (sender, targetHeight) => {
+    internalBridge.emit('window:adjustWindowHeight', { sender, targetHeight });
+};
+
 
 function setupWindowController(windowPool, layoutManager, movementManager) {
     internalBridge.on('window:requestVisibility', ({ name, visible }) => {
@@ -108,6 +127,21 @@ function setupWindowController(windowPool, layoutManager, movementManager) {
     });
     internalBridge.on('window:moveStep', ({ direction }) => {
         movementManager.moveStep(direction);
+    });
+    internalBridge.on('window:resizeHeaderWindow', ({ width, height }) => {
+        resizingHeaderWindow(layoutManager, movementManager, { width, height });
+    });
+    internalBridge.on('window:headerAnimationFinished', (state) => {
+        handlingHeaderAnimationFinished(windowPool, layoutManager, state);
+    });
+    internalBridge.on('window:getHeaderPosition', () => {
+        gettingHeaderPosition(layoutManager);
+    });
+    internalBridge.on('window:moveHeaderTo', ({ newX, newY }) => {
+        movingHeaderTo(layoutManager, newX, newY);
+    });
+    internalBridge.on('window:adjustWindowHeight', ({ sender, targetHeight }) => {
+        adjustingWindowHeight(layoutManager, sender, targetHeight);
     });
 }
 
@@ -249,8 +283,8 @@ async function handleWindowVisibilityRequest(windowPool, layoutManager, movement
         const otherWin = windowPool.get(otherName);
         const isOtherWinVisible = otherWin && !otherWin.isDestroyed() && otherWin.isVisible();
 
-        const ANIM_OFFSET_X = 100; 
-        const ANIM_OFFSET_Y = 20; 
+        const ANIM_OFFSET_X = 50; 
+        const ANIM_OFFSET_Y = 20;
 
         if (shouldBeVisible) {
             win.setOpacity(0);
@@ -305,7 +339,7 @@ async function handleWindowVisibilityRequest(windowPool, layoutManager, movement
         } else {
             const currentBounds = win.getBounds();
             fadeWindow(
-                win, 1, 0, undefined,
+                win, 1, 0, 250,
                 () => win.hide()
             );
             if (name === 'listen') {
@@ -313,7 +347,7 @@ async function handleWindowVisibilityRequest(windowPool, layoutManager, movement
                     const targetX = currentBounds.x - ANIM_OFFSET_X;
                     movementManager.animateWindow(win, targetX, currentBounds.y);
                 } else {
-                    const targetX = currentBounds.x - currentBounds.width;
+                    const targetX = currentBounds.x - ANIM_OFFSET_X;
                     movementManager.animateWindow(win, targetX, currentBounds.y);
                 }
             } else if (name === 'ask') {
@@ -353,64 +387,12 @@ const toggleContentProtection = () => {
     return newStatus;
 };
 
-const resizeHeaderWindow = ({ width, height }) => {
-    const header = windowPool.get('header');
-    if (header) {
-      console.log(`[WindowManager] Resize request: ${width}x${height}`);
-      
-      if (movementManager && movementManager.isAnimating) {
-        console.log('[WindowManager] Skipping resize during animation');
-        return { success: false, error: 'Cannot resize during animation' };
-      }
-
-      const currentBounds = header.getBounds();
-      console.log(`[WindowManager] Current bounds: ${currentBounds.width}x${currentBounds.height} at (${currentBounds.x}, ${currentBounds.y})`);
-      
-      if (currentBounds.width === width && currentBounds.height === height) {
-        console.log('[WindowManager] Already at target size, skipping resize');
-        return { success: true };
-      }
-
-      const wasResizable = header.isResizable();
-      if (!wasResizable) {
-        header.setResizable(true);
-      }
-
-      const centerX = currentBounds.x + currentBounds.width / 2;
-      const newX = Math.round(centerX - width / 2);
-
-      const display = getCurrentDisplay(header);
-      const { x: workAreaX, width: workAreaWidth } = display.workArea;
-      
-      const clampedX = Math.max(workAreaX, Math.min(workAreaX + workAreaWidth - width, newX));
-
-      header.setBounds({ x: clampedX, y: currentBounds.y, width, height });
-
-      if (!wasResizable) {
-        header.setResizable(false);
-      }
-      
-      if (updateLayout) {
-        updateLayout();
-      }
-      
-      return { success: true };
-    }
-    return { success: false, error: 'Header window not found' };
-};
-
 
 const openLoginPage = () => {
     const webUrl = process.env.pickleglass_WEB_URL || 'http://localhost:3000';
     const personalizeUrl = `${webUrl}/personalize?desktop=true`;
     shell.openExternal(personalizeUrl);
     console.log('Opening personalization page:', personalizeUrl);
-};
-
-const moveWindowStep = (direction) => {
-    if (movementManager) {
-        movementManager.moveStep(direction);
-    }
 };
 
 
@@ -617,14 +599,6 @@ function getCurrentDisplay(window) {
     return screen.getDisplayNearestPoint(windowCenter);
 }
 
-function getDisplayById(displayId) {
-    const displays = screen.getAllDisplays();
-    return displays.find(d => d.id === displayId) || screen.getPrimaryDisplay();
-}
-
-
-
-
 
 
 function createWindows() {
@@ -636,8 +610,7 @@ function createWindows() {
 
     const initialX = Math.round((screenWidth - DEFAULT_WINDOW_WIDTH) / 2);
     const initialY = workAreaY + 21;
-    movementManager = new SmoothMovementManager(windowPool, getDisplayById, getCurrentDisplay, updateLayout);
-    
+        
     const header = new BrowserWindow({
         width: DEFAULT_WINDOW_WIDTH,
         height: HEADER_HEIGHT,
@@ -687,15 +660,17 @@ function createWindows() {
         });
     }
     windowPool.set('header', header);
-    header.on('moved', updateLayout);
     layoutManager = new WindowLayoutManager(windowPool);
+    movementManager = new SmoothMovementManager(windowPool, layoutManager);
+
+    header.on('moved', () => layoutManager.updateLayout());
 
     header.webContents.once('dom-ready', () => {
         shortcutsService.initialize(windowPool);
         shortcutsService.registerShortcuts();
     });
 
-    setupIpcHandlers(movementManager);
+    setupIpcHandlers(movementManager, layoutManager);
     setupWindowController(windowPool, layoutManager, movementManager);
 
     if (currentHeaderState === 'main') {
@@ -729,13 +704,13 @@ function createWindows() {
 
     header.on('resize', () => {
         console.log('[WindowManager] Header resize event triggered');
-        updateLayout();
+        layoutManager.updateLayout();
     });
 
     return windowPool;
 }
 
-function setupIpcHandlers(movementManager) {
+function setupIpcHandlers(movementManager, layoutManager) {
     // quit-application handler moved to windowBridge.js to avoid duplication
     screen.on('display-added', (event, newDisplay) => {
         console.log('[Display] New display added:', newDisplay.id);
@@ -752,9 +727,10 @@ function setupIpcHandlers(movementManager) {
 
     screen.on('display-metrics-changed', (event, display, changedMetrics) => {
         // console.log('[Display] Display metrics changed:', display.id, changedMetrics);
-        updateLayout();
+        layoutManager.updateLayout();
     });
 }
+
 
 const handleHeaderStateChanged = (state) => {
     console.log(`[WindowManager] Header state changed to: ${state}`);
@@ -768,7 +744,17 @@ const handleHeaderStateChanged = (state) => {
     internalBridge.emit('reregister-shortcuts');
 };
 
-const handleHeaderAnimationFinished = (state) => {
+
+const resizingHeaderWindow = (layoutManager, movementManager, { width, height }) => {
+    if (movementManager.isAnimating) {
+        console.log('[WindowManager] Skipping resize during animation');
+        return { success: false, error: 'Cannot resize during animation' };
+      }
+
+    return layoutManager.resizeHeaderWindow({ width, height });
+};
+
+const handlingHeaderAnimationFinished = (windowPool, layoutManager, state) => {
     const header = windowPool.get('header');
     if (!header || header.isDestroyed()) return;
 
@@ -777,87 +763,24 @@ const handleHeaderAnimationFinished = (state) => {
         console.log('[WindowManager] Header hidden after animation.');
     } else if (state === 'visible') {
         console.log('[WindowManager] Header shown after animation.');
-        updateLayout();
+        layoutManager.updateLayout();
     }
 };
 
-const getHeaderPosition = () => {
-    const header = windowPool.get('header');
-    if (header) {
-        const [x, y] = header.getPosition();
-        return { x, y };
-    }
-    return { x: 0, y: 0 };
+const gettingHeaderPosition = (layoutManager) => {
+    return layoutManager.getHeaderPosition();
 };
 
-const moveHeader = (newX, newY) => {
-    const header = windowPool.get('header');
-    if (header) {
-        const currentY = newY !== undefined ? newY : header.getBounds().y;
-        header.setPosition(newX, currentY, false);
-        updateLayout();
-    }
+const movingHeaderTo = (layoutManager, newX, newY) => {
+    layoutManager.moveHeaderTo(newX, newY);
 };
 
-const moveHeaderTo = (newX, newY) => {
-    const header = windowPool.get('header');
-    if (header) {
-        const targetDisplay = screen.getDisplayNearestPoint({ x: newX, y: newY });
-        const { x: workAreaX, y: workAreaY, width, height } = targetDisplay.workArea;
-        const headerBounds = header.getBounds();
-
-        let clampedX = newX;
-        let clampedY = newY;
-        
-        if (newX < workAreaX) {
-            clampedX = workAreaX;
-        } else if (newX + headerBounds.width > workAreaX + width) {
-            clampedX = workAreaX + width - headerBounds.width;
-        }
-        
-        if (newY < workAreaY) {
-            clampedY = workAreaY;
-        } else if (newY + headerBounds.height > workAreaY + height) {
-            clampedY = workAreaY + height - headerBounds.height;
-        }
-
-        header.setPosition(clampedX, clampedY, false);
-        updateLayout();
-    }
-};
-
-const adjustWindowHeight = (sender, targetHeight) => {
-    const senderWindow = BrowserWindow.fromWebContents(sender);
-    if (senderWindow) {
-        const wasResizable = senderWindow.isResizable();
-        if (!wasResizable) {
-            senderWindow.setResizable(true);
-        }
-
-        const currentBounds = senderWindow.getBounds();
-        const minHeight = senderWindow.getMinimumSize()[1];
-        const maxHeight = senderWindow.getMaximumSize()[1];
-        
-        let adjustedHeight;
-        if (maxHeight === 0) {
-            adjustedHeight = Math.max(minHeight, targetHeight);
-        } else {
-            adjustedHeight = Math.max(minHeight, Math.min(maxHeight, targetHeight));
-        }
-        
-        senderWindow.setSize(currentBounds.width, adjustedHeight, false);
-
-        if (!wasResizable) {
-            senderWindow.setResizable(false);
-        }
-
-        updateLayout();
-    }
+const adjustingWindowHeight = (layoutManager, sender, targetHeight) => {
+    layoutManager.adjustWindowHeight(sender, targetHeight);
 };
 
 
 module.exports = {
-    updateLayout,
     createWindows,
     windowPool,
     toggleContentProtection,
@@ -871,7 +794,6 @@ module.exports = {
     handleHeaderStateChanged,
     handleHeaderAnimationFinished,
     getHeaderPosition,
-    moveHeader,
     moveHeaderTo,
     adjustWindowHeight,
 };

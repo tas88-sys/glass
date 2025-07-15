@@ -37,6 +37,110 @@ class WindowLayoutManager {
         });
     }
 
+    getHeaderPosition = () => {
+        const header = this.windowPool.get('header');
+        if (header) {
+            const [x, y] = header.getPosition();
+            return { x, y };
+        }
+        return { x: 0, y: 0 };
+    };
+
+    resizeHeaderWindow = ({ width, height }) => {
+        const header = this.windowPool.get('header');
+        if (header) {
+          console.log(`[WindowManager] Resize request: ${width}x${height}`);
+    
+          const currentBounds = header.getBounds();
+          console.log(`[WindowManager] Current bounds: ${currentBounds.width}x${currentBounds.height} at (${currentBounds.x}, ${currentBounds.y})`);
+          
+          if (currentBounds.width === width && currentBounds.height === height) {
+            console.log('[WindowManager] Already at target size, skipping resize');
+            return { success: true };
+          }
+    
+          const wasResizable = header.isResizable();
+          if (!wasResizable) {
+            header.setResizable(true);
+          }
+    
+          const centerX = currentBounds.x + currentBounds.width / 2;
+          const newX = Math.round(centerX - width / 2);
+    
+          const display = getCurrentDisplay(header);
+          const { x: workAreaX, width: workAreaWidth } = display.workArea;
+          
+          const clampedX = Math.max(workAreaX, Math.min(workAreaX + workAreaWidth - width, newX));
+    
+          header.setBounds({ x: clampedX, y: currentBounds.y, width, height });
+    
+          if (!wasResizable) {
+            header.setResizable(false);
+          }
+
+          this.updateLayout();
+          
+          return { success: true };
+        }
+        return { success: false, error: 'Header window not found' };
+    };
+
+    moveHeaderTo = (newX, newY) => {
+        const header = this.windowPool.get('header');
+        if (header) {
+            const targetDisplay = screen.getDisplayNearestPoint({ x: newX, y: newY });
+            const { x: workAreaX, y: workAreaY, width, height } = targetDisplay.workArea;
+            const headerBounds = header.getBounds();
+    
+            let clampedX = newX;
+            let clampedY = newY;
+            
+            if (newX < workAreaX) {
+                clampedX = workAreaX;
+            } else if (newX + headerBounds.width > workAreaX + width) {
+                clampedX = workAreaX + width - headerBounds.width;
+            }
+            
+            if (newY < workAreaY) {
+                clampedY = workAreaY;
+            } else if (newY + headerBounds.height > workAreaY + height) {
+                clampedY = workAreaY + height - headerBounds.height;
+            }
+    
+            header.setPosition(clampedX, clampedY, false);
+            this.updateLayout();
+        }
+    };
+
+    adjustWindowHeight = (sender, targetHeight) => {
+        const senderWindow = this.windowPool.get(sender);
+        if (senderWindow) {
+            const wasResizable = senderWindow.isResizable();
+            if (!wasResizable) {
+                senderWindow.setResizable(true);
+            }
+    
+            const currentBounds = senderWindow.getBounds();
+            const minHeight = senderWindow.getMinimumSize()[1];
+            const maxHeight = senderWindow.getMaximumSize()[1];
+            
+            let adjustedHeight;
+            if (maxHeight === 0) {
+                adjustedHeight = Math.max(minHeight, targetHeight);
+            } else {
+                adjustedHeight = Math.max(minHeight, Math.min(maxHeight, targetHeight));
+            }
+            
+            senderWindow.setSize(currentBounds.width, adjustedHeight, false);
+    
+            if (!wasResizable) {
+                senderWindow.setResizable(false);
+            }
+    
+            this.updateLayout();
+        }
+    };
+
     /**
      * 
      * @param {object} [visibilityOverride] - { listen: true, ask: true }
