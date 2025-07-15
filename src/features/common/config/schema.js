@@ -117,6 +117,12 @@ const LATEST_SCHEMA = {
             { name: 'accelerator', type: 'TEXT NOT NULL' },
             { name: 'created_at', type: 'INTEGER' }
         ]
+    },
+    permissions: {
+        columns: [
+            { name: 'uid', type: 'TEXT PRIMARY KEY' },
+            { name: 'keychain_completed', type: 'INTEGER DEFAULT 0' }
+        ]
     }
 };
 

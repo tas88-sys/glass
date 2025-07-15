@@ -11,6 +11,7 @@ const presetRepository = require('../features/common/repositories/preset');
 const askService = require('../features/ask/askService');
 const listenService = require('../features/listen/listenService');
 const permissionService = require('../features/common/services/permissionService');
+const encryptionService = require('../features/common/services/encryptionService');
 
 module.exports = {
   // Renderer로부터의 요청을 수신하고 서비스로 전달
@@ -20,7 +21,6 @@ module.exports = {
     ipcMain.handle('settings:get-auto-update', async () => await settingsService.getAutoUpdateSetting());
     ipcMain.handle('settings:set-auto-update', async (event, isEnabled) => await settingsService.setAutoUpdateSetting(isEnabled));  
     ipcMain.handle('settings:get-model-settings', async () => await settingsService.getModelSettings());
-    ipcMain.handle('settings:validate-and-save-key', async (e, { provider, key }) => await settingsService.validateAndSaveKey(provider, key));
     ipcMain.handle('settings:clear-api-key', async (e, { provider }) => await settingsService.clearApiKey(provider));
     ipcMain.handle('settings:set-selected-model', async (e, { type, modelId }) => await settingsService.setSelectedModel(type, modelId));    
 
@@ -37,8 +37,13 @@ module.exports = {
     ipcMain.handle('check-system-permissions', async () => await permissionService.checkSystemPermissions());
     ipcMain.handle('request-microphone-permission', async () => await permissionService.requestMicrophonePermission());
     ipcMain.handle('open-system-preferences', async (event, section) => await permissionService.openSystemPreferences(section));
-    ipcMain.handle('mark-permissions-completed', async () => await permissionService.markPermissionsAsCompleted());
-    ipcMain.handle('check-permissions-completed', async () => await permissionService.checkPermissionsCompleted());
+    ipcMain.handle('mark-keychain-completed', async () => await permissionService.markKeychainCompleted());
+    ipcMain.handle('check-keychain-completed', async () => await permissionService.checkKeychainCompleted());
+    ipcMain.handle('initialize-encryption-key', async () => {
+        const userId = authService.getCurrentUserId();
+        await encryptionService.initializeKey(userId);
+        return { success: true };
+    });
 
     // User/Auth
     ipcMain.handle('get-current-user', () => authService.getCurrentUser());
@@ -109,6 +114,7 @@ module.exports = {
     ipcMain.handle('model:get-available-models', (e, { type }) => modelStateService.getAvailableModels(type));
     ipcMain.handle('model:are-providers-configured', () => modelStateService.areProvidersConfigured());
     ipcMain.handle('model:get-provider-config', () => modelStateService.getProviderConfig());
+    ipcMain.handle('model:re-initialize-state', () => modelStateService.initialize());
 
     console.log('[FeatureBridge] Initialized with all feature handlers.');
   },

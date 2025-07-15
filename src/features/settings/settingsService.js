@@ -44,10 +44,6 @@ async function getModelSettings() {
     }
 }
 
-async function validateAndSaveKey(provider, key) {
-    return modelStateService.handleValidateKey(provider, key);
-}
-
 async function clearApiKey(provider) {
     const success = await modelStateService.handleRemoveApiKey(provider);
     return { success };
@@ -461,7 +457,6 @@ module.exports = {
     setAutoUpdateSetting,
     // Model settings facade
     getModelSettings,
-    validateAndSaveKey,
     clearApiKey,
     setSelectedModel,
     // Ollama facade

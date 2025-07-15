@@ -10,10 +10,13 @@ class DatabaseInitializer {
         
         // 최종적으로 사용될 DB 경로 (쓰기 가능한 위치)
         const userDataPath = app.getPath('userData');
+        // In both development and production mode, the database is stored in the userData directory:
+        //   macOS: ~/Library/Application Support/Glass/pickleglass.db
+        //   Windows: %APPDATA%\Glass\pickleglass.db
         this.dbPath = path.join(userDataPath, 'pickleglass.db');
         this.dataDir = userDataPath;
 
-        // 원본 DB 경로 (패키지 내 읽기 전용 위치)
+        // The original DB path (read-only location in the package)
         this.sourceDbPath = app.isPackaged
             ? path.join(process.resourcesPath, 'data', 'pickleglass.db')
             : path.join(app.getAppPath(), 'data', 'pickleglass.db');
@@ -52,7 +55,7 @@ class DatabaseInitializer {
         try {
             this.ensureDatabaseExists();
 
-            await sqliteClient.connect(this.dbPath); // DB 경로를 인자로 전달
+            sqliteClient.connect(this.dbPath); // DB 경로를 인자로 전달
             
             // This single call will now synchronize the schema and then init default data.
             await sqliteClient.initTables();

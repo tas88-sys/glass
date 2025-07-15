@@ -9,13 +9,39 @@ const userModelSelectionsRepository = require('../repositories/userModelSelectio
 
 // Import authService directly (singleton)
 const authService = require('./authService');
+const permissionService = require('./permissionService');
+
+function looksEncrypted(str) {
+    if (!str || typeof str !== 'string') return false;
+    // Base64 chars + optional '=' padding
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(str)) return false;
+    try {
+        const buf = Buffer.from(str, 'base64');
+        // Our AES-GCM cipher text must be at least 32 bytes (IV 16 + TAG 16)
+        return buf.length >= 32;
+    } catch {
+        return false;
+    }
+}
 
 class ModelStateService extends EventEmitter {
     constructor() {
         super();
         this.authService = authService;
         this.store = new Store({ name: 'pickle-glass-model-state' });
-        this.state = {};
+        
+        const initialApiKeys = Object.keys(PROVIDERS).reduce((acc, provider) => {
+            acc[provider] = null;
+            return acc;
+        }, {});
+
+        this.state = {
+            apiKeys: initialApiKeys,
+            selectedModels: {
+                llm: null,
+                stt: null
+            }
+        };
         this.hasMigrated = false;
     }
 
@@ -193,9 +219,19 @@ class ModelStateService extends EventEmitter {
 
     async _loadStateForCurrentUser() {
         const userId = this.authService.getCurrentUserId();
-        
-        // Initialize encryption service for current user
-        await encryptionService.initializeKey(userId);
+
+        // Conditionally initialize encryption if old encrypted keys are detected
+        try {
+            const rows = await providerSettingsRepository.getRawApiKeysByUid();
+            if (rows.some(r => looksEncrypted(r.api_key))) {
+                console.log('[ModelStateService] Encrypted keys detected, initializing encryption...');
+                await encryptionService.initializeKey(userId);
+            } else {
+                console.log('[ModelStateService] No encrypted keys detected, skipping encryption initialization.');
+            }
+        } catch (err) {
+            console.warn('[ModelStateService] Error while checking encrypted keys:', err.message);
+        }
         
         // Try to load from database first
         await this._loadStateFromDatabase();
@@ -262,17 +298,6 @@ class ModelStateService extends EventEmitter {
             ...this.state,
             apiKeys: { ...this.state.apiKeys }
         };
-        
-        for (const [provider, key] of Object.entries(stateToSave.apiKeys)) {
-            if (key) {
-                try {
-                    stateToSave.apiKeys[provider] = encryptionService.encrypt(key);
-                } catch (error) {
-                    console.error(`[ModelStateService] Failed to encrypt API key for ${provider}`);
-                    stateToSave.apiKeys[provider] = null;
-                }
-            }
-        }
         
         this.store.set(`users.${userId}`, stateToSave);
         console.log(`[ModelStateService] State saved to electron-store for user: ${userId}`);

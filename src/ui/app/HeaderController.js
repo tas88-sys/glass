@@ -48,7 +48,13 @@ class HeaderTransitionManager {
                 console.log('[HeaderController] ensureHeader: Header of type:', type, 'created.');
             } else if (type === 'permission') {
                 this.permissionHeader = document.createElement('permission-setup');
-                this.permissionHeader.continueCallback = () => this.transitionToMainHeader();
+                this.permissionHeader.continueCallback = async () => {
+                    if (window.api && window.api.headerController) {
+                        console.log('[HeaderController] Re-initializing model state after permission grant...');
+                        await window.api.headerController.reInitializeModelState();
+                    }
+                    this.transitionToMainHeader();
+                };
                 this.headerContainer.appendChild(this.permissionHeader);
             } else {
                 this.mainHeader = document.createElement('main-header');
@@ -121,19 +127,15 @@ class HeaderTransitionManager {
         const isConfigured = await window.api.apiKeyHeader.areProvidersConfigured();
 
         if (isConfigured) {
-            const { isLoggedIn } = userState;
-            if (isLoggedIn) {
-                const permissionResult = await this.checkPermissions();
-                if (permissionResult.success) {
-                    this.transitionToMainHeader();
-                } else {
-                    this.transitionToPermissionHeader();
-                }
-            } else {
+            // If providers are configured, always check permissions regardless of login state.
+            const permissionResult = await this.checkPermissions();
+            if (permissionResult.success) {
                 this.transitionToMainHeader();
+            } else {
+                this.transitionToPermissionHeader();
             }
         } else {
-            // 프로바이더가 설정되지 않았으면 WelcomeHeader 먼저 표시
+            // If no providers are configured, show the welcome header to prompt for setup.
             await this._resizeForWelcome();
             this.ensureHeader('welcome');
         }

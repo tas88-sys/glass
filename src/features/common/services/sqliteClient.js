@@ -40,7 +40,7 @@ class SQLiteClient {
         return `"${identifier}"`;
     }
 
-    synchronizeSchema() {
+    async synchronizeSchema() {
         console.log('[DB Sync] Starting schema synchronization...');
         const tablesInDb = this.getTablesFromDb();
 
@@ -132,8 +132,8 @@ class SQLiteClient {
         console.log(`[DB Cleanup] Successfully deleted ${result.changes} empty sessions.`);
     }
 
-    initTables() {
-        this.synchronizeSchema();
+    async initTables() {
+        await this.synchronizeSchema();
         this.initDefaultData();
     }
 
@@ -164,21 +164,6 @@ class SQLiteClient {
         }
 
         console.log('Default data initialized.');
-    }
-
-    markPermissionsAsCompleted() {
-        return this.query(
-            'INSERT OR REPLACE INTO system_settings (key, value) VALUES (?, ?)',
-            ['permissions_completed', 'true']
-        );
-    }
-
-    checkPermissionsCompleted() {
-        const result = this.query(
-            'SELECT value FROM system_settings WHERE key = ?',
-            ['permissions_completed']
-        );
-        return result.length > 0 && result[0].value === 'true';
     }
 
     close() {

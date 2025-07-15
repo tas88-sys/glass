@@ -9,6 +9,8 @@ try {
     keytar = null;
 }
 
+const permissionService = require('./permissionService');
+
 const SERVICE_NAME = 'com.pickle.glass'; // A unique identifier for the app in the keychain
 let sessionKey = null; // In-memory fallback key
 
@@ -31,6 +33,8 @@ async function initializeKey(userId) {
         throw new Error('A user ID must be provided to initialize the encryption key.');
     }
 
+    let keyRetrieved = false;
+
     if (keytar) {
         try {
             let key = await keytar.getPassword(SERVICE_NAME, userId);
@@ -41,6 +45,7 @@ async function initializeKey(userId) {
                 console.log(`[EncryptionService] New key securely stored in keychain for ${userId}.`);
             } else {
                 console.log(`[EncryptionService] Encryption key successfully retrieved from keychain for ${userId}.`);
+                keyRetrieved = true;
             }
             sessionKey = key;
         } catch (error) {
@@ -55,7 +60,17 @@ async function initializeKey(userId) {
             sessionKey = crypto.randomBytes(32).toString('hex');
         }
     }
-    
+
+    // Mark keychain completed in permissions DB if this is the first successful retrieval or storage
+    try {
+        await permissionService.markKeychainCompleted(userId);
+        if (keyRetrieved) {
+            console.log(`[EncryptionService] Keychain completion marked in DB for ${userId}.`);
+        }
+    } catch (permErr) {
+        console.error('[EncryptionService] Failed to mark keychain completion:', permErr);
+    }
+
     if (!sessionKey) {
         throw new Error('Failed to initialize encryption key.');
     }
@@ -129,6 +144,7 @@ function decrypt(encryptedText) {
     } catch (error) {
         // It's common for this to fail if the data is not encrypted (e.g., legacy data).
         // In that case, we return the original value.
+        console.error('[EncryptionService] Decryption failed:', error);
         return encryptedText;
     }
 }

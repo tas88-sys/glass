@@ -69,6 +69,7 @@ contextBridge.exposeInMainWorld('api', {
   headerController: {
     // State Management
     sendHeaderStateChanged: (state) => ipcRenderer.send('header-state-changed', state),
+    reInitializeModelState: () => ipcRenderer.invoke('model:re-initialize-state'),
     
     // Window Management
     resizeHeaderWindow: (dimensions) => ipcRenderer.invoke('resize-header-window', dimensions),
@@ -83,7 +84,9 @@ contextBridge.exposeInMainWorld('api', {
     onAuthFailed: (callback) => ipcRenderer.on('auth-failed', callback),
     removeOnAuthFailed: (callback) => ipcRenderer.removeListener('auth-failed', callback),
     onForceShowApiKeyHeader: (callback) => ipcRenderer.on('force-show-apikey-header', callback),
-    removeOnForceShowApiKeyHeader: (callback) => ipcRenderer.removeListener('force-show-apikey-header', callback)
+    removeOnForceShowApiKeyHeader: (callback) => ipcRenderer.removeListener('force-show-apikey-header', callback),
+    onForceShowPermissionHeader: (callback) => ipcRenderer.on('force-show-permission-header', callback),
+    removeOnForceShowPermissionHeader: (callback) => ipcRenderer.removeListener('force-show-permission-header', callback)
   },
 
   // src/ui/app/MainHeader.js
@@ -114,7 +117,9 @@ contextBridge.exposeInMainWorld('api', {
     checkSystemPermissions: () => ipcRenderer.invoke('check-system-permissions'),
     requestMicrophonePermission: () => ipcRenderer.invoke('request-microphone-permission'),
     openSystemPreferences: (preference) => ipcRenderer.invoke('open-system-preferences', preference),
-    markPermissionsCompleted: () => ipcRenderer.invoke('mark-permissions-completed')
+    markKeychainCompleted: () => ipcRenderer.invoke('mark-keychain-completed'),
+    checkKeychainCompleted: (uid) => ipcRenderer.invoke('check-keychain-completed', uid),
+    initializeEncryptionKey: () => ipcRenderer.invoke('initialize-encryption-key') // New for keychain
   },
 
   // src/ui/app/PickleGlassApp.js

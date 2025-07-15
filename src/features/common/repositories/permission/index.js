@@ -6,6 +6,6 @@ function getRepository() {
 }
 
 module.exports = {
-    markPermissionsAsCompleted: (...args) => getRepository().markPermissionsAsCompleted(...args),
-    checkPermissionsCompleted: (...args) => getRepository().checkPermissionsCompleted(...args),
+    markKeychainCompleted: (...args) => getRepository().markKeychainCompleted(...args),
+    checkKeychainCompleted: (...args) => getRepository().checkKeychainCompleted(...args),
 }; 

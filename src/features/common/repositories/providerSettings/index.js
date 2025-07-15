@@ -56,6 +56,13 @@ const providerSettingsRepositoryAdapter = {
         const repo = getBaseRepository();
         const uid = authService.getCurrentUserId();
         return await repo.removeAllByUid(uid);
+    },
+
+    async getRawApiKeysByUid() {
+        // This function should always target the local sqlite DB,
+        // as it's part of the local-first boot sequence.
+        const uid = authService.getCurrentUserId();
+        return await sqliteRepository.getRawApiKeysByUid(uid);
     }
 };
 

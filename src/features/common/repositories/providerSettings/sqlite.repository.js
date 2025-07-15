@@ -7,7 +7,6 @@ function getByProvider(uid, provider) {
     const result = stmt.get(uid, provider) || null;
     
     if (result && result.api_key) {
-        // Decrypt API key if it exists
         result.api_key = encryptionService.decrypt(result.api_key);
     }
     
@@ -19,7 +18,6 @@ function getAllByUid(uid) {
     const stmt = db.prepare('SELECT * FROM provider_settings WHERE uid = ? ORDER BY provider');
     const results = stmt.all(uid);
     
-    // Decrypt API keys for all results
     return results.map(result => {
         if (result.api_key) {
             result.api_key = encryptionService.decrypt(result.api_key);
@@ -30,12 +28,6 @@ function getAllByUid(uid) {
 
 function upsert(uid, provider, settings) {
     const db = sqliteClient.getDb();
-    
-    // Encrypt API key if it exists
-    const encryptedSettings = { ...settings };
-    if (encryptedSettings.api_key) {
-        encryptedSettings.api_key = encryptionService.encrypt(encryptedSettings.api_key);
-    }
     
     // Use SQLite's UPSERT syntax (INSERT ... ON CONFLICT ... DO UPDATE)
     const stmt = db.prepare(`
@@ -51,11 +43,11 @@ function upsert(uid, provider, settings) {
     const result = stmt.run(
         uid,
         provider,
-        encryptedSettings.api_key || null,
-        encryptedSettings.selected_llm_model || null,
-        encryptedSettings.selected_stt_model || null,
-        encryptedSettings.created_at || Date.now(),
-        encryptedSettings.updated_at
+        settings.api_key || null,
+        settings.selected_llm_model || null,
+        settings.selected_stt_model || null,
+        settings.created_at || Date.now(),
+        settings.updated_at
     );
     
     return { changes: result.changes };
@@ -75,10 +67,17 @@ function removeAllByUid(uid) {
     return { changes: result.changes };
 }
 
+function getRawApiKeysByUid(uid) {
+    const db = sqliteClient.getDb();
+    const stmt = db.prepare('SELECT api_key FROM provider_settings WHERE uid = ?');
+    return stmt.all(uid);
+}
+
 module.exports = {
     getByProvider,
     getAllByUid,
     upsert,
     remove,
-    removeAllByUid
+    removeAllByUid,
+    getRawApiKeysByUid
 }; 
