@@ -422,6 +422,12 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
 
     try {
         if (isMacOS) {
+
+            const sessionActive = await window.api.listenCapture.isSessionActive();
+            if (!sessionActive) {
+                throw new Error('STT sessions not initialized - please wait for initialization to complete');
+            }
+
             // On macOS, use SystemAudioDump for audio and getDisplayMedia for screen
             console.log('Starting macOS capture with SystemAudioDump...');
 
@@ -466,6 +472,12 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
 
             console.log('macOS screen capture started - audio handled by SystemAudioDump');
         } else if (isLinux) {
+
+            const sessionActive = await window.api.listenCapture.isSessionActive();
+            if (!sessionActive) {
+                throw new Error('STT sessions not initialized - please wait for initialization to complete');
+            }
+            
             // Linux - use display media for screen capture and getUserMedia for microphone
             mediaStream = await navigator.mediaDevices.getDisplayMedia({
                 video: {

@@ -290,7 +290,7 @@ contextBridge.exposeInMainWorld('api', {
     stopMacosSystemAudio: () => ipcRenderer.invoke('listen:stopMacosSystemAudio'),
     
     // Session Management
-    isSessionActive: () => ipcRenderer.invoke('is-session-active'),
+    isSessionActive: () => ipcRenderer.invoke('listen:isSessionActive'),
     
     // Listeners
     onSystemAudioData: (callback) => ipcRenderer.on('system-audio-data', callback),
