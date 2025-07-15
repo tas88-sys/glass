@@ -60,41 +60,6 @@ function updateChildWindowLayouts(animated = true) {
     movementManager.animateLayout(newLayout, animated);
 }
 
-// /**
-//  * @param {BrowserWindow} win
-//  * @param {number} from
-//  * @param {number} to
-//  * @param {number} duration
-//  * @param {Function=} onComplete 
-//  */
-// function fadeWindow(win, from, to, duration = 250, onComplete) {
-//   if (!win || win.isDestroyed()) return;
-
-//   const FPS   = 60;
-//   const steps       = Math.max(1, Math.round(duration / (1000 / FPS)));
-//   let   currentStep = 0;
-
-//   win.setOpacity(from);
-
-//   const timer = setInterval(() => {
-//     if (win.isDestroyed()) { clearInterval(timer); return; }
-
-//     currentStep += 1;
-//     const progress = currentStep / steps;
-//     const eased    = progress < 1
-//       ? 1 - Math.pow(1 - progress, 3)
-//       : 1;
-
-//     win.setOpacity(from + (to - from) * eased);
-
-//     if (currentStep >= steps) {
-//       clearInterval(timer);
-//       win.setOpacity(to);
-//       onComplete && onComplete();
-//     }
-//   }, 1000 / FPS);
-// }
-
 const showSettingsWindow = () => {
     internalBridge.emit('window:requestVisibility', { name: 'settings', visible: true });
 };
@@ -120,7 +85,11 @@ const handleHeaderAnimationFinished = (state) => {
 };
 
 const getHeaderPosition = () => {
-    internalBridge.emit('window:getHeaderPosition');
+    return new Promise((resolve) => {
+        internalBridge.emit('window:getHeaderPosition', (position) => {
+            resolve(position);
+        });
+    });
 };
 
 const moveHeaderTo = (newX, newY) => {
@@ -131,39 +100,6 @@ const adjustWindowHeight = (sender, targetHeight) => {
     internalBridge.emit('window:adjustWindowHeight', { sender, targetHeight });
 };
 
-
-// function setupWindowController(windowPool, layoutManager, movementManager) {
-//     internalBridge.on('window:requestVisibility', ({ name, visible }) => {
-//         handleWindowVisibilityRequest(windowPool, layoutManager, movementManager, name, visible);
-//     });
-//     internalBridge.on('window:requestToggleAllWindowsVisibility', ({ targetVisibility }) => {
-//         changeAllWindowsVisibility(windowPool, targetVisibility);
-//     });
-//     internalBridge.on('window:moveToDisplay', ({ displayId }) => {
-//         movementManager.moveToDisplay(displayId);
-//     });
-//     internalBridge.on('window:moveToEdge', ({ direction }) => {
-//         movementManager.moveToEdge(direction);
-//     });
-//     internalBridge.on('window:moveStep', ({ direction }) => {
-//         movementManager.moveStep(direction);
-//     });
-//     internalBridge.on('window:resizeHeaderWindow', ({ width, height }) => {
-//         resizingHeaderWindow(layoutManager, movementManager, { width, height });
-//     });
-//     internalBridge.on('window:headerAnimationFinished', (state) => {
-//         handlingHeaderAnimationFinished(windowPool, layoutManager, state);
-//     });
-//     internalBridge.on('window:getHeaderPosition', () => {
-//         gettingHeaderPosition(layoutManager);
-//     });
-//     internalBridge.on('window:moveHeaderTo', ({ newX, newY }) => {
-//         movingHeaderTo(layoutManager, newX, newY);
-//     });
-//     internalBridge.on('window:adjustWindowHeight', ({ sender, targetHeight }) => {
-//         adjustingWindowHeight(layoutManager, sender, targetHeight);
-//     });
-// }
 
 function setupWindowController(windowPool, layoutManager, movementManager) {
     internalBridge.on('window:requestVisibility', ({ name, visible }) => {
@@ -193,15 +129,31 @@ function setupWindowController(windowPool, layoutManager, movementManager) {
             });
         }
     });
+
     internalBridge.on('window:moveStep', ({ direction }) => {
         const header = windowPool.get('header');
-        if (header) {
-            const newPosition = layoutManager.calculateStepMovePosition(header, direction);
-            movementManager.animateWindowPosition(header, newPosition, {
-                onComplete: () => updateChildWindowLayouts(true)
-            });
+        if (header) { 
+            const newHeaderPosition = layoutManager.calculateStepMovePosition(header, direction);
+            if (!newHeaderPosition) return;
+    
+            const futureHeaderBounds = { ...header.getBounds(), ...newHeaderPosition };
+            const visibleWindows = {};
+            const listenWin = windowPool.get('listen');
+            const askWin = windowPool.get('ask');
+            if (listenWin && !listenWin.isDestroyed() && listenWin.isVisible()) {
+                visibleWindows.listen = true;
+            }
+            if (askWin && !askWin.isDestroyed() && askWin.isVisible()) {
+                visibleWindows.ask = true;
+            }
+
+            const newChildLayout = layoutManager.calculateFeatureWindowLayout(visibleWindows, futureHeaderBounds);
+    
+            movementManager.animateWindowPosition(header, newHeaderPosition);
+            movementManager.animateLayout(newChildLayout);
         }
     });
+
     internalBridge.on('window:resizeHeaderWindow', ({ width, height }) => {
         const header = windowPool.get('header');
         if (!header || movementManager.isAnimating) return;
@@ -228,18 +180,19 @@ function setupWindowController(windowPool, layoutManager, movementManager) {
             updateChildWindowLayouts(false);
         }
     });
-    internalBridge.on('window:getHeaderPosition', () => {
+    internalBridge.on('window:getHeaderPosition', (reply) => {
         const header = windowPool.get('header');
-        if (header) return header.getBounds();
-        return { x: 0, y: 0 };
+        if (header && !header.isDestroyed()) {
+            reply(header.getBounds());
+        } else {
+            reply({ x: 0, y: 0, width: 0, height: 0 });
+        }
     });
     internalBridge.on('window:moveHeaderTo', ({ newX, newY }) => {
         const header = windowPool.get('header');
         if (header) {
             const newPosition = layoutManager.calculateClampedPosition(header, { x: newX, y: newY });
-            movementManager.animateWindowPosition(header, newPosition, {
-                 onComplete: () => updateChildWindowLayouts(true)
-            });
+            header.setPosition(newPosition.x, newPosition.y);
         }
     });
     internalBridge.on('window:adjustWindowHeight', ({ sender, targetHeight }) => {
@@ -396,94 +349,6 @@ async function handleWindowVisibilityRequest(windowPool, layoutManager, movement
         return;
     }
 
-    // if (name === 'listen' || name === 'ask') {
-    //     const otherName = name === 'listen' ? 'ask' : 'listen';
-    //     const otherWin = windowPool.get(otherName);
-    //     const isOtherWinVisible = otherWin && !otherWin.isDestroyed() && otherWin.isVisible();
-
-    //     const ANIM_OFFSET_X = 50; 
-    //     const ANIM_OFFSET_Y = 20;
-
-    //     if (shouldBeVisible) {
-    //         win.setOpacity(0);
-
-    //         if (name === 'listen') {
-    //             if (!isOtherWinVisible) {
-    //                 const targets = layoutManager.getTargetBoundsForFeatureWindows({ listen: true, ask: false });
-    //                 if (!targets.listen) return;
-
-    //                 const startPos = { x: targets.listen.x - ANIM_OFFSET_X, y: targets.listen.y };
-    //                 win.setBounds(startPos);
-    //                 win.show();
-    //                 fadeWindow(win, 0, 1);
-    //                 movementManager.animateWindow(win, targets.listen.x, targets.listen.y);
-
-    //             } else {
-    //                 const targets = layoutManager.getTargetBoundsForFeatureWindows({ listen: true, ask: true });
-    //                 if (!targets.listen || !targets.ask) return;
-
-    //                 const startListenPos = { x: targets.listen.x - ANIM_OFFSET_X, y: targets.listen.y };
-    //                 win.setBounds(startListenPos);
-
-    //                 win.show();
-    //                 fadeWindow(win, 0, 1);
-    //                 movementManager.animateWindow(otherWin, targets.ask.x, targets.ask.y);
-    //                 movementManager.animateWindow(win, targets.listen.x, targets.listen.y);
-    //             }
-    //         } else if (name === 'ask') {
-    //             if (!isOtherWinVisible) {
-    //                 const targets = layoutManager.getTargetBoundsForFeatureWindows({ listen: false, ask: true });
-    //                 if (!targets.ask) return;
-
-    //                 const startPos = { x: targets.ask.x, y: targets.ask.y - ANIM_OFFSET_Y };
-    //                 win.setBounds(startPos);
-    //                 win.show();
-    //                 fadeWindow(win, 0, 1);
-    //                 movementManager.animateWindow(win, targets.ask.x, targets.ask.y);
-
-    //             } else {
-    //                 const targets = layoutManager.getTargetBoundsForFeatureWindows({ listen: true, ask: true });
-    //                 if (!targets.listen || !targets.ask) return;
-
-    //                 const startAskPos = { x: targets.ask.x, y: targets.ask.y - ANIM_OFFSET_Y };
-    //                 win.setBounds(startAskPos);
-
-    //                 win.show();
-    //                 fadeWindow(win, 0, 1);
-    //                 movementManager.animateWindow(otherWin, targets.listen.x, targets.listen.y);
-    //                 movementManager.animateWindow(win, targets.ask.x, targets.ask.y);
-    //             }
-    //         }
-    //     } else {
-    //         const currentBounds = win.getBounds();
-    //         fadeWindow(
-    //             win, 1, 0, 250,
-    //             () => win.hide()
-    //         );
-    //         if (name === 'listen') {
-    //             if (!isOtherWinVisible) {
-    //                 const targetX = currentBounds.x - ANIM_OFFSET_X;
-    //                 movementManager.animateWindow(win, targetX, currentBounds.y);
-    //             } else {
-    //                 const targetX = currentBounds.x - ANIM_OFFSET_X;
-    //                 movementManager.animateWindow(win, targetX, currentBounds.y);
-    //             }
-    //         } else if (name === 'ask') {
-    //             if (!isOtherWinVisible) {
-    //                 const targetY = currentBounds.y - ANIM_OFFSET_Y;
-    //                 movementManager.animateWindow(win, currentBounds.x, targetY);
-    //             } else {
-    //                 const targetAskY = currentBounds.y - ANIM_OFFSET_Y;
-    //                 movementManager.animateWindow(win, currentBounds.x, targetAskY);
-
-    //                 const targets = layoutManager.getTargetBoundsForFeatureWindows({ listen: true, ask: false });
-    //                 if (targets.listen) {
-    //                     movementManager.animateWindow(otherWin, targets.listen.x, targets.listen.y);
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
     if (name === 'listen' || name === 'ask') {
         const win = windowPool.get(name);
         const otherName = name === 'listen' ? 'ask' : 'listen';
@@ -578,7 +443,7 @@ function createFeatureWindows(header, namesToCreate) {
         hasShadow: false,
         skipTaskbar: true,
         hiddenInMissionControl: true,
-        resizable: true,
+        resizable: false,
         webPreferences: {
             nodeIntegration: false,
             contextIsolation: true,
@@ -831,11 +696,15 @@ function createWindows() {
     }
     windowPool.set('header', header);
     layoutManager = new WindowLayoutManager(windowPool);
-    // movementManager = new SmoothMovementManager(windowPool, layoutManager);
     movementManager = new SmoothMovementManager(windowPool);
 
-    // header.on('moved', () => layoutManager.updateLayout());
-    header.on('moved', () => updateChildWindowLayouts(false));
+
+    header.on('moved', () => {
+        if (movementManager.isAnimating) {
+            return;
+        }
+        updateChildWindowLayouts(false);
+    });
 
     header.webContents.once('dom-ready', () => {
         shortcutsService.initialize(windowPool);
@@ -874,35 +743,11 @@ function createWindows() {
         }
     });
 
-    // header.on('resize', () => {
-    //     console.log('[WindowManager] Header resize event triggered');
-    //     layoutManager.updateLayout();
-    // });
     header.on('resize', () => updateChildWindowLayouts(false));
 
     return windowPool;
 }
 
-// function setupIpcHandlers(movementManager, layoutManager) {
-//     // quit-application handler moved to windowBridge.js to avoid duplication
-//     screen.on('display-added', (event, newDisplay) => {
-//         console.log('[Display] New display added:', newDisplay.id);
-//     });
-
-//     screen.on('display-removed', (event, oldDisplay) => {
-//         console.log('[Display] Display removed:', oldDisplay.id);
-//         const header = windowPool.get('header');
-//         if (header && getCurrentDisplay(header).id === oldDisplay.id) {
-//             const primaryDisplay = screen.getPrimaryDisplay();
-//             movementManager.moveToDisplay(primaryDisplay.id);
-//         }
-//     });
-
-//     screen.on('display-metrics-changed', (event, display, changedMetrics) => {
-//         // console.log('[Display] Display metrics changed:', display.id, changedMetrics);
-//         layoutManager.updateLayout();
-//     });
-// }
 
 function setupIpcHandlers(windowPool, layoutManager) {
     screen.on('display-added', (event, newDisplay) => {
@@ -942,41 +787,6 @@ const handleHeaderStateChanged = (state) => {
     }
     internalBridge.emit('reregister-shortcuts');
 };
-
-
-// const resizingHeaderWindow = (layoutManager, movementManager, { width, height }) => {
-//     if (movementManager.isAnimating) {
-//         console.log('[WindowManager] Skipping resize during animation');
-//         return { success: false, error: 'Cannot resize during animation' };
-//       }
-
-//     return layoutManager.resizeHeaderWindow({ width, height });
-// };
-
-// const handlingHeaderAnimationFinished = (windowPool, layoutManager, state) => {
-//     const header = windowPool.get('header');
-//     if (!header || header.isDestroyed()) return;
-
-//     if (state === 'hidden') {
-//         header.hide();
-//         console.log('[WindowManager] Header hidden after animation.');
-//     } else if (state === 'visible') {
-//         console.log('[WindowManager] Header shown after animation.');
-//         layoutManager.updateLayout();
-//     }
-// };
-
-// const gettingHeaderPosition = (layoutManager) => {
-//     return layoutManager.getHeaderPosition();
-// };
-
-// const movingHeaderTo = (layoutManager, newX, newY) => {
-//     layoutManager.moveHeaderTo(newX, newY);
-// };
-
-// const adjustingWindowHeight = (layoutManager, sender, targetHeight) => {
-//     layoutManager.adjustWindowHeight(sender, targetHeight);
-// };
 
 
 module.exports = {
