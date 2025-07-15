@@ -426,7 +426,7 @@ class ModelStateService extends EventEmitter {
         }
     }
     
-    setFirebaseVirtualKey(virtualKey) {
+    async setFirebaseVirtualKey(virtualKey) {
         console.log(`[ModelStateService] Setting Firebase virtual key (for openai-glass).`);
         this.state.apiKeys['openai-glass'] = virtualKey;
         
@@ -448,8 +448,12 @@ class ModelStateService extends EventEmitter {
             this._autoSelectAvailableModels();
         }
         
-        this._saveState();
+        await this._saveState();
         this._logCurrentSelection();
+        
+        // Emit events to update UI
+        this.emit('state-updated', this.state);
+        this.emit('settings-updated');
     }
 
     async setApiKey(provider, key) {

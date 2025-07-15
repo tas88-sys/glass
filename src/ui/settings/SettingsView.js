@@ -956,7 +956,8 @@ export class SettingsView extends LitElement {
                 this.firebaseUser = null;
             }
             this.loadAutoUpdateSetting();
-            this.requestUpdate();
+            // Reload model settings when user state changes (Firebase login/logout)
+            this.loadInitialData();
         };
         
         this._settingsUpdatedListener = (event, settings) => {

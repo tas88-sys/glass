@@ -7,9 +7,7 @@ const ollamaService = require('../features/common/services/ollamaService');
 const modelStateService = require('../features/common/services/modelStateService');
 const shortcutsService = require('../features/shortcuts/shortcutsService');
 const presetRepository = require('../features/common/repositories/preset');
-const windowBridge = require('./windowBridge');
 const localAIManager = require('../features/common/services/localAIManager');
-
 const askService = require('../features/ask/askService');
 const listenService = require('../features/listen/listenService');
 const permissionService = require('../features/common/services/permissionService');

@@ -643,7 +643,7 @@ class WhisperService extends EventEmitter {
     async installWindows() {
         console.log('[WhisperService] Installing Whisper on Windows...');
         const version = 'v1.7.6';
-        const binaryUrl = `https://github.com/ggerganov/whisper.cpp/releases/download/${version}/whisper-cpp-${version}-win-x64.zip`;
+        const binaryUrl = `https://github.com/ggml-org/whisper.cpp/releases/download/${version}/whisper-cpp-${version}-win-x64.zip`;
         const tempFile = path.join(this.tempDir, 'whisper-binary.zip');
         
         try {
@@ -757,7 +757,7 @@ class WhisperService extends EventEmitter {
     async installLinux() {
         console.log('[WhisperService] Installing Whisper on Linux...');
         const version = 'v1.7.6';
-        const binaryUrl = `https://github.com/ggerganov/whisper.cpp/releases/download/${version}/whisper-cpp-${version}-linux-x64.tar.gz`;
+        const binaryUrl = `https://github.com/ggml-org/whisper.cpp/releases/download/${version}/whisper-cpp-${version}-linux-x64.tar.gz`;
         const tempFile = path.join(this.tempDir, 'whisper-binary.tar.gz');
         
         try {
