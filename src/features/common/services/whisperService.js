@@ -285,7 +285,7 @@ class WhisperService extends EventEmitter {
             
             // Windows에서는 .exe 확장자 필요
             const platform = this.getPlatform();
-            const whisperExecutable = platform === 'win32' ? 'whisper.exe' : 'whisper';
+            const whisperExecutable = platform === 'win32' ? 'whisper-whisper.exe' : 'whisper';
             this.whisperPath = path.join(whisperDir, 'bin', whisperExecutable);
 
             await this.ensureDirectories();
@@ -643,7 +643,7 @@ class WhisperService extends EventEmitter {
     async installWindows() {
         console.log('[WhisperService] Installing Whisper on Windows...');
         const version = 'v1.7.6';
-        const binaryUrl = `https://github.com/ggml-org/whisper.cpp/releases/download/${version}/whisper-cpp-${version}-win-x64.zip`;
+        const binaryUrl = `https://github.com/ggml-org/whisper.cpp/releases/download/${version}/whisper-bin-x64.zip`;
         const tempFile = path.join(this.tempDir, 'whisper-binary.zip');
         
         try {
@@ -721,8 +721,7 @@ class WhisperService extends EventEmitter {
                 if (item.isDirectory()) {
                     const subExecutables = await this.findWhisperExecutables(fullPath);
                     executables.push(...subExecutables);
-                } else if (item.isFile() && (item.name === 'whisper.exe' || item.name === 'main.exe')) {
-                    // main.exe도 포함 (일부 빌드에서 whisper 실행파일이 main.exe로 명명됨)
+                } else if (item.isFile() && (item.name === 'whisper-whisper.exe' || item.name === 'whisper.exe' || item.name === 'main.exe')) {
                     executables.push(fullPath);
                 }
             }
