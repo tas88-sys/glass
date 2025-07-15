@@ -96,20 +96,12 @@ const LATEST_SCHEMA = {
             { name: 'api_key', type: 'TEXT' },
             { name: 'selected_llm_model', type: 'TEXT' },
             { name: 'selected_stt_model', type: 'TEXT' },
+            { name: 'is_active_llm', type: 'INTEGER DEFAULT 0' },
+            { name: 'is_active_stt', type: 'INTEGER DEFAULT 0' },
             { name: 'created_at', type: 'INTEGER' },
             { name: 'updated_at', type: 'INTEGER' }
         ],
         constraints: ['PRIMARY KEY (uid, provider)']
-    },
-    user_model_selections: {
-        columns: [
-            { name: 'uid', type: 'TEXT PRIMARY KEY' },
-            { name: 'selected_llm_provider', type: 'TEXT' },
-            { name: 'selected_llm_model', type: 'TEXT' },
-            { name: 'selected_stt_provider', type: 'TEXT' },
-            { name: 'selected_stt_model', type: 'TEXT' },
-            { name: 'updated_at', type: 'INTEGER' }
-        ]
     },
     shortcuts: {
         columns: [

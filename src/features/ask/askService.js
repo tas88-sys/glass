@@ -3,7 +3,6 @@ const { createStreamingLLM } = require('../common/ai/factory');
 // Lazy require helper to avoid circular dependency issues
 const getWindowManager = () => require('../../window/windowManager');
 const internalBridge = require('../../bridge/internalBridge');
-const { EVENTS } = internalBridge;
 
 const getWindowPool = () => {
     try {
@@ -162,11 +161,11 @@ class AskService {
             this._broadcastState();
         } else {
             if (askWindow && askWindow.isVisible()) {
-                internalBridge.emit('request-window-visibility', { name: 'ask', visible: false });
+                internalBridge.emit('window:requestVisibility', { name: 'ask', visible: false });
                 this.state.isVisible = false;
             } else {
                 console.log('[AskService] Showing hidden Ask window');
-                internalBridge.emit('request-window-visibility', { name: 'ask', visible: true });
+                internalBridge.emit('window:requestVisibility', { name: 'ask', visible: true });
                 this.state.isVisible = true;
             }
             if (this.state.isVisible) {
@@ -192,7 +191,7 @@ class AskService {
             };
             this._broadcastState();
     
-            internalBridge.emit('request-window-visibility', { name: 'ask', visible: false });
+            internalBridge.emit('window:requestVisibility', { name: 'ask', visible: false });
     
             return { success: true };
         }
@@ -217,7 +216,16 @@ class AskService {
      * @returns {Promise<{success: boolean, response?: string, error?: string}>}
      */
     async sendMessage(userPrompt, conversationHistoryRaw=[]) {
-        // ensureAskWindowVisible();
+        internalBridge.emit('window:requestVisibility', { name: 'ask', visible: true });
+        this.state = {
+            ...this.state,
+            isLoading: true,
+            isStreaming: false,
+            currentQuestion: userPrompt,
+            currentResponse: '',
+            showTextInput: false,
+        };
+        this._broadcastState();
 
         if (this.abortController) {
             this.abortController.abort('New request received.');
@@ -226,26 +234,10 @@ class AskService {
         const { signal } = this.abortController;
 
 
-        // if (!userPrompt || userPrompt.trim().length === 0) {
-        //     console.warn('[AskService] Cannot process empty message');
-        //     return { success: false, error: 'Empty message' };
-        // }
-        
-
         let sessionId;
 
         try {
             console.log(`[AskService] 🤖 Processing message: ${userPrompt.substring(0, 50)}...`);
-            
-            this.state = {
-                ...this.state,
-                isLoading: true,
-                isStreaming: false,
-                currentQuestion: userPrompt,
-                currentResponse: '',
-                showTextInput: false,
-            };
-            this._broadcastState();
 
             sessionId = await sessionRepository.getOrCreateActive('ask');
             await askRepository.addAiMessage({ sessionId, role: 'user', content: userPrompt.trim() });

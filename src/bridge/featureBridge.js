@@ -1,5 +1,5 @@
 // src/bridge/featureBridge.js
-const { ipcMain, app } = require('electron');
+const { ipcMain, app, BrowserWindow } = require('electron');
 const settingsService = require('../features/settings/settingsService');
 const authService = require('../features/common/services/authService');
 const whisperService = require('../features/common/services/whisperService');
@@ -7,7 +7,7 @@ const ollamaService = require('../features/common/services/ollamaService');
 const modelStateService = require('../features/common/services/modelStateService');
 const shortcutsService = require('../features/shortcuts/shortcutsService');
 const presetRepository = require('../features/common/repositories/preset');
-
+const localAIManager = require('../features/common/services/localAIManager');
 const askService = require('../features/ask/askService');
 const listenService = require('../features/listen/listenService');
 const permissionService = require('../features/common/services/permissionService');
@@ -29,9 +29,12 @@ module.exports = {
     ipcMain.handle('settings:shutdown-ollama', async () => await settingsService.shutdownOllama());
 
     // Shortcuts
-    ipcMain.handle('get-current-shortcuts', async () => await shortcutsService.loadKeybinds());
-    ipcMain.handle('get-default-shortcuts', async () => await shortcutsService.handleRestoreDefaults());
-    ipcMain.handle('save-shortcuts', async (event, newKeybinds) => await shortcutsService.handleSaveShortcuts(newKeybinds));
+    ipcMain.handle('settings:getCurrentShortcuts', async () => await shortcutsService.loadKeybinds());
+    ipcMain.handle('shortcut:getDefaultShortcuts', async () => await shortcutsService.handleRestoreDefaults());
+    ipcMain.handle('shortcut:closeShortcutSettingsWindow', async () => await shortcutsService.closeShortcutSettingsWindow());
+    ipcMain.handle('shortcut:openShortcutSettingsWindow', async () => await shortcutsService.openShortcutSettingsWindow());
+    ipcMain.handle('shortcut:saveShortcuts', async (event, newKeybinds) => await shortcutsService.handleSaveShortcuts(newKeybinds));
+    ipcMain.handle('shortcut:toggleAllWindowsVisibility', async () => await shortcutsService.toggleAllWindowsVisibility());
 
     // Permissions
     ipcMain.handle('check-system-permissions', async () => await permissionService.checkSystemPermissions());
@@ -115,6 +118,115 @@ module.exports = {
     ipcMain.handle('model:are-providers-configured', () => modelStateService.areProvidersConfigured());
     ipcMain.handle('model:get-provider-config', () => modelStateService.getProviderConfig());
     ipcMain.handle('model:re-initialize-state', () => modelStateService.initialize());
+
+    // LocalAIManager 이벤트를 모든 윈도우에 브로드캐스트
+    localAIManager.on('install-progress', (service, data) => {
+      const event = { service, ...data };
+      BrowserWindow.getAllWindows().forEach(win => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('localai:install-progress', event);
+        }
+      });
+    });
+    localAIManager.on('installation-complete', (service) => {
+      BrowserWindow.getAllWindows().forEach(win => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('localai:installation-complete', { service });
+        }
+      });
+    });
+    localAIManager.on('error', (error) => {
+      BrowserWindow.getAllWindows().forEach(win => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('localai:error-occurred', error);
+        }
+      });
+    });
+    // Handle error-occurred events from LocalAIManager's error handling
+    localAIManager.on('error-occurred', (error) => {
+      BrowserWindow.getAllWindows().forEach(win => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('localai:error-occurred', error);
+        }
+      });
+    });
+    localAIManager.on('model-ready', (data) => {
+      BrowserWindow.getAllWindows().forEach(win => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('localai:model-ready', data);
+        }
+      });
+    });
+    localAIManager.on('state-changed', (service, state) => {
+      const event = { service, ...state };
+      BrowserWindow.getAllWindows().forEach(win => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('localai:service-status-changed', event);
+        }
+      });
+    });
+
+    // 주기적 상태 동기화 시작
+    localAIManager.startPeriodicSync();
+
+    // ModelStateService 이벤트를 모든 윈도우에 브로드캐스트
+    modelStateService.on('state-updated', (state) => {
+      BrowserWindow.getAllWindows().forEach(win => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('model-state:updated', state);
+        }
+      });
+    });
+    modelStateService.on('settings-updated', () => {
+      BrowserWindow.getAllWindows().forEach(win => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('settings-updated');
+        }
+      });
+    });
+    modelStateService.on('force-show-apikey-header', () => {
+      BrowserWindow.getAllWindows().forEach(win => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('force-show-apikey-header');
+        }
+      });
+    });
+
+    // LocalAI 통합 핸들러 추가
+    ipcMain.handle('localai:install', async (event, { service, options }) => {
+      return await localAIManager.installService(service, options);
+    });
+    ipcMain.handle('localai:get-status', async (event, service) => {
+      return await localAIManager.getServiceStatus(service);
+    });
+    ipcMain.handle('localai:start-service', async (event, service) => {
+      return await localAIManager.startService(service);
+    });
+    ipcMain.handle('localai:stop-service', async (event, service) => {
+      return await localAIManager.stopService(service);
+    });
+    ipcMain.handle('localai:install-model', async (event, { service, modelId, options }) => {
+      return await localAIManager.installModel(service, modelId, options);
+    });
+    ipcMain.handle('localai:get-installed-models', async (event, service) => {
+      return await localAIManager.getInstalledModels(service);
+    });
+    ipcMain.handle('localai:run-diagnostics', async (event, service) => {
+      return await localAIManager.runDiagnostics(service);
+    });
+    ipcMain.handle('localai:repair-service', async (event, service) => {
+      return await localAIManager.repairService(service);
+    });
+    
+    // 에러 처리 핸들러
+    ipcMain.handle('localai:handle-error', async (event, { service, errorType, details }) => {
+      return await localAIManager.handleError(service, errorType, details);
+    });
+    
+    // 전체 상태 조회
+    ipcMain.handle('localai:get-all-states', async (event) => {
+      return await localAIManager.getAllServiceStates();
+    });
 
     console.log('[FeatureBridge] Initialized with all feature handlers.');
   },

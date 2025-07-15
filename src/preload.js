@@ -31,11 +31,20 @@ contextBridge.exposeInMainWorld('api', {
   apiKeyHeader: {
     // Model & Provider Management
     getProviderConfig: () => ipcRenderer.invoke('model:get-provider-config'),
-    getOllamaStatus: () => ipcRenderer.invoke('ollama:get-status'),
+    // LocalAI 통합 API
+    getLocalAIStatus: (service) => ipcRenderer.invoke('localai:get-status', service),
+    installLocalAI: (service, options) => ipcRenderer.invoke('localai:install', { service, options }),
+    startLocalAIService: (service) => ipcRenderer.invoke('localai:start-service', service),
+    stopLocalAIService: (service) => ipcRenderer.invoke('localai:stop-service', service),
+    installLocalAIModel: (service, modelId, options) => ipcRenderer.invoke('localai:install-model', { service, modelId, options }),
+    getInstalledModels: (service) => ipcRenderer.invoke('localai:get-installed-models', service),
+    
+    // Legacy support (호환성 위해 유지)
+    getOllamaStatus: () => ipcRenderer.invoke('localai:get-status', 'ollama'),
     getModelSuggestions: () => ipcRenderer.invoke('ollama:get-model-suggestions'),
     ensureOllamaReady: () => ipcRenderer.invoke('ollama:ensure-ready'),
-    installOllama: () => ipcRenderer.invoke('ollama:install'),
-    startOllamaService: () => ipcRenderer.invoke('ollama:start-service'),
+    installOllama: () => ipcRenderer.invoke('localai:install', { service: 'ollama' }),
+    startOllamaService: () => ipcRenderer.invoke('localai:start-service', 'ollama'),
     pullOllamaModel: (modelName) => ipcRenderer.invoke('ollama:pull-model', modelName),
     downloadWhisperModel: (modelId) => ipcRenderer.invoke('whisper:download-model', modelId),
     validateKey: (data) => ipcRenderer.invoke('model:validate-key', data),
@@ -47,21 +56,25 @@ contextBridge.exposeInMainWorld('api', {
     moveHeaderTo: (x, y) => ipcRenderer.invoke('move-header-to', x, y),
     
     // Listeners
-    onOllamaInstallProgress: (callback) => ipcRenderer.on('ollama:install-progress', callback),
-    removeOnOllamaInstallProgress: (callback) => ipcRenderer.removeListener('ollama:install-progress', callback),
-    onceOllamaInstallComplete: (callback) => ipcRenderer.once('ollama:install-complete', callback),
-    removeOnceOllamaInstallComplete: (callback) => ipcRenderer.removeListener('ollama:install-complete', callback),
-    onOllamaPullProgress: (callback) => ipcRenderer.on('ollama:pull-progress', callback),
-    removeOnOllamaPullProgress: (callback) => ipcRenderer.removeListener('ollama:pull-progress', callback),
-    onWhisperDownloadProgress: (callback) => ipcRenderer.on('whisper:download-progress', callback),
-    removeOnWhisperDownloadProgress: (callback) => ipcRenderer.removeListener('whisper:download-progress', callback),
+    // LocalAI 통합 이벤트 리스너
+    onLocalAIProgress: (callback) => ipcRenderer.on('localai:install-progress', callback),
+    removeOnLocalAIProgress: (callback) => ipcRenderer.removeListener('localai:install-progress', callback),
+    onLocalAIComplete: (callback) => ipcRenderer.on('localai:installation-complete', callback),
+    removeOnLocalAIComplete: (callback) => ipcRenderer.removeListener('localai:installation-complete', callback),
+    onLocalAIError: (callback) => ipcRenderer.on('localai:error-notification', callback),
+    removeOnLocalAIError: (callback) => ipcRenderer.removeListener('localai:error-notification', callback),
+    onLocalAIModelReady: (callback) => ipcRenderer.on('localai:model-ready', callback),
+    removeOnLocalAIModelReady: (callback) => ipcRenderer.removeListener('localai:model-ready', callback),
+    
 
     // Remove all listeners (for cleanup)
     removeAllListeners: () => {
-      ipcRenderer.removeAllListeners('whisper:download-progress');
-      ipcRenderer.removeAllListeners('ollama:install-progress');
-      ipcRenderer.removeAllListeners('ollama:pull-progress');
-      ipcRenderer.removeAllListeners('ollama:install-complete');
+      // LocalAI 통합 이벤트
+      ipcRenderer.removeAllListeners('localai:install-progress');
+      ipcRenderer.removeAllListeners('localai:installation-complete');
+      ipcRenderer.removeAllListeners('localai:error-notification');
+      ipcRenderer.removeAllListeners('localai:model-ready');
+      ipcRenderer.removeAllListeners('localai:service-status-changed');
     }
   },
 
@@ -98,11 +111,14 @@ contextBridge.exposeInMainWorld('api', {
 
     // Settings Window Management
     cancelHideSettingsWindow: () => ipcRenderer.send('cancel-hide-settings-window'),
-    showSettingsWindow: (bounds) => ipcRenderer.send('show-settings-window', bounds),
+    showSettingsWindow: () => ipcRenderer.send('show-settings-window'),
     hideSettingsWindow: () => ipcRenderer.send('hide-settings-window'),
     
     // Generic invoke (for dynamic channel names)
-    invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
+    // invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
+    sendListenButtonClick: (listenButtonText) => ipcRenderer.invoke('listen:changeSession', listenButtonText),
+    sendAskButtonClick: () => ipcRenderer.invoke('ask:toggleAskButton'),
+    sendToggleAllWindowsVisibility: () => ipcRenderer.invoke('shortcut:toggleAllWindowsVisibility'),
     
     // Listeners
     onListenChangeSessionResult: (callback) => ipcRenderer.on('listen:changeSessionResult', callback),
@@ -218,8 +234,8 @@ contextBridge.exposeInMainWorld('api', {
     setAutoUpdate: (isEnabled) => ipcRenderer.invoke('settings:set-auto-update', isEnabled),
     getContentProtectionStatus: () => ipcRenderer.invoke('get-content-protection-status'),
     toggleContentProtection: () => ipcRenderer.invoke('toggle-content-protection'),
-    getCurrentShortcuts: () => ipcRenderer.invoke('get-current-shortcuts'),
-    openShortcutEditor: () => ipcRenderer.invoke('open-shortcut-editor'),
+    getCurrentShortcuts: () => ipcRenderer.invoke('settings:getCurrentShortcuts'),
+    openShortcutSettingsWindow: () => ipcRenderer.invoke('shortcut:openShortcutSettingsWindow'),
     
     // Window Management
     moveWindowStep: (direction) => ipcRenderer.invoke('move-window-step', direction),
@@ -241,29 +257,27 @@ contextBridge.exposeInMainWorld('api', {
     removeOnPresetsUpdated: (callback) => ipcRenderer.removeListener('presets-updated', callback),
     onShortcutsUpdated: (callback) => ipcRenderer.on('shortcuts-updated', callback),
     removeOnShortcutsUpdated: (callback) => ipcRenderer.removeListener('shortcuts-updated', callback),
-    onWhisperDownloadProgress: (callback) => ipcRenderer.on('whisper:download-progress', callback),
-    removeOnWhisperDownloadProgress: (callback) => ipcRenderer.removeListener('whisper:download-progress', callback),
-    onOllamaPullProgress: (callback) => ipcRenderer.on('ollama:pull-progress', callback),
-    removeOnOllamaPullProgress: (callback) => ipcRenderer.removeListener('ollama:pull-progress', callback)
+    // 통합 LocalAI 이벤트 사용
+    onLocalAIInstallProgress: (callback) => ipcRenderer.on('localai:install-progress', callback),
+    removeOnLocalAIInstallProgress: (callback) => ipcRenderer.removeListener('localai:install-progress', callback),
+    onLocalAIInstallationComplete: (callback) => ipcRenderer.on('localai:installation-complete', callback),
+    removeOnLocalAIInstallationComplete: (callback) => ipcRenderer.removeListener('localai:installation-complete', callback)
   },
 
   // src/ui/settings/ShortCutSettingsView.js
   shortcutSettingsView: {
     // Shortcut Management
-    saveShortcuts: (shortcuts) => ipcRenderer.invoke('save-shortcuts', shortcuts),
-    getDefaultShortcuts: () => ipcRenderer.invoke('get-default-shortcuts'),
-    closeShortcutEditor: () => ipcRenderer.send('close-shortcut-editor'),
+    saveShortcuts: (shortcuts) => ipcRenderer.invoke('shortcut:saveShortcuts', shortcuts),
+    getDefaultShortcuts: () => ipcRenderer.invoke('shortcut:getDefaultShortcuts'),
+    closeShortcutSettingsWindow: () => ipcRenderer.invoke('shortcut:closeShortcutSettingsWindow'),
     
     // Listeners
-    onLoadShortcuts: (callback) => ipcRenderer.on('load-shortcuts', callback),
-    removeOnLoadShortcuts: (callback) => ipcRenderer.removeListener('load-shortcuts', callback)
+    onLoadShortcuts: (callback) => ipcRenderer.on('shortcut:loadShortcuts', callback),
+    removeOnLoadShortcuts: (callback) => ipcRenderer.removeListener('shortcut:loadShortcuts', callback)
   },
 
   // src/ui/app/content.html inline scripts
   content: {
-    // Animation Management
-    // sendAnimationFinished: () => ipcRenderer.send('animation-finished'),
-    
     // Listeners
     onSettingsWindowHideAnimation: (callback) => ipcRenderer.on('settings-window-hide-animation', callback),
     removeOnSettingsWindowHideAnimation: (callback) => ipcRenderer.removeListener('settings-window-hide-animation', callback),    

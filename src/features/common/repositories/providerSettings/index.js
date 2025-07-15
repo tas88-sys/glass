@@ -57,6 +57,24 @@ const providerSettingsRepositoryAdapter = {
         // as it's part of the local-first boot sequence.
         const uid = authService.getCurrentUserId();
         return await sqliteRepository.getRawApiKeysByUid(uid);
+    },
+    
+    async getActiveProvider(type) {
+        const repo = getBaseRepository();
+        const uid = authService.getCurrentUserId();
+        return await repo.getActiveProvider(uid, type);
+    },
+    
+    async setActiveProvider(provider, type) {
+        const repo = getBaseRepository();
+        const uid = authService.getCurrentUserId();
+        return await repo.setActiveProvider(uid, provider, type);
+    },
+    
+    async getActiveSettings() {
+        const repo = getBaseRepository();
+        const uid = authService.getCurrentUserId();
+        return await repo.getActiveSettings(uid);
     }
 };
 

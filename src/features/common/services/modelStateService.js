@@ -1,11 +1,9 @@
 const Store = require('electron-store');
 const fetch = require('node-fetch');
 const { EventEmitter } = require('events');
-const { BrowserWindow } = require('electron');
 const { PROVIDERS, getProviderClass } = require('../ai/factory');
 const encryptionService = require('./encryptionService');
 const providerSettingsRepository = require('../repositories/providerSettings');
-const userModelSelectionsRepository = require('../repositories/userModelSelections');
 const authService = require('./authService');
 
 class ModelStateService extends EventEmitter {
@@ -29,23 +27,52 @@ class ModelStateService extends EventEmitter {
         this.hasMigrated = false;
     }
 
-    // 모든 윈도우에 이벤트 브로드캐스트
-    _broadcastToAllWindows(eventName, data = null) {
-        BrowserWindow.getAllWindows().forEach(win => {
-            if (win && !win.isDestroyed()) {
-                if (data !== null) {
-                    win.webContents.send(eventName, data);
-                } else {
-                    win.webContents.send(eventName);
-                }
-            }
-        });
-    }
 
     async initialize() {
         console.log('[ModelStateService] Initializing...');
         await this._loadStateForCurrentUser();
+        
+        // LocalAI 상태 변경 이벤트 구독
+        this.setupLocalAIStateSync();
+        
         console.log('[ModelStateService] Initialization complete');
+    }
+
+    setupLocalAIStateSync() {
+        // LocalAI 서비스 상태 변경 감지
+        // LocalAIManager에서 직접 이벤트를 받아 처리
+        const localAIManager = require('./localAIManager');
+        localAIManager.on('state-changed', (service, status) => {
+            this.handleLocalAIStateChange(service, status);
+        });
+    }
+
+    handleLocalAIStateChange(service, state) {
+        console.log(`[ModelStateService] LocalAI state changed: ${service}`, state);
+        
+        // Ollama의 경우 로드된 모델 정보도 처리
+        if (service === 'ollama' && state.loadedModels) {
+            console.log(`[ModelStateService] Ollama loaded models: ${state.loadedModels.join(', ')}`);
+            
+            // 선택된 모델이 메모리에서 언로드되었는지 확인
+            const selectedLLM = this.state.selectedModels.llm;
+            if (selectedLLM && this.getProviderForModel('llm', selectedLLM) === 'ollama') {
+                if (!state.loadedModels.includes(selectedLLM)) {
+                    console.log(`[ModelStateService] Selected model ${selectedLLM} is not loaded in memory`);
+                    // 필요시 자동 워밍업 트리거
+                    this._triggerAutoWarmUp();
+                }
+            }
+        }
+        
+        // 자동 선택 재실행 (필요시)
+        if (!state.installed || !state.running) {
+            const types = service === 'ollama' ? ['llm'] : service === 'whisper' ? ['stt'] : [];
+            this._autoSelectAvailableModels(types);
+        }
+        
+        // UI 업데이트 알림
+        this.emit('state-updated', this.state);
     }
 
     _logCurrentSelection() {
@@ -96,6 +123,66 @@ class ModelStateService extends EventEmitter {
         });
     }
 
+    async _migrateUserModelSelections() {
+        console.log('[ModelStateService] Checking for user_model_selections migration...');
+        const userId = this.authService.getCurrentUserId();
+        
+        try {
+            // Check if user_model_selections table exists
+            const sqliteClient = require('./sqliteClient');
+            const db = sqliteClient.getDb();
+            
+            const tableExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='user_model_selections'").get();
+            
+            if (!tableExists) {
+                console.log('[ModelStateService] user_model_selections table does not exist, skipping migration');
+                return;
+            }
+            
+            // Get existing user_model_selections data
+            const selections = db.prepare('SELECT * FROM user_model_selections WHERE uid = ?').get(userId);
+            
+            if (!selections) {
+                console.log('[ModelStateService] No user_model_selections data to migrate');
+                return;
+            }
+            
+            console.log('[ModelStateService] Found user_model_selections data, migrating to provider_settings...');
+            
+            // Migrate LLM selection
+            if (selections.llm_model) {
+                const llmProvider = this.getProviderForModel('llm', selections.llm_model);
+                if (llmProvider) {
+                    await providerSettingsRepository.upsert(llmProvider, {
+                        selected_llm_model: selections.llm_model
+                    });
+                    await providerSettingsRepository.setActiveProvider(llmProvider, 'llm');
+                    console.log(`[ModelStateService] Migrated LLM: ${selections.llm_model} (provider: ${llmProvider})`);
+                }
+            }
+            
+            // Migrate STT selection
+            if (selections.stt_model) {
+                const sttProvider = this.getProviderForModel('stt', selections.stt_model);
+                if (sttProvider) {
+                    await providerSettingsRepository.upsert(sttProvider, {
+                        selected_stt_model: selections.stt_model
+                    });
+                    await providerSettingsRepository.setActiveProvider(sttProvider, 'stt');
+                    console.log(`[ModelStateService] Migrated STT: ${selections.stt_model} (provider: ${sttProvider})`);
+                }
+            }
+            
+            // Delete the migrated data from user_model_selections
+            db.prepare('DELETE FROM user_model_selections WHERE uid = ?').run(userId);
+            console.log('[ModelStateService] user_model_selections migration completed');
+            
+        } catch (error) {
+            console.error('[ModelStateService] user_model_selections migration failed:', error);
+            // Don't throw - continue with normal operation
+        }
+    }
+
     async _migrateFromElectronStore() {
         console.log('[ModelStateService] Starting migration from electron-store to database...');
         const userId = this.authService.getCurrentUserId();
@@ -125,17 +212,26 @@ class ModelStateService extends EventEmitter {
             }
             
             // Migrate global model selections
-            if (selectedModels.llm || selectedModels.stt) {
-                const llmProvider = selectedModels.llm ? this.getProviderForModel('llm', selectedModels.llm) : null;
-                const sttProvider = selectedModels.stt ? this.getProviderForModel('stt', selectedModels.stt) : null;
-                
-                await userModelSelectionsRepository.upsert({
-                    selected_llm_provider: llmProvider,
-                    selected_llm_model: selectedModels.llm,
-                    selected_stt_provider: sttProvider,
-                    selected_stt_model: selectedModels.stt
-                });
-                console.log('[ModelStateService] Migrated global model selections');
+            if (selectedModels.llm) {
+                const llmProvider = this.getProviderForModel('llm', selectedModels.llm);
+                if (llmProvider) {
+                    await providerSettingsRepository.upsert(llmProvider, {
+                        selected_llm_model: selectedModels.llm
+                    });
+                    await providerSettingsRepository.setActiveProvider(llmProvider, 'llm');
+                    console.log(`[ModelStateService] Migrated LLM model selection: ${selectedModels.llm}`);
+                }
+            }
+            
+            if (selectedModels.stt) {
+                const sttProvider = this.getProviderForModel('stt', selectedModels.stt);
+                if (sttProvider) {
+                    await providerSettingsRepository.upsert(sttProvider, {
+                        selected_stt_model: selectedModels.stt
+                    });
+                    await providerSettingsRepository.setActiveProvider(sttProvider, 'stt');
+                    console.log(`[ModelStateService] Migrated STT model selection: ${selectedModels.stt}`);
+                }
             }
             
             // Mark migration as complete by removing legacy data
@@ -169,11 +265,11 @@ class ModelStateService extends EventEmitter {
                 }
             }
             
-            // Load global model selections
-            const modelSelections = await userModelSelectionsRepository.get();
+            // Load active model selections from provider settings
+            const activeSettings = await providerSettingsRepository.getActiveSettings();
             const selectedModels = {
-                llm: modelSelections?.selected_llm_model || null,
-                stt: modelSelections?.selected_stt_model || null
+                llm: activeSettings.llm?.selected_llm_model || null,
+                stt: activeSettings.stt?.selected_stt_model || null
             };
             
             this.state = {
@@ -217,6 +313,9 @@ class ModelStateService extends EventEmitter {
             console.warn('[ModelStateService] Error while checking encrypted keys:', err.message);
         }
         
+        // Check for user_model_selections migration first
+        await this._migrateUserModelSelections();
+        
         // Try to load from database first
         await this._loadStateFromDatabase();
         
@@ -252,17 +351,38 @@ class ModelStateService extends EventEmitter {
                 }
             }
             
-            // Save global model selections
-            const llmProvider = this.state.selectedModels.llm ? this.getProviderForModel('llm', this.state.selectedModels.llm) : null;
-            const sttProvider = this.state.selectedModels.stt ? this.getProviderForModel('stt', this.state.selectedModels.stt) : null;
+            // Save model selections and update active providers
+            const llmModel = this.state.selectedModels.llm;
+            const sttModel = this.state.selectedModels.stt;
             
-            if (llmProvider || sttProvider || this.state.selectedModels.llm || this.state.selectedModels.stt) {
-                await userModelSelectionsRepository.upsert({
-                    selected_llm_provider: llmProvider,
-                    selected_llm_model: this.state.selectedModels.llm,
-                    selected_stt_provider: sttProvider,
-                    selected_stt_model: this.state.selectedModels.stt
-                });
+            if (llmModel) {
+                const llmProvider = this.getProviderForModel('llm', llmModel);
+                if (llmProvider) {
+                    // Update the provider's selected model
+                    await providerSettingsRepository.upsert(llmProvider, {
+                        selected_llm_model: llmModel
+                    });
+                    // Set as active LLM provider
+                    await providerSettingsRepository.setActiveProvider(llmProvider, 'llm');
+                }
+            } else {
+                // Deactivate all LLM providers if no model selected
+                await providerSettingsRepository.setActiveProvider(null, 'llm');
+            }
+            
+            if (sttModel) {
+                const sttProvider = this.getProviderForModel('stt', sttModel);
+                if (sttProvider) {
+                    // Update the provider's selected model
+                    await providerSettingsRepository.upsert(sttProvider, {
+                        selected_stt_model: sttModel
+                    });
+                    // Set as active STT provider
+                    await providerSettingsRepository.setActiveProvider(sttProvider, 'stt');
+                }
+            } else {
+                // Deactivate all STT providers if no model selected
+                await providerSettingsRepository.setActiveProvider(null, 'stt');
             }
             
             console.log(`[ModelStateService] State saved to database for user: ${userId}`);
@@ -315,7 +435,7 @@ class ModelStateService extends EventEmitter {
         }
     }
     
-    setFirebaseVirtualKey(virtualKey) {
+    async setFirebaseVirtualKey(virtualKey) {
         console.log(`[ModelStateService] Setting Firebase virtual key (for openai-glass).`);
         this.state.apiKeys['openai-glass'] = virtualKey;
         
@@ -337,8 +457,12 @@ class ModelStateService extends EventEmitter {
             this._autoSelectAvailableModels();
         }
         
-        this._saveState();
+        await this._saveState();
         this._logCurrentSelection();
+        
+        // Emit events to update UI
+        this.emit('state-updated', this.state);
+        this.emit('settings-updated');
     }
 
     async setApiKey(provider, key) {
@@ -353,8 +477,8 @@ class ModelStateService extends EventEmitter {
         
         this._autoSelectAvailableModels([]);
         
-        this._broadcastToAllWindows('model-state:updated', this.state);
-        this._broadcastToAllWindows('settings-updated');
+        this.emit('state-updated', this.state);
+        this.emit('settings-updated');
     }
 
     getApiKey(provider) {
@@ -372,8 +496,8 @@ class ModelStateService extends EventEmitter {
             await providerSettingsRepository.remove(provider);
             await this._saveState();
             this._autoSelectAvailableModels([]);
-            this._broadcastToAllWindows('model-state:updated', this.state);
-            this._broadcastToAllWindows('settings-updated');
+            this.emit('state-updated', this.state);
+            this.emit('settings-updated');
             return true;
         }
         return false;
@@ -515,12 +639,21 @@ class ModelStateService extends EventEmitter {
         if (type === 'llm' && modelId && modelId !== previousModelId) {
             const provider = this.getProviderForModel('llm', modelId);
             if (provider === 'ollama') {
-                this._autoWarmUpOllamaModel(modelId, previousModelId);
+                const localAIManager = require('./localAIManager');
+                if (localAIManager) {
+                    console.log('[ModelStateService] Triggering Ollama model warm-up via LocalAIManager');
+                    localAIManager.warmUpModel(modelId).catch(error => {
+                        console.warn('[ModelStateService] Model warm-up failed:', error);
+                    });
+                } else {
+                    // fallback to old method
+                    this._autoWarmUpOllamaModel(modelId, previousModelId);
+                }
             }
         }
         
-        this._broadcastToAllWindows('model-state:updated', this.state);
-        this._broadcastToAllWindows('settings-updated');
+        this.emit('state-updated', this.state);
+        this.emit('settings-updated');
         return true;
     }
 
@@ -587,7 +720,7 @@ class ModelStateService extends EventEmitter {
         if (success) {
             const selectedModels = this.getSelectedModels();
             if (!selectedModels.llm || !selectedModels.stt) {
-                this._broadcastToAllWindows('force-show-apikey-header');
+                this.emit('force-show-apikey-header');
             }
         }
         return success;

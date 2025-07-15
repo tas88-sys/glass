@@ -179,7 +179,7 @@ export class ShortcutSettingsView extends LitElement {
 
     handleClose() {
         if (!window.api) return;
-        window.api.shortcutSettingsView.closeShortcutEditor();
+        window.api.shortcutSettingsView.closeShortcutSettingsWindow();
     }
 
     async handleResetToDefault() {
