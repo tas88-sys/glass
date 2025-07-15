@@ -6,8 +6,7 @@ const { getStoredApiKey, getStoredProvider, windowPool } = require('../../window
 
 // New imports for common services
 const modelStateService = require('../common/services/modelStateService');
-const ollamaService = require('../common/services/ollamaService');
-const whisperService = require('../common/services/whisperService');
+const localAIManager = require('../common/services/localAIManager');
 
 const store = new Store({
     name: 'pickle-glass-settings',
@@ -58,17 +57,21 @@ async function setSelectedModel(type, modelId) {
     return { success };
 }
 
-// Ollama facade functions
+// LocalAI facade functions
 async function getOllamaStatus() {
-    return ollamaService.getStatus();
+    return localAIManager.getServiceStatus('ollama');
 }
 
 async function ensureOllamaReady() {
-    return ollamaService.ensureReady();
+    const status = await localAIManager.getServiceStatus('ollama');
+    if (!status.installed || !status.running) {
+        await localAIManager.startService('ollama');
+    }
+    return { success: true };
 }
 
 async function shutdownOllama() {
-    return ollamaService.shutdown(false); // false for graceful shutdown
+    return localAIManager.stopService('ollama');
 }
 
 

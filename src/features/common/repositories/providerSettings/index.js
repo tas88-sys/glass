@@ -56,6 +56,24 @@ const providerSettingsRepositoryAdapter = {
         const repo = getBaseRepository();
         const uid = authService.getCurrentUserId();
         return await repo.removeAllByUid(uid);
+    },
+    
+    async getActiveProvider(type) {
+        const repo = getBaseRepository();
+        const uid = authService.getCurrentUserId();
+        return await repo.getActiveProvider(uid, type);
+    },
+    
+    async setActiveProvider(provider, type) {
+        const repo = getBaseRepository();
+        const uid = authService.getCurrentUserId();
+        return await repo.setActiveProvider(uid, provider, type);
+    },
+    
+    async getActiveSettings() {
+        const repo = getBaseRepository();
+        const uid = authService.getCurrentUserId();
+        return await repo.getActiveSettings(uid);
     }
 };
 

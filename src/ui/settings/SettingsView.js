@@ -575,19 +575,50 @@ export class SettingsView extends LitElement {
         this.requestUpdate();
     }
 
+    async loadLocalAIStatus() {
+        try {
+            // Load Ollama status
+            const ollamaStatus = await window.api.settingsView.getOllamaStatus();
+            if (ollamaStatus?.success) {
+                this.ollamaStatus = { installed: ollamaStatus.installed, running: ollamaStatus.running };
+                this.ollamaModels = ollamaStatus.models || [];
+            }
+            
+            // Load Whisper models status only if Whisper is enabled
+            if (this.apiKeys?.whisper === 'local') {
+                const whisperModelsResult = await window.api.settingsView.getWhisperInstalledModels();
+                if (whisperModelsResult?.success) {
+                    const installedWhisperModels = whisperModelsResult.models;
+                    if (this.providerConfig?.whisper) {
+                        this.providerConfig.whisper.sttModels.forEach(m => {
+                            const installedInfo = installedWhisperModels.find(i => i.id === m.id);
+                            if (installedInfo) {
+                                m.installed = installedInfo.installed;
+                            }
+                        });
+                    }
+                }
+            }
+            
+            // Trigger UI update
+            this.requestUpdate();
+        } catch (error) {
+            console.error('Error loading LocalAI status:', error);
+        }
+    }
+
     //////// after_modelStateService ////////
     async loadInitialData() {
         if (!window.api) return;
         this.isLoading = true;
         try {
-            const [userState, modelSettings, presets, contentProtection, shortcuts, ollamaStatus, whisperModelsResult] = await Promise.all([
+            // Load essential data first
+            const [userState, modelSettings, presets, contentProtection, shortcuts] = await Promise.all([
                 window.api.settingsView.getCurrentUser(),
                 window.api.settingsView.getModelSettings(), // Facade call
                 window.api.settingsView.getPresets(),
                 window.api.settingsView.getContentProtectionStatus(),
-                window.api.settingsView.getCurrentShortcuts(),
-                window.api.settingsView.getOllamaStatus(),
-                window.api.settingsView.getWhisperInstalledModels()
+                window.api.settingsView.getCurrentShortcuts()
             ]);
             
             if (userState && userState.isLoggedIn) this.firebaseUser = userState;
@@ -609,23 +640,9 @@ export class SettingsView extends LitElement {
                 const firstUserPreset = this.presets.find(p => p.is_default === 0);
                 if (firstUserPreset) this.selectedPreset = firstUserPreset;
             }
-            // Ollama status
-            if (ollamaStatus?.success) {
-                this.ollamaStatus = { installed: ollamaStatus.installed, running: ollamaStatus.running };
-                this.ollamaModels = ollamaStatus.models || [];
-            }
-            // Whisper status
-            if (whisperModelsResult?.success) {
-                const installedWhisperModels = whisperModelsResult.models;
-                if (this.providerConfig.whisper) {
-                    this.providerConfig.whisper.sttModels.forEach(m => {
-                        const installedInfo = installedWhisperModels.find(i => i.id === m.id);
-                        if (installedInfo) {
-                            m.installed = installedInfo.installed;
-                        }
-                    });
-                }
-            }
+            
+            // Load LocalAI status asynchronously to improve initial load time
+            this.loadLocalAIStatus();
         } catch (error) {
             console.error('Error loading initial settings data:', error);
         } finally {
@@ -779,16 +796,16 @@ export class SettingsView extends LitElement {
             this.installingModels = { ...this.installingModels, [modelName]: 0 };
             this.requestUpdate();
 
-            // 진행률 이벤트 리스너 설정
+            // 진행률 이벤트 리스너 설정 - 통합 LocalAI 이벤트 사용
             const progressHandler = (event, data) => {
-                if (data.modelId === modelName) {
-                    this.installingModels = { ...this.installingModels, [modelName]: data.progress };
+                if (data.service === 'ollama' && data.model === modelName) {
+                    this.installingModels = { ...this.installingModels, [modelName]: data.progress || 0 };
                     this.requestUpdate();
                 }
             };
 
-            // 진행률 이벤트 리스너 등록
-            window.api.settingsView.onOllamaPullProgress(progressHandler);
+            // 통합 LocalAI 이벤트 리스너 등록
+            window.api.settingsView.onLocalAIInstallProgress(progressHandler);
 
             try {
                 const result = await window.api.settingsView.pullOllamaModel(modelName);
@@ -805,8 +822,8 @@ export class SettingsView extends LitElement {
                     throw new Error(result.error || 'Installation failed');
                 }
             } finally {
-                // 진행률 이벤트 리스너 제거
-                window.api.settingsView.removeOnOllamaPullProgress(progressHandler);
+                // 통합 LocalAI 이벤트 리스너 제거
+                window.api.settingsView.removeOnLocalAIInstallProgress(progressHandler);
             }
         } catch (error) {
             console.error(`[SettingsView] Error installing model ${modelName}:`, error);
@@ -821,34 +838,52 @@ export class SettingsView extends LitElement {
         this.requestUpdate();
         
         try {
-            // Set up progress listener
-            const progressHandler = (event, { modelId: id, progress }) => {
-                if (id === modelId) {
-                    this.installingModels = { ...this.installingModels, [modelId]: progress };
+            // Set up progress listener - 통합 LocalAI 이벤트 사용
+            const progressHandler = (event, data) => {
+                if (data.service === 'whisper' && data.model === modelId) {
+                    this.installingModels = { ...this.installingModels, [modelId]: data.progress || 0 };
                     this.requestUpdate();
                 }
             };
             
-            window.api.settingsView.onWhisperDownloadProgress(progressHandler);
+            window.api.settingsView.onLocalAIInstallProgress(progressHandler);
             
             // Start download
             const result = await window.api.settingsView.downloadWhisperModel(modelId);
             
             if (result.success) {
+                // Update the model's installed status
+                if (this.providerConfig?.whisper?.sttModels) {
+                    const modelInfo = this.providerConfig.whisper.sttModels.find(m => m.id === modelId);
+                    if (modelInfo) {
+                        modelInfo.installed = true;
+                    }
+                }
+                
+                // Remove from installing models
+                delete this.installingModels[modelId];
+                this.requestUpdate();
+                
+                // Reload LocalAI status to get fresh data
+                await this.loadLocalAIStatus();
+                
                 // Auto-select the model after download
                 await this.selectModel('stt', modelId);
             } else {
+                // Remove from installing models on failure too
+                delete this.installingModels[modelId];
+                this.requestUpdate();
                 alert(`Failed to download Whisper model: ${result.error}`);
             }
             
             // Cleanup
-            window.api.settingsView.removeOnWhisperDownloadProgress(progressHandler);
+            window.api.settingsView.removeOnLocalAIInstallProgress(progressHandler);
         } catch (error) {
             console.error(`[SettingsView] Error downloading Whisper model ${modelId}:`, error);
-            alert(`Error downloading ${modelId}: ${error.message}`);
-        } finally {
+            // Remove from installing models on error
             delete this.installingModels[modelId];
             this.requestUpdate();
+            alert(`Error downloading ${modelId}: ${error.message}`);
         }
     }
     
@@ -862,12 +897,6 @@ export class SettingsView extends LitElement {
         return null;
     }
 
-    async handleWhisperModelSelect(modelId) {
-        if (!modelId) return;
-        
-        // Select the model (will trigger download if needed)
-        await this.selectModel('stt', modelId);
-    }
 
     handleUsePicklesKey(e) {
         e.preventDefault()
@@ -1192,12 +1221,7 @@ export class SettingsView extends LitElement {
                         }
                         
                         if (id === 'whisper') {
-                            // Special UI for Whisper with model selection
-                            const whisperModels = config.sttModels || [];
-                            const selectedWhisperModel = this.selectedStt && this.getProviderForModel('stt', this.selectedStt) === 'whisper' 
-                                ? this.selectedStt 
-                                : null;
-                            
+                            // Simplified UI for Whisper without model selection
                             return html`
                                 <div class="provider-key-group">
                                     <label>${config.name} (Local STT)</label>
@@ -1205,51 +1229,6 @@ export class SettingsView extends LitElement {
                                         <div style="padding: 8px; background: rgba(0,255,0,0.1); border-radius: 4px; font-size: 11px; color: rgba(0,255,0,0.8); margin-bottom: 8px;">
                                             ✓ Whisper is enabled
                                         </div>
-                                        
-                                        <!-- Whisper Model Selection Dropdown -->
-                                        <label style="font-size: 10px; margin-top: 8px;">Select Model:</label>
-                                        <select 
-                                            class="model-dropdown" 
-                                            style="width: 100%; padding: 6px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.2); color: white; border-radius: 4px; font-size: 11px; margin-bottom: 8px;"
-                                            @change=${(e) => this.handleWhisperModelSelect(e.target.value)}
-                                            .value=${selectedWhisperModel || ''}
-                                        >
-                                            <option value="">Choose a model...</option>
-                                            ${whisperModels.map(model => {
-                                                const isInstalling = this.installingModels[model.id] !== undefined;
-                                                const progress = this.installingModels[model.id] || 0;
-                                                
-                                                let statusText = '';
-                                                if (isInstalling) {
-                                                    statusText = ` (Downloading ${progress}%)`;
-                                                } else if (model.installed) {
-                                                    statusText = ' (Installed)';
-                                                }
-                                                
-                                                return html`
-                                                    <option value="${model.id}" ?disabled=${isInstalling}>
-                                                        ${model.name}${statusText}
-                                                    </option>
-                                                `;
-                                            })}
-                                        </select>
-                                        
-                                        ${Object.entries(this.installingModels).map(([modelId, progress]) => {
-                                            if (modelId.startsWith('whisper-') && progress !== undefined) {
-                                                return html`
-                                                    <div style="margin: 8px 0;">
-                                                        <div style="font-size: 10px; color: rgba(255,255,255,0.7); margin-bottom: 4px;">
-                                                            Downloading ${modelId}...
-                                                        </div>
-                                                        <div class="install-progress" style="height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden;">
-                                                            <div class="install-progress-bar" style="height: 100%; background: rgba(0, 122, 255, 0.8); width: ${progress}%; transition: width 0.3s ease;"></div>
-                                                        </div>
-                                                    </div>
-                                                `;
-                                            }
-                                            return null;
-                                        })}
-                                        
                                         <button class="settings-button full-width danger" @click=${() => this.handleClearKey(id)}>
                                             Disable Whisper
                                         </button>
@@ -1331,6 +1310,9 @@ export class SettingsView extends LitElement {
                         <div class="model-list">
                             ${this.availableSttModels.map(model => {
                                 const isWhisper = this.getProviderForModel('stt', model.id) === 'whisper';
+                                const whisperModel = isWhisper && this.providerConfig?.whisper?.sttModels 
+                                    ? this.providerConfig.whisper.sttModels.find(m => m.id === model.id) 
+                                    : null;
                                 const isInstalling = this.installingModels[model.id] !== undefined;
                                 const installProgress = this.installingModels[model.id] || 0;
                                 
@@ -1338,10 +1320,16 @@ export class SettingsView extends LitElement {
                                     <div class="model-item ${this.selectedStt === model.id ? 'selected' : ''}" 
                                          @click=${() => this.selectModel('stt', model.id)}>
                                         <span>${model.name}</span>
-                                        ${isWhisper && isInstalling ? html`
-                                            <div class="install-progress">
-                                                <div class="install-progress-bar" style="width: ${installProgress}%"></div>
-                                            </div>
+                                        ${isWhisper ? html`
+                                            ${isInstalling ? html`
+                                                <div class="install-progress">
+                                                    <div class="install-progress-bar" style="width: ${installProgress}%"></div>
+                                                </div>
+                                            ` : whisperModel?.installed ? html`
+                                                <span class="model-status installed">✓ Installed</span>
+                                            ` : html`
+                                                <span class="model-status not-installed">Not Installed</span>
+                                            `}
                                         ` : ''}
                                     </div>
                                 `;

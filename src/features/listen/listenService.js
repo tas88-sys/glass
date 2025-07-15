@@ -110,13 +110,17 @@ class ListenService {
                     console.log('[ListenService] changeSession to "Listen"');
                     internalBridge.emit('window:requestVisibility', { name: 'listen', visible: true });
                     await this.initializeSession();
-                    listenWindow.webContents.send('session-state-changed', { isActive: true });
+                    if (listenWindow && !listenWindow.isDestroyed()) {
+                        listenWindow.webContents.send('session-state-changed', { isActive: true });
+                    }
                     break;
         
                 case 'Stop':
                     console.log('[ListenService] changeSession to "Stop"');
                     await this.closeSession();
-                    listenWindow.webContents.send('session-state-changed', { isActive: false });
+                    if (listenWindow && !listenWindow.isDestroyed()) {
+                        listenWindow.webContents.send('session-state-changed', { isActive: false });
+                    }
                     break;
         
                 case 'Done':

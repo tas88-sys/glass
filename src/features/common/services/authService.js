@@ -6,7 +6,6 @@ const encryptionService = require('./encryptionService');
 const migrationService = require('./migrationService');
 const sessionRepository = require('../repositories/session');
 const providerSettingsRepository = require('../repositories/providerSettings');
-const userModelSelectionsRepository = require('../repositories/userModelSelections');
 
 async function getVirtualKeyByEmail(email, idToken) {
     if (!idToken) {
@@ -48,7 +47,6 @@ class AuthService {
 
         sessionRepository.setAuthService(this);
         providerSettingsRepository.setAuthService(this);
-        userModelSelectionsRepository.setAuthService(this);
     }
 
     initialize() {

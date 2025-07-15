@@ -41,7 +41,7 @@ class WhisperSTTSession extends EventEmitter {
 
     startProcessingLoop() {
         this.processingInterval = setInterval(async () => {
-            const minBufferSize = 24000 * 2 * 0.15;
+            const minBufferSize = 16000 * 2 * 0.15;
             if (this.audioBuffer.length >= minBufferSize && !this.process) {
                 console.log(`[WhisperSTT-${this.sessionId}] Processing audio chunk, buffer size: ${this.audioBuffer.length}`);
                 await this.processAudioChunk();

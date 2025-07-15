@@ -1092,6 +1092,9 @@ export class ApiKeyHeader extends LitElement {
         this.requestUpdate();
 
         const progressHandler = (event, data) => {
+            // 통합 LocalAI 이벤트에서 Ollama 진행률만 처리
+            if (data.service !== 'ollama') return;
+            
             let baseProgress = 0;
             let stageTotal = 0;
 
@@ -1137,17 +1140,21 @@ export class ApiKeyHeader extends LitElement {
             }
         }, 15000); // 15 second timeout
 
-        const completionHandler = async (event, result) => {
+        const completionHandler = async (event, data) => {
+            // 통합 LocalAI 이벤트에서 Ollama 완료만 처리
+            if (data.service !== 'ollama') return;
             if (operationCompleted) return;
             operationCompleted = true;
             clearTimeout(completionTimeout);
 
-            window.api.apiKeyHeader.removeOnOllamaInstallProgress(progressHandler);
-            await this._handleOllamaSetupCompletion(result.success, result.error);
+            window.api.apiKeyHeader.removeOnLocalAIProgress(progressHandler);
+            // installation-complete 이벤트는 성공을 의미
+            await this._handleOllamaSetupCompletion(true);
         };
 
-        window.api.apiKeyHeader.onceOllamaInstallComplete(completionHandler);
-        window.api.apiKeyHeader.onOllamaInstallProgress(progressHandler);
+        // 통합 LocalAI 이벤트 사용
+        window.api.apiKeyHeader.onLocalAIComplete(completionHandler);
+        window.api.apiKeyHeader.onLocalAIProgress(progressHandler);
 
         try {
             let result;
@@ -1173,8 +1180,8 @@ export class ApiKeyHeader extends LitElement {
             operationCompleted = true;
             clearTimeout(completionTimeout);
             console.error('[ApiKeyHeader] Ollama setup failed:', error);
-            window.api.apiKeyHeader.removeOnOllamaInstallProgress(progressHandler);
-            window.api.apiKeyHeader.removeOnceOllamaInstallComplete(completionHandler);
+            window.api.apiKeyHeader.removeOnLocalAIProgress(progressHandler);
+            window.api.apiKeyHeader.removeOnLocalAIComplete(completionHandler);
             await this._handleOllamaSetupCompletion(false, error.message);
         }
     }
@@ -1304,7 +1311,7 @@ export class ApiKeyHeader extends LitElement {
 
             // Create robust progress handler with timeout protection
             progressHandler = (event, data) => {
-                if (data.model === modelName && !this._isOperationCancelled(modelName)) {
+                if (data.service === 'ollama' && data.model === modelName && !this._isOperationCancelled(modelName)) {
                     const progress = Math.round(Math.max(0, Math.min(100, data.progress || 0)));
 
                     if (progress !== this.installProgress) {
@@ -1315,8 +1322,8 @@ export class ApiKeyHeader extends LitElement {
                 }
             };
 
-            // Set up progress tracking
-            window.api.apiKeyHeader.onOllamaPullProgress(progressHandler);
+            // Set up progress tracking - 통합 LocalAI 이벤트 사용
+            window.api.apiKeyHeader.onLocalAIProgress(progressHandler);
 
             // Execute the model pull with timeout
             const installPromise = window.api.apiKeyHeader.pullOllamaModel(modelName);
@@ -1346,7 +1353,7 @@ export class ApiKeyHeader extends LitElement {
         } finally {
             // Comprehensive cleanup
             if (progressHandler) {
-                window.api.apiKeyHeader.removeOnOllamaPullProgress(progressHandler);
+                window.api.apiKeyHeader.removeOnLocalAIProgress(progressHandler);
             }
 
             this.installingModel = null;
@@ -1376,17 +1383,17 @@ export class ApiKeyHeader extends LitElement {
         let progressHandler = null;
 
         try {
-            // Set up robust progress listener
-            progressHandler = (event, { modelId: id, progress }) => {
-                if (id === modelId) {
-                    const cleanProgress = Math.round(Math.max(0, Math.min(100, progress || 0)));
+            // Set up robust progress listener - 통합 LocalAI 이벤트 사용
+            progressHandler = (event, data) => {
+                if (data.service === 'whisper' && data.model === modelId) {
+                    const cleanProgress = Math.round(Math.max(0, Math.min(100, data.progress || 0)));
                     this.whisperInstallingModels = { ...this.whisperInstallingModels, [modelId]: cleanProgress };
                     console.log(`[ApiKeyHeader] Whisper download progress: ${cleanProgress}% for ${modelId}`);
                     this.requestUpdate();
                 }
             };
 
-            window.api.apiKeyHeader.onWhisperDownloadProgress(progressHandler);
+            window.api.apiKeyHeader.onLocalAIProgress(progressHandler);
 
             // Start download with timeout protection
             const downloadPromise = window.api.apiKeyHeader.downloadWhisperModel(modelId);
@@ -1413,7 +1420,7 @@ export class ApiKeyHeader extends LitElement {
         } finally {
             // Cleanup
             if (progressHandler) {
-                window.api.apiKeyHeader.removeOnWhisperDownloadProgress(progressHandler);
+                window.api.apiKeyHeader.removeOnLocalAIProgress(progressHandler);
             }
             delete this.whisperInstallingModels[modelId];
             this.requestUpdate();
