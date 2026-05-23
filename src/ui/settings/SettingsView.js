@@ -717,6 +717,36 @@ export class SettingsView extends LitElement {
         this.saving = false;
     }
 
+    async handleSaveGeminiModels() {
+        const llmInput = this.shadowRoot.querySelector('#gemini-llm-model-input');
+        const sttInput = this.shadowRoot.querySelector('#gemini-stt-model-input');
+        const llmValue = llmInput ? llmInput.value.trim() : '';
+        const sttValue = sttInput ? sttInput.value.trim() : '';
+
+        for (const [type, value] of [['llm', llmValue], ['stt', sttValue]]) {
+            if (value && !value.startsWith('gemini-')) {
+                alert(`Invalid Gemini ${type.toUpperCase()} model ID: "${value}". Must start with "gemini-".`);
+                return;
+            }
+        }
+
+        this.saving = true;
+        try {
+            if (llmValue) {
+                await window.api.settingsView.setSelectedModel({ type: 'llm', modelId: llmValue });
+            }
+            if (sttValue) {
+                await window.api.settingsView.setSelectedModel({ type: 'stt', modelId: sttValue });
+            }
+            await this.refreshModelData();
+        } catch (err) {
+            console.error('[SettingsView] Failed to save Gemini models:', err);
+            alert(`Failed to save Gemini models: ${err.message || err}`);
+        } finally {
+            this.saving = false;
+        }
+    }
+
     async refreshModelData() {
         const [availableLlm, availableStt, selected, storedKeys] = await Promise.all([
             window.api.settingsView.getAvailableModels({ type: 'llm' }),
@@ -893,6 +923,9 @@ export class SettingsView extends LitElement {
             if (models?.some(m => m.id === modelId)) {
                 return providerId;
             }
+        }
+        if (typeof modelId === 'string' && modelId.startsWith('gemini-')) {
+            return 'gemini';
         }
         return null;
     }
@@ -1249,17 +1282,38 @@ export class SettingsView extends LitElement {
                         }
                         
                         // Regular providers
+                        const geminiLlmValue = (id === 'gemini' && this.getProviderForModel('llm', this.selectedLlm) === 'gemini')
+                            ? this.selectedLlm
+                            : '';
+                        const geminiSttValue = (id === 'gemini' && this.getProviderForModel('stt', this.selectedStt) === 'gemini')
+                            ? this.selectedStt
+                            : '';
                         return html`
                         <div class="provider-key-group">
                             <label for="key-input-${id}">${config.name} API Key</label>
                             <input type="password" id="key-input-${id}"
-                                placeholder=${loggedIn ? "Using Pickle's Key" : `Enter ${config.name} API Key`} 
+                                placeholder=${loggedIn ? "Using Pickle's Key" : `Enter ${config.name} API Key`}
                                 .value=${this.apiKeys[id] || ''}
                             >
                             <div class="key-buttons">
                                <button class="settings-button" @click=${() => this.handleSaveKey(id)} >Save</button>
                                <button class="settings-button danger" @click=${() => this.handleClearKey(id)} }>Clear</button>
                             </div>
+                            ${id === 'gemini' ? html`
+                                <label for="gemini-llm-model-input" style="margin-top: 8px;">Gemini LLM Model ID</label>
+                                <input type="text" id="gemini-llm-model-input"
+                                    placeholder="e.g. gemini-2.5-pro"
+                                    .value=${geminiLlmValue}
+                                >
+                                <label for="gemini-stt-model-input">Gemini STT Model ID</label>
+                                <input type="text" id="gemini-stt-model-input"
+                                    placeholder="e.g. gemini-live-2.5-flash-preview"
+                                    .value=${geminiSttValue}
+                                >
+                                <div class="key-buttons">
+                                    <button class="settings-button" @click=${() => this.handleSaveGeminiModels()}>Save Gemini Models</button>
+                                </div>
+                            ` : ''}
                         </div>
                         `;
                     })}
