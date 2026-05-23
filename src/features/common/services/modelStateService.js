@@ -104,8 +104,20 @@ class ModelStateService extends EventEmitter {
     async handleLocalAIStateChange(service, state) {
         console.log(`[ModelStateService] LocalAI state changed: ${service}`, state);
         if (!state.installed || !state.running) {
-            const types = service === 'ollama' ? ['llm'] : service === 'whisper' ? ['stt'] : [];
-            await this._autoSelectAvailableModels(types);
+            const candidateTypes = service === 'ollama' ? ['llm'] : service === 'whisper' ? ['stt'] : [];
+            const types = [];
+            if (candidateTypes.length > 0) {
+                const selected = await this.getSelectedModels();
+                for (const t of candidateTypes) {
+                    const currentProvider = this.getProviderForModel(selected[t], t);
+                    if (currentProvider === service) {
+                        types.push(t);
+                    }
+                }
+            }
+            if (types.length > 0) {
+                await this._autoSelectAvailableModels(types);
+            }
         }
         this.emit('state-updated', await this.getLiveState());
     }
@@ -292,6 +304,9 @@ class ModelStateService extends EventEmitter {
             const installedModels = ollamaModelRepository.getInstalledModels();
             if (installedModels.some(m => m.name === modelId)) return 'ollama';
         }
+        if (typeof modelId === 'string' && modelId.startsWith('gemini-')) {
+            return 'gemini';
+        }
         return null;
     }
 
@@ -345,6 +360,13 @@ class ModelStateService extends EventEmitter {
             if (providerId === 'ollama' && type === 'llm') {
                 const installed = ollamaModelRepository.getInstalledModels();
                 available.push(...installed.map(m => ({ id: m.name, name: m.name })));
+            } else if (providerId === 'gemini' && PROVIDERS[providerId]?.[modelListKey]) {
+                const presets = PROVIDERS[providerId][modelListKey];
+                const customId = type === 'llm' ? setting.selected_llm_model : setting.selected_stt_model;
+                if (customId && !presets.some(m => m.id === customId)) {
+                    available.push({ id: customId, name: `${customId} (custom)` });
+                }
+                available.push(...presets);
             } else if (PROVIDERS[providerId]?.[modelListKey]) {
                 available.push(...PROVIDERS[providerId][modelListKey]);
             }
