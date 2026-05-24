@@ -68,7 +68,7 @@ async function createSTT({ apiKey, language = "en", callbacks = {}, ...config })
  * @param {number} [opts.maxTokens=4096] - Max tokens
  * @returns {object} LLM instance
  */
-function createLLM({ apiKey, model = "claude-3-5-sonnet-20241022", temperature = 0.7, maxTokens = 4096, ...config }) {
+function createLLM({ apiKey, model = "claude-3-5-sonnet-20241022", temperature = 0.7, maxTokens = 8192, ...config }) {
   const client = new Anthropic({ apiKey })
 
   return {
@@ -197,7 +197,7 @@ function createStreamingLLM({
   apiKey,
   model = "claude-3-5-sonnet-20241022",
   temperature = 0.7,
-  maxTokens = 4096,
+  maxTokens = 8192,
   ...config
 }) {
   const client = new Anthropic({ apiKey })
