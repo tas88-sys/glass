@@ -34,7 +34,7 @@ class GeminiProvider {
  * @param {object} [opts.callbacks] - Event callbacks
  * @returns {Promise<object>} STT session
  */
-async function createSTT({ apiKey, language = "en-US", callbacks = {}, ...config }) {
+async function createSTT({ apiKey, language = "en-US", callbacks = {}, model = 'gemini-live-2.5-flash-preview', ...config }) {
   const liveClient = new GoogleGenAI({ vertexai: false, apiKey })
 
   // Language code BCP-47 conversion
@@ -42,7 +42,7 @@ async function createSTT({ apiKey, language = "en-US", callbacks = {}, ...config
 
   const session = await liveClient.live.connect({
 
-    model: 'gemini-live-2.5-flash-preview',
+    model,
     callbacks: {
       ...callbacks,
       onMessage: (msg) => {
