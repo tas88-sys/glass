@@ -116,12 +116,12 @@ function convertMessagesToOllamaFormat(messages) {
     });
 }
 
-function createLLM({ 
-    model, 
-    temperature = 0.7, 
-    maxTokens = 2048, 
+function createLLM({
+    model,
+    temperature = 0.7,
+    maxTokens = -1,
     baseUrl = 'http://localhost:11434',
-    ...config 
+    ...config
 }) {
     if (!model) {
         throw new Error('Model parameter is required for Ollama LLM. Please specify a model name (e.g., "llama3.2:latest", "gemma3:4b")');
@@ -227,12 +227,12 @@ function createLLM({
     };
 }
 
-function createStreamingLLM({ 
-    model, 
-    temperature = 0.7, 
-    maxTokens = 2048, 
+function createStreamingLLM({
+    model,
+    temperature = 0.7,
+    maxTokens = -1,
     baseUrl = 'http://localhost:11434',
-    ...config 
+    ...config
 }) {
     if (!model) {
         throw new Error('Model parameter is required for Ollama streaming LLM. Please specify a model name (e.g., "llama3.2:latest", "gemma3:4b")');
