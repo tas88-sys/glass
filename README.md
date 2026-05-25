@@ -91,6 +91,87 @@ npm run setup
 
 `Ctrl/Cmd + Arrows` : move main window position
 
+## How It Works
+
+A technical walkthrough of what actually happens when you use Glass. Useful for contributors and anyone trying to understand the runtime behavior.
+
+### Architecture at a glance
+
+Glass is an Electron desktop app with two core features:
+
+- **Ask** — query an LLM about your current screen with a hotkey
+- **Listen** — real-time audio capture, transcription, and incremental summarization
+
+Data is persisted to **SQLite** locally, or **Firebase** when signed in (the repository pattern auto-switches based on auth state).
+
+### Ask feature
+
+**Trigger:** `Ctrl/Cmd + Enter` invokes `askService.sendMessage()` (`src/features/ask/askService.js:218`).
+
+**Per-query flow:**
+
+1. **Screenshot capture** (`askService.js:38-120`):
+   - macOS → native `screencapture -x -t jpg`, then resized via `sharp` to max **384px height** at JPEG quality 80
+   - Windows/Linux → Electron `desktopCapturer.getSources()` at 1920×1080, JPEG quality 70
+   - Image is base64-encoded and attached inline to the LLM message
+2. **Message build** (`askService.js:259-274`) — system prompt + user text + the single screenshot (multimodal `image_url` part)
+3. **Streaming call** through `createStreamingLLM(provider)` — supports Anthropic Claude, OpenAI, Gemini, Ollama, Whisper
+4. **Stream parsing** (`_processStream`, `askService.js:369-425`) — SSE chunks broadcast to the Ask window in real time
+5. **Persistence** — user prompt and assistant response written to the `ai_messages` table tied to a session id from `sessionRepository.getOrCreateActive('ask')`
+6. **Multimodal fallback** (`askService.js:303-338`) — if the provider rejects the image, the request is retried text-only
+
+**Important runtime behavior:**
+
+- One Ask press = **exactly one screenshot** of the current screen. No image queue, no multi-image messages.
+- `sendMessage(userPrompt, conversationHistoryRaw=[])` accepts a history parameter, but the IPC handlers (`src/bridge/featureBridge.js:82-83`) **never pass it**. Each Ask query is therefore independent from the LLM's perspective — the model does **not** remember prior questions, answers, or screenshots.
+- The DB still stores every Q&A. That history powers the UI's transcript view, not the next prompt.
+- `sessionRepository.getOrCreateActive` (`src/features/common/repositories/session/sqlite.repository.js:77`) reuses any session where `ended_at IS NULL`. Closing and reopening the app resumes the same session id, but again, the LLM context does not carry over.
+
+### Listen feature
+
+**Audio sources:**
+
+| Stream | Speaker tag | Source | Platforms |
+|---|---|---|---|
+| Microphone | `"Me"` | Browser `getUserMedia()` | All |
+| System audio | `"Them"` | Native `SystemAudioDump` binary | **macOS only** |
+
+On Windows/Linux only the user's mic is captured.
+
+**Real-time STT pipeline** (`src/features/listen/stt/sttService.js`):
+
+- Two parallel STT sessions per provider (OpenAI Realtime, Gemini Live, Deepgram, or local Whisper)
+- Interim/partial results stream to the UI; final results flush through a 2-second debounce
+- Keep-alive heartbeat every 60s for OpenAI; session renewal every 20 minutes with a 2-second overlap to dodge provider hard timeouts
+- Each finalized utterance is inserted into the `transcripts` table tagged with `session_id`, `speaker`, `text`, `start_at`
+
+**Incremental summarization** (`src/features/listen/summary/summaryService.js`):
+
+- `triggerAnalysisIfNeeded()` fires every time `conversationHistory.length % 5 === 0`
+- Prompt includes the **last 30 conversation turns** plus the **previous summary** as context — summaries build forward rather than restarting
+- Output is parsed into TLDR, bullet points, action items, and suggested follow-up questions
+- Persisted with UPSERT to the `summaries` table (one row per session)
+
+**Session lifecycle:**
+
+- **Stop** → STT sessions closed, `SystemAudioDump` process killed, `sessions.ended_at` timestamped, in-memory state cleared
+- **App quit mid-session** → `app.on('before-quit')` (`src/index.js:244-309`) calls `listenService.closeSession()` then `sessionRepository.endAllActiveSessions(uid)` as a safety net. Transcripts and summaries written incrementally during the session are already on disk.
+
+### Storage schema (relevant tables)
+
+```
+sessions        (id, uid, session_type, started_at, ended_at, ...)
+ai_messages     (session_id, role, content, ...)        -- Ask Q&A
+transcripts     (session_id, speaker, text, start_at, ...) -- Listen STT output
+summaries       (session_id PRIMARY KEY, text, tldr, bullet_json, action_json, ...)
+```
+
+### Known limitation: Listen → Ask context is not wired
+
+`listenService.getConversationHistory()` exists (`src/features/listen/listenService.js:266`) and returns the in-memory transcript buffer, but no code path passes it into `askService.sendMessage`. The result: even with Listen actively transcribing a meeting, pressing `Ctrl/Cmd + Enter` sends only your text + current screenshot to the LLM — the transcript is not included as context.
+
+Wiring this up is a small change in `featureBridge.js` for anyone wanting to contribute.
+
 ## Repo Activity
 
 ![Alt](https://repobeats.axiom.co/api/embed/a23e342faafa84fa8797fa57762885d82fac1180.svg "Repobeats analytics image")
