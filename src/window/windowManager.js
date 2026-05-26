@@ -35,6 +35,7 @@ let currentHeaderState = 'apikey';
 const windowPool = new Map();
 
 let settingsHideTimer = null;
+let modePickerHideTimer = null;
 
 
 let layoutManager = null;
@@ -70,6 +71,18 @@ const hideSettingsWindow = () => {
 
 const cancelHideSettingsWindow = () => {
     internalBridge.emit('window:requestVisibility', { name: 'settings', visible: true });
+};
+
+const showModePickerWindow = () => {
+    internalBridge.emit('window:requestVisibility', { name: 'mode-picker', visible: true });
+};
+
+const hideModePickerWindow = () => {
+    internalBridge.emit('window:requestVisibility', { name: 'mode-picker', visible: false });
+};
+
+const cancelHideModePickerWindow = () => {
+    internalBridge.emit('window:requestVisibility', { name: 'mode-picker', visible: true });
 };
 
 const moveWindowStep = (direction) => {
@@ -266,7 +279,7 @@ async function handleWindowVisibilityRequest(windowPool, layoutManager, movement
         return;
     }
 
-    if (name !== 'settings') {
+    if (name !== 'settings' && name !== 'mode-picker') {
         const isCurrentlyVisible = win.isVisible();
         if (isCurrentlyVisible === shouldBeVisible) {
             console.log(`[WindowManager] Window '${name}' is already in the desired state.`);
@@ -323,6 +336,36 @@ async function handleWindowVisibilityRequest(windowPool, layoutManager, movement
         return;
     }
 
+
+    if (name === 'mode-picker') {
+        if (shouldBeVisible) {
+            if (modePickerHideTimer) {
+                clearTimeout(modePickerHideTimer);
+                modePickerHideTimer = null;
+            }
+            const position = layoutManager.calculateModePickerWindowPosition();
+            if (position) {
+                win.setBounds(position);
+                win.show();
+                win.moveTop();
+                win.setAlwaysOnTop(true);
+            } else {
+                console.warn('[WindowManager] Could not calculate mode-picker window position.');
+            }
+        } else {
+            if (modePickerHideTimer) {
+                clearTimeout(modePickerHideTimer);
+            }
+            modePickerHideTimer = setTimeout(() => {
+                if (win && !win.isDestroyed()) {
+                    win.setAlwaysOnTop(false);
+                    win.hide();
+                }
+                modePickerHideTimer = null;
+            }, 200);
+        }
+        return;
+    }
 
     if (name === 'shortcut-settings') {
         if (shouldBeVisible) {
@@ -593,6 +636,37 @@ function createFeatureWindows(header, namesToCreate) {
                 }
                 break;
             }
+
+            // mode-picker (hover panel — parent: undefined mirrors settings/shortcut-settings pattern)
+            case 'mode-picker': {
+                const modePicker = new BrowserWindow({
+                    width: 160,
+                    height: 144,         // 4 rows × 36px = 144
+                    frame: false,
+                    transparent: true,
+                    hasShadow: false,
+                    alwaysOnTop: true,
+                    skipTaskbar: true,
+                    show: false,
+                    resizable: false,
+                    focusable: true,
+                    parent: undefined,
+                    webPreferences: {
+                        nodeIntegration: false,
+                        contextIsolation: true,
+                        preload: path.join(__dirname, '../preload.js'),
+                    },
+                });
+                modePicker.setContentProtection(isContentProtectionOn);
+                if (process.platform === 'darwin') {
+                    modePicker.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+                    modePicker.setWindowButtonVisibility(false);
+                }
+                modePicker.loadFile(path.join(__dirname, '../ui/modePicker/mode-picker.html'))
+                    .catch(console.error);
+                windowPool.set('mode-picker', modePicker);
+                break;
+            }
         }
     };
 
@@ -609,10 +683,14 @@ function createFeatureWindows(header, namesToCreate) {
 }
 
 function destroyFeatureWindows() {
-    const featureWindows = ['listen','ask','settings','shortcut-settings'];
+    const featureWindows = ['listen','ask','settings','shortcut-settings','mode-picker'];
     if (settingsHideTimer) {
         clearTimeout(settingsHideTimer);
         settingsHideTimer = null;
+    }
+    if (modePickerHideTimer) {
+        clearTimeout(modePickerHideTimer);
+        modePickerHideTimer = null;
     }
     featureWindows.forEach(name=>{
         const win = windowPool.get(name);
@@ -716,7 +794,7 @@ function createWindows() {
     setupWindowController(windowPool, layoutManager, movementManager);
 
     if (currentHeaderState === 'main') {
-        createFeatureWindows(header, ['listen', 'ask', 'settings', 'shortcut-settings']);
+        createFeatureWindows(header, ['listen', 'ask', 'settings', 'shortcut-settings', 'mode-picker']);
     }
 
     header.setContentProtection(isContentProtectionOn);
@@ -799,6 +877,9 @@ module.exports = {
     showSettingsWindow,
     hideSettingsWindow,
     cancelHideSettingsWindow,
+    showModePickerWindow,
+    hideModePickerWindow,
+    cancelHideModePickerWindow,
     openLoginPage,
     moveWindowStep,
     handleHeaderStateChanged,

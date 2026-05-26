@@ -78,9 +78,70 @@ module.exports = {
     ipcMain.handle('ollama:get-warm-up-status', async () => await ollamaService.handleGetWarmUpStatus());
     ipcMain.handle('ollama:shutdown', async (event, force = false) => await ollamaService.handleShutdown(force));
 
+    // Ask Mode Shortcuts — IPC handlers
+    const VALID_ASK_MODES = ['default', 'code', 'debug', 'system_design'];
+
+    ipcMain.handle('mainHeader:getAskMode', async () => {
+        const s = await settingsService.getSettings();
+        return s.askMode || 'default';
+    });
+
+    ipcMain.handle('mainHeader:setAskMode', async (event, mode) => {
+        const coercedMode = VALID_ASK_MODES.includes(mode) ? mode : 'default';
+        try {
+            await settingsService.saveSettings({ askMode: coercedMode });
+            // Push change to header window via windowPool
+            const windowManager = require('../window/windowManager');
+            const headerWin = windowManager.windowPool.get('header');
+            if (headerWin && !headerWin.isDestroyed()) {
+                headerWin.webContents.send('mainHeader:askModeChanged', { mode: coercedMode });
+            }
+            return { success: true, mode: coercedMode };
+        } catch (err) {
+            console.error('[FeatureBridge] mainHeader:setAskMode failed', err);
+            return { success: false, error: err.message };
+        }
+    });
+
+    ipcMain.handle('mainHeader:openModePicker', async () => {
+        const internalBridge = require('./internalBridge');
+        internalBridge.emit('window:requestVisibility', { name: 'mode-picker', visible: true });
+        return { success: true };
+    });
+
+    ipcMain.on('mainHeader:cancelHideModePicker', () => {
+        const internalBridge = require('./internalBridge');
+        internalBridge.emit('window:requestVisibility', { name: 'mode-picker', visible: true });
+    });
+
+    ipcMain.handle('modePicker:closeWindow', async () => {
+        const internalBridge = require('./internalBridge');
+        internalBridge.emit('window:requestVisibility', { name: 'mode-picker', visible: false });
+        return { success: true };
+    });
+
+    ipcMain.handle('settings:getPreferredCodeLanguage', async () => {
+        const s = await settingsService.getSettings();
+        return s.preferredCodeLanguage || 'go';
+    });
+
+    ipcMain.handle('settings:setPreferredCodeLanguage', async (event, value) => {
+        await settingsService.saveSettings({ preferredCodeLanguage: (value || '').trim() });
+        return { success: true };
+    });
+
     // Ask
     ipcMain.handle('ask:sendQuestionFromAsk', async (event, userPrompt) => await askService.sendMessage(userPrompt));
-    ipcMain.handle('ask:sendQuestionFromSummary', async (event, userPrompt) => await askService.sendMessage(userPrompt));
+    ipcMain.handle('ask:sendQuestionFromSummary', async (event, userPrompt) => {
+        const s = await settingsService.getSettings();
+        if (s.askMode && s.askMode !== 'default') {
+            return {
+                success: false,
+                error: `Listen-summary actions only work in Default Ask mode. Current mode: ${s.askMode}. Switch back to Default via the caret on the Ask pill.`,
+            };
+        }
+        return await askService.sendMessage(userPrompt);
+    });
     ipcMain.handle('ask:toggleAskButton', async () => await askService.toggleAskButton());
     ipcMain.handle('ask:closeAskWindow',  async () => await askService.closeAskWindow());
     

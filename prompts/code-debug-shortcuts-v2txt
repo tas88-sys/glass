@@ -1,0 +1,35 @@
+Let's create a specification to implement this task below.
+
+Make sure everything described in the ticket makes sense. Also, investigate and confirm that no new bugs, regressions, or unexpected behaviors will be introduced before making any changes. 
+
+We will only proceed with this new feature if you are 100% confident that nothing will break.
+
+### Required Steps
+
+Create a feature branch for this task.
+
+After finishing investigatiom, RIGOROUSLY challenge every assumption and assertion you did.                                                                                                                                  
+
+Double-check and DEEP review everything. Only stop your analysis when you are 100% CONFIDENT that all reasoning is sound and the conclusions make sense.
+
+Query every possible resource before drawing conclusions.
+
+Ensure the output includes sufficient EVIDENCE to support your arguments.
+
+Seek clarifications.
+
+Surface inconsistencies.
+
+Don't assume. State your assumptions explicitly.
+
+Don't hide confusion. 
+
+Surface tradeoffs.
+
+Push hard on every question.
+
+Push back when you should.
+
+Use your judgment.
+
+Apply ultrathink at every step. 

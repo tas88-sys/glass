@@ -111,18 +111,32 @@ contextBridge.exposeInMainWorld('api', {
     cancelHideSettingsWindow: () => ipcRenderer.send('cancel-hide-settings-window'),
     showSettingsWindow: () => ipcRenderer.send('show-settings-window'),
     hideSettingsWindow: () => ipcRenderer.send('hide-settings-window'),
-    
+
+    // Ask Mode Shortcuts — mode management
+    getAskMode: () => ipcRenderer.invoke('mainHeader:getAskMode'),
+    setAskMode: (mode) => ipcRenderer.invoke('mainHeader:setAskMode', mode),
+    openModePicker: () => ipcRenderer.invoke('mainHeader:openModePicker'),
+    cancelHideModePicker: () => ipcRenderer.send('mainHeader:cancelHideModePicker'),
+    onAskModeChanged: (callback) => ipcRenderer.on('mainHeader:askModeChanged', callback),
+    removeOnAskModeChanged: (callback) => ipcRenderer.removeListener('mainHeader:askModeChanged', callback),
+
     // Generic invoke (for dynamic channel names)
     // invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
     sendListenButtonClick: (listenButtonText) => ipcRenderer.invoke('listen:changeSession', listenButtonText),
     sendAskButtonClick: () => ipcRenderer.invoke('ask:toggleAskButton'),
     sendToggleAllWindowsVisibility: () => ipcRenderer.invoke('shortcut:toggleAllWindowsVisibility'),
-    
+
     // Listeners
     onListenChangeSessionResult: (callback) => ipcRenderer.on('listen:changeSessionResult', callback),
     removeOnListenChangeSessionResult: (callback) => ipcRenderer.removeListener('listen:changeSessionResult', callback),
     onShortcutsUpdated: (callback) => ipcRenderer.on('shortcuts-updated', callback),
     removeOnShortcutsUpdated: (callback) => ipcRenderer.removeListener('shortcuts-updated', callback)
+  },
+
+  // src/ui/modePicker/ModePickerView.js
+  modePicker: {
+    selectMode: (mode) => ipcRenderer.invoke('mainHeader:setAskMode', mode),
+    closeWindow: () => ipcRenderer.invoke('modePicker:closeWindow'),
   },
 
   // src/ui/app/PermissionHeader.js
@@ -226,6 +240,10 @@ contextBridge.exposeInMainWorld('api', {
     getWhisperInstalledModels: () => ipcRenderer.invoke('whisper:get-installed-models'),
     downloadWhisperModel: (modelId) => ipcRenderer.invoke('whisper:download-model', modelId),
     
+    // Ask Mode Shortcuts — preferred code language
+    getPreferredCodeLanguage: () => ipcRenderer.invoke('settings:getPreferredCodeLanguage'),
+    setPreferredCodeLanguage: (value) => ipcRenderer.invoke('settings:setPreferredCodeLanguage', value),
+
     // Settings Management
     getPresets: () => ipcRenderer.invoke('settings:getPresets'),
     getAutoUpdate: () => ipcRenderer.invoke('settings:get-auto-update'),

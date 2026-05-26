@@ -1,0 +1,698 @@
+_version: "1.0"
+_spec_id: "2026-05-25-ask-mode-shortcuts"
+_spec_name: "Ask Mode Shortcuts"
+_branch_target: "feat/ask-mode-shortcuts"
+
+generation_context:
+  generated_at: "2026-05-25"
+  generated_by: "/tasks 2026-05-25-ask-mode-shortcuts-plan.md"
+  spec_sha256: "1f3174a53dce676255b55a04c92bbbed856d0c1bdcdc0fb93e2e2a555487deab"
+  plan_sha256: "4af9a2023145fd1d021b3a6b1c8fcd09273d9882bee2437512638427f725f921"
+  tasks_sha256: "81ffa1616cb1510f87a2be940af726cfad464889d2bc81b8ace326da1a9500e1"
+  framework_note: |
+    Repo does not vendor CW SpecKit framework (.specify/templates missing per plan §0).
+    Acceptance manifest emitted directly under docs/plans/ per repo convention.
+    No automated test harness for Lit elements in this repo (per plan §10) — most checks
+    are manual smoke tests gated by spec §11. Structural/grep checks are automatable
+    and execute via the commands below.
+
+_references:
+  files:
+    new:
+      - "src/ui/modePicker/mode-picker.html"
+      - "src/ui/modePicker/ModePickerView.js"
+    modified:
+      - "src/features/common/prompts/promptTemplates.js"
+      - "src/features/settings/settingsService.js"
+      - "src/features/ask/askService.js"
+      - "src/bridge/featureBridge.js"
+      - "src/window/windowManager.js"
+      - "src/window/windowLayoutManager.js"
+      - "src/preload.js"
+      - "src/ui/app/MainHeader.js"
+      - "src/ui/settings/SettingsView.js"
+      - "src/ui/listen/summary/SummaryView.js"
+  ipc_channels:
+    new:
+      - "mainHeader:getAskMode"
+      - "mainHeader:setAskMode"
+      - "mainHeader:openModePicker"
+      - "mainHeader:cancelHideModePicker"
+      - "mainHeader:askModeChanged"
+      - "modePicker:closeWindow"
+      - "settings:getPreferredCodeLanguage"
+      - "settings:setPreferredCodeLanguage"
+    modified:
+      - "ask:sendQuestionFromSummary"
+  prompt_profiles:
+    new:
+      - "pickle_glass_code"
+      - "pickle_glass_debug"
+      - "pickle_glass_system_design"
+    untouched:
+      - "pickle_glass_analysis"
+      - "interview"
+  settings_keys:
+    new:
+      - "askMode (string; 'default' | 'code' | 'debug' | 'system_design'; default 'default')"
+      - "preferredCodeLanguage (string; free-text; default 'go')"
+  tokens:
+    new:
+      - "{{PREFERRED_LANGUAGE}} — used exactly once in pickle_glass_code.content"
+    untouched:
+      - "{{CONVERSATION_HISTORY}} — used only by pickle_glass_analysis.outputInstructions and summaryService"
+
+# ─── Categories that do NOT apply ───────────────────────────────────────────
+# sql_tests:          n/a — no SQLite or DB schema changes (electron-store JSON only)
+# http_tests:         n/a — no HTTP routes; only Electron IPC
+# aws_tests:          n/a — no CDK / Lambda / SSM
+# cli_tests:          n/a — no shell scripts or npm script changes
+# test_gates:         n/a — no automated test harness wired (plan §10); manual gate only
+# performance_checks: n/a — no SLAs / latency bounds defined
+# ────────────────────────────────────────────────────────────────────────────
+
+structural_checks:
+  description: |
+    Automated grep / read-based checks that verify the touched files contain the
+    edits described in plan §6 substeps. Runnable without booting the app.
+  checks:
+  - id: SC-001
+    name: settings-defaults-present
+    plan_ref: plan §6 P1.1 + spec §7.1
+    description: "settingsService.js getDefaultSettings() returns object containing askMode:'default' and preferredCodeLanguage:'go'"
+    command: |
+      grep -E "askMode:\s*'default'" src/features/settings/settingsService.js && \
+      grep -E "preferredCodeLanguage:\s*'go'" src/features/settings/settingsService.js
+    expect:
+      exit_code: 0
+      matches_both: true
+    on_failure:
+      severity: BLOCKER
+      rca_hints:
+        - "Verify getDefaultSettings() return object includes both keys after `contentProtection: true`."
+        - "Check that the edit landed inside getDefaultSettings() and not in a sibling function."
+      related_files: ["src/features/settings/settingsService.js"]
+
+  - id: SC-002
+    name: prompt-profiles-added
+    plan_ref: plan §6 P1.2 + spec §9.1–§9.3
+    description: "promptTemplates.js exports 3 new profile keys: pickle_glass_code, pickle_glass_debug, pickle_glass_system_design"
+    command: |
+      grep -E "pickle_glass_code\s*:" src/features/common/prompts/promptTemplates.js && \
+      grep -E "pickle_glass_debug\s*:" src/features/common/prompts/promptTemplates.js && \
+      grep -E "pickle_glass_system_design\s*:" src/features/common/prompts/promptTemplates.js
+    expect:
+      exit_code: 0
+    on_failure:
+      severity: BLOCKER
+      rca_hints:
+        - "Profile bodies must follow the 5-slot shape: intro, formatRequirements, searchUsage, content, outputInstructions."
+        - "Use spec §9.1–§9.3 verbatim — drift here is a prompt-engineering regression."
+      related_files: ["src/features/common/prompts/promptTemplates.js"]
+
+  - id: SC-003
+    name: preferred-language-token-unique
+    plan_ref: plan §6 P1.3 (sanity check) + spec clarify session Q1
+    description: "{{PREFERRED_LANGUAGE}} token appears exactly once in promptTemplates.js — only inside pickle_glass_code.content"
+    command: |
+      grep -c "{{PREFERRED_LANGUAGE}}" src/features/common/prompts/promptTemplates.js
+    expect:
+      stdout: "1"
+    on_failure:
+      severity: BLOCKER
+      rca_hints:
+        - "Token must NOT collide with {{CONVERSATION_HISTORY}} (which lives in pickle_glass_analysis.outputInstructions)."
+        - "If a second occurrence appears, the askService string replacement at askService.js:~280 will silently mutate the wrong slot."
+      related_files: ["src/features/common/prompts/promptTemplates.js", "src/features/ask/askService.js"]
+
+  - id: SC-004
+    name: existing-analysis-profile-untouched
+    plan_ref: spec §2 E7 + plan §4 "No changes (verified)"
+    description: "pickle_glass_analysis profile is left verbatim — no edits to the intro / formatRequirements / content / outputInstructions slots"
+    command: |
+      grep -A 2 "pickle_glass_analysis:" src/features/common/prompts/promptTemplates.js | head -3
+    expect:
+      regression_gate: true
+      note: "Manual diff review — comparing intro/content of pickle_glass_analysis against baseline (pre-feat/ask-mode-shortcuts branch)"
+    on_failure:
+      severity: BLOCKER
+      rca_hints:
+        - "If this profile drifts, Listen summary path (summaryService.js:93) and default-mode Ask both regress simultaneously."
+        - "Spec §2 E7 explicitly verified this profile must remain verbatim."
+      related_files: ["src/features/common/prompts/promptTemplates.js", "src/features/listen/summary/summaryService.js"]
+
+  - id: SC-005
+    name: askservice-uses-mode-routing
+    plan_ref: plan §6 P2.1 + P2.2 + spec §7.3
+    description: "askService.js no longer hard-codes 'pickle_glass_analysis' at line ~257 — VALID_MODES + PROFILE_BY_MODE constructs are present"
+    command: |
+      grep -E "VALID_MODES" src/features/ask/askService.js && \
+      grep -E "PROFILE_BY_MODE" src/features/ask/askService.js && \
+      grep -E "PREFERRED_LANGUAGE" src/features/ask/askService.js
+    expect:
+      exit_code: 0
+    on_failure:
+      severity: BLOCKER
+      rca_hints:
+        - "Mode routing is the core of this feature — if absent, every mode produces analysis-profile output."
+        - "Verify VALID_MODES = ['default','code','debug','system_design'] and the defensive coerce branch is hit on bad data."
+      related_files: ["src/features/ask/askService.js"]
+
+  - id: SC-006
+    name: settingsservice-require-hoisted
+    plan_ref: plan §6 P2.1
+    description: "require('../settings/settingsService') appears at the TOP of askService.js (not inline in sendMessage hot path)"
+    command: |
+      head -50 src/features/ask/askService.js | grep -E "require.*settings/settingsService"
+    expect:
+      exit_code: 0
+    on_failure:
+      severity: WARN
+      rca_hints:
+        - "Hoist avoids circular-import risk at boot AND avoids the require() in a hot streaming path."
+        - "Per plan §6 P2.1 — explicit refactor step, do not skip."
+      related_files: ["src/features/ask/askService.js"]
+
+  - id: SC-007
+    name: summary-handler-rejects-non-default-mode
+    plan_ref: plan §6 P2.5 + spec §7.4
+    description: "featureBridge.js ask:sendQuestionFromSummary handler checks askMode and returns {success:false} when !== 'default'"
+    command: |
+      grep -B 1 -A 8 "ask:sendQuestionFromSummary" src/bridge/featureBridge.js | grep -E "askMode|success.*false"
+    expect:
+      exit_code: 0
+      regression_gate: true
+      note: "This is the E2 regression fix from spec §2. CRITICAL."
+    on_failure:
+      severity: BLOCKER
+      rca_hints:
+        - "Without this guard, clicking a Listen-summary follow-up while askMode='code' silently fires the Code prompt against a Listen-context question."
+        - "Spec §2 E2 is the genesis of this guard."
+      related_files: ["src/bridge/featureBridge.js"]
+
+  - id: SC-008
+    name: new-ipc-handlers-registered
+    plan_ref: plan §6 P2.4 + spec §7.7 IPC inventory
+    description: "All 6 new IPC handlers exist in featureBridge.js initialize()"
+    command: |
+      for h in "mainHeader:getAskMode" "mainHeader:setAskMode" "mainHeader:openModePicker" "modePicker:closeWindow" "settings:getPreferredCodeLanguage" "settings:setPreferredCodeLanguage"; do
+        grep -q "$h" src/bridge/featureBridge.js || { echo "MISSING: $h"; exit 1; }
+      done
+    expect:
+      exit_code: 0
+    on_failure:
+      severity: BLOCKER
+      rca_hints:
+        - "Missing handlers will cause window.api.mainHeader.* invokes from the renderer to throw 'No handler registered'."
+        - "Add to featureBridge.js initialize() body following the existing handler-registration pattern."
+      related_files: ["src/bridge/featureBridge.js"]
+
+  - id: SC-009
+    name: mode-picker-window-registered
+    plan_ref: plan §6 P3.1
+    description: "windowManager.js registers 'mode-picker' in windowPool, with parent:undefined per clarify IMPL GAP 1"
+    command: |
+      grep -E "'mode-picker'" src/window/windowManager.js && \
+      grep -B 5 "mode-picker" src/window/windowManager.js | grep -E "parent:\s*undefined|width:\s*160|height:\s*144"
+    expect:
+      exit_code: 0
+    on_failure:
+      severity: BLOCKER
+      rca_hints:
+        - "If parent is set to header window, the picker becomes an OS-level child — focus/alwaysOnTop conflicts."
+        - "Mirror the settings window (windowManager.js:527) and shortcut-settings (windowManager.js:565) which both use parent:undefined."
+      related_files: ["src/window/windowManager.js"]
+
+  - id: SC-010
+    name: mode-picker-hide-debounce-present
+    plan_ref: plan §6 P3.2 + spec clarify Q2 (hide-debounce pattern)
+    description: "windowManager.js has modePickerHideTimer parallel to settingsHideTimer with 200ms delay"
+    command: |
+      grep -E "modePickerHideTimer" src/window/windowManager.js && \
+      grep -B 2 -A 2 "modePickerHideTimer" src/window/windowManager.js | grep -E "200"
+    expect:
+      exit_code: 0
+    on_failure:
+      severity: BLOCKER
+      rca_hints:
+        - "Without this debounce, the picker will flicker when the user crosses the caret→picker pixel gap."
+        - "Mirror settingsHideTimer at windowManager.js:308-322."
+      related_files: ["src/window/windowManager.js"]
+
+  - id: SC-011
+    name: mode-picker-position-calc-present
+    plan_ref: plan §6 P3.3
+    description: "windowLayoutManager.js has calculateModePickerWindowPosition() method"
+    command: |
+      grep -E "calculateModePickerWindowPosition" src/window/windowLayoutManager.js
+    expect:
+      exit_code: 0
+    on_failure:
+      severity: BLOCKER
+      rca_hints:
+        - "If absent, windowManager will not know where to place the picker — defaults to (0,0) or worse, crashes."
+        - "Mirror calculateSettingsWindowPosition at windowLayoutManager.js:71-94 including the work-area clamp."
+      related_files: ["src/window/windowLayoutManager.js"]
+
+  - id: SC-012
+    name: mode-picker-files-created
+    plan_ref: plan §6 P3.4 + P3.5
+    description: "New files src/ui/modePicker/mode-picker.html and ModePickerView.js exist"
+    command: |
+      test -f src/ui/modePicker/mode-picker.html && \
+      test -f src/ui/modePicker/ModePickerView.js
+    expect:
+      exit_code: 0
+    on_failure:
+      severity: BLOCKER
+      related_files:
+        - "src/ui/modePicker/mode-picker.html"
+        - "src/ui/modePicker/ModePickerView.js"
+
+  - id: SC-013
+    name: mode-picker-click-ordering
+    plan_ref: plan §6 P3.5 + clarify IMPL GAP 3
+    description: "ModePickerView.js click handler awaits setAskMode BEFORE calling closeWindow (no race)"
+    command: |
+      grep -E "await\s+window\.api\.mainHeader\.setAskMode" src/ui/modePicker/ModePickerView.js && \
+      grep -B 2 -A 4 "setAskMode" src/ui/modePicker/ModePickerView.js | grep -E "closeWindow"
+    expect:
+      exit_code: 0
+      note: "Manual diff inspection — ensure closeWindow appears AFTER the await on setAskMode resolution"
+    on_failure:
+      severity: BLOCKER
+      rca_hints:
+        - "If closeWindow runs first, setAskMode IPC may be cancelled mid-roundtrip when window unloads."
+        - "Clarify IMPL GAP 3 mandates strict ordering."
+      related_files: ["src/ui/modePicker/ModePickerView.js"]
+
+  - id: SC-014
+    name: preload-exposes-new-namespaces
+    plan_ref: plan §6 P3.6 + spec §5 file #10
+    description: "preload.js exposes window.api.mainHeader.{getAskMode, setAskMode, openModePicker, cancelHideModePicker, onAskModeChanged, removeOnAskModeChanged} and window.api.modePicker.{selectMode, closeWindow} and window.api.settingsView.{getPreferredCodeLanguage, setPreferredCodeLanguage}"
+    command: |
+      for m in "getAskMode" "setAskMode" "openModePicker" "cancelHideModePicker" "onAskModeChanged" "removeOnAskModeChanged" "getPreferredCodeLanguage" "setPreferredCodeLanguage"; do
+        grep -q "$m" src/preload.js || { echo "MISSING: $m"; exit 1; }
+      done && \
+      grep -q "modePicker" src/preload.js
+    expect:
+      exit_code: 0
+    on_failure:
+      severity: BLOCKER
+      related_files: ["src/preload.js"]
+
+  - id: SC-015
+    name: mainheader-renders-caret-and-badge
+    plan_ref: plan §6 P4.1 + P4.2 + P4.3
+    description: "MainHeader.js has askMode state property, _renderAskLabel() helper, and ▾ caret button"
+    command: |
+      grep -E "askMode" src/ui/app/MainHeader.js && \
+      grep -E "_renderAskLabel|ask-mode-caret|ask-group" src/ui/app/MainHeader.js
+    expect:
+      exit_code: 0
+    on_failure:
+      severity: BLOCKER
+      related_files: ["src/ui/app/MainHeader.js"]
+
+  - id: SC-016
+    name: settingsview-has-language-input
+    plan_ref: plan §6 P4.6 + spec §7.5
+    description: "SettingsView.js has preferred-code-language-input field and handleSavePreferredLanguage handler"
+    command: |
+      grep -E "preferredCodeLanguage|preferred-code-language" src/ui/settings/SettingsView.js
+    expect:
+      exit_code: 0
+    on_failure:
+      severity: BLOCKER
+      related_files: ["src/ui/settings/SettingsView.js"]
+
+  - id: SC-017
+    name: summaryview-surfaces-error
+    plan_ref: plan §6 P4.7 + spec §7.4
+    description: "SummaryView.handleRequestClick surfaces result.error via alert() when success===false"
+    command: |
+      grep -B 2 -A 6 "handleRequestClick" src/ui/listen/summary/SummaryView.js | grep -E "alert|result\.error"
+    expect:
+      exit_code: 0
+    on_failure:
+      severity: BLOCKER
+      rca_hints:
+        - "Without this, the IPC block from P2.5 fails silently — user clicks summary action with askMode='code', nothing happens, no LLM call, no feedback."
+      related_files: ["src/ui/listen/summary/SummaryView.js"]
+
+# ─── Negative assertions (things that MUST NOT be present) ─────────────
+negative_assertions:
+  description: |
+    The plan §4 lists files explicitly "not touched". Drift here is a regression.
+  checks:
+  - id: NA-001
+    name: pickle-glass-analysis-not-modified
+    plan_ref: spec §2 E7 + plan §4 "No changes (verified)"
+    description: "git diff between feat/ask-mode-shortcuts and main must NOT change pickle_glass_analysis profile content"
+    command: |
+      git diff main..HEAD -- src/features/common/prompts/promptTemplates.js | grep -E "pickle_glass_analysis" || echo "no changes — pass"
+    expect:
+      regression_gate: true
+      manual_review: true
+    on_failure:
+      severity: BLOCKER
+      rca_hints:
+        - "pickle_glass_analysis is shared between Ask default mode AND Listen summary path."
+        - "Any edit here causes simultaneous regression in two user-visible surfaces."
+
+  - id: NA-002
+    name: summaryservice-untouched
+    plan_ref: spec §2 E9 + plan §4
+    description: "summaryService.js still calls getSystemPrompt('pickle_glass_analysis', '', false) at line ~93 — no edits"
+    command: |
+      grep -E "pickle_glass_analysis" src/features/listen/summary/summaryService.js
+    expect:
+      exit_code: 0
+      regression_gate: true
+    on_failure:
+      severity: BLOCKER
+      related_files: ["src/features/listen/summary/summaryService.js"]
+
+  - id: NA-003
+    name: relevant-window-types-untouched
+    plan_ref: plan §4 "No changes (verified)" — RELEVANT_WINDOW_TYPES
+    description: "RELEVANT_WINDOW_TYPES array (the pre-existing ['settings','main'] dead-broadcast bug) is OUT OF SCOPE — must NOT be modified by this feature"
+    command: |
+      git diff main..HEAD -- src/window/windowManager.js | grep -E "RELEVANT_WINDOW_TYPES" || echo "no changes — pass"
+    expect:
+      regression_gate: true
+      manual_review: true
+    on_failure:
+      severity: WARN
+      rca_hints:
+        - "Spec §12 explicitly defers this bug; new push uses direct windowPool.get('header').webContents.send instead."
+        - "If this is touched, scope is inflated and should be a separate PR."
+
+  - id: NA-004
+    name: no-new-keybinds
+    plan_ref: plan §4 "No new keyboard shortcuts"
+    description: "shortcutsService.js Cmd+Enter binding at line ~214 (toggleAskButton) is intentional pass-through — no edits"
+    command: |
+      git diff main..HEAD -- src/features/shortcuts/shortcutsService.js 2>/dev/null | wc -l
+    expect:
+      stdout_max: "5"
+      note: "Allow trivial whitespace; flag any substantive diff"
+      regression_gate: true
+    on_failure:
+      severity: WARN
+      rca_hints:
+        - "Spec §4 Decision 9 defers per-mode shortcuts to v2."
+
+  - id: NA-005
+    name: no-db-migration
+    plan_ref: plan §4 "No DB migration"
+    description: "No new files under any migrations / repositories directory; no SQLite schema changes"
+    command: |
+      git diff main..HEAD --name-only 2>/dev/null | grep -E "migration|repository|sqlite" || echo "no changes — pass"
+    expect:
+      no_match: true
+    on_failure:
+      severity: BLOCKER
+      rca_hints:
+        - "This feature uses electron-store JSON only. Any DB touch is out-of-scope and indicates wrong wiring."
+
+  - id: NA-006
+    name: no-new-dependencies
+    plan_ref: plan §4 "No new dependencies"
+    description: "package.json dependencies / devDependencies unchanged"
+    command: |
+      git diff main..HEAD -- package.json | grep -E "^\+\s+\"" || echo "no new deps — pass"
+    expect:
+      no_match: true
+    on_failure:
+      severity: WARN
+
+  - id: NA-007
+    name: maxtokens-not-passed
+    plan_ref: plan §8 R8 risk register + plan §2 technical context
+    description: "createStreamingLLM call at askService.js:~276 does NOT pass maxTokens (provider defaults apply). Spec §10 T6 accepts this; touching it is out-of-scope unless QA flags System Design truncation."
+    command: |
+      grep -B 2 -A 5 "createStreamingLLM" src/features/ask/askService.js | grep -E "maxTokens" || echo "maxTokens not passed — pass"
+    expect:
+      no_match: true
+      regression_gate: true
+    on_failure:
+      severity: WARN
+      rca_hints:
+        - "If maxTokens is passed here, this PR has inflated scope vs the plan's risk-accepted defaults."
+
+# ─── Data integrity checks ─────────────────────────────────────────────
+data_integrity:
+  description: "Token uniqueness, defensive coerce, sentinel correctness"
+  checks:
+  - id: DI-001
+    name: valid-modes-coerce-defensive
+    plan_ref: plan §6 P2.6 + P5.1 + spec §8.1
+    description: "Set users.default.askMode='banana' in electron-store; fire Ask; logs MUST show coerce-to-default and use pickle_glass_analysis (NOT profilePrompts.interview)"
+    method: manual
+    steps:
+      - "Quit app"
+      - "Edit electron-store JSON: set users.default.askMode='banana'"
+      - "Re-launch app"
+      - "Click Ask, type 'test', press Enter"
+      - "Read main-process logs"
+    expect:
+      logs_contain: "pickle_glass_analysis (or equivalent indicator that default profile was chosen)"
+      logs_do_not_contain: "interview"
+    on_failure:
+      severity: BLOCKER
+      rca_hints:
+        - "If 'interview' profile fires, the user gets TOPICS: / QUESTIONS: output instead of analysis output."
+        - "VALID_MODES.includes(rawMode) ? rawMode : 'default' is the canonical coerce per spec §7.3."
+
+  - id: DI-002
+    name: preferred-language-whitespace-trim
+    plan_ref: plan §6 P5.2 + spec §8.2
+    description: "Set preferredCodeLanguage='   ' (whitespace only); fire Code mode; sentinel __INFER_FROM_SCREENSHOT__ appears in the system prompt sent to the LLM"
+    method: manual
+    steps:
+      - "Settings → set Preferred Coding Language to '   ' (3 spaces)"
+      - "Switch Ask mode to Code"
+      - "Fire Ask with a screenshot of a coding problem"
+      - "Inspect outgoing prompt log"
+    expect:
+      prompt_contains: "__INFER_FROM_SCREENSHOT__"
+    on_failure:
+      severity: BLOCKER
+      rca_hints:
+        - "If whitespace is not trimmed, the user accidentally sends '   ' as the target language and the LLM tries to write code in three-space-language."
+        - "spec §8.2 mandates .trim() before injection."
+
+  - id: DI-003
+    name: askmode-persistence-across-restart
+    plan_ref: spec §11 T6 (Persistence)
+    description: "Set askMode='debug', quit app, relaunch. askMode is still 'debug'."
+    method: manual
+    steps:
+      - "Launch app fresh"
+      - "Open mode picker, select Debug"
+      - "Verify badge reads 'Ask · Debug'"
+      - "Quit app fully"
+      - "Relaunch"
+      - "Verify badge still reads 'Ask · Debug' on cold start"
+    expect:
+      badge_text: "Ask · Debug"
+    on_failure:
+      severity: BLOCKER
+      rca_hints:
+        - "If badge resets to 'Ask', settingsService.saveSettings({askMode:'debug'}) was never persisted, OR the connectedCallback fetch is broken."
+
+# ─── Error scans / fallback paths ──────────────────────────────────────
+error_scans:
+  description: "Defensive paths from spec §8 hardening — must not crash; must surface helpful errors"
+  checks:
+  - id: ES-001
+    name: ipc-failure-on-mount
+    plan_ref: spec §11 T14 + spec §8.3
+    description: "Simulate IPC failure on MainHeader mount by replacing the getAskMode handler with `throw new Error('boom')`. Badge defaults to 'Ask'; no crash; no console error blocks the app."
+    method: manual
+    steps:
+      - "Temporarily edit featureBridge.js mainHeader:getAskMode handler to throw an Error"
+      - "Launch app"
+      - "Observe MainHeader"
+    expect:
+      badge_text: "Ask"
+      no_crash: true
+    on_failure:
+      severity: BLOCKER
+      rca_hints:
+        - "try/catch in connectedCallback must cover this — spec §8.3 mandates."
+
+  - id: ES-002
+    name: picker-dismiss-on-blur
+    plan_ref: spec §11 T12 + spec §8.4
+    description: "Open mode picker, click on another app (e.g. Finder). Picker hides."
+    method: manual
+    expect:
+      picker_visible: false
+    on_failure:
+      severity: BLOCKER
+      rca_hints:
+        - "ModePickerView must register window.addEventListener('blur', ...) per P3.5."
+
+  - id: ES-003
+    name: empty-screenshot-fallback
+    plan_ref: spec §11 T11 + plan §2 technical context (multimodal-retry path)
+    description: "Trigger an empty screenshot capture (e.g. permission denied). All four modes still respond using only the typed text — existing fallback path at askService.js:303-338 handles it."
+    method: manual
+    steps:
+      - "Revoke screen-recording permission temporarily (or simulate via testing hook)"
+      - "Fire Ask in each of the four modes with typed text"
+      - "Verify response in all four cases"
+    expect:
+      all_modes_respond: true
+    on_failure:
+      severity: WARN
+      rca_hints:
+        - "Multimodal-retry path inherits the same outer systemPrompt variable — spec §2 E8 verified."
+        - "If only default mode survives, mode routing is leaking somehow into the retry path."
+
+  - id: ES-004
+    name: blocked-summary-shows-alert
+    plan_ref: spec §11 T9 (REGRESSION GATE) + plan §6 P2.5 + P4.7
+    description: "With askMode='code', click a Listen summary follow-up action. User sees alert with the spec's literal error string. NO LLM call is made (verify via network log)."
+    method: manual
+    steps:
+      - "Start a Listen session, generate at least one summary action"
+      - "Switch Ask mode to Code"
+      - "Click any summary follow-up action"
+    expect:
+      alert_displayed: true
+      alert_text_contains: "Listen-summary actions only work in Default Ask mode"
+      no_outbound_llm_request: true
+    on_failure:
+      severity: BLOCKER
+      regression_gate: true
+      rca_hints:
+        - "This is the E2 regression gate. The whole 'block + warn' decision (spec §4 #6) hinges on this test."
+
+# ─── Manual smoke test suite (mirrors spec §11) ────────────────────────
+manual_smoke_tests:
+  description: |
+    Verbatim mirror of spec §11 T1–T14 + T-15. Execution order from plan §10.
+    Each test is gated; ANY failure blocks merge.
+
+  execution_order:
+    - id: T1
+      name: backward-compat-gate
+      description: "Fresh install with empty settings → Ask works identically to today (default mode)"
+      method: manual
+      severity: BLOCKER
+      on_failure:
+        rca_hints:
+          - "If T1 fails, the whole feature has a backward-compat regression and must NOT merge."
+
+    - id: T2
+      name: code-mode-default-language
+      description: "Pick Code, leave language empty → screenshot a Go problem → response uses Go (sentinel branch)"
+      method: manual
+      severity: BLOCKER
+
+    - id: T3
+      name: code-mode-language-change
+      description: "Switch Preferred Coding Language to 'python' in Settings, re-fire → response uses Python"
+      method: manual
+      severity: BLOCKER
+
+    - id: T4
+      name: debug-mode-five-heading-structure
+      description: "Pick Debug, screenshot a stack trace → response uses the 5-heading structure (### Issues / ### Specific Improvements / ### Optimizations / ### Explanation / ### Key Points)"
+      method: manual
+      severity: BLOCKER
+
+    - id: T5
+      name: system-design-routing-rule-a
+      description: "Pick System Design, type 'design Twitter feed' → response has all 10 sections + ASCII diagram, all numbers populated"
+      method: manual
+      severity: BLOCKER
+
+    - id: T5b
+      name: system-design-routing-rule-b
+      description: "After T5, type 'deep dive on db' → response shows ONLY the data-model section expanded 3× with 2 numerical examples; other 9 sections each show '(unchanged — see prior turn)'"
+      method: manual
+      severity: BLOCKER
+
+    - id: T6
+      name: persistence
+      description: "Restart app → mode persists"
+      method: manual
+      severity: BLOCKER
+      duplicate_of: "DI-003"
+
+    - id: T7
+      name: listen-summary-still-uses-analysis-profile
+      description: "Start Listen session, run summary every 5 turns → summary still uses pickle_glass_analysis"
+      method: manual
+      severity: BLOCKER
+      verify_by: "Reading the prompt log — verify pickle_glass_analysis fires"
+
+    - id: T8
+      name: listen-summary-followup-default-mode
+      description: "askMode='default'; click summary follow-up → behaves as today, LLM call fires with analysis profile"
+      method: manual
+      severity: BLOCKER
+
+    - id: T9
+      name: listen-summary-followup-non-default-mode-REGRESSION
+      description: "askMode='code'; click summary follow-up → alert appears, NO LLM call"
+      method: manual
+      severity: BLOCKER
+      regression_gate: true
+      duplicate_of: "ES-004"
+
+    - id: T10
+      name: corrupted-askmode-coerce
+      description: "Edit electron-store askMode='banana' → fire Ask → falls back to default profile, no crash"
+      method: manual
+      severity: BLOCKER
+      duplicate_of: "DI-001"
+
+    - id: T11
+      name: empty-screenshot-fallback
+      description: "Trigger empty screenshot capture → all four modes respond using only typed text"
+      method: manual
+      severity: WARN
+      duplicate_of: "ES-003"
+
+    - id: T12
+      name: picker-dismiss-on-blur
+      description: "Open picker, click another app → picker hides"
+      method: manual
+      severity: BLOCKER
+      duplicate_of: "ES-002"
+
+    - id: T13
+      name: picker-focus-tab-enter
+      description: "Tab cycles focus through 4 buttons; Enter activates focused row"
+      method: manual
+      severity: BLOCKER
+
+    - id: T14
+      name: settings-ipc-failure-on-mount
+      description: "Simulate IPC throw → badge defaults to 'Ask', no crash"
+      method: manual
+      severity: BLOCKER
+      duplicate_of: "ES-001"
+
+    - id: T-15
+      name: header-width-visual-gate
+      description: "askMode='system_design' → header on 1920×1080 display shows 'Ask · SysDes' badge + caret fully visible, no overflow, no layout crash"
+      method: manual
+      severity: BLOCKER
+      added_by: "spec clarify session 2026-05-25"
+
+# ─── Final gate ─────────────────────────────────────────────────────────
+gate_summary:
+  blocker_count_must_be: 0
+  warn_count_acceptable_threshold: 2
+  duplicate_handling: "Duplicate-of references collapse to a single PASS — running T9 covers ES-004 and vice versa."
+  merge_gate:
+    require_all_blocker_pass: true
+    require_t1_pass: true
+    require_t9_pass_REGRESSION: true
+    require_t15_pass_VISUAL: true
