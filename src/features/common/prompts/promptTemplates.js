@@ -566,16 +566,18 @@ Show the math inline. DAU → requests/user/day → peak QPS (peak ≈ 3× avg u
 ## 4. API Design
 4–8 endpoints / RPCs. Per endpoint: HTTP method + path, key params, response shape (1 line), auth requirement, idempotency key if write.
 
-## 5. Data Model + High-Level Architecture
+## 5. Data Model
 **Entities** — core entities + key fields + index choices (primary, secondary).
 **Storage tech per entity** — name the tech (Postgres / DynamoDB / Cassandra / Redis / S3 / Kafka / Elasticsearch) with a one-line rationale AND the rejected alternative with a one-line reason for rejection.
+
+## 6. High-Level Architecture
 **Diagram** — a single ASCII diagram in a fenced \`\`\` block — client → CDN → LB → API gateway → services → datastores + cache + queue + CDC + search. Number each box.
 **Box Legend** — immediately below the diagram, list each numbered box on its own line with a ≤ 12-word purpose statement (e.g. "(3) API Gateway — auth, rate-limit, request routing").
 
-## 6. Deep Dives
+## 7. Deep Dives
 Cover the 2–3 probes the interviewer is MOST likely to ask given the problem. For each: **concern** (what's at risk), **mechanism** (how it works in 1–2 sentences), **tradeoff** (what you give up), **failure mode** (what breaks first), **alert metric** (what you'd page on).
 
-## 7. Scaling, Bottlenecks & Failure Modes
+## 8. Scaling, Bottlenecks & Failure Modes
 Required sub-bullets, all of them:
 - **Sharding** — sharding key + scheme (range / hash / consistent-hash) + rebalance plan
 - **Caching** — cache layer + TTL + invalidation strategy + stampede mitigation
@@ -583,16 +585,16 @@ Required sub-bullets, all of them:
 - **"What breaks first at 10× load?"** — name the component and the fix
 - **"What breaks when component X dies?"** — name the critical component(s) and your fallback / circuit-breaker / retry strategy
 
-## 8. Trade-offs Summary
+## 9. Trade-offs Summary
 3–5 one-liners naming the highest-leverage trade-offs you accepted and the one-line reason. (Bullet form. Each ≤ 20 words.)
 
-## 9. Say-Aloud Cheat Sheet
+## 10. Say-Aloud Cheat Sheet
 Three labelled snippets the candidate can READ VERBATIM if they blank:
 - **Opening 30s pitch:** one paragraph (2–3 sentences) that frames the design at the top of the interview
 - **If they say "walk me through your design":** a 3-sentence sequenced walkthrough
 - **If you stall:** 2 confidence-builder phrases starting with "The part I'd want to validate with you before committing is…" or equivalent
 
-## 10. Anticipated Interviewer Probes
+## 11. Anticipated Interviewer Probes
 Exactly 10 entries, each in the form: \`**Q:** <likely interviewer question> --- **A:** <1-3 sentence say-aloud answer>\`. Order by probability they ask. REQUIRED coverage — every list MUST include at least one entry on each of these topics (combine when natural):
 1. Consistency model trade-off
 2. Hot-key / celebrity problem
