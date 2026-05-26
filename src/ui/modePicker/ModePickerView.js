@@ -73,6 +73,8 @@ class ModePickerView extends LitElement {
         super();
         this.activeMode = 'default';
         this._handleBlur = this._onWindowBlur.bind(this);
+        this._handleHostEnter = this._onHostEnter.bind(this);
+        this._handleHostLeave = this._onHostLeave.bind(this);
     }
 
     async connectedCallback() {
@@ -89,11 +91,30 @@ class ModePickerView extends LitElement {
 
         // Blur fallback: close the window if focus leaves the picker window (spec §8.4)
         window.addEventListener('blur', this._handleBlur);
+
+        // Hover bridge: cancel pending hide when mouse enters the picker, start hide on leave.
+        // Mirrors SettingsView's handleMouseEnter/handleMouseLeave pattern.
+        this.addEventListener('mouseenter', this._handleHostEnter);
+        this.addEventListener('mouseleave', this._handleHostLeave);
     }
 
     disconnectedCallback() {
         super.disconnectedCallback();
         window.removeEventListener('blur', this._handleBlur);
+        this.removeEventListener('mouseenter', this._handleHostEnter);
+        this.removeEventListener('mouseleave', this._handleHostLeave);
+    }
+
+    _onHostEnter() {
+        if (window.api && window.api.mainHeader) {
+            try { window.api.mainHeader.cancelHideModePicker(); } catch {}
+        }
+    }
+
+    _onHostLeave() {
+        if (window.api && window.api.modePicker) {
+            try { window.api.modePicker.closeWindow(); } catch {}
+        }
     }
 
     async _onWindowBlur() {
