@@ -113,3 +113,7 @@ data/*.db-wal
 out/
 dist/
 build/ 
+
+# Claude Code framework
+.claude/
+.specify

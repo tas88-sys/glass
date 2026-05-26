@@ -404,19 +404,22 @@ export class SummaryView extends LitElement {
     }
 
     async handleRequestClick(requestText) {
-        console.log('🔥 Analysis request clicked:', requestText);
+        console.log('Analysis request clicked:', requestText);
 
         if (window.api) {
             try {
                 const result = await window.api.summaryView.sendQuestionFromSummary(requestText);
 
-                if (result.success) {
-                    console.log('✅ Question sent to AskView successfully');
+                if (result && result.success) {
+                    console.log('Question sent to AskView successfully');
                 } else {
-                    console.error('❌ Failed to send question to AskView:', result.error);
+                    // Surface the error to the user — includes the Ask-mode block message (spec §7.4)
+                    console.error('Failed to send question to AskView:', result && result.error);
+                    alert(result?.error || 'Failed to send question.');
                 }
             } catch (error) {
-                console.error('❌ Error in handleRequestClick:', error);
+                console.error('Error in handleRequestClick:', error);
+                alert('Failed to send question. See logs.');
             }
         }
     }

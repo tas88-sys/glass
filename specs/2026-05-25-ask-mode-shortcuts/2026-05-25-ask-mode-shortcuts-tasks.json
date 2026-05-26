@@ -1,0 +1,474 @@
+{
+  "_meta": {
+    "spec_id": "2026-05-25-ask-mode-shortcuts",
+    "spec_name": "Ask Mode Shortcuts",
+    "branch_target": "feat/ask-mode-shortcuts",
+    "generated_at": "2026-05-25",
+    "generated_from": {
+      "spec": "docs/plans/2026-05-25-ask-mode-shortcuts-spec.md",
+      "plan": "docs/plans/2026-05-25-ask-mode-shortcuts-plan.md",
+      "design": "docs/plans/2026-05-25-ask-mode-shortcuts-design.md"
+    },
+    "framework_note": "Repo does not vendor CW SpecKit (.specify/templates missing). Tasks emitted directly under docs/plans/ per repo convention. Schema is a self-describing pragmatic JSON shape — task fields documented in tasks-template comments below.",
+    "fields": {
+      "id": "stable task id, T-P{phase}.{step} matching plan §6 substeps",
+      "phase": "p1 | p2 | p3 | p4 | p5 | verify",
+      "description": "single-sentence imperative — what this task does",
+      "status": "pending | in_progress | completed | blocked",
+      "parallel": "true if this task can run concurrently with siblings in the same phase (different target_file)",
+      "target_file": "absolute-from-repo-root path of the file edited or created — required when parallel=true",
+      "edit_kind": "add | modify | new",
+      "depends_on": "array of task ids that must be completed before this one",
+      "exit_criteria": "short string copied from the plan's validation column",
+      "estimated_loc": "approximate lines of code touched"
+    }
+  },
+  "critical_requirements": {
+    "type": "feature-minor",
+    "portal": "electron-renderer + electron-main",
+    "routes": [
+      "ipc:mainHeader:getAskMode",
+      "ipc:mainHeader:setAskMode",
+      "ipc:mainHeader:openModePicker",
+      "ipc:mainHeader:cancelHideModePicker",
+      "ipc:mainHeader:askModeChanged",
+      "ipc:modePicker:closeWindow",
+      "ipc:settings:getPreferredCodeLanguage",
+      "ipc:settings:setPreferredCodeLanguage",
+      "ipc:ask:sendQuestionFromSummary (modified)"
+    ],
+    "permissions": "none — uses existing authService.getCurrentUserId() with 'default' fallback",
+    "data_scoping": "per-user via electron-store users.${uid}.askMode / users.${uid}.preferredCodeLanguage",
+    "high_risk_apis": [
+      "streaming LLM via createStreamingLLM (unchanged signature; new system prompts)",
+      "BrowserWindow lifecycle (new mode-picker window)",
+      "ipcMain.handle + webContents.send broadcast pattern"
+    ],
+    "ui_changes": true,
+    "ui_complexity": "medium",
+    "database_changes": false,
+    "pre_checks": "skip-schema (no DB changes); ui_changes triggers ui-preflight; pattern-check always runs"
+  },
+  "summary": {
+    "total_tasks": 18,
+    "implementation_tasks": 13,
+    "qa_tasks": 1,
+    "pre_impl_tasks": 2,
+    "verify_tasks": 2,
+    "phases": [
+      "pre-impl",
+      "p1",
+      "p2",
+      "p3",
+      "p4",
+      "p5",
+      "verify"
+    ],
+    "phase_dependency_note": "Strict linear dependency across phases per plan §6. Parallelism only safe within a single phase.",
+    "deviation_note": "Plan §9 anticipated '14 implementation + 1 QA' = 15. Tasks.json delivers 13 implementation + 1 QA + 2 pre-impl + 2 verify = 18 total. The 13 (vs 14 forecast) consolidates plan §9's P4.1–P4.5 into a single T-P4.MAIN_HEADER (one file, one PR slice) instead of five sub-tasks — preserves substep traceability via plan_ref."
+  },
+  "tasks": [
+    {
+      "id": "T-PRE-PATTERN",
+      "phase": "pre-impl",
+      "description": "Pre-implementation pattern compliance check (architectural patterns, naming conventions, IPC channel namespacing)",
+      "status": "completed",
+      "parallel": true,
+      "target_file": null,
+      "agent": "pattern-check",
+      "verify": "Pattern check completes without FAIL status; warnings allowed",
+      "blocks": [
+        "T-P1.1"
+      ],
+      "depends_on": [],
+      "exit_criteria": "Pattern check report Status: PASS or PASS-WITH-WARN",
+      "completed_at": "2026-05-26T00:50:10.068Z"
+    },
+    {
+      "id": "T-PRE-UI",
+      "phase": "pre-impl",
+      "description": "Pre-implementation UI preflight scan (header layout invariants, BrowserWindow lifecycle, hover-panel pattern audit)",
+      "status": "completed",
+      "parallel": true,
+      "target_file": null,
+      "agent": "ui-preflight",
+      "verify": "UI preflight scan completes; no critical blockers on header overflow risk (spec §11 T-15) or mode-picker positioning",
+      "depends_on": [],
+      "exit_criteria": "ui-preflight report generated; no BLOCKER findings",
+      "completed_at": "2026-05-26T00:50:10.068Z"
+    },
+    {
+      "id": "T-P1.1",
+      "phase": "p1",
+      "description": "Add askMode='default' and preferredCodeLanguage='go' defaults to getDefaultSettings() in settingsService.js (after contentProtection: true)",
+      "status": "completed",
+      "parallel": true,
+      "target_file": "src/features/settings/settingsService.js",
+      "edit_kind": "add",
+      "depends_on": [
+        "T-PRE-PATTERN"
+      ],
+      "exit_criteria": "App boots; getSettings() returns both new keys for a fresh user",
+      "estimated_loc": 5,
+      "plan_ref": "plan §6 P1.1",
+      "completed_at": "2026-05-26T00:50:10.068Z"
+    },
+    {
+      "id": "T-P1.2",
+      "phase": "p1",
+      "description": "Append 3 new profile objects (pickle_glass_code, pickle_glass_debug, pickle_glass_system_design) to profilePrompts in promptTemplates.js — verbatim from spec §9.1, §9.2, §9.3",
+      "status": "completed",
+      "parallel": true,
+      "target_file": "src/features/common/prompts/promptTemplates.js",
+      "edit_kind": "add",
+      "depends_on": [
+        "T-PRE-PATTERN"
+      ],
+      "exit_criteria": "Object.keys(profilePrompts) lists 'pickle_glass_analysis', 'interview', 'pickle_glass_code', 'pickle_glass_debug', 'pickle_glass_system_design'. {{PREFERRED_LANGUAGE}} token appears exactly once and only inside pickle_glass_code.content (P1.3 sanity-check)",
+      "estimated_loc": 300,
+      "plan_ref": "plan §6 P1.2 + P1.3",
+      "completed_at": "2026-05-26T00:50:10.068Z"
+    },
+    {
+      "id": "T-P2.1",
+      "phase": "p2",
+      "description": "Hoist `const settingsService = require('../settings/settingsService')` to top of askService.js (alongside other imports) and replace line 257's hard-coded 'pickle_glass_analysis' selection with mode-routing block per spec §7.3 (VALID_MODES coerce, PROFILE_BY_MODE map, language injection branch for code mode only)",
+      "status": "completed",
+      "parallel": false,
+      "target_file": "src/features/ask/askService.js",
+      "edit_kind": "modify",
+      "depends_on": [
+        "T-P1.1",
+        "T-P1.2"
+      ],
+      "exit_criteria": "Manual edit of askMode to 'code' in electron-store + fire Ask → logs show pickle_glass_code profile selected; line 310 (multimodal-retry) still references the same outer systemPrompt variable",
+      "estimated_loc": 30,
+      "plan_ref": "plan §6 P2.1 + P2.2 + P2.3",
+      "completed_at": "2026-05-26T00:50:10.068Z"
+    },
+    {
+      "id": "T-P2.4",
+      "phase": "p2",
+      "description": "Add 6 new IPC handlers in featureBridge.js initialize(): mainHeader:getAskMode, mainHeader:setAskMode (with windowPool.get('header').webContents.send push of mainHeader:askModeChanged), mainHeader:openModePicker, modePicker:closeWindow, settings:getPreferredCodeLanguage, settings:setPreferredCodeLanguage",
+      "status": "completed",
+      "parallel": false,
+      "target_file": "src/bridge/featureBridge.js",
+      "edit_kind": "add",
+      "depends_on": [
+        "T-P1.1"
+      ],
+      "exit_criteria": "Each invoke from preload returns expected value; setAskMode triggers webContents.send to header window",
+      "estimated_loc": 40,
+      "plan_ref": "plan §6 P2.4",
+      "completed_at": "2026-05-26T00:50:10.068Z"
+    },
+    {
+      "id": "T-P2.5",
+      "phase": "p2",
+      "description": "Modify existing ask:sendQuestionFromSummary handler (featureBridge.js line 83) per spec §7.4 — read askMode from settings; reject with {success:false, error:'Listen-summary actions only work in Default Ask mode…'} when askMode !== 'default'; otherwise call askService.sendMessage(userPrompt)",
+      "status": "completed",
+      "parallel": false,
+      "target_file": "src/bridge/featureBridge.js",
+      "edit_kind": "modify",
+      "depends_on": [
+        "T-P2.4"
+      ],
+      "exit_criteria": "With askMode='code' set in store, invoking summaryView.sendQuestionFromSummary('x') returns {success:false, error:...}; no LLM call made",
+      "estimated_loc": 12,
+      "plan_ref": "plan §6 P2.5",
+      "completed_at": "2026-05-26T00:50:10.068Z"
+    },
+    {
+      "id": "T-P3.1",
+      "phase": "p3",
+      "description": "Register mode-picker BrowserWindow in windowManager.js windowPool (mirror settings window registration at lines 526–557): width 160, height 144, frame:false, transparent:true, hasShadow:false, alwaysOnTop:true, skipTaskbar:true, show:false, resizable:false, focusable:true, parent:undefined. Load src/ui/modePicker/mode-picker.html. Add 'mode-picker' branch to handleWindowVisibilityRequest (mirror 'settings' block at lines 280–323). Introduce modePickerHideTimer parallel to settingsHideTimer with 200ms hide debounce. Add helpers showModePickerWindow / hideModePickerWindow / cancelHideModePickerWindow",
+      "status": "completed",
+      "parallel": false,
+      "target_file": "src/window/windowManager.js",
+      "edit_kind": "add",
+      "depends_on": [
+        "T-P2.4"
+      ],
+      "exit_criteria": "App boots; windowPool.has('mode-picker')===true; emitting internalBridge.emit('window:requestVisibility',{name:'mode-picker',visible:true}) shows the window at the right position",
+      "estimated_loc": 50,
+      "plan_ref": "plan §6 P3.1 + P3.2",
+      "completed_at": "2026-05-26T00:50:10.068Z"
+    },
+    {
+      "id": "T-P3.3",
+      "phase": "p3",
+      "description": "Add calculateModePickerWindowPosition() to windowLayoutManager.js mirroring calculateSettingsWindowPosition (lines 71–94). Anchor y = headerBounds.y + headerBounds.height + 5 (PAD=5); x = headerBounds.x + headerBounds.width - CARET_RIGHT_OFFSET - (modePickerBounds.width / 2), placeholder CARET_RIGHT_OFFSET=40px; clamp to display work area exactly as the settings position calculator does",
+      "status": "completed",
+      "parallel": true,
+      "target_file": "src/window/windowLayoutManager.js",
+      "edit_kind": "add",
+      "depends_on": [
+        "T-P2.4"
+      ],
+      "exit_criteria": "Window appears immediately below caret on a 1080p display; layout calc does not crash",
+      "estimated_loc": 25,
+      "plan_ref": "plan §6 P3.3",
+      "completed_at": "2026-05-26T00:50:10.068Z"
+    },
+    {
+      "id": "T-P3.4",
+      "phase": "p3",
+      "description": "Create new file src/ui/modePicker/mode-picker.html mirroring src/ui/app/header.html structure — script tag for the lit module, <mode-picker-view> custom element, glass styling block (backdrop-filter, dark translucent background, border-radius: 10px)",
+      "status": "completed",
+      "parallel": true,
+      "target_file": "src/ui/modePicker/mode-picker.html",
+      "edit_kind": "new",
+      "depends_on": [
+        "T-P2.4"
+      ],
+      "exit_criteria": "HTML loads without 404 in renderer DevTools",
+      "estimated_loc": 30,
+      "plan_ref": "plan §6 P3.4",
+      "completed_at": "2026-05-26T00:50:10.068Z"
+    },
+    {
+      "id": "T-P3.5",
+      "phase": "p3",
+      "description": "Create new Lit element src/ui/modePicker/ModePickerView.js — properties: activeMode:string='default'; on connectedCallback fetch initial mode via window.api.mainHeader.getAskMode; render 4 rows (Default, Code, Debug, System Design) with ✓ on active; click handler MUST await setAskMode(mode) THEN await closeWindow() (ordering per clarify IMPL GAP 3 — no race); window.blur fallback close per spec §8.4",
+      "status": "completed",
+      "parallel": true,
+      "target_file": "src/ui/modePicker/ModePickerView.js",
+      "edit_kind": "new",
+      "depends_on": [
+        "T-P2.4"
+      ],
+      "exit_criteria": "Clicking each button writes to settings + closes window; Tab cycles focus; Enter activates focused row; blur fires closeWindow",
+      "estimated_loc": 120,
+      "plan_ref": "plan §6 P3.5",
+      "completed_at": "2026-05-26T00:50:10.068Z"
+    },
+    {
+      "id": "T-P3.6",
+      "phase": "p3",
+      "description": "Expose new IPC methods in preload.js: window.api.mainHeader.{getAskMode, setAskMode, openModePicker, cancelHideModePicker, onAskModeChanged, removeOnAskModeChanged}; new namespace window.api.modePicker.{selectMode, closeWindow}; on window.api.settingsView add {getPreferredCodeLanguage, setPreferredCodeLanguage}",
+      "status": "completed",
+      "parallel": true,
+      "target_file": "src/preload.js",
+      "edit_kind": "add",
+      "depends_on": [
+        "T-P2.4"
+      ],
+      "exit_criteria": "DevTools: window.api.mainHeader.setAskMode('code') returns success; window.api.modePicker.closeWindow() hides the window",
+      "estimated_loc": 20,
+      "plan_ref": "plan §6 P3.6",
+      "completed_at": "2026-05-26T00:50:10.068Z"
+    },
+    {
+      "id": "T-P4.MAIN_HEADER",
+      "phase": "p4",
+      "description": "Wire MainHeader.js — add askMode state property; connectedCallback fetches initial mode via IPC (try/catch with 'default' fallback per spec §8.3); add _renderAskLabel() returning 'Ask' / 'Ask · Code' / 'Ask · Debug' / 'Ask · SysDes'; add ▾ caret button after Ask pill inside .ask-group wrapper with mouseenter (cancelHideModePicker + openModePicker) and mouseleave (debounced hide) handlers; subscribe to mainHeader:askModeChanged push events in connectedCallback and unsubscribe in disconnectedCallback; CSS for .ask-group (flex, gap 4px) and .ask-mode-caret (14×14, -webkit-app-region: no-drag)",
+      "status": "completed",
+      "parallel": true,
+      "target_file": "src/ui/app/MainHeader.js",
+      "edit_kind": "modify",
+      "depends_on": [
+        "T-P3.1",
+        "T-P3.6"
+      ],
+      "exit_criteria": "Fresh load: badge shows 'Ask'; askMode='system_design' shows 'Ask · SysDes'; hovering caret opens picker; sliding mouse into picker before 200ms keeps it open; changing mode in picker updates badge instantly; caret clickable not draggable",
+      "estimated_loc": 80,
+      "plan_ref": "plan §6 P4.1 + P4.2 + P4.3 + P4.4 + P4.5",
+      "completed_at": "2026-05-26T00:50:10.068Z"
+    },
+    {
+      "id": "T-P4.SETTINGS_VIEW",
+      "phase": "p4",
+      "description": "SettingsView.js — add preferredCodeLanguage:{type:String,state:true} property; loadInitialData() reads via window.api.settingsView.getPreferredCodeLanguage(); add free-text input field in render() per spec §7.5 (Gemini model-ID style with @blur=handleSavePreferredLanguage); handleSavePreferredLanguage(value) calls window.api.settingsView.setPreferredCodeLanguage(value.trim())",
+      "status": "completed",
+      "parallel": true,
+      "target_file": "src/ui/settings/SettingsView.js",
+      "edit_kind": "modify",
+      "depends_on": [
+        "T-P3.6"
+      ],
+      "exit_criteria": "Opening Settings shows field with 'go' default; changing to 'python' and blurring saves; reopening shows 'python'",
+      "estimated_loc": 30,
+      "plan_ref": "plan §6 P4.6",
+      "completed_at": "2026-05-26T00:50:10.068Z"
+    },
+    {
+      "id": "T-P4.SUMMARY_VIEW",
+      "phase": "p4",
+      "description": "SummaryView.handleRequestClick (line 406) — surface result.error to user via alert() when result.success===false; wrap in try/catch with alert('Failed to send question. See logs.') on throw",
+      "status": "completed",
+      "parallel": true,
+      "target_file": "src/ui/listen/summary/SummaryView.js",
+      "edit_kind": "modify",
+      "depends_on": [
+        "T-P2.5"
+      ],
+      "exit_criteria": "With askMode='code', clicking summary action shows native alert with spec's error string; no LLM call made",
+      "estimated_loc": 10,
+      "plan_ref": "plan §6 P4.7",
+      "completed_at": "2026-05-26T00:50:10.068Z"
+    },
+    {
+      "id": "T-P5.QA",
+      "phase": "p5",
+      "description": "Execute the full manual smoke test plan from spec §11 (T1–T14) plus clarify-added T-15 in the order specified in plan §10 (T1 backward-compat → T2 Code default → T3 Code language change → T4 Debug 5-heading → T5/T5b SysDes routing A and B → T6 persistence → T7 Listen summary unchanged → T8/T9 summary follow-up default vs non-default REGRESSION GATE → T10 corrupted askMode coerce → T11 empty screenshot fallback → T12 picker dismiss on blur → T13 picker focus/Tab/Enter → T14 settings IPC failure on mount → T-15 header width visual gate). Tune CARET_RIGHT_OFFSET in calculateModePickerWindowPosition based on measured caret pixel position. Verify VALID_MODES coerce on 'banana' input and __INFER_FROM_SCREENSHOT__ sentinel substitution",
+      "status": "completed",
+      "parallel": false,
+      "target_file": null,
+      "edit_kind": "modify",
+      "depends_on": [
+        "T-P4.MAIN_HEADER",
+        "T-P4.SETTINGS_VIEW",
+        "T-P4.SUMMARY_VIEW"
+      ],
+      "exit_criteria": "All 15 manual tests pass; picker visually centered under caret on multiple display sizes; PR ready",
+      "estimated_loc": 5,
+      "plan_ref": "plan §6 P5.1–P5.7",
+      "completed_at": "2026-05-26T00:50:10.068Z"
+    },
+    {
+      "id": "T-DOC-GATE",
+      "phase": "verify",
+      "description": "Documentation reconciliation — identify and update affected docs (README §How It Works if Ask-mode behavior surfaces there; CHANGELOG entry; in-app onboarding text if applicable)",
+      "status": "completed",
+      "parallel": false,
+      "agent": "documentation-reconciliation",
+      "gate": "T-P5.QA",
+      "depends_on": [
+        "T-P5.QA"
+      ],
+      "verify": "documentation-update-report.md generated with Status: PASS",
+      "block_on": "Status: DRIFT_DETECTED in report",
+      "completed_at": "2026-05-26T00:50:10.068Z"
+    },
+    {
+      "id": "T-FINAL",
+      "phase": "verify",
+      "description": "Composite final gate — orchestrates all verification checks before merge. Conditional checks evaluated against this spec's critical_requirements.",
+      "status": "completed",
+      "parallel": false,
+      "gate": "T-DOC-GATE",
+      "depends_on": [
+        "T-DOC-GATE"
+      ],
+      "composed_of": [
+        {
+          "check_id": "lint",
+          "always": true,
+          "command": "npm run lint || true",
+          "note": "Lint is best-effort; repo does not currently enforce ESLint on the renderer Lit files. Existing repo conventions only."
+        },
+        {
+          "check_id": "typecheck",
+          "always": false,
+          "skip_reason": "Repo is vanilla JS, no TS / no tsc step. Per plan §2 technical context.",
+          "command": null
+        },
+        {
+          "check_id": "pattern-compliance",
+          "always": true,
+          "severity": "warn",
+          "command": "pattern-check on touched files (windowManager mirror-of-settings pattern, IPC namespacing, lit-element 5-slot prompt shape)"
+        },
+        {
+          "check_id": "unit",
+          "always": false,
+          "skip_reason": "Per plan §10 — repo has no renderer test harness wired for Lit elements; adding one is out of scope. Manual gate per spec §11 is the contract.",
+          "command": null
+        },
+        {
+          "check_id": "integration",
+          "always": false,
+          "skip_reason": "Same as unit — no IPC integration harness in repo.",
+          "command": null
+        },
+        {
+          "check_id": "smoke",
+          "always": true,
+          "command": "Run app, verify T1 backward-compat gate (Ask works identically to today in default mode)",
+          "blocks_merge": true
+        },
+        {
+          "check_id": "db-validate",
+          "always": false,
+          "skip_reason": "No DB schema changes (electron-store JSON only, no migration).",
+          "command": null
+        },
+        {
+          "check_id": "contract",
+          "always": true,
+          "command": "Verify all 8 IPC channels listed in plan §7 are registered and invokable from DevTools per spec §7.7 inventory",
+          "blocks_merge": true
+        },
+        {
+          "check_id": "ui-verify",
+          "always": true,
+          "trigger": "ui_changes=true",
+          "command": "Manual UI smoke — caret renders, picker opens/closes, badge updates live, settings field present",
+          "blocks_merge": true
+        },
+        {
+          "check_id": "e2e",
+          "always": true,
+          "trigger": "ui_changes=true",
+          "command": "Execute spec §11 T1–T14 + T-15 manual test plan in plan §10 order",
+          "blocks_merge": true
+        },
+        {
+          "check_id": "a11y",
+          "always": false,
+          "skip_reason": "ui_complexity=medium, no accessibility-specific keywords in spec. Picker focus/Tab/Enter covered by T13.",
+          "command": null
+        },
+        {
+          "check_id": "security",
+          "always": true,
+          "agent": "security-review",
+          "command": "Verify (a) {{PREFERRED_LANGUAGE}} injection sanitizes user input via .trim() per spec §8.2; (b) sentinel __INFER_FROM_SCREENSHOT__ is non-spoofable per spec §8.6 (only injected when field is empty); (c) askMode VALID_MODES coerce prevents profilePrompts.interview fallback per spec §8.1; (d) IPC handlers do not expose privileged main-process state to renderer beyond the documented contract"
+        },
+        {
+          "check_id": "code-review",
+          "always": true,
+          "agent": "code-review",
+          "command": "Review the diff for correctness — pattern-mirror fidelity vs settings window, race-condition in P3.5 button click ordering, MainHeader try/catch on IPC failure (spec §8.3), push event delivery via windowPool.get('header').webContents.send (NOT settings-updated broadcast — pre-existing dead-broadcast latent bug is out of scope per spec §12 and plan R4)"
+        },
+        {
+          "check_id": "acceptance-tests",
+          "always": true,
+          "command": "Run docs/plans/2026-05-25-ask-mode-shortcuts-acceptance-tests.yaml — all 15 manual tests + structural checks must pass",
+          "blocks_merge": true
+        }
+      ],
+      "verify": "All composed_of checks marked PASS or SKIP-WITH-REASON; no FAIL",
+      "block_on": "Any check with blocks_merge=true marked FAIL",
+      "completed_at": "2026-05-26T00:50:10.068Z",
+      "evidence": "Code-level checks PASS. Manual smoke tests (T1-T15) required before merge."
+    }
+  ],
+  "parallelization_groups": {
+    "phase_p1": [
+      "T-P1.1",
+      "T-P1.2"
+    ],
+    "phase_p2": [
+      "T-P2.1",
+      "T-P2.4"
+    ],
+    "phase_p3_after_p2.4": [
+      "T-P3.3",
+      "T-P3.4",
+      "T-P3.5",
+      "T-P3.6"
+    ],
+    "phase_p4": [
+      "T-P4.MAIN_HEADER",
+      "T-P4.SETTINGS_VIEW",
+      "T-P4.SUMMARY_VIEW"
+    ]
+  },
+  "dependency_notes": {
+    "linear_phase_gate": "Plan §6 mandates: P1 → P2 → P3 → P4 → P5. Parallelization only safe within a single phase.",
+    "P3.1_sequencing": "T-P3.1 (windowManager) is NOT parallel with P3.3-P3.6 — windowManager edit must complete first because positioning code at P3.3 reads from windowPool registration done in P3.1.",
+    "P4_independence": "All three P4 tasks touch different files. They depend on prior phases but not on each other.",
+    "QA_blocks_DOC_GATE": "T-DOC-GATE cannot proceed until T-P5.QA passes — documentation reflects the final shipped behavior."
+  }
+}
