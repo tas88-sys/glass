@@ -1,4 +1,4 @@
-Let's create a specification to implement this task below.
+Create a specification to implement this task: @2026-05-25-ask-mode-shortcuts-design.md
 
 Make sure everything described in the ticket makes sense. Also, investigate and confirm that no new bugs, regressions, or unexpected behaviors will be introduced before making any changes. 
 
