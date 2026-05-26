@@ -679,6 +679,7 @@ function createFeatureWindows(header, namesToCreate) {
         createFeatureWindow('ask');
         createFeatureWindow('settings');
         createFeatureWindow('shortcut-settings');
+        createFeatureWindow('mode-picker');
     }
 }
 
