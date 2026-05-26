@@ -1,0 +1,667 @@
+_version: "1.0"
+_spec_id: "2026-05-26-gemini-failover-design"
+_spec_name: "Gemini Failover"
+_branch_target: "feat/gemini-failover"
+
+generation_context:
+  generated_at: "2026-05-26"
+  generated_by: "/tasks 2026-05-26-gemini-failover-design"
+  spec_sha256: "c8ca0eab1236b92cb133d9e78ebca865052137a3e424b8978ab099e4c6ab65cd"
+  plan_sha256: "027a345e89954d490e4329dfd244fa8d6fc05ebc7e9fffceadcd4ea61a4c7bd6"
+  tasks_sha256: "2d5dcec4f2a13e992b7693d782e3144594db400fd6257eac488126111873216d"
+  framework_note: |
+    Repo does not vendor CW SpecKit framework (.specify/templates missing per plan §0).
+    Acceptance manifest emitted directly under specs/{spec-id}/ per sibling spec convention.
+    No Jest configured in package.json — implementer chooses test runner at T-P1.1
+    (Jest add or node:test built-in). Most "test_gates" entries below run via npm run test
+    once T-P1.1 lands. Structural/grep checks are runnable standalone before any code lands.
+
+_references:
+  files:
+    new:
+      - "src/features/common/ai/providers/geminiModelRotator.js"
+      - "src/features/common/ai/providers/__tests__/geminiModelRotator.test.js"
+      - "src/features/common/ai/providers/__tests__/gemini.test.js"
+      - "src/features/ask/__tests__/askService-sse.test.js"
+    modified:
+      - "src/features/common/ai/providers/gemini.js"
+      - "src/features/settings/settingsService.js"
+      - "src/ui/settings/SettingsView.js"
+      - "src/features/ask/askService.js"
+      - "src/ui/ask/AskView.js"
+      - "CHANGELOG.md"
+      - "package.json"
+  ipc_channels:
+    new: []
+    modified: []
+    untouched:
+      - "ask:stateUpdate  (new state fields responseModel + responseHadFallback ride existing envelope)"
+  sentinels:
+    new:
+      - '_reset (emitted by gemini.js streaming on transient err; consumed by askService.js SSE parser)'
+      - '_final_model (emitted at end of successful stream; consumed by askService.js SSE parser)'
+      - '_modelUsed (top-level field on non-streaming createLLM return objects)'
+      - 'next_model (companion field inside _reset sentinel JSON)'
+  settings_keys:
+    new: []
+    modified:
+      - "selected_llm_model (existing TEXT column; semantics extended to comma-separated CSV when provider=gemini; no schema migration)"
+  rotator_exports:
+    new:
+      - "pickModel(modelList) -> string  (throws on empty list)"
+      - "markFailed(modelId, retryAfterMs)  -> void"
+      - "markSucceeded(modelId)  -> void  (clears entry entirely per impl-gap)"
+      - "classifyError(err)  -> 'transient' | 'fatal-request' | 'fatal-auth'  (fail-open default 'transient')"
+      - "parseRetryAfter(err)  -> ms clamped [5000, 300000]"
+      - "parseModelList(csv)  -> string[]  (handles null/undefined as [])"
+      - "resetHealth()  -> void  (@internal — test helper)"
+  constants:
+    new:
+      - "DEFAULT_COOLDOWN_MS = 60000"
+      - "MIN_COOLDOWN_MS = 5000"
+      - "MAX_COOLDOWN_MS = 300000"
+
+# --- Categories that DO NOT apply ---------------------------------------------
+# sql_tests:          n/a — no SQLite schema changes; selected_llm_model is an
+#                     existing TEXT column, value treated opaquely
+# http_tests:         n/a — no HTTP routes; only an internal Electron provider
+#                     layer change; SSE is between main and renderer process
+# aws_tests:          n/a — no CDK / Lambda / SSM / S3
+# cli_tests:          n/a — no shell scripts or new npm scripts beyond the
+#                     test runner setup in T-P1.1 (which adds `npm run test`)
+# data_integrity:     n/a — no thresholds, ratios, or data-quality SLAs
+# performance_checks: n/a — no latency SLA defined; failover overhead is one
+#                     extra Map lookup per call which is irrelevant
+# ----------------------------------------------------------------------------
+
+structural_checks:
+  description: |
+    Automated grep / read-based checks that verify the touched files contain the
+    edits described in plan §6 substeps. Runnable without booting the app.
+  checks:
+    - id: SC-001
+      name: rotator-module-exists
+      plan_ref: plan §6 P1.2 + spec §2 Components row 1
+      description: "geminiModelRotator.js exists at the spec'd path and exports all 7 functions"
+      command: |
+        test -f src/features/common/ai/providers/geminiModelRotator.js && \
+        node -e "const r=require('./src/features/common/ai/providers/geminiModelRotator'); const need=['pickModel','markFailed','markSucceeded','classifyError','parseRetryAfter','parseModelList','resetHealth']; const missing=need.filter(k=>typeof r[k]!=='function'); if(missing.length){console.error('MISSING:',missing); process.exit(1)} else console.log('ALL_EXPORTS_PRESENT')"
+      expect:
+        exit_code: 0
+        stdout_contains: "ALL_EXPORTS_PRESENT"
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "File must be at src/features/common/ai/providers/geminiModelRotator.js (NOT under __tests__)."
+          - "All 7 exports required: pickModel, markFailed, markSucceeded, classifyError, parseRetryAfter, parseModelList, resetHealth."
+          - "Confirm module.exports object includes every function — not just declared at top of file."
+        related_files: ["src/features/common/ai/providers/geminiModelRotator.js"]
+
+    - id: SC-002
+      name: rotator-singleton-state
+      plan_ref: plan §3 decision #6 + spec § Clarifications IMPL GAP
+      description: "Rotator uses a module-level singleton `const health = new Map()` (NOT instantiable; NOT a class)"
+      command: |
+        grep -E "^const\s+health\s*=\s*new\s+Map\s*\(\s*\)" src/features/common/ai/providers/geminiModelRotator.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "Multiple rotator instances would partition the cooldown view and defeat the point — impl-gap resolution in spec mandates singleton."
+          - "Pattern: top of file, `const health = new Map()`. Do not wrap in a class."
+        related_files: ["src/features/common/ai/providers/geminiModelRotator.js"]
+
+    - id: SC-003
+      name: cooldown-constants-clamped
+      plan_ref: spec §2 Cooldown + plan §3 decision #2
+      description: "Cooldown constants DEFAULT=60000, MIN=5000, MAX=300000 are declared in the rotator module"
+      command: |
+        grep -E "DEFAULT_COOLDOWN_MS\s*=\s*60000" src/features/common/ai/providers/geminiModelRotator.js && \
+        grep -E "MIN_COOLDOWN_MS\s*=\s*5000" src/features/common/ai/providers/geminiModelRotator.js && \
+        grep -E "MAX_COOLDOWN_MS\s*=\s*300000" src/features/common/ai/providers/geminiModelRotator.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "Spec §1 locked decision #2: default 60s, clamp [5s, 300s]. Constants must use ms."
+          - "Clamp via Math.max(MIN, Math.min(MAX, value)) — both sides required."
+        related_files: ["src/features/common/ai/providers/geminiModelRotator.js"]
+
+    - id: SC-004
+      name: rotator-imported-in-gemini
+      plan_ref: plan §6 P2.1
+      description: "gemini.js imports the rotator module"
+      command: |
+        grep -E "require\(['\"]\\./geminiModelRotator['\"]\)" src/features/common/ai/providers/gemini.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "Add `const rotator = require('./geminiModelRotator')` at top of gemini.js."
+          - "Without the import, callWithFailover and the streaming loop cannot reach pickModel/markFailed/etc."
+        related_files: ["src/features/common/ai/providers/gemini.js"]
+
+    - id: SC-005
+      name: gemini-streaming-uses-failover-loop
+      plan_ref: plan §6 P2.3 + spec §3 Streaming LLM
+      description: "createStreamingLLM body uses the failover loop — references parseModelList, pickModel, and emits _reset/_final_model sentinels"
+      command: |
+        grep -E "parseModelList\(" src/features/common/ai/providers/gemini.js && \
+        grep -E "pickModel\(" src/features/common/ai/providers/gemini.js && \
+        grep -E "_reset" src/features/common/ai/providers/gemini.js && \
+        grep -E "_final_model" src/features/common/ai/providers/gemini.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "Failover loop in createStreamingLLM must emit `_reset` on transient failover (with next_model) and `_final_model` on completion."
+          - "Old streaming body (gemini.js:243-319) is replaced wholesale per spec §3 snippet — verify the new body, not just additions alongside the old one."
+        related_files: ["src/features/common/ai/providers/gemini.js"]
+
+    - id: SC-006
+      name: controller-error-wrapped-in-trycatch
+      plan_ref: plan §6 P2.4 + spec § Clarifications IMPL GAP
+      description: "controller.error() in createStreamingLLM is wrapped in try/catch (defense-in-depth, mirrors controller.close() pattern)"
+      command: |
+        grep -cE "try\s*\{\s*controller\.error" src/features/common/ai/providers/gemini.js
+      expect:
+        stdout_min: "2"
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "BOTH controller.error() call sites must be wrapped: the fatal-error branch (kind !== 'transient') AND the all-models-failed branch (!succeededModel)."
+          - "Pattern: try { controller.error(err) } catch {}  — matches the existing controller.close() pattern at line 311 of pre-edit gemini.js."
+          - "Test for ERR_INVALID_STATE on consumer cancellation regression."
+        related_files: ["src/features/common/ai/providers/gemini.js"]
+
+    - id: SC-007
+      name: stt-first-csv-entry-only
+      plan_ref: plan §6 P2.5 + spec §3 STT + spec §1 locked decision #3
+      description: "createSTT in gemini.js calls parseModelList(modelCsv)[0] — single model, no failover"
+      command: |
+        grep -nE "parseModelList\([^)]*\)\s*\[0\]" src/features/common/ai/providers/gemini.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "STT is a long-lived session per spec §1 locked decision #3 — no failover semantics."
+          - "Pattern: const firstModel = parseModelList(modelCsv)[0] || 'gemini-live-2.5-flash-preview';"
+        related_files: ["src/features/common/ai/providers/gemini.js"]
+
+    - id: SC-008
+      name: sse-consumer-handles-sentinels
+      plan_ref: plan §6 P4.2 + spec §3 SSE consumer changes
+      description: "askService.js SSE parser branches on _reset and _final_model BEFORE the existing token path"
+      command: |
+        grep -E "json\._reset|json\['_reset'\]" src/features/ask/askService.js && \
+        grep -E "json\._final_model|json\['_final_model'\]" src/features/ask/askService.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "Insert BEFORE the existing `const token = ...` line in askService.js:407-432 region."
+          - "On _reset: fullResponse=''; this.state.currentResponse=''; this.state.responseHadFallback=true; this._broadcastState(); continue;"
+          - "On _final_model: this.state.responseModel = json._final_model; this._broadcastState(); continue;"
+          - "Order matters: sentinels MUST be checked first or the existing path may swallow them as empty/unknown tokens."
+        related_files: ["src/features/ask/askService.js"]
+
+    - id: SC-009
+      name: askservice-state-reset-on-new-request
+      plan_ref: plan §6 P4.1
+      description: "askService.sendMessage (or equivalent new-request entry) resets state.responseModel=null and state.responseHadFallback=false"
+      command: |
+        grep -nE "responseModel\s*=\s*(null|''|\"\")" src/features/ask/askService.js && \
+        grep -nE "responseHadFallback\s*=\s*false" src/features/ask/askService.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "Without per-request reset, stale values from the previous response leak into the new render's footer."
+          - "Place the reset where this.state.currentResponse = '' is already set for a new request."
+        related_files: ["src/features/ask/askService.js"]
+
+    - id: SC-010
+      name: askview-reactive-properties-declared
+      plan_ref: plan §6 P5.1 + spec §2 Components row 6
+      description: "AskView.js declares responseModel:{type:String} and responseHadFallback:{type:Boolean} as Lit reactive properties"
+      command: |
+        grep -nE "responseModel\s*:\s*\{\s*type\s*:\s*String" src/ui/ask/AskView.js && \
+        grep -nE "responseHadFallback\s*:\s*\{\s*type\s*:\s*Boolean" src/ui/ask/AskView.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "Without reactive property declarations, Lit will not propagate state-update assignments to the render."
+          - "Add to the existing `static properties` block (around lines 4-17)."
+        related_files: ["src/ui/ask/AskView.js"]
+
+    - id: SC-011
+      name: askview-footer-rendered
+      plan_ref: plan §6 P5.4
+      description: "AskView.js render() includes the per-response footer with 'answered by:' text and optional '(fallback)' marker"
+      command: |
+        grep -E "answered by:" src/ui/ask/AskView.js && \
+        grep -E "\(fallback\)" src/ui/ask/AskView.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "Footer template: <div class=\"response-footer\">answered by: ${this.responseModel}${this.responseHadFallback ? ' (fallback)' : ''}</div>"
+          - "Render conditionally — only when responseModel is non-empty."
+        related_files: ["src/ui/ask/AskView.js"]
+
+    - id: SC-012
+      name: settings-csv-validator-fixed
+      plan_ref: plan §6 P3.2 + spec § Clarifications IMPL GAP
+      description: "SettingsView.handleSaveGeminiModels splits CSV before validating gemini- prefix (no longer single-string startsWith check)"
+      command: |
+        grep -nE "split\(['\"],['\"]\)" src/ui/settings/SettingsView.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "Original code did `value.startsWith('gemini-')` on the raw CSV — accidentally accepts 'gpt-4,gemini-2.5-flash'."
+          - "New code: split on ',', trim each, drop empties, validate every entry starts with 'gemini-'."
+          - "On failure, alert mentions the offending token."
+        related_files: ["src/ui/settings/SettingsView.js"]
+
+    - id: SC-013
+      name: settings-help-text-present
+      plan_ref: plan §6 P3.3 + spec §4 Settings panel
+      description: "SettingsView.js renders the Gemini CSV help text under the LLM Model ID input"
+      command: |
+        grep -E "Comma-separated list for failover" src/ui/settings/SettingsView.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: MEDIUM
+        rca_hints:
+          - "Verbatim copy from spec §4: 'Comma-separated list for failover. Models are tried in priority order; transient errors (429/503) skip to the next. Example: gemini-3-pro,gemini-2.5-flash,gemini-2.5-flash-lite'"
+          - "Place under the existing Gemini LLM Model ID input field."
+        related_files: ["src/ui/settings/SettingsView.js"]
+
+    - id: SC-014
+      name: changelog-entry-added
+      plan_ref: plan §6 P6.7 + plan §7
+      description: "CHANGELOG.md contains a 'Gemini Failover' entry under [Unreleased]"
+      command: |
+        grep -E "Gemini Failover" CHANGELOG.md
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: MEDIUM
+        rca_hints:
+          - "Add an entry following the format of the sibling 'Ask Mode Shortcuts' block."
+          - "Sections: Added, Changed, Internal — see plan §7 for the draft text."
+        related_files: ["CHANGELOG.md"]
+
+    - id: SC-015
+      name: no-new-ipc-channels
+      plan_ref: plan §8 + spec §2 Components row 6
+      description: "No new IPC channels were added — new state fields ride existing ask:stateUpdate envelope (regression-prevention check)"
+      command: |
+        ! git diff --name-only HEAD 2>/dev/null | xargs grep -lE "ipcMain\.handle\(['\"](_reset|_final_model|responseModel|responseHadFallback)" 2>/dev/null
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "Plan §8 mandates: no new IPC channels. Sentinel data flows through SSE -> existing ask:stateUpdate broadcast."
+          - "If a new channel was added, refactor to reuse ask:stateUpdate by adding the field to the state envelope."
+        related_files: ["src/bridge/featureBridge.js", "src/preload.js", "src/window/windowManager.js"]
+
+negative_assertions:
+  description: |
+    Things that MUST NOT exist in the codebase after this feature lands.
+    Each is an "anti-pattern" or "out-of-scope" guard from the spec/plan.
+  checks:
+    - id: NA-001
+      name: no-class-based-rotator
+      plan_ref: plan §3 decision #6 + spec § Clarifications IMPL GAP
+      description: "Rotator must be a singleton module, NOT instantiated via a class (no `new GeminiModelRotator`)"
+      command: |
+        ! grep -E "new\s+GeminiModelRotator|class\s+GeminiModelRotator" src/features/common/ai/providers/
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "Per impl-gap resolution: one Electron process, one shared rate-limit budget. Multiple rotators would partition cooldown state."
+        related_files: ["src/features/common/ai/providers/geminiModelRotator.js"]
+
+    - id: NA-002
+      name: no-failover-in-stt
+      plan_ref: spec §1 locked decision #3
+      description: "createSTT must NOT contain a failover loop or while(remaining) — single model only"
+      command: |
+        ! grep -nE "createSTT[\s\S]*?while\s*\(\s*remaining\.length" src/features/common/ai/providers/gemini.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "STT is a persistent live session per spec §1 locked decision #3 — failover has no clean semantics."
+          - "Only parseModelList(...)[0] should be used in createSTT."
+        related_files: ["src/features/common/ai/providers/gemini.js"]
+
+    - id: NA-003
+      name: no-schema-migration
+      plan_ref: plan §4 No-changes list + spec § Clarifications IMPL GAP
+      description: "No SQLite migration files were added — selected_llm_model column is reused opaquely"
+      command: |
+        test -z "$(git diff --name-only HEAD 2>/dev/null | grep -E 'migration|schema' || true)"
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "Per impl-gap resolution: column is plain TEXT, no length / format validation at DB layer; CSV bounded by frontend input width."
+          - "No migration should be necessary. If you added one, revisit whether it's truly required."
+        related_files: []
+
+    - id: NA-004
+      name: no-cross-provider-failover
+      plan_ref: spec §8 Out of scope
+      description: "openai.js, anthropic.js, ollama.js must NOT import the rotator (scope guard)"
+      command: |
+        ! grep -lE "geminiModelRotator" src/features/common/ai/providers/openai.js src/features/common/ai/providers/anthropic.js src/features/common/ai/providers/ollama.js 2>/dev/null
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "Spec §8 explicitly lists multi-provider failover as out of scope."
+          - "If the rotator is later lifted to be provider-agnostic, do so as a follow-up PR."
+        related_files: ["src/features/common/ai/providers/openai.js", "src/features/common/ai/providers/anthropic.js", "src/features/common/ai/providers/ollama.js"]
+
+    - id: NA-005
+      name: no-cooldown-persistence
+      plan_ref: spec §2 State + spec §8 Out of scope
+      description: "Cooldowns are in-memory only — no JSON/SQLite write of health state on shutdown"
+      command: |
+        ! grep -nE "writeFileSync.*health|health.*writeFile|setItem.*cooldownUntil" src/features/common/ai/providers/geminiModelRotator.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: MEDIUM
+        rca_hints:
+          - "Per spec §2 State: cooldowns ≤300s so restart loses nothing meaningful."
+          - "Persistence is in §8 out-of-scope list."
+        related_files: ["src/features/common/ai/providers/geminiModelRotator.js"]
+
+    - id: NA-006
+      name: no-header-window-changes
+      plan_ref: spec §9 + plan §4 No-changes list
+      description: "MainHeader.js was NOT modified (header at 393px is untouched per spec §9)"
+      command: |
+        test -z "$(git diff --name-only HEAD 2>/dev/null | grep 'src/ui/app/MainHeader.js' || true)"
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: MEDIUM
+        rca_hints:
+          - "Spec §9 explicitly says header (393px wide per commit 525dcb1) is untouched."
+          - "If MainHeader.js was modified, verify the change is unrelated to failover, OR escalate to spec amendment."
+        related_files: ["src/ui/app/MainHeader.js"]
+
+test_gates:
+  description: |
+    Automated tests required to be green before merge. Runner determined at T-P1.1.
+    Assumes Jest if jest is in package.json devDependencies; otherwise node:test.
+  gates:
+    - id: TG-001
+      name: rotator-unit-tests
+      plan_ref: plan §6 P1.9 + spec §6.1
+      description: "Unit tests for geminiModelRotator.js cover all 20+ assertions from spec §6.1"
+      command: |
+        npm run test -- --testPathPattern=geminiModelRotator || \
+        node --test src/features/common/ai/providers/__tests__/geminiModelRotator.test.js
+      expect:
+        exit_code: 0
+      assertions:
+        - "pickModel([]) throws Error('pickModel: empty model list')"
+        - "pickModel(['a','b','c']) with all healthy returns 'a'"
+        - "After markFailed('a', 60000), pickModel(['a','b','c']) returns 'b'"
+        - "All cooling: returns the model with soonest cooldownUntil"
+        - "classifyError handles SDK status 429 -> transient"
+        - "classifyError handles SDK status 400 -> fatal-request"
+        - "classifyError handles raw Response status 503 -> transient"
+        - "classifyError handles network TypeError -> transient"
+        - "classifyError handles AbortError -> transient (fail-open)"
+        - "parseRetryAfter parses errorDetails RetryInfo retryDelay '37s' -> 37000"
+        - "parseRetryAfter parses HTTP header Retry-After numeric -> ms"
+        - "parseRetryAfter parses HTTP-date format header -> ms"
+        - "parseRetryAfter falls back to 60000 when both missing"
+        - "parseRetryAfter clamps input 1000 -> 5000 (MIN)"
+        - "parseRetryAfter clamps input 999999 -> 300000 (MAX)"
+        - "parseModelList('a,b,c') -> ['a','b','c']"
+        - "parseModelList(' a , , b ') -> ['a','b']"
+        - "parseModelList('') -> []"
+        - "parseModelList(null) -> []"
+        - "parseModelList(undefined) -> []"
+        - "markFailed then markSucceeded -> pickModel returns model immediately (no cooldown remains)"
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "First check: did resetHealth() run in beforeEach? Without it, prior test state leaks."
+          - "If classifyError fails: verify 3-tier inspection order (status -> errorDetails -> message)."
+          - "If parseRetryAfter fails: check both the parse path AND the clamp."
+        related_files:
+          - "src/features/common/ai/providers/geminiModelRotator.js"
+          - "src/features/common/ai/providers/__tests__/geminiModelRotator.test.js"
+
+    - id: TG-002
+      name: gemini-failover-integration-tests
+      plan_ref: plan §6 P2.6 + spec §6.2 + spec §6.3
+      description: "Integration tests for failover loop (non-streaming and streaming) with mocked SDK"
+      command: |
+        npm run test -- --testPathPattern=gemini.test || \
+        node --test src/features/common/ai/providers/__tests__/gemini.test.js
+      expect:
+        exit_code: 0
+      assertions:
+        - "Success-first: returns response with _modelUsed='modelA', no cooldowns recorded"
+        - "429-then-success: returns modelB's response, modelA cooled down per Retry-After"
+        - "429-all: throws the last error"
+        - "400-first: throws immediately, second model NEVER called"
+        - "401-first: throws immediately, second model NEVER called"
+        - "Streaming 503-after-2-chunks: _reset emitted to consumer"
+        - "Streaming failover: second model's full output streams cleanly"
+        - "Streaming failover: _final_model sentinel emitted with second model's ID"
+        - "Streaming failover: [DONE] emitted last"
+        - "Streaming failover success: controller.error() NEVER called"
+        - "Streaming all-fail: controller.error() IS called wrapped in try/catch (no thrown error)"
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "Streaming mocks must script the SDK to emit 2 chunks then throw status:503 — partial-then-fail is the critical case."
+          - "If _reset is not observed: verify gemini.js calls safeEnqueue(encode({_reset:true, next_model:...})) BEFORE filtering remaining models."
+          - "If 400-first calls second model: classifyError is mis-classifying INVALID_ARGUMENT as transient — check the table in spec §2."
+        related_files:
+          - "src/features/common/ai/providers/gemini.js"
+          - "src/features/common/ai/providers/__tests__/gemini.test.js"
+
+    - id: TG-003
+      name: askservice-sse-consumer-tests
+      plan_ref: plan §6 P4.4 + spec §6.4
+      description: "SSE consumer parses _reset and _final_model sentinels correctly"
+      command: |
+        npm run test -- --testPathPattern=askService-sse || \
+        node --test src/features/ask/__tests__/askService-sse.test.js
+      expect:
+        exit_code: 0
+      assertions:
+        - "_reset event: fullResponse and state.currentResponse cleared to ''"
+        - "_reset event: state.responseHadFallback set to true"
+        - "_reset event: _broadcastState() called"
+        - "_final_model event: state.responseModel set to the provided ID"
+        - "_final_model event: _broadcastState() called"
+        - "Normal token after _reset: appears in fullResponse alone, NOT concatenated with pre-reset content"
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "Place sentinel branches BEFORE the existing `const token = ...` line — order matters."
+          - "Each branch must `continue` (not fall through to the token path)."
+          - "Verify _broadcastState is the actual method name in askService — sibling spec referred to it; double-check."
+        related_files:
+          - "src/features/ask/askService.js"
+          - "src/features/ask/__tests__/askService-sse.test.js"
+
+manual_smoke_tests:
+  description: |
+    From spec §6.5 and plan §6 P6 — gated by automated tests above.
+    These ARE the acceptance criteria per spec §10.
+  tests:
+    - id: MST-001
+      name: typo-detection
+      plan_ref: spec §6.5 #1 + plan §6 P6.1
+      description: "Set Gemini LLM Model ID to 'gemini-does-not-exist,gemini-2.5-flash'. Send a request."
+      expected: |
+        Immediate surfaced error mentioning the bad first model.
+        Second model is NOT called (no LLM cost incurred).
+        Validates fatal-request handling — typos surface, do not silently skip.
+      manual_only: true
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "If the second model was called: classifyError is mis-routing 400 as transient. Check error-classification table."
+          - "If no error surfaced: confirm controller.error() runs for fatal cases and that the renderer renders the error state."
+
+    - id: MST-002
+      name: single-model-backward-compat
+      plan_ref: spec §6.5 #2 + plan §6 P6.2 + spec §10 acceptance criterion 4
+      description: "Set Gemini LLM Model ID to 'gemini-2.5-flash' (single, no comma). Send a request."
+      expected: |
+        Behavior identical to pre-feature on the happy path.
+        Footer renders 'answered by: gemini-2.5-flash' (no (fallback) marker).
+        Single-model byte-identical behavior is acceptance criterion #4.
+      manual_only: true
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "If response is delayed or odd: parseModelList may be wrapping the input incorrectly."
+          - "If no footer: AskView.responseModel was not updated — verify _final_model sentinel reaches AskView via ask:stateUpdate."
+
+    - id: MST-003
+      name: happy-path-multi-model
+      plan_ref: spec §6.5 #3 + plan §6 P6.3
+      description: "Set to 'gemini-2.5-flash,gemini-2.5-flash-lite'. Send a request."
+      expected: |
+        Response footer shows 'answered by: gemini-2.5-flash' (no (fallback) since the first model succeeded).
+        Footer styling is muted but legible against the dark glass background.
+      manual_only: true
+
+    - id: MST-004
+      name: fallback-marker-visible
+      plan_ref: spec §6.5 #4 + plan §6 P6.4 + spec §10 acceptance criterion 5
+      description: |
+        Engineer a failover. Easiest reliable method: in DevTools console of the renderer,
+        monkey-patch rotator.classifyError to return 'transient' once on the first model:
+        require('./geminiModelRotator').__monkey = true  (or temporarily edit the rotator).
+        Alternative: temporarily replace first model with a model the user knows is throttled.
+      expected: |
+        Response footer shows 'answered by: gemini-2.5-flash-lite (fallback)'.
+        (fallback) marker is acceptance criterion #5.
+      manual_only: true
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "If (fallback) is missing: verify responseHadFallback is set true in the _reset SSE branch AND read by AskView."
+          - "If empty content flashes too briefly to observe: this is expected per impl-gap resolution — not a bug."
+
+    - id: MST-005
+      name: whitespace-and-empty-entries
+      plan_ref: plan §6 P6.5 + spec §5
+      description: "Paste 'gemini-2.5-flash, , gemini-2.5-flash-lite' (with empty middle entry) into settings. Save. Send a request."
+      expected: |
+        No crash. CSV parses to 2 valid entries. Happy-path response.
+        Verifies parseModelList drops empties + trims whitespace.
+      manual_only: true
+
+    - id: MST-006
+      name: single-typo-surfaces
+      plan_ref: plan §6 P6.6 + spec §5
+      description: "Set to single model 'gemini-does-not-exist'. Send a request."
+      expected: |
+        400 error surfaced immediately, NOT a silent skip.
+        Confirms typo detection works at the failover-loop level too (not just CSV split).
+      manual_only: true
+
+error_scans:
+  description: |
+    Error / log scans to confirm no regressions in the SSE consumer or stream-controller pathway.
+  scans:
+    - id: ES-001
+      name: no-err-invalid-state-on-cancel
+      plan_ref: plan R4 + spec § Clarifications IMPL GAP
+      description: "After running MST-004 with consumer cancellation, no ERR_INVALID_STATE appears in main-process logs"
+      command: "manual: check Electron main-process console for ERR_INVALID_STATE during stream cancellation"
+      expect:
+        contains: ""
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "controller.error() was not wrapped in try/catch in one of the two branches."
+          - "Check SC-006 first; if it passes, verify both branches reach the wrapped call."
+        related_files: ["src/features/common/ai/providers/gemini.js"]
+
+    - id: ES-002
+      name: no-double-broadcast-on-reset
+      plan_ref: spec § Clarifications IMPL GAP residual risk #2
+      description: |
+        Observed via DevTools console — broadcast state count should be exactly N tokens + 1 (_reset) + 1 (_final_model)
+        per failover episode. Double-counting would indicate a transcript persistence accumulator is re-recording.
+      command: "manual: log this._broadcastState invocations in DevTools and count"
+      expect:
+        condition: "broadcasts_count == tokens_count + sentinels_count"
+      on_failure:
+        severity: MEDIUM
+        rca_hints:
+          - "If transcript double-records: check that addAiMessage / persistence-layer hook fires AFTER the _reset cleared fullResponse, not before."
+          - "This is a known residual risk in spec § Confidence statement."
+        related_files: ["src/features/ask/askService.js"]
+
+ipc_contract_validation:
+  description: |
+    Confirms IPC channel envelope is unchanged structurally — new state fields ride existing ask:stateUpdate.
+  channels:
+    - channel: "ask:stateUpdate"
+      direction: "main -> renderer (push)"
+      args_shape: |
+        state: {
+          currentResponse: string,
+          currentQuestion: string,
+          isLoading: boolean,
+          isStreaming: boolean,
+          responseModel: string | null,        // NEW
+          responseHadFallback: boolean,        // NEW
+          ...existing fields untouched
+        }
+      validation: |
+        Existing renderer code reads `newState` opaquely (AskView.js:789). New fields ride the
+        same envelope. Backward-compatible: old code without the new property declarations
+        receives the fields and ignores them.
+      regression_check:
+        id: IPC-001
+        command: |
+          grep -nE "ask:stateUpdate" src/preload.js && \
+          grep -nE "responseModel|responseHadFallback" src/preload.js
+        expect:
+          exit_code: 0
+          note: "preload.js must NOT strip the new fields from the state envelope. The IPC listener should forward the entire state object."
+        on_failure:
+          severity: HIGH
+          rca_hints:
+            - "If preload.js does field-by-field destructure, add responseModel + responseHadFallback to the forwarded shape."
+            - "If preload.js forwards the whole event.args, no change is needed there."
+          related_files: ["src/preload.js"]
