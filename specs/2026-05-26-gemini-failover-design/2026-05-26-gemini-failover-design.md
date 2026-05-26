@@ -6,7 +6,7 @@ Author: thiagosoeiro
 
 ## Problem
 
-The Gemini API returns transient errors (429 rate limits, 503 overloads, 500/504, network timeouts) frequently enough to disrupt normal usage. Different models have different quotas and degradation patterns, so a single hardcoded model leaves the app at the mercy of whichever model is currently degraded.
+The Gemini API returns transient errors (408, 429 rate limits, 503 overloads, 500/504, network timeouts) frequently enough to disrupt normal usage. Different models have different quotas and degradation patterns, so a single hardcoded model leaves the app at the mercy of whichever model is currently degraded.
 
 Goal: when the configured Gemini model fails transiently, try the next model in a user-supplied priority list. Surface the actually-used model on every response. Do not change any behavior when the user only configures one model.
 
@@ -64,7 +64,7 @@ Sticky primary is implicit: the loop returns the *first* healthy model in declar
 
 | Class | Triggers | Action |
 |---|---|---|
-| `transient` | HTTP 429, 500, 502, 503, 504; network/timeout errors; SDK error codes `RESOURCE_EXHAUSTED`, `UNAVAILABLE`, `DEADLINE_EXCEEDED` | Cooldown current model, try next |
+| `transient` | HTTP 408, 429, 500, 502, 503, 504; network/timeout errors; SDK error codes `RESOURCE_EXHAUSTED`, `UNAVAILABLE`, `DEADLINE_EXCEEDED` | Cooldown current model, try next |
 | `fatal-request` | HTTP 400; SDK `INVALID_ARGUMENT` (bad model name, malformed payload) | Surface immediately — next model will also fail. This catches typos in the CSV. |
 | `fatal-auth` | HTTP 401, 403; SDK `PERMISSION_DENIED`, `API_KEY_INVALID` | Surface immediately — API key is shared across models |
 

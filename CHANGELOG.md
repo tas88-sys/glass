@@ -6,6 +6,27 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 
 ## [Unreleased]
 
+### Gemini Failover (branch `feat/gemini-failover`)
+
+#### Added
+- **CSV model failover for Gemini LLM** — `selectedLlmModel` now accepts a comma-separated priority list (e.g. `gemini-2.5-flash,gemini-2.5-flash-lite`). On transient errors (HTTP 408/429/500/502/503/504, SDK codes `RESOURCE_EXHAUSTED`/`UNAVAILABLE`/`DEADLINE_EXCEEDED`, network/timeout), the current model is cooled down and the next is tried automatically.
+- **In-memory cooldown registry** (`geminiModelRotator.js`) — singleton `Map` tracking per-model cooldown expiry. Honors `Retry-After` header and SDK `retryDelay` from `RetryInfo`; default 60s; clamped to `[5s, 300s]`. Exports: `pickModel`, `markFailed`, `markSucceeded`, `classifyError`, `parseRetryAfter`, `parseModelList`, `resetHealth`.
+- **Per-response footer** in `AskView.js` — muted `answered by: <model>` line below the response body when `responseModel` is set. Shows `(fallback)` suffix when at least one failover occurred during the stream.
+- **Settings help text** under the Gemini LLM Model ID input explaining comma-separated failover format with example.
+- **New SSE sentinels** emitted by `createStreamingLLM`: `{_reset, next_model, reason}` (tells consumer to discard accumulated output before the next model streams) and `{_final_model}` (records which model completed the response).
+
+#### Changed
+- **CSV semantics on `selected_llm_model`** — the existing free-text model ID field now accepts a CSV; persisted as opaque TEXT in SQLite (no schema change). Single-model entries behave identically to before.
+- **Frontend CSV validator** in `SettingsView.js` — `handleSaveGeminiModels` now splits on `,`, trims each entry, drops empties, and validates every non-empty token starts with `gemini-` (previously validated the whole string, which passed `"gpt-4,gemini-2.5-flash"` by accident). Persists the trimmed-rejoin string, not the raw input.
+- **`createSTT` first-model-only** — `createSTT` extracts only the first CSV entry via `parseModelList(csv)[0]`; no failover for live STT sessions (locked decision #3).
+- **`controller.error()` wrapped in `try/catch`** in both the fatal-error and all-models-failed branches of `createStreamingLLM` — defense in depth against `ERR_INVALID_STATE` on consumer cancel.
+
+#### Internal
+- New test files: `geminiModelRotator.test.js` (27 unit assertions covering all 7 exports) and `gemini.test.js` (9 integration cases covering failover loop + streaming sentinels) and `askService-sse.test.js` (6 cases covering `_reset`/`_final_model` handling).
+- Added `npm run test` script using `node:test` (Node 18+ built-in; no new dev dependencies required).
+
+---
+
 ### Ask Mode Shortcuts (branch `feat/ask-mode-shortcuts`)
 
 #### Added

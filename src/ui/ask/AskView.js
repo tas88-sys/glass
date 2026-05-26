@@ -14,6 +14,8 @@ export class AskView extends LitElement {
         headerText: { type: String },
         headerAnimating: { type: Boolean },
         isStreaming: { type: Boolean },
+        responseModel: { type: String },
+        responseHadFallback: { type: Boolean },
     };
 
     static styles = css`
@@ -395,6 +397,15 @@ export class AskView extends LitElement {
             background: rgba(255, 255, 255, 0.3);
         }
 
+        .response-footer {
+            font-size: 11px;
+            opacity: 0.6;
+            margin-top: 8px;
+            padding-top: 4px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.7);
+        }
+
         .loading-dots {
             display: flex;
             align-items: center;
@@ -721,6 +732,8 @@ export class AskView extends LitElement {
         this.headerText = 'AI Response';
         this.headerAnimating = false;
         this.isStreaming = false;
+        this.responseModel = '';
+        this.responseHadFallback = false;
 
         this.marked = null;
         this.hljs = null;
@@ -791,10 +804,12 @@ export class AskView extends LitElement {
                 this.currentQuestion = newState.currentQuestion;
                 this.isLoading       = newState.isLoading;
                 this.isStreaming     = newState.isStreaming;
-              
+                this.responseModel   = newState.responseModel || '';
+                this.responseHadFallback = newState.responseHadFallback || false;
+
                 const wasHidden = !this.showTextInput;
                 this.showTextInput = newState.showTextInput;
-              
+
                 if (newState.showTextInput) {
                   if (wasHidden) {
                     this.updateComplete.then(() => this.focusTextInput());
@@ -1377,8 +1392,15 @@ export class AskView extends LitElement {
 
                 <!-- Response Container -->
                 <div class="response-container ${!hasResponse ? 'hidden' : ''}" id="responseContainer">
-                    <!-- Content is dynamically generated in updateResponseContent() -->
+                    <!-- Content is dynamically generated in renderContent() -->
                 </div>
+
+                <!-- Per-response footer: shows which model answered and whether a fallback occurred -->
+                ${this.responseModel ? html`
+                    <div class="response-footer">
+                        answered by: ${this.responseModel}${this.responseHadFallback ? ' (fallback)' : ''}
+                    </div>
+                ` : ''}
 
                 <!-- Text Input Container -->
                 <div class="text-input-container ${!hasResponse ? 'no-response' : ''} ${!this.showTextInput ? 'hidden' : ''}">
