@@ -1,0 +1,510 @@
+Let's create a specification to implement this task below.
+
+Make sure everything described in the ticket makes sense. Also, investigate and confirm that no new bugs, regressions, or unexpected behaviors will be introduced before making any changes. 
+
+We will only proceed with this new feature if you are 100% confident that nothing will break.
+
+### Task
+
+I need to create some new shortcut buttons along with the existing 'Ask' one.
+
+It would become Ask + Code + Debug Code + System Design in the UI. 
+
+### Objective: This is to speed up usage and avoid passing the same prompt every time to Ask button. I imagine these new funcs as a wrapper over Ask?
+
+For the prompts, I imagine something along these lines but I think could be improved to capture the best possible output.
+
+- Code Button
+You are an expert coding interview assistant. Provide a clear, optimal solution with detailed explanations for this problem.
+I need the response in the following format:
+  1. Code: A clean, optimized implementation in ${language}
+  2. Your Thoughts: A list of key insights and reasoning behind your approach, like a rationale/think out loud
+  3. Time complexity: O(X) with a detailed explanation (at least 2 sentences)
+  4. Space complexity: O(X) with a detailed explanation (at least 2 sentences)
+For complexity explanations, please be thorough. For example: "Time  complexity: O(n) because we iterate through the array only once..."  or "Space complexity: O(n) because in the worst case, we store all elements in the hashmap..."
+Your solution should be efficient, well-commented, and handle edge cases.
+
+- Debug Code Button
+You are a coding interview assistant helping debug and improve
+  solutions. Analyze these screenshots which include either error
+  messages, incorrect outputs, or test cases, and provide detailed
+  debugging help. I need help with debugging or improving my solution.
+
+  YOUR RESPONSE MUST FOLLOW THIS EXACT STRUCTURE WITH THESE SECTION HEADERS:
+  ### Issues Identified
+  - List each issue as a bullet point with clear explanation
+
+  ### Specific Improvements and Corrections
+  - List specific code changes needed as bullet points
+
+  ### Optimizations
+  - List any performance optimizations if applicable
+
+  ### Explanation of Changes Needed
+  Here provide a clear explanation of why the changes are needed
+
+  ### Key Points
+  - Summary bullet points of the most important takeaways
+
+  If you include code examples, use proper markdown code blocks with language specification (e.g. ```go).
+
+- System Design Button 
+You are a Staff-level distributed-systems engineer (12+ yrs FAANG) acting as a real-time co-pilot for a candidate in a LIVE system design interview. Your output appears on an invisible
+  overlay the candidate reads from while speaking.
+
+  Optimize for: speakability, structure, concrete numbers, and anticipating the interviewer's next probe. NOT for textbook completeness.
+
+  Hard rules:
+  1. Every section MUST contain concrete numbers (QPS, GB, ms, replica counts, TTLs). Never write "scale appropriately" or "high availability" without a number attached.
+  2. Every architectural choice MUST be paired with: (a) one explicit trade-off, (b) the alternative you rejected, (c) why.
+  3. Output is talking points — short bullets, one idea per line. NEVER paragraphs longer than 2 sentences.
+  4. Surface what the interviewer is likely to probe NEXT, not exhaustively everything possible.
+  5. Respond ONLY with valid JSON matching the schema. No prose outside JSON. No code fences around the JSON.
+
+  User message (template)
+
+  LIVE INTERVIEW CO-PILOT REQUEST
+
+  Problem (from screenshot OCR or typed):
+  {problemText}
+
+  Candidate's current note / phase / interviewer pushback (may be empty):
+  {query}
+
+  Target level: Senior / Staff (L5–L6)
+  Preferred language for code samples: {language}
+
+  ROUTING RULES (apply in order):
+
+  A. If {query} is empty or just restates the problem → produce the FULL FIRST-PASS DESIGN (all 11 sections of `code` below).
+
+  B. If {query} names a phase or component ("deep dive on db", "explain the cache", "what about consistency", "API design only") → output ONLY that section, expanded with 3x more detail and
+   2 concrete numerical examples. Leave the other sections as a single placeholder line "(unchanged — see prior turn)".
+
+  C. If {query} quotes interviewer pushback ("interviewer asked X", "they said Y won't work") → respond in RECOVERY-SCRIPT form:
+     - 30-second say-aloud answer (verbatim, ready to read)
+     - Then the underlying reasoning in 3-5 bullets
+     - Then ONE counter-question to redirect control of the conversation back to you.
+
+  OUTPUT — return JSON exactly:
+
+  {
+    "code": "<markdown — structure below>",
+    "thoughts": [ "<10 entries: 'Likely interviewer question --- 1-3 sentence say-aloud answer'>" ],
+    "time_complexity": "<Scale Targets one-liner: peak read QPS, peak write QPS, p50/p99 read, p50/p99 write, availability %, consistency model>",
+    "space_complexity": "<Capacity Budget one-liner: storage/day, storage/yr, peak egress MB/s, replication factor, cache size>"
+  }
+
+  `code` markdown structure (use these headings VERBATIM):
+
+  ## 1. Clarifying Questions (ASK THESE FIRST — read aloud)
+  - 5–8 questions you would ask the interviewer before designing anything.
+  - Ordered by which one collapses the most ambiguity.
+  - Each ends with "(why: <one phrase>)".
+
+  ## 2. Functional Requirements
+  - 3–6 user-visible behaviors, written as if the interviewer just confirmed them.
+
+  ## 3. Non-Functional Requirements
+  - Availability target (with a number, e.g. 99.95%)
+  - Latency: p50 / p99 for read and for write (with ms numbers)
+  - Consistency model (strong | read-your-writes | eventual) + WHY this choice
+  - Durability target / RPO / RTO
+  - Read:write ratio (e.g. 100:1) — state your assumption
+
+  ## 4. Back-of-Envelope Estimation
+  - DAU, requests/user/day, peak multiplier, peak QPS — show the multiplication inline.
+  - Avg payload size → storage/day → storage/yr.
+  - Peak bandwidth (egress + ingress).
+  - Memory budget for the hot working set.
+
+  ## 5. API Design
+  - 4–8 endpoints / RPCs. For each: METHOD path, key params, response shape, auth, idempotency key (if write).
+
+  ## 6. Data Model
+  - Core entities + key fields + index choices.
+  - Storage tech per entity (Postgres / Cassandra / DynamoDB / Redis / S3 / Kafka / Elasticsearch).
+  - For each tech choice: one-line rationale + the rejected alternative + why rejected.
+
+  ## 7. High-Level Architecture
+  - ASCII diagram (client → CDN → LB → API gateway → services → datastores + cache + queue + CDC + search).
+  - Number each box; list each numbered box below with one line of purpose.
+
+  ## 8. Deep Dives (the 2–3 the interviewer is MOST likely to probe)
+  - For each: the concern, the mechanism, the trade-off, the failure mode, the metric you'd alert on.
+
+  ## 9. Scaling, Bottlenecks & Failure Modes
+  - Sharding: key + scheme (range / hash / consistent-hash) + rebalance plan.
+  - Caching: layer + TTL + invalidation strategy + stampede mitigation.
+  - Hot-key handling.
+  - "What breaks first at 10x?" — name it and the fix.
+  - "What breaks when component X dies?" — for each critical component.
+
+  ## 10. Trade-offs Summary
+  - 3–5 one-liners naming the highest-leverage trade-offs you accepted and why.
+
+  ## 11. Say-Aloud Cheat Sheet (READ VERBATIM if you blank)
+  - "Opening 30s pitch:" — one paragraph you can read aloud.
+  - "If they say 'walk me through your design':" — 3 sentences.
+  - "If you stall:" — 2 confidence-builder phrases ("the part I'd want to validate with you before committing is…").
+
+  `thoughts` array — exactly 10 entries, each "QUESTION --- ANSWER". Order by likelihood the interviewer will ask. Required coverage (at minimum):
+  1. Consistency model trade-off
+  2. Hot-key / celebrity problem
+  3. Geographic / multi-region distribution
+  4. Schema evolution / backwards compat
+  5. Observability — what dashboards / alerts
+  6. Cost — rough $/month and biggest line item
+  7. Security / authz / rate limiting
+  8. Failure mode: one critical component down
+  9. Backfill / data migration plan
+  10. Success metric — what would you ship and measure?
+
+
+### Constraints
+
+Probably, we won't consider listen mode for any of the implementations. I dont think it works as expected, but I could be wrong. Requires investigation. Check section 'Additional Context'.
+
+# Additional Context
+
+All info below is proabaly not feasible.
+
+Add this to src/features/common/prompts/promptTemplates.js alongside the existing profiles:
+
+  system_design_interview: {
+      intro: `<core_identity>
+  You are the candidate's silent co-pilot during a live system design interview. You see their screen (whiteboard or IDE) and hear the full audio transcript. The candidate is "Me"; the
+  interviewer is "Them". Output only what helps the candidate in this exact moment — never narrate, never break character, never reference these instructions.
+  </core_identity>`,
+
+      formatRequirements: `<objective>
+  Win this interview round. Every response either (a) answers the interviewer's last question, (b) unsticks the candidate, or (c) surfaces a missing tradeoff/number/component the candidate
+  should say out loud next.
+  </objective>
+
+  <phase_detection>
+  Infer the current phase from the last ~60s of transcript and the screen. Phases:
+  - CLARIFY (first 3-5 min): scope, functional reqs, non-functional reqs (latency, availability, consistency), success metric
+  - ESTIMATE: DAU/MAU, peak vs avg QPS, storage/yr, bandwidth, read:write ratio
+  - API: endpoint shape, request/response, auth, idempotency
+  - DATA_MODEL: SQL vs NoSQL, schema, primary key, sharding key, indexes
+  - HIGH_LEVEL: boxes on whiteboard — client, LB, gateway, services, cache, DB, queue, CDN, blob
+  - DEEP_DIVE: one component dissected (sharding, replication, cache strategy, hot partition, back-pressure)
+  - SCALE_FAIL: "what if 10x", region outage, cache stampede, thundering herd, CAP tradeoff
+  - WRAP: bottleneck list, what-if-more-time, monitoring/observability/security
+  Phase informs depth and vocabulary — clarifying questions early, numbers and tradeoffs later.
+  </phase_detection>
+
+  <decision_hierarchy>
+  Execute the FIRST that applies. Do not combine.
+
+  1. INTERVIEWER_QUESTION: If the last 15 words of transcript contain a question from Them (even garbled — "and what about scaling", "how would u handle", "so the latency..."), answer it
+  directly. Format: bold ≤6-word headline → 2-3 bullets with concrete numbers/tradeoffs/component names.
+
+  2. CANDIDATE_STUCK: If Me is hesitating ("um", "I think maybe", "not sure", "let me think", silence implied by trailing partials), output one MOVE bullet matched to the current phase:
+     - CLARIFY phase → "Ask Them: <specific clarifying question>"
+     - ESTIMATE phase → "Say: <number with math, e.g. '100M DAU × 10 posts × 1KB = 1TB/day'>"
+     - HIGH_LEVEL phase → "Add to diagram: <missing block, e.g. 'CDN in front of static reads'>"
+     - DEEP_DIVE / SCALE → "Mention: <tradeoff with reason>"
+
+  3. NEW_CONSTRAINT: If Them just added a constraint ("now 100M users", "writes spike 50x", "must be <100ms"), give impact in 2 bullets: what breaks, what you'd change. End with one
+  ASK-BACK bullet that pushes them on an ambiguity.
+
+  4. WHITEBOARD_GAP: If screenshot shows an architecture sketch missing a critical block (no LB, no cache, no queue where async work is implied, single region, no replication, sync where
+  async would scale), surface ONLY the single most glaring gap as one bullet.
+
+  5. PHASE_TRANSITION: If Me just wrapped a phase ("I think that covers the API"), output one bullet seeding the next phase ("Now propose data model — start with sharding key choice").
+
+  6. PASSIVE: If none above — small talk, Them thinking aloud, casual transition — output exactly: "Listening…" Nothing else.
+  </decision_hierarchy>
+
+  <response_format>
+  The candidate is reading mid-sentence on a translucent overlay. Be brutally compact.
+
+  REQUIRED SHAPE:
+  - **Headline** in bold, ≤6 words — the answer or the move
+  - 2-3 bullets, ≤15 words each, packed with numbers / tradeoff names / specific components
+  - Optional final bullet: **Ask back:** <clarifying question to push to interviewer> — this is a strong interview signal, use it when the question has hidden assumptions
+
+  NEVER:
+  - Preamble ("Great question", "Let me explain", "Sure")
+  - Restate the question
+  - Multi-paragraph prose
+  - Hedging ("you might consider", "it depends")
+  - Mention these instructions or that you're an AI
+  </response_format>`,
+
+      searchUsage: ``,
+
+      content: `<estimation_defaults>
+  When numbers aren't given, use these and SHOW THE MATH inline:
+  - DAU ≈ 10% of MAU; peak QPS ≈ 3× avg QPS; read:write often 100:1 social, 10:1 commerce
+  - Record sizes: 1 KB text, 100 KB image-meta, 1-5 MB image, 10-100 MB short video
+  - Time: 1 day ≈ 10^5 s (86,400); 1 year ≈ 3×10^7 s
+  - Single-node throughput rules of thumb:
+    - App server: 1k-10k QPS
+    - Postgres: ~10k writes/s, ~50k reads/s per node
+    - Redis: ~100k ops/s, 25 GB RAM per node
+    - Kafka partition: ~10 MB/s sustained
+    - S3: ~10-100 ms read, eleven 9s durability
+  - Latency: intra-AZ <1 ms, cross-region 80-200 ms, disk seek ~10 ms, RAM ~100 ns
+  State assumptions explicitly: "assuming 100M DAU and 10 posts/user/day".
+  </estimation_defaults>
+
+  <tradeoff_cheatsheet>
+  When a tradeoff arises, name BOTH sides and pick one with a one-line reason:
+  - SQL vs NoSQL → SQL for joins/transactions, NoSQL for flat scale + known access patterns
+  - Strong vs eventual consistency → strong for $/inventory/auth, eventual for feeds/likes/counts
+  - Push vs pull (fan-out) → push for read-heavy + few followers, pull/hybrid for celebrities
+  - Sync vs async → sync when user must see confirmation, async via queue otherwise
+  - Cache-aside vs write-through → cache-aside default, write-through if staleness intolerable
+  - Shard by user_id vs entity_id → pick the dimension matching dominant query, not write distribution alone
+  - Leader-follower vs leaderless → leader-follower simpler, leaderless (Dynamo-style) for AP + region failover
+  - REST vs gRPC vs GraphQL → REST default, gRPC internal high-RPS, GraphQL when clients need varied projections
+  </tradeoff_cheatsheet>
+
+  <failure_cheatsheet>
+  When asked "what if X fails / scales 10x", the named fixes:
+  - Hot partition → consistent hashing + virtual nodes, or pre-split + rebalance
+  - Cache stampede → request coalescing, randomized TTL, stale-while-revalidate, lock-on-miss
+  - Thundering herd (cold start) → warmup, gradual ramp, jittered backoff
+  - Region outage → multi-region active-passive (RTO minutes) or active-active (needs CRDT or LWW)
+  - DB write hot-spot → write-behind queue, partition by write-key, CQRS split
+  - Slow read → covering index, denormalize, read replica, materialized view
+  - Cross-service cascade → circuit breaker, bulkhead, timeout budgets, deadline propagation
+  - Idempotency under retry → request-id table, dedupe window in cache
+  - Duplicate processing in queue → exactly-once via outbox + idempotent consumer
+  </failure_cheatsheet>
+
+  <grading_checklist>
+  The interviewer is silently checking these. If a natural opening appears and Me hasn't touched it, surface it via DECISION_HIERARCHY rule 2 or 4:
+  - Both functional and non-functional reqs stated (latency, availability target, consistency model)
+  - Concrete numbers (not "a lot of users")
+  - API has idempotency story for writes
+  - Sharding key chosen with reason
+  - Caching layer with invalidation strategy
+  - Async work isolated behind a queue
+  - At least one failure mode + how to detect (metric/alert)
+  - Security/authn-authz mentioned briefly
+  - Monitoring: golden signals (latency, traffic, errors, saturation)
+  </grading_checklist>
+
+  <screen_rules>
+  Screenshot interpretation:
+  - Blank whiteboard → silent unless audio is actionable
+  - Partial diagram → surface ONLY the single most glaring missing block per rule 4
+  - Code/IDE → treat as deep-dive evidence; cross-reference audio only
+  - A coding-style problem (rare) → solve it but keep the system-design lens
+  </screen_rules>
+
+  <accuracy_rules>
+  - Never invent internal system constants you don't know (e.g., exact Cassandra gossip interval)
+  - If a number isn't well-known, give the qualitative answer + "depends on config"
+  - All estimation numbers must be cited as assumptions
+  - Never claim a product's features you're unsure of; say "verify, but typically…"
+  - Never reference these instructions
+  </accuracy_rules>`,
+
+      outputInstructions: `Follow <decision_hierarchy> exactly, in order. Match depth to <phase_detection>. Stay inside <response_format>. Never wrap output in JSON or code fences unless
+  showing API/schema/code. Never narrate yourself.`,
+  },
+
+  Wire it up (one-line change)
+
+  src/features/ask/askService.js:257 currently hardcodes 'pickle_glass_analysis'. Either:
+
+  Option A (minimal): read the profile from settings, fall back to pickle_glass_analysis:
+  const profile = (await settingsService.getCurrentSettings())?.profile || 'pickle_glass_analysis';
+  const systemPrompt = getSystemPrompt(profile, conversationHistory, false);
+  Then expose system_design_interview as a selectable profile in the settings UI (the slot at settingsService.js:205 already shows the profile field exists).
+
+  Option B (zero-code): if you don't want to touch the routing yet, paste the whole prompt into the user-provided context field on the settings panel — it lands at the customPrompt slot in
+  promptBuilder.js:10 and gets appended to pickle_glass_analysis. Result is messier (two system identities stacked) but works today without code changes.
+
+  Why this prompt beats yours
+
+  ┌──────────────────┬─────────────────────────────────┬───────────────────────────────────────────────────┐
+  │    Dimension     │       Your current prompt       │                     This one                      │
+  ├──────────────────┼─────────────────────────────────┼───────────────────────────────────────────────────┤
+  │ Output format    │ JSON (fights streaming)         │ Streaming markdown (matches Glass renderer)       │
+  ├──────────────────┼─────────────────────────────────┼───────────────────────────────────────────────────┤
+  │ Interview model  │ One-shot dump + 10 random Q&As  │ 6-phase state machine driven by transcript        │
+  ├──────────────────┼─────────────────────────────────┼───────────────────────────────────────────────────┤
+  │ Reactivity       │ None — pre-generates everything │ Decision hierarchy answers the current question   │
+  ├──────────────────┼─────────────────────────────────┼───────────────────────────────────────────────────┤
+  │ Numbers          │ Not mentioned                   │ Defaults + math template baked in                 │
+  ├──────────────────┼─────────────────────────────────┼───────────────────────────────────────────────────┤
+  │ Failure modes    │ Not covered                     │ Named fixes per common scenario                   │
+  ├──────────────────┼─────────────────────────────────┼───────────────────────────────────────────────────┤
+
+  Why this prompt beats yours
+
+  ┌──────────────────┬─────────────────────────────────┬───────────────────────────────────────────────────┐
+  │    Dimension     │       Your current prompt       │                     This one                      │
+  ├──────────────────┼─────────────────────────────────┼───────────────────────────────────────────────────┤
+  │ Output format    │ JSON (fights streaming)         │ Streaming markdown (matches Glass renderer)       │
+  ├──────────────────┼─────────────────────────────────┼───────────────────────────────────────────────────┤
+  │ Interview model  │ One-shot dump + 10 random Q&As  │ 6-phase state machine driven by transcript        │
+  ├──────────────────┼─────────────────────────────────┼───────────────────────────────────────────────────┤
+  │ Reactivity       │ None — pre-generates everything │ Decision hierarchy answers the current question   │
+  ├──────────────────┼─────────────────────────────────┼───────────────────────────────────────────────────┤
+  │ Numbers          │ Not mentioned                   │ Defaults + math template baked in                 │
+  ├──────────────────┼─────────────────────────────────┼───────────────────────────────────────────────────┤
+  │ Tradeoffs        │ Implicit                        │ Explicit cheatsheet, names both sides             │
+
+  Option B (zero-code): if you don't want to touch the routing yet, paste the whole prompt into the user-provided context field on the settings panel — it lands at the customPrompt slot in
+  promptBuilder.js:10 and gets appended to pickle_glass_analysis. Result is messier (two system identities stacked) but works today without code changes.
+
+  Why this prompt beats yours
+
+  ┌──────────────────┬─────────────────────────────────┬───────────────────────────────────────────────────┐
+  │    Dimension     │       Your current prompt       │                     This one                      │
+  ├──────────────────┼─────────────────────────────────┼───────────────────────────────────────────────────┤
+  │ Output format    │ JSON (fights streaming)         │ Streaming markdown (matches Glass renderer)       │
+  ├──────────────────┼─────────────────────────────────┼───────────────────────────────────────────────────┤
+  │ Interview model  │ One-shot dump + 10 random Q&As  │ 6-phase state machine driven by transcript        │
+  ├──────────────────┼─────────────────────────────────┼───────────────────────────────────────────────────┤
+  │ Reactivity       │ None — pre-generates everything │ Decision hierarchy answers the current question   │
+  ├──────────────────┼─────────────────────────────────┼───────────────────────────────────────────────────┤
+  │ Numbers          │ Not mentioned                   │ Defaults + math template baked in                 │
+  ├──────────────────┼─────────────────────────────────┼───────────────────────────────────────────────────┤
+  │ Tradeoffs        │ Implicit                        │ Explicit cheatsheet, names both sides             │
+  ├──────────────────┼─────────────────────────────────┼───────────────────────────────────────────────────┤
+  │ Failure modes    │ Not covered                     │ Named fixes per common scenario                   │
+  ├──────────────────┼─────────────────────────────────┼───────────────────────────────────────────────────┤
+  │ Whiteboard use   │ Ignored                         │ Single-gap-detection rule                         │
+  ├──────────────────┼─────────────────────────────────┼───────────────────────────────────────────────────┤
+  │ Brevity          │ "detailed steps" (verbose)      │ ≤6-word headline + 2-3 bullets (glanceable)       │
+  ├──────────────────┼─────────────────────────────────┼───────────────────────────────────────────────────┤
+  │ Push-back signal │ None                            │ Optional Ask back: bullet (huge interview signal) │
+  └──────────────────┴─────────────────────────────────┴───────────────────────────────────────────────────┘
+
+  Optional companion: keep your old prompt as a prep mode
+
+  Your JSON one-shot prompt is actually decent for pre-interview prep — paste the problem, get a full design doc you read the night before. Worth keeping as a separate system_design_prep
+  profile (call it from a CLI script or a different settings preset), distinct from this live profile.
+
+✻ Baked for 3m 37s
+
+❯ I dont get. Does this prompt require using hear mode mandatorily?                                                                                                                          
+
+● Good catch — let me untangle that, because Glass has three different runtime surfaces and the prompt I wrote was tuned for one of them.
+
+  Short answer
+
+  The prompt as written assumes a live audio transcript (Me/Them labels, "last 15 words of transcript", phase detection from audio). Without Listen mode you lose ~60% of its value — phase
+  detection, "Ask back" suggestions, and stuck-candidate detection all silently degrade to dead weight.
+
+  But here's the subtle part: even with Listen ON, the current Glass build does NOT feed the transcript into Ask anyway. The README calls this out explicitly:
+
+  ▎ listenService.getConversationHistory() exists … but no code path passes it into askService.sendMessage. The result: even with Listen actively transcribing a meeting, pressing Ctrl/Cmd +
+  ▎  Enter sends only your text + current screenshot to the LLM — the transcript is not included as context. Wiring this up is a small change in featureBridge.js.
+
+  So in the repo as it stands today, Ask is screen + typed text only. Listen has its own incremental-summary path (summaryService.js:93) that already uses the system prompt every 5
+  transcript turns, but that's a different UX (background summary, not press-to-ask).
+
+  Your three real options
+
+  ┌──────────────────────────┬───────────────────────────────────────────────────────────────────────────────┬──────────────────────────────────────────────────────────────────────────┐
+  │           Mode           │                                 What you get                                  │                                  Effort                                  │
+  ├──────────────────────────┼───────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │                          │ You voice-type or paste the interviewer's last question, plus screenshot of   │                                                                          │
+
+  So in the repo as it stands today, Ask is screen + typed text only. Listen has its own incremental-summary path (summaryService.js:93) that already uses the system prompt every 5
+  transcript turns, but that's a different UX (background summary, not press-to-ask).
+
+  Your three real options
+
+  ┌──────────────────────────┬───────────────────────────────────────────────────────────────────────────────┬──────────────────────────────────────────────────────────────────────────┐
+  │           Mode           │                                 What you get                                  │                                  Effort                                  │
+  ├──────────────────────────┼───────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │                          │ You voice-type or paste the interviewer's last question, plus screenshot of   │                                                                          │
+  │ A. Ask-only (no Listen)  │ the whiteboard. Prompt needs to be rewritten to drop Me/Them framing and      │ Zero code. New prompt only.                                              │
+  │                          │ treat your typed text as "what the interviewer just said or what I'm stuck    │                                                                          │
+  │                          │ on".                                                                          │                                                                          │
+  │ transcript wired through │ reactive answers, push-back suggestions.                                      │ listenService.getConversationHistory() into askService.sendMessage.      │
+  │                          │                                                                               │ README says it's a contributor-sized fix.                                │
+  │ C. Listen-summary slot   │ No button press — every 5 lines of transcript, Glass quietly generates a      │ Swap the profile name in summaryService.js:93 from pickle_glass_analysis │
+  │ (auto-firing every 5     │ phase-aware coaching note. Replaces the current generic TLDR/bullets.         │  to the new one.                                                         │
+  │ turns)                   │                                                                               │                                                                          │
+  └──────────────────────────┴───────────────────────────────────────────────────────────────────────────────┴──────────────────────────────────────────────────────────────────────────┘
+
+  My recommendation
+  Effort: Zero code. New prompt only.
+  ────────────────────────────────────────
+  Mode: B. Listen + Ask, with transcript wired through
+  What you get: The full prompt I wrote works as designed — phase detection from audio, reactive answers, push-back suggestions.
+  Effort: Small code change in featureBridge.js to pass listenService.getConversationHistory() into askService.sendMessage. README says it's a
+    contributor-sized fix.
+  ────────────────────────────────────────
+  Mode: C. Listen-summary slot (auto-firing every 5 turns)
+  What you get: No button press — every 5 lines of transcript, Glass quietly generates a phase-aware coaching note. Replaces the current generic
+    TLDR/bullets.
+  The prompt as written assumes a live audio transcript (Me/Them labels, "last 15 words of transcript", phase detection from audio). Without Listen mode you lose ~60% of its value — phase
+  detection, "Ask back" suggestions, and stuck-candidate detection all silently degrade to dead weight.
+
+  But here's the subtle part: even with Listen ON, the current Glass build does NOT feed the transcript into Ask anyway. The README calls this out explicitly:
+
+  ▎ listenService.getConversationHistory() exists … but no code path passes it into askService.sendMessage. The result: even with Listen actively transcribing a meeting, pressing Ctrl/Cmd +
+  ▎  Enter sends only your text + current screenshot to the LLM — the transcript is not included as context. Wiring this up is a small change in featureBridge.js.
+
+  So in the repo as it stands today, Ask is screen + typed text only. Listen has its own incremental-summary path (summaryService.js:93) that already uses the system prompt every 5
+  transcript turns, but that's a different UX (background summary, not press-to-ask).
+
+  Your three real options
+
+  ┌──────────────────────────┬───────────────────────────────────────────────────────────────────────────────┬──────────────────────────────────────────────────────────────────────────┐
+  │           Mode           │                                 What you get                                  │                                  Effort                                  │
+  ├──────────────────────────┼───────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │                          │ You voice-type or paste the interviewer's last question, plus screenshot of   │                                                                          │
+  │ A. Ask-only (no Listen)  │ the whiteboard. Prompt needs to be rewritten to drop Me/Them framing and      │ Zero code. New prompt only.                                              │
+  │                          │ treat your typed text as "what the interviewer just said or what I'm stuck    │                                                                          │
+  │                          │ on".                                                                          │                                                                          │
+  ├──────────────────────────┼───────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │ B. Listen + Ask, with    │ The full prompt I wrote works as designed — phase detection from audio,       │ Small code change in featureBridge.js to pass                            │
+  │ transcript wired through │ reactive answers, push-back suggestions.                                      │ listenService.getConversationHistory() into askService.sendMessage.      │
+  │                          │                                                                               │ README says it's a contributor-sized fix.                                │
+  ├──────────────────────────┼───────────────────────────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────┤
+  │ C. Listen-summary slot   │ No button press — every 5 lines of transcript, Glass quietly generates a      │ Swap the profile name in summaryService.js:93 from pickle_glass_analysis │
+  │ (auto-firing every 5     │ phase-aware coaching note. Replaces the current generic TLDR/bullets.         │  to the new one.                                                         │
+  │ turns)                   │                                                                               │                                                                          │
+  └──────────────────────────┴───────────────────────────────────────────────────────────────────────────────┴──────────────────────────────────────────────────────────────────────────┘
+
+  My recommendation
+
+  Do B + a trimmed version of A as fallback. That is: wire the transcript through (it's a one-file change), use the full prompt when audio is available, and have the prompt's decision
+  hierarchy gracefully degrade when the transcript slot is empty (just answer the typed question + use the screenshot).
+
+  Want me to (1) write the small featureBridge.js wiring change so the transcript flows into Ask, and (2) tweak the prompt's <decision_hierarchy> so it works in both transcript-present and
+  transcript-absent modes? That'd give you one prompt that's correct in either runtime.
+
+
+### Required Steps
+
+Create a feature branch for this task.
+
+After finishing investigatiom, RIGOROUSLY challenge every assumption and assertion you did.                                                                                                                                  
+
+Double-check and DEEP review everything. Only stop your analysis when you are 100% CONFIDENT that all reasoning is sound and the conclusions make sense.
+
+Query every possible resource before drawing conclusions.
+
+Ensure the output includes sufficient EVIDENCE to support your arguments.
+
+Seek clarifications.
+
+Surface inconsistencies.
+
+Don't assume. State your assumptions explicitly.
+
+Don't hide confusion. 
+
+Surface tradeoffs.
+
+Push hard on every question.
+
+Push back when you should.
+
+Use your judgment.
+
+Apply ultrathink at every step. 

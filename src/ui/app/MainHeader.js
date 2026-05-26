@@ -5,6 +5,7 @@ export class MainHeader extends LitElement {
         isTogglingSession: { type: Boolean, state: true },
         shortcuts: { type: Object, state: true },
         listenSessionStatus: { type: String, state: true },
+        askMode: { type: String, state: true },
     };
 
     static styles = css`
@@ -338,6 +339,36 @@ export class MainHeader extends LitElement {
             transform: none !important;
             will-change: auto !important;
         }
+
+        /* ── Ask Mode Shortcuts ── */
+        .ask-group {
+            display: flex;
+            align-items: center;
+            gap: 0;
+        }
+
+        .ask-mode-caret {
+            -webkit-app-region: no-drag;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px;
+            height: 18px;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 11px;
+            padding: 0;
+            border-radius: 4px;
+            transition: background 0.15s ease, color 0.15s ease;
+            flex-shrink: 0;
+        }
+
+        .ask-mode-caret:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 1);
+        }
         `;
 
     constructor() {
@@ -349,12 +380,51 @@ export class MainHeader extends LitElement {
         this.settingsHideTimer = null;
         this.isTogglingSession = false;
         this.listenSessionStatus = 'beforeSession';
+        this.askMode = 'default';
         this.animationEndTimer = null;
         this.handleAnimationEnd = this.handleAnimationEnd.bind(this);
         this.handleMouseMove = this.handleMouseMove.bind(this);
         this.handleMouseUp = this.handleMouseUp.bind(this);
         this.dragState = null;
         this.wasJustDragged = false;
+    }
+
+    /**
+     * Returns the badge text for the Ask pill based on active mode.
+     * @returns {string}
+     */
+    _renderAskLabel() {
+        switch (this.askMode) {
+            case 'code':          return 'Ask · Code';
+            case 'debug':         return 'Ask · Debug';
+            case 'system_design': return 'Ask · SysDes';
+            default:              return 'Ask';
+        }
+    }
+
+    async _handleCaretEnter() {
+        if (this.wasJustDragged) return;
+        if (window.api && window.api.mainHeader) {
+            try {
+                window.api.mainHeader.cancelHideModePicker();
+                await window.api.mainHeader.openModePicker();
+            } catch (err) {
+                console.warn('[MainHeader] Failed to open mode picker', err);
+            }
+        }
+    }
+
+    _handleCaretLeave() {
+        // The 200ms hide-debounce lives in windowManager; just emit the hide request.
+        if (window.api && window.api.mainHeader) {
+            try {
+                // Trigger the debounced hide by sending hide visibility request
+                // (will fire through internalBridge → windowManager's modePickerHideTimer)
+                window.api.modePicker && window.api.modePicker.closeWindow();
+            } catch (err) {
+                // Best-effort; window may already be closed
+            }
+        }
     }
 
     _getListenButtonText(status) {
@@ -483,7 +553,7 @@ export class MainHeader extends LitElement {
                 } else {
                     this.listenSessionStatus = 'beforeSession';
                 }
-                this.isTogglingSession = false; // ✨ 로딩 상태만 해제
+                this.isTogglingSession = false;
             };
             window.api.mainHeader.onListenChangeSessionResult(this._sessionStateTextListener);
 
@@ -492,6 +562,23 @@ export class MainHeader extends LitElement {
                 this.shortcuts = keybinds;
             };
             window.api.mainHeader.onShortcutsUpdated(this._shortcutListener);
+
+            // Fetch initial askMode via IPC (spec §8.3 — try/catch with 'default' fallback)
+            try {
+                window.api.mainHeader.getAskMode().then(mode => {
+                    this.askMode = mode || 'default';
+                }).catch(() => {
+                    this.askMode = 'default';
+                });
+            } catch {
+                this.askMode = 'default';
+            }
+
+            // Subscribe to push events from setAskMode handler (spec §2 E6 fix)
+            this._askModeChangedListener = (event, { mode }) => {
+                this.askMode = mode || 'default';
+            };
+            window.api.mainHeader.onAskModeChanged(this._askModeChangedListener);
         }
     }
 
@@ -510,6 +597,9 @@ export class MainHeader extends LitElement {
             }
             if (this._shortcutListener) {
                 window.api.mainHeader.removeOnShortcutsUpdated(this._shortcutListener);
+            }
+            if (this._askModeChangedListener) {
+                window.api.mainHeader.removeOnAskModeChanged(this._askModeChangedListener);
             }
         }
     }
@@ -642,13 +732,21 @@ export class MainHeader extends LitElement {
                         `}
                 </button>
 
-                <div class="header-actions ask-action" @click=${() => this._handleAskClick()}>
-                    <div class="action-text">
-                        <div class="action-text-content">Ask</div>
+                <div class="ask-group">
+                    <div class="header-actions ask-action" @click=${() => this._handleAskClick()}>
+                        <div class="action-text">
+                            <div class="action-text-content">${this._renderAskLabel()}</div>
+                        </div>
+                        <div class="icon-container">
+                            ${this.renderShortcut(this.shortcuts.nextStep)}
+                        </div>
                     </div>
-                    <div class="icon-container">
-                        ${this.renderShortcut(this.shortcuts.nextStep)}
-                    </div>
+                    <button
+                        class="ask-mode-caret"
+                        title="Pick Ask mode"
+                        @mouseenter=${() => this._handleCaretEnter()}
+                        @mouseleave=${() => this._handleCaretLeave()}
+                    >▾</button>
                 </div>
 
                 <div class="header-actions" @click=${() => this._handleToggleAllWindowsVisibility()}>

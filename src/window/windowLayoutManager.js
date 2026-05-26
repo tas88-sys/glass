@@ -94,6 +94,43 @@ class WindowLayoutManager {
     }
 
 
+    /**
+     * Calculate position of the mode-picker window below the caret in the header.
+     * Mirrors calculateSettingsWindowPosition — anchors below the header with PAD=5.
+     * CARET_RIGHT_OFFSET is the caret's CSS distance from the right edge of the header
+     * (placeholder 40px; tuned visually during P5 QA).
+     * @returns {{x: number, y: number, width: number, height: number} | null}
+     */
+    calculateModePickerWindowPosition() {
+        const header = this.windowPool.get('header');
+        const modePicker = this.windowPool.get('mode-picker');
+
+        if (!header || header.isDestroyed() || !modePicker || modePicker.isDestroyed()) {
+            return null;
+        }
+
+        const headerBounds = header.getBounds();
+        const modePickerBounds = modePicker.getBounds();
+        const display = getCurrentDisplay(header);
+        const { x: workAreaX, y: workAreaY, width: screenWidth, height: screenHeight } = display.workArea;
+
+        const PAD = 5;
+        const CARET_RIGHT_OFFSET = 40; // px from right edge of header to caret center; tuned in P5.6
+
+        const x = headerBounds.x + headerBounds.width - CARET_RIGHT_OFFSET - (modePickerBounds.width / 2);
+        const y = headerBounds.y + headerBounds.height + PAD;
+
+        const clampedX = Math.max(workAreaX + 10, Math.min(workAreaX + screenWidth - modePickerBounds.width - 10, x));
+        const clampedY = Math.max(workAreaY + 10, Math.min(workAreaY + screenHeight - modePickerBounds.height - 10, y));
+
+        return {
+            x: Math.round(clampedX),
+            y: Math.round(clampedY),
+            width: modePickerBounds.width,
+            height: modePickerBounds.height,
+        };
+    }
+
     calculateHeaderResize(header, { width, height }) {
         if (!header) return null;
         const currentBounds = header.getBounds();

@@ -505,6 +505,8 @@ export class SettingsView extends LitElement {
         installingModels: { type: Object, state: true },
         // Whisper related properties
         whisperModels: { type: Array, state: true },
+        // Ask Mode Shortcuts
+        preferredCodeLanguage: { type: String, state: true },
     };
     //////// after_modelStateService ////////
 
@@ -537,6 +539,8 @@ export class SettingsView extends LitElement {
         this.handleUsePicklesKey = this.handleUsePicklesKey.bind(this)
         this.autoUpdateEnabled = true;
         this.autoUpdateLoading = true;
+        // Ask Mode Shortcuts
+        this.preferredCodeLanguage = 'go';
         this.loadInitialData();
         //////// after_modelStateService ////////
     }
@@ -643,6 +647,15 @@ export class SettingsView extends LitElement {
             
             // Load LocalAI status asynchronously to improve initial load time
             this.loadLocalAIStatus();
+
+            // Load preferred code language (Ask Mode Shortcuts)
+            if (window.api.settingsView.getPreferredCodeLanguage) {
+                try {
+                    this.preferredCodeLanguage = await window.api.settingsView.getPreferredCodeLanguage() || 'go';
+                } catch {
+                    this.preferredCodeLanguage = 'go';
+                }
+            }
         } catch (error) {
             console.error('Error loading initial settings data:', error);
         } finally {
@@ -715,6 +728,18 @@ export class SettingsView extends LitElement {
         this.apiKeys = { ...this.apiKeys, [provider]: '' };
         await this.refreshModelData();
         this.saving = false;
+    }
+
+    async handleSavePreferredLanguage(value) {
+        const trimmed = (value || '').trim();
+        this.preferredCodeLanguage = trimmed;
+        if (window.api && window.api.settingsView.setPreferredCodeLanguage) {
+            try {
+                await window.api.settingsView.setPreferredCodeLanguage(trimmed);
+            } catch (err) {
+                console.error('[SettingsView] Failed to save preferredCodeLanguage', err);
+            }
+        }
     }
 
     async handleSaveGeminiModels() {
@@ -1491,6 +1516,21 @@ export class SettingsView extends LitElement {
                         <span>${this.isContentProtectionOn ? 'Disable Invisibility' : 'Enable Invisibility'}</span>
                     </button>
                     
+                    <!-- Ask Mode Shortcuts: Preferred Coding Language -->
+                    <div class="provider-key-group" style="padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.1);">
+                        <label for="preferred-code-language-input">Preferred Coding Language (Ask Code mode)</label>
+                        <input
+                            type="text"
+                            id="preferred-code-language-input"
+                            placeholder="e.g. go, python, typescript"
+                            .value=${this.preferredCodeLanguage || ''}
+                            @blur=${(e) => this.handleSavePreferredLanguage(e.target.value)}
+                        >
+                        <div style="font-size: 9px; color: rgba(255,255,255,0.5); margin-top: 2px;">
+                            Leave blank to infer from the screenshot.
+                        </div>
+                    </div>
+
                     <div class="bottom-buttons">
                         ${this.firebaseUser
                             ? html`

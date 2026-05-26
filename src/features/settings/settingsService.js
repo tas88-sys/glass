@@ -214,7 +214,10 @@ function getDefaultSettings() {
         googleSearchEnabled: false,
         backgroundTransparency: 0.5,
         fontSize: 14,
-        contentProtection: true
+        contentProtection: true,
+        // ── NEW: Ask mode shortcuts ──
+        askMode: 'default',                // 'default' | 'code' | 'debug' | 'system_design'
+        preferredCodeLanguage: 'go',       // free-text; empty → infer from screenshot
     };
 }
 

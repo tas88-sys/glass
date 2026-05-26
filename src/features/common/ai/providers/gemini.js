@@ -242,6 +242,13 @@ function createStreamingLLM({ apiKey, model = "gemini-2.5-flash", temperature = 
 
       const stream = new ReadableStream({
         async start(controller) {
+          // Guard against enqueue-after-close: when a consumer cancels the stream
+          // (e.g. AskService aborts on a new request), `controller.desiredSize`
+          // becomes null. enqueueing then throws ERR_INVALID_STATE.
+          const safeEnqueue = (chunk) => {
+            if (controller.desiredSize === null) return false
+            try { controller.enqueue(chunk); return true } catch { return false }
+          }
           try {
             const lastMessage = nonSystemMessages[nonSystemMessages.length - 1]
             let geminiContent = []
@@ -297,14 +304,16 @@ function createStreamingLLM({ apiKey, model = "gemini-2.5-flash", temperature = 
                   },
                 ],
               })
-              controller.enqueue(new TextEncoder().encode(`data: ${data}\n\n`))
+              if (!safeEnqueue(new TextEncoder().encode(`data: ${data}\n\n`))) break
             }
 
-            controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-            controller.close()
+            safeEnqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+            try { controller.close() } catch {}
           } catch (error) {
             console.error("[Gemini Provider] Streaming error:", error)
-            controller.error(error)
+            if (controller.desiredSize !== null) {
+              try { controller.error(error) } catch {}
+            }
           }
         },
       })

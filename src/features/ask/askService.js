@@ -15,6 +15,7 @@ const getWindowPool = () => {
 const sessionRepository = require('../common/repositories/session');
 const askRepository = require('./repositories');
 const { getSystemPrompt } = require('../common/prompts/promptBuilder');
+const settingsService = require('../settings/settingsService');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('os');
@@ -254,7 +255,36 @@ class AskService {
 
             const conversationHistory = this._formatConversationForPrompt(conversationHistoryRaw);
 
-            const systemPrompt = getSystemPrompt('pickle_glass_analysis', conversationHistory, false);
+            // Read mode + language from settings (single source of truth).
+            const currentSettings = await settingsService.getSettings();
+
+            const VALID_MODES = ['default', 'code', 'debug', 'system_design'];
+            const rawMode = currentSettings.askMode;
+            const askMode = VALID_MODES.includes(rawMode) ? rawMode : 'default'; // defensive coerce
+
+            const PROFILE_BY_MODE = {
+                default: 'pickle_glass_analysis',
+                code: 'pickle_glass_code',
+                debug: 'pickle_glass_debug',
+                system_design: 'pickle_glass_system_design',
+            };
+            const profile = PROFILE_BY_MODE[askMode];
+            console.log(`[AskService] askMode='${askMode}', profile='${profile}'`);
+
+            // preferredCodeLanguage only meaningful for 'code' mode; trim + empty fallback.
+            let language = '';
+            if (askMode === 'code') {
+                language = (currentSettings.preferredCodeLanguage || '').trim();
+            }
+
+            // Build prompt. For code mode, inject language via token replacement.
+            let systemPrompt;
+            if (askMode === 'code') {
+                const base = getSystemPrompt(profile, conversationHistory, false);
+                systemPrompt = base.replace('{{PREFERRED_LANGUAGE}}', language || '__INFER_FROM_SCREENSHOT__');
+            } else {
+                systemPrompt = getSystemPrompt(profile, conversationHistory, false);
+            }
 
             const messages = [
                 { role: 'system', content: systemPrompt },
