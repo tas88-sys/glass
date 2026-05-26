@@ -224,6 +224,8 @@ class AskService {
             isStreaming: false,
             currentQuestion: userPrompt,
             currentResponse: '',
+            responseModel: null,
+            responseHadFallback: false,
             showTextInput: false,
         };
         this._broadcastState();
@@ -419,7 +421,24 @@ class AskService {
                         }
                         try {
                             const json = JSON.parse(data);
-                            const token = json.choices[0]?.delta?.content || '';
+
+                            // Handle _reset sentinel: discard accumulated output and start fresh with next model
+                            if (json._reset) {
+                                fullResponse = '';
+                                this.state.currentResponse = '';
+                                this.state.responseHadFallback = true;
+                                this._broadcastState();
+                                continue;
+                            }
+
+                            // Handle _final_model sentinel: record which model satisfied this request
+                            if (json._final_model) {
+                                this.state.responseModel = json._final_model;
+                                this._broadcastState();
+                                continue;
+                            }
+
+                            const token = json.choices?.[0]?.delta?.content || '';
                             if (token) {
                                 fullResponse += token;
                                 this.state.currentResponse = fullResponse;

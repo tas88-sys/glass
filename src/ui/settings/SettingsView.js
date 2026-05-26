@@ -745,14 +745,24 @@ export class SettingsView extends LitElement {
     async handleSaveGeminiModels() {
         const llmInput = this.shadowRoot.querySelector('#gemini-llm-model-input');
         const sttInput = this.shadowRoot.querySelector('#gemini-stt-model-input');
-        const llmValue = llmInput ? llmInput.value.trim() : '';
+        // Trim and normalise LLM input: split on ',', trim each entry, drop empties, rejoin
+        const llmRaw = llmInput ? llmInput.value : '';
+        const llmTokens = llmRaw.split(',').map(s => s.trim()).filter(s => s.length > 0);
+        const llmValue = llmTokens.join(',');
         const sttValue = sttInput ? sttInput.value.trim() : '';
 
-        for (const [type, value] of [['llm', llmValue], ['stt', sttValue]]) {
-            if (value && !value.startsWith('gemini-')) {
-                alert(`Invalid Gemini ${type.toUpperCase()} model ID: "${value}". Must start with "gemini-".`);
+        // Validate LLM CSV: every non-empty token must start with 'gemini-'
+        for (const token of llmTokens) {
+            if (!token.startsWith('gemini-')) {
+                alert(`Invalid Gemini LLM model ID: "${token}". Must start with "gemini-".`);
                 return;
             }
+        }
+
+        // Validate STT (single model, no CSV)
+        if (sttValue && !sttValue.startsWith('gemini-')) {
+            alert(`Invalid Gemini STT model ID: "${sttValue}". Must start with "gemini-".`);
+            return;
         }
 
         this.saving = true;
@@ -1330,6 +1340,11 @@ export class SettingsView extends LitElement {
                                     placeholder="e.g. gemini-2.5-pro"
                                     .value=${geminiLlmValue}
                                 >
+                                <p style="font-size: 11px; opacity: 0.6; margin: 4px 0 8px 0; line-height: 1.4;">
+                                    Comma-separated list for failover. Models are tried in priority order;
+                                    transient errors (429/503) skip to the next.
+                                    Example: <code style="font-size: 10px;">gemini-3-pro,gemini-2.5-flash,gemini-2.5-flash-lite</code>
+                                </p>
                                 <label for="gemini-stt-model-input">Gemini STT Model ID</label>
                                 <input type="text" id="gemini-stt-model-input"
                                     placeholder="e.g. gemini-live-2.5-flash-preview"
