@@ -607,13 +607,13 @@ manual_smoke_tests:
 
     - id: T5
       name: system-design-routing-rule-a
-      description: "Pick System Design, type 'design Twitter feed' → response has all 10 sections + ASCII diagram, all numbers populated"
+      description: "Pick System Design, type 'design Twitter feed' → response has all TWELVE sections (§0 Opening Pitch + §1-§11) + EXACTLY ONE ASCII diagram (Phase 1 baseline in §6 only — Phases 2 and 3 are bullet deltas, NOT new diagrams) + Trade-off Roll-up markdown table in §6 with 6-10 rows in Phase|Decision|Chose|Rejected|Why shape + three ≤25-word say-aloud sentences in §6 (one per phase) + §5 storage tech with rationale ONLY (no rejected alternatives inline) + §8 has NO duplicate 10× load probe (Phase 2 owns it) + §10 has exactly TWO transition snippets (Opening Pitch lives in §0, not §10). All numbers populated. Refined per spec Clarifications session 2026-05-27."
       method: manual
       severity: BLOCKER
 
     - id: T5b
       name: system-design-routing-rule-b
-      description: "After T5, type 'deep dive on db' → response shows ONLY the data-model section expanded 3× with 2 numerical examples; other 9 sections each show '(unchanged — see prior turn)'"
+      description: "After T5, type 'deep dive on db' → response shows ONLY the data-model (§5) section expanded 3× with 2 numerical examples; the OTHER ELEVEN sections each show '(unchanged — see prior turn)' placeholder. When the deep-dive target is one of §6's three architecture phases (e.g. 'deep dive on Phase 2'), the other two phases inside §6 become placeholders but §6's section header is preserved (per output rule)."
       method: manual
       severity: BLOCKER
 

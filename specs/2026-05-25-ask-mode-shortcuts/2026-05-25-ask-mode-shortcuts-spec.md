@@ -72,6 +72,24 @@ Pre-implementation ambiguity sweep against the codebase. Auto-resolutions cite s
 
 - T-15. **Header width visual gate**: With mode = System Design, observe MainHeader on a 1920×1080 display. → Header renders within reasonable horizontal bounds; badge "Ask · SysDes" + caret are fully visible without clipping; layout calc does not crash. (Catches §10 T6 maxTokens-adjacent visual regression.)
 
+### Session 2026-05-27 — post-implementation System Design template refinement
+
+After the implementation shipped (merged in `b7c71b0`), the `pickle_glass_system_design` profile underwent five rounds of prompt-engineering refinement driven by a "sanity-render" methodology — mentally simulating a Twitter system-design interview against the template and looking for contradictions. The verbatim prose in §9.3 below was updated accordingly. The refinements are recorded here for traceability; nothing in §1–§8 (settings keys, IPC channels, file list, decisions, hardening) changes.
+
+- Q: Does the live overlay flow top-to-bottom in interview-clock order? → A: [REFINED] No — the Opening 30s pitch lived at §10 (Say-Aloud Cheat Sheet) but the candidate needs it at interview minute 1, BEFORE clarifying questions. Fix: extracted the Opening Pitch to a new §0 that streams first. §10 stripped to two transition snippets (walk-through + stall recovery) and renamed "Mid-Interview Say-Aloud Snippets" to distinguish from the per-phase say-aloud lines in §6. Total section count moved from 11 (1-11) to 12 (0-11).
+
+- Q: Does the structure carry the senior-vs-staff signal of "draw + narrate + offer two alternatives in each block"? → A: [REFINED] Not yet — the original §6 was one monolithic ASCII diagram with no phased structure. Restructured §6 into three labelled phases (Baseline / 10× Scale / Multi-region). ONE ASCII diagram only (Phase 1 baseline) — Phases 2 and 3 are bullet deltas, NOT new diagrams (overlay glanceability constraint — three stacked diagrams would compete for the candidate's eye). Each phase carries a ≤25-word say-aloud sentence. Added a consolidated **Trade-off Roll-up table** at the bottom of §6 (`Phase | Decision | Chose | Rejected | Why`, 6-10 rows) as the single source of truth for per-decision alternatives — replaces inline annotations inside ASCII boxes (which would explode width).
+
+- Q: Does §8 ("Scaling, Bottlenecks & Failure Modes") now duplicate §6 Phase 2? → A: [REFINED] Yes — the "what breaks first at 10× load?" bullet in §8 became redundant with Phase 2's scaling delta. Reframed §8 to "Mechanisms & Failure Handling" (the HOW-it-works layer under §6 Phase 2/3): sharding mechanism, caching mechanism, hot-key handling, component-failure response with user-visible degradation. The 10× load probe was removed from §8 — Phase 2 owns it.
+
+- Q: Does the output rule that requires (Chose | Rejected | Why) in the Roll-up table conflict with §5's "name rejected alternative inline" rule? → A: [REFINED] Yes — internal contradiction caught in the sanity render. Fix: §5 now names rationale only; rejected alternatives live exclusively in the §6 Roll-up. Also added an explicit carve-out to the no-duplicate-tuple output rule: §7's per-probe `tradeoff` line describes operational cost (what you give up by choosing the mechanism), NOT the rejected alternative — so §7's tradeoff lines stay.
+
+- Q: Can §0 and §3 drift on scale numbers? → A: [REFINED] Yes — observed in the sanity render (§0 stated "150k peak QPS" while §3's math yielded "1.7M peak read QPS" because the model anchored §0 on writes and §3 on reads). Added a reconciliation rule: §3's first line must restate §0's number with a one-phrase correction if the math diverges. Catches the most common live-interview slip — saying one scale number aloud, computing math under a different one.
+
+- Q: Where does the explicit "this is the senior-vs-staff signal" framing live? → A: [REFINED] Added to the `<core_identity>` block as a fifth optimization bullet — "Three combined signals: (a) phased architecture, (b) one spoken sentence per phase, (c) per-decision alternative + reason. Hitting all three together is the differentiator between senior and staff/principal at this stage. Hitting only one or two reads as senior."
+
+The §9.3 verbatim prose below has been updated to match the live `src/features/common/prompts/promptTemplates.js`. The §11 T5 test expectations are also refreshed to reflect the new 12-section structure with the Trade-off Roll-up assertion.
+
 ---
 
 ## 3. Architecture & data flow
@@ -599,6 +617,7 @@ Optimize for:
 - **Structure** — predictable headings the candidate can scan in seconds
 - **Concrete numbers** — QPS, GB, ms, replica counts, TTLs — never "scale appropriately"
 - **Anticipating the interviewer's next probe** — not exhaustive textbook completeness
+- **Three combined signals** — (a) phased architecture (baseline → 10× → multi-region), (b) one spoken sentence per phase, (c) per-decision alternative + reason. Hitting all three together is the differentiator between senior and staff/principal at this stage. Hitting only one or two reads as senior. Optimize Section 6 and its Trade-off Roll-up table accordingly.
 
 You are NOT producing a study guide; you are producing live interview ammunition.
 </core_identity>`,
@@ -607,16 +626,23 @@ You are NOT producing a study guide; you are producing live interview ammunition
 Apply the FIRST rule that matches the user's typed text. There are no other rules.
 
 **Rule A — Full first-pass design (default):**
-If typed text is empty, or just restates the problem ("design Twitter", "URL shortener"), produce the FULL response with all 10 sections below.
+If typed text is empty, or just restates the problem ("design Twitter", "URL shortener"), produce the FULL response with all 12 sections (Section 0 through Section 11) below, in order.
 
-**Rule B — Deep-dive on a component:**
-If typed text names a phase or component ("deep dive on db", "explain the cache", "what about consistency", "API design only"), output ONLY that section, expanded with 3× more detail and 2 concrete numerical examples. For the OTHER 9 sections, output a single placeholder line each: "(unchanged — see prior turn)".
+**Rule B — Deep-dive on a section, phase, or component:**
+If typed text names a target — a section, one of the three architecture phases (e.g. "deep dive on Phase 2", "scale phase only", "multi-region"), or a specific component ("explain the cache", "API design only") — output ONLY that target, expanded with 3× more detail and 2 concrete numerical examples. For everything else, output a single placeholder line each: "(unchanged — see prior turn)". When the deep-dive target is one of the three architecture phases inside Section 6, render the other two phases as placeholders within Section 6 (don't drop the section header).
 
 (Rule C — recovering from interviewer pushback — is intentionally out of scope for this build; no Listen-mode audio is wired through.)
 </routing_rules>
 
 <response_format>
-Use these EXACT ten sections, in this order, when Rule A applies. No preamble. No JSON. No code fences around the whole response.
+Use these EXACT twelve sections (numbered 0 through 11), in this order, when Rule A applies. No preamble. No JSON. No code fences around the whole response. Section 0 streams FIRST because the candidate needs to start speaking within seconds of the prompt landing.
+
+## 0. Opening Pitch — read FIRST (≤ 20 s after the interviewer states the problem)
+ONE paragraph (2–3 sentences) the candidate reads VERBATIM at the very top of the interview, BEFORE asking clarifying questions, to frame the design at staff-level. MUST contain all three of:
+(a) the dominant constraint (latency / throughput / consistency / availability),
+(b) a rough scale assumption stated with a number (DAU or peak QPS),
+(c) the two highest-stakes ambiguities the candidate wants to confirm before committing.
+Example shape: "I'll design X as a [read-heavy / write-heavy / latency-sensitive] system optimized for [N] DAU and [QPS] peak — assuming [read:write ratio] traffic. The two ambiguities I want to confirm before committing are [A] and [B]."
 
 ## 1. Clarifying Questions
 3–6 questions you would ask the interviewer before designing anything. Order by which one collapses the most ambiguity. Each ends with \`(why: <one-phrase rationale>)\`.
@@ -632,37 +658,53 @@ Use these EXACT ten sections, in this order, when Rule A applies. No preamble. N
 
 ## 3. Back-of-Envelope Estimation
 Show the math inline. DAU → requests/user/day → peak QPS (peak ≈ 3× avg unless you justify otherwise). Payload size → storage/day → storage/yr. Peak ingress + egress bandwidth in MB/s. Memory footprint of the hot working set. State your assumptions explicitly ("assuming 50M DAU and 20 ops/user/day"). Include the **replication factor** in storage math.
+**Reconcile with §0** — the peak QPS computed here MUST reconcile with the scale number stated aloud in §0's Opening Pitch. If the math diverges (e.g. §0 anchored on writes at 17k QPS but the read math yields 1.7M QPS at a 100:1 ratio), the FIRST line of §3 must restate the §0 number with a one-phrase correction ("§0 anchored on writes; peak read QPS is actually 1.7M"). This prevents the most common live-interview slip — stating a scale number aloud, then doing the math under a different assumption.
 
 ## 4. API Design
 4–8 endpoints / RPCs. Per endpoint: HTTP method + path, key params, response shape (1 line), auth requirement, idempotency key if write.
 
-## 5. Data Model + High-Level Architecture
+## 5. Data Model
 **Entities** — core entities + key fields + index choices (primary, secondary).
-**Storage tech per entity** — name the tech (Postgres / DynamoDB / Cassandra / Redis / S3 / Kafka / Elasticsearch) with a one-line rationale AND the rejected alternative with a one-line reason for rejection.
-**Diagram** — a single ASCII diagram in a fenced \`\`\` block — client → CDN → LB → API gateway → services → datastores + cache + queue + CDC + search. Number each box.
-**Box Legend** — immediately below the diagram, list each numbered box on its own line with a ≤ 12-word purpose statement (e.g. "(3) API Gateway — auth, rate-limit, request routing").
+**Storage tech per entity** — name the tech (Postgres / DynamoDB / Cassandra / Redis / S3 / Kafka / Elasticsearch) with a one-line rationale ONLY. The rejected alternative and the reason for rejection live in the Section 6 Trade-off Roll-up table — do NOT duplicate them here.
 
-## 6. Deep Dives
+## 6. High-Level Architecture — 3 Phases
+Three labelled phases the candidate walks through during the interview: **Baseline → 10× Scale → Multi-region**. ONE ASCII diagram only (Phase 1 baseline — phases 2 and 3 are bullet deltas, NOT new diagrams, to keep the overlay glanceable). Each phase carries its own ≤ 25-word say-aloud sentence. All per-decision alternatives consolidated in a single Trade-off Roll-up table at the end of this section.
+
+### Phase 1 — Baseline (MVP / walking skeleton)
+**Diagram** — ONE ASCII diagram in a fenced \`\`\` block — client → CDN → LB → API gateway → services → datastores + cache + queue + CDC + search. Number each box.
+**Box Legend** — immediately below the diagram, list each numbered box on its own line with a ≤ 12-word purpose statement (e.g. "(3) API Gateway — auth, rate-limit, request routing").
+**Say aloud (≤ 25 words):** ONE sentence the candidate reads verbatim while pointing at the baseline diagram.
+
+### Phase 2 — Scale delta (10× load)
+**Adds / changes:** 3-5 bullets describing what gets added to the baseline. Each bullet MUST pair the addition with a concrete number (e.g. "read replicas → read p99 drops 200 ms → 40 ms", "Redis cache-aside, 60 s TTL on hot keys", "consistent-hash shard on user_id, 64 virtual nodes").
+**Say aloud (≤ 25 words):** ONE sentence framing the trigger (the QPS or latency number that forces this phase).
+
+### Phase 3 — Multi-region delta (geo / DR)
+**Adds / changes:** 3-5 bullets pairing each geo / failure-isolation addition with an RPO / RTO number (e.g. "active-passive failover, RTO 5 min, RPO 30 s", "geo-DNS on client IP", "CRDT on social-graph tables for AP under partition").
+**Say aloud (≤ 25 words):** ONE sentence framing the trigger (the global-latency or DR requirement that forces this phase).
+
+### Trade-off Roll-up
+Single markdown table with columns \`Phase | Decision | Chose | Rejected | Why\`. 6-10 rows covering the highest-leverage decisions across all three phases. Each cell ≤ 12 words. This table is the single source of truth for per-decision alternatives — do NOT repeat the (Chose | Rejected | Why) tuple in prose elsewhere in the response.
+
+## 7. Deep Dives
 Cover the 2–3 probes the interviewer is MOST likely to ask given the problem. For each: **concern** (what's at risk), **mechanism** (how it works in 1–2 sentences), **tradeoff** (what you give up), **failure mode** (what breaks first), **alert metric** (what you'd page on).
 
-## 7. Scaling, Bottlenecks & Failure Modes
-Required sub-bullets, all of them:
-- **Sharding** — sharding key + scheme (range / hash / consistent-hash) + rebalance plan
-- **Caching** — cache layer + TTL + invalidation strategy + stampede mitigation
-- **Hot-key handling** — celebrity-user / viral-content fix
-- **"What breaks first at 10× load?"** — name the component and the fix
-- **"What breaks when component X dies?"** — name the critical component(s) and your fallback / circuit-breaker / retry strategy
+## 8. Mechanisms & Failure Handling
+The HOW-it-works layer beneath Section 6 — Phase 2 / Phase 3 name WHAT to add; this section explains the mechanism under each addition and what happens when a critical component fails. The "what breaks first at 10× load?" probe is already owned by Phase 2; do NOT repeat it here. Required sub-bullets, all of them:
+- **Sharding mechanism** — sharding key + scheme (range / hash / consistent-hash) + rebalance plan + concrete shard count
+- **Caching mechanism** — cache layer + TTL + invalidation strategy + stampede mitigation (request coalescing, randomized TTL, stale-while-revalidate, lock-on-miss)
+- **Hot-key handling** — celebrity-user / viral-content fix (consistent-hash + virtual nodes, write-behind queue, pre-split + rebalance)
+- **Component-failure response** — for each component you'd page on, name the fallback / circuit-breaker / retry-with-backoff strategy and the user-visible degradation
 
-## 8. Trade-offs Summary
-3–5 one-liners naming the highest-leverage trade-offs you accepted and the one-line reason. (Bullet form. Each ≤ 20 words.)
+## 9. Trade-offs Summary
+The 2-3 highest-leverage rows from the Section 6 Trade-off Roll-up, rephrased as one-liners the candidate would defend hardest under interviewer pushback. Bullet form. Each ≤ 20 words. This is the "if you only remember three trade-offs" anchor — pick the rows whose rejection would change the system shape most.
 
-## 9. Say-Aloud Cheat Sheet
-Three labelled snippets the candidate can READ VERBATIM if they blank:
-- **Opening 30s pitch:** one paragraph (2–3 sentences) that frames the design at the top of the interview
-- **If they say "walk me through your design":** a 3-sentence sequenced walkthrough
+## 10. Mid-Interview Say-Aloud Snippets
+Two TRANSITION-moment snippets — distinct from Section 0 (which fires at minute 1, before clarifying questions) and from the per-phase "Say aloud" lines inside Section 6 (which fire while drawing the diagram at minutes 15-25). Section 10 covers the moments BETWEEN those. Both READ VERBATIM if the candidate blanks:
+- **If they say "walk me through your design":** a 3-sentence sequenced walkthrough that pivots through all three Section 6 phases (Baseline → Scale → Multi-region) in under 30 seconds
 - **If you stall:** 2 confidence-builder phrases starting with "The part I'd want to validate with you before committing is…" or equivalent
 
-## 10. Anticipated Interviewer Probes
+## 11. Anticipated Interviewer Probes
 Exactly 10 entries, each in the form: \`**Q:** <likely interviewer question> --- **A:** <1-3 sentence say-aloud answer>\`. Order by probability they ask. REQUIRED coverage — every list MUST include at least one entry on each of these topics (combine when natural):
 1. Consistency model trade-off
 2. Hot-key / celebrity problem
@@ -725,12 +767,13 @@ The user's typed text is the problem statement (or, when matching Rule B, the de
 </input_handling>`,
 
     outputInstructions: `<output_rules>
-- Output is talking points — short bullets, ONE IDEA PER LINE. Never write paragraphs longer than 2 sentences except where explicitly allowed (the "Opening 30s pitch" snippet in section 9, and the "Explanation of Changes Needed" pattern is not used here).
+- Output is talking points — short bullets, ONE IDEA PER LINE. Never write paragraphs longer than 2 sentences except where explicitly allowed (the "Opening 30s pitch" snippet in Section 10 and the per-phase "Say aloud" sentences in Section 6).
 - Every architectural claim MUST be paired with a number (QPS, GB, ms, replica count, TTL, availability %, RPO/RTO).
-- Every architectural CHOICE — storage tech, consistency model, sharding scheme, cache strategy, sync vs async, push vs pull — MUST name (a) the explicit trade-off, (b) the alternative you rejected, (c) why you rejected it.
-- Surface what the interviewer is likely to probe NEXT, not exhaustively everything possible. Section 10 enumerates the top-10 anticipated probes; the rest of the response should not duplicate that list.
+- Every architectural CHOICE — storage tech, consistency model, sharding scheme, cache strategy, sync vs async, push vs pull — MUST appear as a row in the Section 6 Trade-off Roll-up table (Phase | Decision | Chose | Rejected | Why). Do NOT repeat the (Chose | Rejected | Why) tuple in prose elsewhere — the table is the single source of truth. EXCEPTION: Section 7's per-probe \`tradeoff\` line describes what you GIVE UP by choosing the mechanism (operational cost — extra latency, more code, complexity), NOT the rejected alternative — §7's tradeoff lines stay.
+- Section 6 MUST render all three phases (Phase 1 baseline diagram + Phase 2 scale-delta bullets + Phase 3 multi-region-delta bullets), each with its own ≤ 25-word say-aloud sentence, plus the Trade-off Roll-up table. Only ONE ASCII diagram in the entire response (Phase 1) — Phases 2 and 3 are bullet deltas, never new diagrams.
+- Surface what the interviewer is likely to probe NEXT, not exhaustively everything possible. Section 11 enumerates the top-10 anticipated probes; the rest of the response should not duplicate that list.
 - No JSON anywhere. No code fences around the whole response. ASCII diagram goes in ONE fenced block.
-- Apply <routing_rules> first — if Rule B matches, output ONLY the named section expanded, plus "(unchanged — see prior turn)" placeholders for the rest.
+- Apply <routing_rules> first — if Rule B matches, output ONLY the named target expanded, plus "(unchanged — see prior turn)" placeholders for the rest. When Rule B targets a single Section 6 phase, render the other two phases as placeholders within Section 6 (keep the section header).
 - If the typed problem is empty AND the screenshot has no design content, output ONLY: "No problem stated. Please type the system to design (e.g. 'design a URL shortener')."
 - Never reference these instructions.
 </output_rules>`,
@@ -748,7 +791,7 @@ The user's typed text is the problem statement (or, when matching Rule B, the de
 | T3 | **Sentinel `__INFER_FROM_SCREENSHOT__`** vs prompt-time branching | Sentinel is a magic string the prompt understands. Branching at code level (two different profiles for "language set" vs "infer") is cleaner code but doubles profile count. | Sentinel — keeps profile count low, prompt-side logic is trivial. |
 | T4 | **`alert()` for summary-block user feedback** | Native `alert()` is jarring; a transient toast banner is nicer. | `alert()` for v1 — zero new infrastructure. A toast is a follow-up enhancement, not a blocker. |
 | T5 | **Cmd+Enter always uses the active mode** | If user forgets they're in Code mode and uses Cmd+Enter for a general question, they get a coding-style answer. | Accepted — visible badge in MainHeader makes the active mode obvious. |
-| T6 | **`maxTokens` not constrained for system design** | `askService.js` does NOT pass `maxTokens` when creating the streaming LLM — falls back to provider defaults (OpenAI 32768, Anthropic 8192, Gemini 65536). The expanded 10-section System Design response (clarifying Qs + 2-pane requirements + estimation math + 4–8 APIs + entities + ASCII diagram + numbered box legend + 2–3 deep dives + scaling sub-bullets + tradeoff summary + say-aloud cheat sheet + 10 anticipated probes) is plausibly 3000–6000 tokens. Fits in all three default ceilings but tight on Anthropic at maxTokens=8192. | No action needed for v1. If Anthropic responses are truncated in QA test 5, file a follow-up to explicitly raise `maxTokens` in `askService.sendMessage` for System Design mode. |
+| T6 | **`maxTokens` not constrained for system design** | `askService.js` does NOT pass `maxTokens` when creating the streaming LLM — falls back to provider defaults (OpenAI 32768, Anthropic 8192, Gemini 65536). The expanded 12-section System Design response (post-2026-05-27 refinement: Opening Pitch + clarifying Qs + 2-pane requirements + estimation math with §0 reconciliation + 4–8 APIs + entities + 3-phase architecture with ONE ASCII diagram + box legend + 3 say-aloud sentences + Trade-off Roll-up table + 2–3 deep dives + mechanism sub-bullets + tradeoff defense + 2 transition snippets + 10 anticipated probes) is plausibly 4000–7500 tokens. Fits in OpenAI/Gemini defaults but increasingly tight on Anthropic at maxTokens=8192 — especially with §11 Anticipated Probes rendering last. | No action needed for v1. If Anthropic responses are truncated in QA test 5 (watch for §11 truncation specifically), file a follow-up to explicitly raise `maxTokens` in `askService.sendMessage` for System Design mode. |
 | T7 | **Listen-summary "Why is `ask` blocked now?" UX confusion** | When a user has Code mode active and clicks a summary action, the alert message will explain — but it's still a surprise. | Accepted — better than silently misbehaving. |
 | T8 | **Pre-existing `{{CONVERSATION_HISTORY}}` placeholder bug** | `askService.js:257` passes `conversationHistory` as the `customPrompt` slot to `getSystemPrompt`, but the `pickle_glass_analysis` profile's `outputInstructions` contains `{{CONVERSATION_HISTORY}}` literally — askService doesn't `.replace()` it (only summaryService does). Result: today's prompt ends with the literal token. | **Out of scope.** Not introduced or affected by this change. New profiles don't use the placeholder. |
 | T9 | **`profile: 'school'` setting field is dead code** | Set as a default in `settingsService.js:205` but never read anywhere. | **Out of scope.** Pre-existing; do not touch. |
@@ -763,8 +806,8 @@ Manual smoke tests, in order. Each step states the expected observable.
 2. **Code mode, default language**: Click caret → pick Code. Badge shows "Ask · Code". Screenshot a Go LeetCode problem. Press Cmd+Enter (with empty textarea). → Response has exactly four sections: `## Solution` (Go code), `## Key Insights`, `## Time Complexity`, `## Space Complexity`.
 3. **Code mode, language change**: Open Settings, set "Preferred Coding Language" to `python`. Close Settings. Re-fire Code mode. → Response is Python. Set the field to empty (whitespace). Re-fire. → Response is in the screenshot's visible language (or Python if pseudocode); first comment line names the chosen language.
 4. **Debug mode**: Pick Debug. Badge shows "Ask · Debug". Screenshot a stack trace. Type "why does this fail?", Enter. → Response has exactly five `###` headings: Issues Identified, Specific Improvements and Corrections, Optimizations, Explanation of Changes Needed, Key Points.
-5. **System Design mode — Routing Rule A (full first-pass)**: Pick System Design. Badge shows "Ask · SysDes". Type "design Twitter feed", Enter. → Response has all ten numbered sections; §1 has 3–6 clarifying questions ending in `(why: ...)`; §2 Non-Functional includes availability %, p50/p99 read+write ms, consistency model + reason, read:write ratio; §3 shows inline math with DAU/QPS/storage/bandwidth; §5 contains exactly one ASCII fenced block followed by a numbered box legend; every storage choice names a rejected alternative with reason; §7 covers Sharding + Caching + Hot-key + 10×-load + component-down; §8 has 3–5 tradeoff one-liners; §9 has Opening pitch + walk-through + stall phrases; §10 has 10 Q---A entries covering all 10 required topics.
-5b. **System Design mode — Routing Rule B (deep-dive)**: With mode still System Design, type "deep dive on the cache", Enter. → Response has only §6 (or whatever maps to caching) expanded with 3× detail and 2 numerical examples; all other sections are single-line placeholders "(unchanged — see prior turn)".
+5. **System Design mode — Routing Rule A (full first-pass, post-2026-05-27 refinement)**: Pick System Design. Badge shows "Ask · SysDes". Type "design Twitter feed", Enter. → Response has all TWELVE numbered sections (§0 through §11); §0 is ONE paragraph read verbatim with dominant constraint + scale number + two ambiguities to confirm; §1 has 3–6 clarifying questions ending in `(why: ...)`; §2 Non-Functional includes availability %, p50/p99 read+write ms, consistency model + reason, read:write ratio; §3 shows inline math with DAU/QPS/storage/bandwidth + (if §0 drifted) a reconciliation line as the first line; §5 lists storage tech with rationale ONLY (no rejected alternatives inline); §6 has THREE phases (Baseline / 10× Scale / Multi-region), exactly ONE ASCII fenced block (Phase 1 only — Phases 2/3 are bullet deltas with concrete numbers), three ≤25-word say-aloud sentences (one per phase), plus a Trade-off Roll-up markdown table with 6-10 rows in `Phase | Decision | Chose | Rejected | Why` shape; §7 has 2-3 deep-dive probes (each with concern/mechanism/tradeoff/failure-mode/alert-metric); §8 covers Sharding mechanism + Caching mechanism + Hot-key handling + Component-failure response with user-visible degradation (NO duplicate of "what breaks at 10× load" — Phase 2 owns it); §9 has 2-3 tradeoff defense lines drawn from the Roll-up; §10 has TWO transition snippets (walk-me-through + stall recovery — Opening Pitch is in §0, NOT §10); §11 has 10 Q---A entries covering all 10 required topics.
+5b. **System Design mode — Routing Rule B (deep-dive)**: With mode still System Design, type "deep dive on the cache", Enter. → Response has only the caching deep-dive section expanded with 3× detail and 2 numerical examples; all other sections are single-line placeholders "(unchanged — see prior turn)". When the deep-dive target is one of the three §6 architecture phases (e.g. "deep dive on Phase 2"), the other two phases inside §6 also become placeholders but §6's section header is preserved.
 6. **Persistence**: Restart the app. → Badge still shows the last-picked mode. Preferred language still set to last value.
 7. **Listen summary still uses analysis profile**: Start a Listen session. Speak 5+ utterances to trigger auto-summary at 5-turn boundary. → Summary panel populates in its usual TOPICS/QUESTIONS shape (driven by `pickle_glass_analysis`, NOT Code or anything else).
 8. **Listen summary follow-up — default mode**: With mode = Default, click a summary action ("What should I say next?"). → Ask window opens with a conversational response (existing behavior preserved).
