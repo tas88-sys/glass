@@ -1,0 +1,27 @@
+%% 13 - "If I run Glass as-is, what works?" decision tree
+%% Answers: does transcription + speaker attribution work right away, and on Windows?
+flowchart TB
+    run(["Launch Glass (fresh)"]) --> creds{"Any LLM + STT credentials?<br/>(own API key, OR Pickle login,<br/>OR local Ollama+Whisper installed)"}
+
+    creds -->|"none"| blocked["Ask & Listen are blocked.<br/>areProvidersConfigured() needs BOTH<br/>an LLM key and an STT key.<br/>Header sits in 'apikey' state."]
+    creds -->|"yes"| perms{"Platform + permissions?"}
+
+    perms -->|"macOS"| mac{"mic + screen-recording<br/>permission granted?"}
+    perms -->|"Windows"| win["mic permission granted"]
+    perms -->|"Linux"| lin["mic permission granted"]
+
+    mac -->|yes| macok["Listen: 'Me' (mic) + 'Them' (SystemAudioDump)<br/>AEC on. Ask: screencapture screenshot."]
+    mac -->|no| macblock["No system audio / no screenshot<br/>until permissions granted in System Settings."]
+
+    win --> winok["Listen: 'Me' (mic) + 'Them' (native loopback)<br/>AEC on. NO extra binary needed.<br/>Ask: desktopCapturer screenshot."]
+
+    lin --> linok["Listen: 'Me' (mic) ONLY.<br/>System audio loopback DISABLED -> no 'Them'.<br/>No AEC. Ask: desktopCapturer screenshot.<br/>(No Linux build target — run from source.)"]
+
+    macok --> diar
+    winok --> diar
+    linok --> diar
+    diar{{"Do I get 'speaker diarization'?"}}
+    diar --> ans["You get SOURCE ATTRIBUTION (Me vs Them),<br/>NOT voice diarization.<br/>macOS + Windows: 2-channel (Me + Them).<br/>Linux: 1-channel (Me only).<br/>Two people on one mic are both 'Me'."]
+
+    note["'Free' path = sign in with Pickle (hosted OpenAI key via Portkey).<br/>'Local/offline' path = install Ollama (LLM) + download Whisper (STT).<br/>Screenshots are ON-DEMAND per Ask press — never a background loop."]
+    ans -.-> note

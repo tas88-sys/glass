@@ -1,0 +1,20 @@
+%% 09 - Incremental summarization (Listen)
+%% Source: summaryService.js. Fires every 5th conversation turn; each run feeds the
+%% previous summary + last 30 turns back in, so summaries build forward.
+flowchart TB
+    turn["handleTranscriptionComplete(speaker, text)"]
+    turn --> add["summaryService.addConversationTurn()<br/>push 'me:/them: text' to conversationHistory"]
+    add --> gate{"length >= 5<br/>AND length % 5 == 0 ?"}
+    gate -->|no| wait["wait for more turns"]
+    gate -->|yes| build["makeOutlineAndRequests()"]
+
+    build --> ctx["prompt = system('pickle_glass_analysis')<br/>+ last 30 turns<br/>+ PREVIOUS analysis result as context"]
+    ctx --> llm["createLLM(provider).chat()  (non-streaming)"]
+    llm --> parse["parseResponseText()<br/>-> {summary[], topic+bullets, actions[], followUps[]}"]
+    parse --> render["sendToRenderer('summary-update')<br/>-> SummaryView (TLDR / bullets / actions)"]
+    parse --> save[("UPSERT summaries table<br/>(one row per session_id:<br/>text, tldr, bullet_json, action_json)")]
+    parse --> keep["store as previousAnalysisResult<br/>(history capped at 10)"]
+    keep -.-> ctx
+
+    note["NOTE: summaries are LLM-generated from the transcript.<br/>The Listen transcript is NOT auto-fed into the Ask feature<br/>(see ARCHITECTURE.md 'Known limitations')."]
+    render -.-> note

@@ -1,0 +1,33 @@
+%% 12 - Data persistence (dual repository) + auth-driven storage switching
+%% Every user-data repository has TWO implementations behind one adapter. The adapter
+%% checks login state per call and injects the uid. Source: repositories/*/index.js, authService.js
+flowchart TB
+    svc["Service call<br/>e.g. sessionRepository.getOrCreateActive('ask')"]
+    svc --> adapter["Repository adapter (index.js)<br/>getBaseRepository() + UID injection"]
+    adapter --> decide{"authService.getCurrentUser().isLoggedIn ?"}
+
+    decide -->|"NO (default_user, local mode)"| sq["sqlite.repository.js"]
+    decide -->|"YES (firebase mode)"| fb["firebase.repository.js"]
+
+    sq --> sqlite[("SQLite (better-sqlite3)<br/>schema.js LATEST_SCHEMA")]
+    fb --> enc["createEncryptedConverter<br/>encrypts API keys, titles,<br/>transcripts, summaries"]
+    enc --> firestore[("Firestore")]
+
+    subgraph schema["SQLite tables (schema.js)"]
+        direction LR
+        t1["sessions (id, uid, session_type,<br/>started_at, ended_at)"]
+        t2["transcripts (session_id, speaker, text, start_at)"]
+        t3["ai_messages (session_id, role, content)"]
+        t4["summaries (session_id PK, tldr,<br/>bullet_json, action_json)"]
+        t5["provider_settings (provider, api_key,<br/>selected_*_model, is_active_*)"]
+        t6["users · prompt_presets · shortcuts<br/>· ollama_models · whisper_models · permissions"]
+    end
+    sqlite --- schema
+
+    subgraph authflow["Auth / storage switch (authService.onAuthStateChanged)"]
+        direction TB
+        a1["login: deep link pickleglass://<br/>-> Cloud Function -> custom token"]
+        a2["fetch Pickle virtual key by email<br/>-> setFirebaseVirtualKey (openai-glass)"]
+        a3["logout -> back to default_user / SQLite,<br/>clear hosted key"]
+    end
+    decide -.-> authflow

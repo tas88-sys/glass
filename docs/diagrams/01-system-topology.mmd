@@ -1,0 +1,70 @@
+%% 01 - System / Process Topology
+%% Glass is one Electron app that internally runs: the main process, several
+%% frameless renderer windows, an embedded Express API + Next.js static server,
+%% and (optionally, when signed in) Firebase. All data logic lives in main.
+flowchart TB
+    user(["User / Desktop"])
+
+    subgraph electron["Electron App (single instance lock)"]
+        direction TB
+
+        subgraph main["MAIN PROCESS  (src/index.js)"]
+            direction TB
+            svc["Services<br/>askService · listenService · sttService<br/>summaryService · settingsService<br/>modelStateService · authService"]
+            bridges["IPC Bridges<br/>featureBridge · windowBridge · internalBridge"]
+            repos["Repository Factory<br/>(SQLite ⇆ Firebase adapter)"]
+            ai["AI Provider Factory<br/>(OpenAI · Gemini · Anthropic · Deepgram · Ollama · Whisper)"]
+            winmgr["windowManager<br/>(window pool + content protection)"]
+        end
+
+        subgraph renderers["RENDERER WINDOWS  (frameless, transparent, contextIsolation)"]
+            direction LR
+            header["header"]
+            ask["ask"]
+            listen["listen"]
+            settings["settings"]
+            shortcut["shortcut-settings"]
+            modepicker["mode-picker"]
+        end
+
+        subgraph webstack["EMBEDDED WEB STACK  (started by startWebStack)"]
+            direction TB
+            nextjs["Next.js static dashboard<br/>pickleglass_web/out (Express static)"]
+            apisrv["Express API<br/>pickleglass_web/backend_node"]
+        end
+    end
+
+    subgraph local["LOCAL MACHINE"]
+        sqlite[("SQLite<br/>better-sqlite3")]
+        sysaudio["SystemAudioDump<br/>(macOS native binary)"]
+        ollama["Ollama daemon (local LLM)"]
+        whisper["whisper.cpp (local STT)"]
+    end
+
+    subgraph cloud["CLOUD (only when signed in / using hosted key)"]
+        firebase[("Firebase Auth + Firestore")]
+        functions["Cloud Functions<br/>pickleGlassAuthCallback"]
+        vkey["Pickle virtual-key API<br/>(Portkey-routed OpenAI)"]
+        providers["LLM/STT provider APIs<br/>OpenAI · Gemini · Anthropic · Deepgram"]
+    end
+
+    user <--> header
+    header <-->|preload contextBridge IPC| main
+    ask <--> main
+    listen <--> main
+    settings <--> main
+
+    main --> winmgr --> renderers
+    svc --> ai --> providers
+    svc --> repos
+    repos --> sqlite
+    repos -. signed in .-> firebase
+    ai -. local .-> ollama
+    ai -. local .-> whisper
+    svc -. macOS system audio .-> sysaudio
+
+    header -. loads localhost URL .-> nextjs
+    nextjs --> apisrv
+    apisrv -->|web-data-request IPC| main
+    authService -. deep link token .-> functions
+    authService -. hosted key .-> vkey

@@ -1,0 +1,34 @@
+%% 03 - IPC Architecture
+%% Three bridges + a preload contextBridge. Renderers never touch Node/DB directly;
+%% everything funnels through ipcMain handlers in the main process. The Next.js web
+%% dashboard reaches local data through a second hop: HTTP -> Express -> web-data-request IPC.
+flowchart LR
+    subgraph rendererProc["Renderer (browser context, no Node)"]
+        view["Lit views<br/>AskView · ListenView · SttView · SummaryView · SettingsView"]
+        preload["preload.js<br/>contextBridge.exposeInMainWorld('api', ...)<br/>window.api.askView / listenCapture / settingsView ..."]
+        view --> preload
+    end
+
+    subgraph mainProc["Main process"]
+        feature["featureBridge.js<br/>ipcMain.handle('ask:*','listen:*','model:*',<br/>'settings:*','shortcut:*','ollama:*','localai:*')"]
+        window["windowBridge.js<br/>window move / resize / visibility invokes"]
+        internal["internalBridge.js<br/>EventEmitter — IN-PROCESS only<br/>(services <-> windowManager, no renderer)"]
+        services["Services & Repositories"]
+    end
+
+    preload -->|ipcRenderer.invoke / .send| feature
+    preload -->|ipcRenderer.invoke| window
+    feature --> services
+    window --> internal
+    services --> internal
+    internal --> winmgr["windowManager (visibility, layout)"]
+    services -->|webContents.send| preload
+
+    subgraph web["Web dashboard data path"]
+        fe["Next.js frontend<br/>fetch /api/conversations"]
+        be["Express backend_node<br/>ipcBridge.ipcRequest()"]
+        eb["eventBridge (EventEmitter)<br/>'web-data-request'"]
+        handler["setupWebDataHandlers (index.js)<br/>get-sessions · get-session-details ..."]
+        fe -->|HTTP| be -->|emit| eb -->|on| handler --> services
+        handler -->|response channel| eb -->|resolve| be -->|HTTP JSON| fe
+    end

@@ -1,0 +1,33 @@
+%% 04 - App Lifecycle (startup + graceful shutdown)
+%% Source: src/index.js (app.whenReady, app.on('before-quit'))
+sequenceDiagram
+    autonumber
+    participant OS as OS
+    participant App as Electron app
+    participant DB as databaseInitializer
+    participant Auth as authService
+    participant Model as modelStateService
+    participant Web as startWebStack
+    participant Win as windowManager
+
+    OS->>App: launch
+    App->>App: requestSingleInstanceLock() (quit if already running)
+    App->>App: setupProtocolHandling() — register pickleglass://
+    Note over App: app.whenReady()
+    App->>App: session.setDisplayMediaRequestHandler<br/>(grants Windows loopback audio)
+    App->>App: initializeFirebase()
+    App->>DB: initialize() — open SQLite, run schema/migrations
+    App->>Auth: initialize() — onAuthStateChanged listener<br/>(default_user = local, until login)
+    App->>Model: initialize() — encryption, migrations,<br/>auto-select available models
+    App->>App: featureBridge.initialize() + windowBridge.initialize()
+    App->>App: ollama warm-up (background, non-blocking)
+    App->>Web: startWebStack() — pick free ports,<br/>start Express API + Next.js static
+    App->>Win: createWindows() — header first,<br/>feature windows when state='main'
+    App->>App: initAutoUpdater() (skipped in dev)
+
+    Note over App: app.on('before-quit') — graceful shutdown
+    App->>App: listenService.closeSession() (stop audio, kill SystemAudioDump)
+    App->>DB: sessionRepository.endAllActiveSessions()
+    App->>App: ollamaService.shutdown() (8s race timeout)
+    App->>DB: databaseInitializer.close()
+    App->>OS: app.exit(0)

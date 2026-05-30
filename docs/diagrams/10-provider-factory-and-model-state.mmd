@@ -1,0 +1,35 @@
+%% 10 - AI Provider Factory + Model State resolution
+%% A single registry (factory.js PROVIDERS) drives the whole model layer and the
+%% Settings UI. modelStateService resolves {provider, model, apiKey} at call time.
+flowchart TB
+    subgraph registry["factory.js — PROVIDERS registry (single source of truth)"]
+        direction LR
+        r1["openai: LLM gpt-4.1 · STT gpt-4o-mini-transcribe"]
+        r2["openai-glass: hosted via Portkey virtual key"]
+        r3["gemini: LLM gemini-2.5-flash (CSV failover) · STT live-2.5-flash"]
+        r4["anthropic: LLM claude-3.5-sonnet · STT none"]
+        r5["deepgram: STT nova-3 · LLM none"]
+        r6["ollama: LLM dynamic (local) · STT none"]
+        r7["whisper: STT tiny/base/small/medium (local, main only)"]
+    end
+
+    subgraph state["modelStateService"]
+        keys["provider_settings table<br/>api_key (encrypted at rest if Firebase)<br/>selected_llm_model / selected_stt_model<br/>is_active_llm / is_active_stt"]
+        auto["_autoSelectAvailableModels()<br/>picks a valid model when key added/removed"]
+        resolve["getCurrentModelInfo('llm' | 'stt')<br/>-> {provider, model, apiKey}"]
+        gate["areProvidersConfigured()<br/>requires BOTH an LLM key AND an STT key"]
+    end
+
+    subgraph consumers["Consumers"]
+        ask["askService -> createStreamingLLM"]
+        summ["summaryService -> createLLM"]
+        stt["sttService -> createSTT x2"]
+    end
+
+    registry --> state
+    keys --> resolve
+    resolve --> consumers
+    consumers --> dispatch["factory.createLLM / createStreamingLLM / createSTT<br/>sanitizeModelId strips '-glass'"]
+    dispatch --> registry
+
+    settingsui["SettingsView (data-driven)<br/>renders one API-key field per provider"] --> keys
