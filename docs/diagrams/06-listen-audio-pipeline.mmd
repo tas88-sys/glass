@@ -1,0 +1,44 @@
+%% 06 - Listen Audio -> STT pipeline (dual channel)
+%% Two independent capture chains -> two independent STT sessions. Each transcript
+%% is tagged by WHICH SOURCE it arrived on (Me = mic, Them = system audio).
+%% Source: listenCapture.js (renderer) + sttService.js (main)
+flowchart TB
+    subgraph renderer["RENDERER  (listenCapture.js)  — PCM16 / mono / 24kHz / 100ms chunks"]
+        direction TB
+        mic["navigator.getUserMedia()<br/>microphone"]
+        subgraph micpath["mic path"]
+            aec["runAecSync(mic, sysRef)<br/>Rust/WASM AEC (macOS + Windows)<br/>subtracts other party leaking from speakers"]
+            linmic["setupLinuxMicProcessing()<br/>NO AEC (Linux)"]
+        end
+        mic --> aec
+        mic -.Linux.-> linmic
+
+        subgraph sysplat["system audio capture (platform-specific)"]
+            win["Windows: getDisplayMedia({audio:true})<br/>-> native loopback (handler in index.js)"]
+            mac["macOS: SystemAudioDump binary<br/>spawned in MAIN, stereo->mono"]
+            lin["Linux: getDisplayMedia({audio:false})<br/>DISABLED — mic only"]
+        end
+    end
+
+    subgraph main["MAIN  (sttService.js)"]
+        direction TB
+        mySess["mySttSession  (tag = 'Me')"]
+        theirSess["theirSttSession  (tag = 'Them')"]
+        debounce["2s completion debounce<br/>+ interim/partial -> UI live"]
+        listenSvc["listenService.handleTranscriptionComplete"]
+    end
+
+    aec -->|sendMicAudioContent| mySess
+    linmic -->|sendMicAudioContent| mySess
+    win -->|sendSystemAudioContent| theirSess
+    mac -->|"stdout PCM to sendRealtimeInput"| theirSess
+    lin -. nothing .-> theirSess
+
+    mySess --> debounce
+    theirSess --> debounce
+    debounce -->|stt-update isFinal| listenSvc
+    listenSvc --> store[("transcripts table<br/>(session_id, speaker, text, start_at)")]
+    listenSvc --> summ["summaryService.addConversationTurn"]
+
+    aec -. echo reference .-> win
+    aec -. echo reference .-> mac

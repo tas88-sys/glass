@@ -1,0 +1,46 @@
+%% 02 - Window Model & Invisibility
+%% All windows live in a Map called windowPool (windowManager.js:35). Every window
+%% is frameless + transparent + alwaysOnTop + skipTaskbar, and has
+%% setContentProtection(true) by default (windowManager.js:31) which excludes it
+%% from screen recordings / screenshots. That is what makes Glass "invisible".
+flowchart TB
+    subgraph pool["windowPool : Map&lt;name, BrowserWindow&gt;"]
+        direction TB
+        header["'header'  (393x47, always created)<br/>the toolbar pill: Listen / Ask / Settings"]
+        ask["'ask'  (600 wide)<br/>LLM Q&A + streaming answer"]
+        listen["'listen'  (400 wide)<br/>live transcript + summary"]
+        settings["'settings'  (240 wide, hover panel)"]
+        shortcut["'shortcut-settings'  (353x720)"]
+        modepicker["'mode-picker'  (160x144)<br/>default / code / debug / system_design"]
+    end
+
+    header -->|parent of| ask
+    header -->|parent of| listen
+    note1["Feature windows are children of header.<br/>They are created only when header<br/>state = 'main' (after API key / login),<br/>destroyed when state = 'apikey'/'permission'.<br/>(handleHeaderStateChanged)"]
+    header -.-> note1
+
+    subgraph props["Shared window properties (commonChildOptions)"]
+        direction LR
+        p1["frame: false"]
+        p2["transparent: true"]
+        p3["alwaysOnTop: true"]
+        p4["skipTaskbar: true"]
+        p5["hiddenInMissionControl: true"]
+        p6["setVisibleOnAllWorkspaces(true,<br/>{visibleOnFullScreen:true})"]
+        p7["setContentProtection(true)<br/>= excluded from capture"]
+    end
+    pool --> props
+
+    subgraph layout["Positioning & motion"]
+        lm["WindowLayoutManager<br/>computes child layout relative to header"]
+        mm["SmoothMovementManager<br/>animates position / fade / bounds"]
+    end
+    header --> layout
+
+    subgraph control["Visibility control (internalBridge events)"]
+        c1["'window:requestVisibility'<br/>show/hide a single window with fade+slide"]
+        c2["'window:requestToggleAllWindowsVisibility'<br/>Ctrl/Cmd+Backslash hides EVERYTHING at once"]
+        c3["toggleContentProtection()<br/>flips capture-exclusion at runtime"]
+        c4["setIgnoreMouseEvents (click-through, Ctrl/Cmd+M)"]
+    end
+    layout --> control

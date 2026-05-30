@@ -1,0 +1,37 @@
+%% 08 - STT session lifecycle & resilience (single live session, NO failover)
+%% Source: sttService.js + listenService.js. Resilience keeps ONE session healthy;
+%% it does not switch models/providers. A mid-session socket drop is logged, not recovered.
+stateDiagram-v2
+    [*] --> Initializing
+    Initializing: initializeSttSessions(language)
+    Initializing: createSTT(provider) x2  (Me + Them in parallel)
+
+    Initializing --> RetryInit: throws
+    RetryInit: listenService retries up to 10x @ 300ms
+    RetryInit --> Initializing: attempt under 10
+    RetryInit --> Failed: attempts exhausted
+
+    Initializing --> Active: both sessions open
+
+    state Active {
+        [*] --> Listening
+        Listening --> Listening: audio chunk every 100ms
+        Listening --> Buffering: interim/partial transcript to UI
+        Buffering --> Listening: 2s debounce flush, final, persist to DB
+
+        Listening --> KeepAlive: every 60s (OpenAI only)
+        KeepAlive --> Listening
+
+        Listening --> Renewing: every 20 min (SESSION_RENEW_INTERVAL_MS)
+        Renewing: spawn fresh sessions, 2s overlap, close old
+        Renewing --> Listening: hand-off, no audio dropped
+    }
+
+    Active --> Dropped: socket onerror/onclose
+    Dropped: ONLY logged — no reconnect, no model switch
+    Dropped --> Active: requires manual Stop then Listen
+
+    Active --> Closed: Stop / app quit
+    Closed: closeSessions() — clear timers, kill SystemAudioDump
+    Closed --> [*]
+    Failed --> [*]

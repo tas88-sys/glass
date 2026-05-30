@@ -1,0 +1,20 @@
+%% 07 - "Speaker Diarization" reality: SOURCE ATTRIBUTION, not voice diarization
+%% Glass labels speech by which audio CHANNEL it came in on, never by analysing voice.
+%% This is why "interviewer vs me" works on calls — but two people on one mic both = "Me".
+flowchart TB
+    q{{"Where did the audio bytes arrive?"}}
+
+    q -->|microphone channel| me["Tag = 'Me'<br/>(mySttSession)"]
+    q -->|system / loopback channel| them["Tag = 'Them'<br/>(theirSttSession)"]
+
+    subgraph platforms["Does each channel exist per platform?"]
+        direction TB
+        macp["macOS:  Me = yes (mic)<br/>Them = yes (SystemAudioDump)<br/>AEC = yes"]
+        winp["Windows:  Me = yes (mic)<br/>Them = yes (native loopback)<br/>AEC = yes"]
+        linp["Linux:  Me = yes (mic)<br/>Them = NO (loopback disabled)<br/>AEC = no"]
+    end
+    me --> platforms
+    them --> platforms
+
+    note["CONSEQUENCE:<br/>• Clean 2-party split works because the OTHER person<br/>  comes through system audio (Zoom/Meet/Teams output).<br/>• Two humans sharing ONE microphone are BOTH 'Me'.<br/>• There is no voice fingerprinting / no per-speaker model.<br/>• Works on macOS AND Windows. On Linux you only get 'Me'."]
+    platforms --> note

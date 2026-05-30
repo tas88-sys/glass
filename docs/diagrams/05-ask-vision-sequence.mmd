@@ -1,0 +1,37 @@
+%% 05 - Ask (Vision) per-query sequence
+%% ONE Ask press = ONE fresh screenshot of the current screen. No image queue,
+%% no history sent to the model. Source: askService.js
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant SC as shortcutsService
+    participant AS as askService
+    participant Cap as captureScreenshot()
+    participant MS as modelStateService
+    participant F as AI factory
+    participant LLM as Provider (stream)
+    participant AW as ask window (AskView)
+    participant DB as askRepository (SQLite/Firebase)
+
+    U->>SC: Ctrl/Cmd+Enter (nextStep)
+    SC->>AS: toggleAskButton(true) -> sendMessage(text)
+    AS->>DB: getOrCreateActive('ask') + addAiMessage(role:user)
+    AS->>MS: getCurrentModelInfo('llm') -> {provider, model, apiKey}
+    AS->>Cap: capture ONE frame NOW
+    alt macOS
+        Cap->>Cap: screencapture -x -t jpg, sharp resize to 384px h, q80
+    else Windows / Linux
+        Cap->>Cap: desktopCapturer.getSources(1920x1080) -> toJPEG(70)
+    end
+    Cap-->>AS: base64 JPEG (or null on failure)
+    AS->>AS: build messages = [system(askMode prompt), user(text + image_url)]
+    AS->>F: createStreamingLLM(provider, opts)
+    F-->>AS: streaming handle
+    AS->>LLM: streamChat(messages)
+    loop SSE chunks
+        LLM-->>AW: data: {choices[0].delta.content}  (broadcast ask:stateUpdate)
+        Note over AW: _reset -> wipe partial (Gemini failover)<br/>_final_model -> footer "answered by: X"
+    end
+    LLM-->>AS: [DONE]
+    AS->>DB: addAiMessage(role:assistant, full text)
+    Note over AS,LLM: If provider rejects the image -> retry TEXT-ONLY once<br/>(_isMultimodalError). conversationHistory param exists but<br/>featureBridge NEVER passes it -> each Ask is stateless.
