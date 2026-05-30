@@ -160,3 +160,24 @@ does not react to a failure. Recovery requires a manual Stop → Listen.
 
 Building real STT failover/reconnect-on-drop would mean wrapping those callbacks to re-run
 `createSTT` (with the next model, or a cross-provider chain) and re-attach the audio pipeline.
+
+---
+
+## 6. From transcript to insights & answers (the next hop)
+
+STT's job ends at a **finalized, speaker-tagged transcript turn**. That turn is then forwarded
+to two consumers at once by `listenService.handleTranscriptionComplete` (`listenService.js:99-107`):
+
+1. **Persistence** → `sttRepository.addTranscript()` writes it to the `transcripts` table
+   (`listenService.js:118`).
+2. **Live Insights** → `summaryService.addConversationTurn()` feeds the rolling-summary engine
+   (`listenService.js:106`), which produces the **"Live insights"** panel.
+
+The insights panel starts every session showing **"No insights yet…"** and only fills after the
+**5th** finalized turn (then refreshes every 5 turns). And critically, the **Ask** feature does
+**not** receive this transcript — pressing Ask sends only your typed text + a fresh screenshot.
+
+The full story of how a live conversation becomes insights and answers — including the
+"interviewer asks a question, how do I get an answer?" walkthrough — is documented separately:
+
+> **→ [`LIVE_INSIGHTS_AND_ASK.md`](LIVE_INSIGHTS_AND_ASK.md)**

@@ -506,6 +506,10 @@ Each finalized utterance lands in the `transcripts` table tagged with `session_i
 
 ## 8. Incremental summarization
 
+> User-facing deep-dive — what **"No insights yet…"** means, exactly when the panel fills, and
+> the **interview "how do I get an answer?"** walkthrough — lives in
+> [`docs/LIVE_INSIGHTS_AND_ASK.md`](docs/LIVE_INSIGHTS_AND_ASK.md).
+
 ```mermaid
 flowchart TB
     turn["handleTranscriptionComplete(speaker, text)"] --> add["addConversationTurn() push 'me:/them: text'"]
