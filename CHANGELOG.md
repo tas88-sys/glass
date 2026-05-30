@@ -6,6 +6,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 
 ## [Unreleased]
 
+### Documentation
+
+#### Added
+- **`docs/AUDIO_AND_STT.md`** — deep reference for the audio + STT subsystem: two-channel `"Me"`/`"Them"` source attribution, per-platform capture matrix (Windows native loopback / macOS `SystemAudioDump` / Linux mic-only), Rust/WASM AEC, the full STT/LLM provider matrix, Deepgram setup + caveats, and STT resilience vs. failover. All claims carry `file:line` references.
+
+#### Fixed
+- **README "How It Works" — corrected Windows audio capture.** The audio-sources table claimed system audio was *"macOS only"* and that *"on Windows/Linux only the user's mic is captured."* Windows in fact captures system audio via Electron native loopback (`src/index.js:175-182` + `listenCapture.js:515-566`); only **Linux** is mic-only. Table now lists all three platforms and notes AEC coverage.
+- **README "Currently Supporting" list** — added Anthropic Claude (LLM) and Deepgram (STT), which were already wired but undocumented; clarified which providers do LLM vs STT.
+
 ### Gemini Failover (branch `feat/gemini-failover`)
 
 #### Added
