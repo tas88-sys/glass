@@ -67,9 +67,13 @@ npm run setup
 <img width="100%" alt="booking-screen" src="./public/assets/02.gif">
 
 **Currently Supporting:**
-- OpenAI API: Get OpenAI API Key [here](https://platform.openai.com/api-keys)
-- Gemini API: Get Gemini API Key [here](https://aistudio.google.com/apikey)
-- Local LLM Ollama & Whisper
+- OpenAI (LLM + STT): Get OpenAI API Key [here](https://platform.openai.com/api-keys)
+- Gemini (LLM + STT): Get Gemini API Key [here](https://aistudio.google.com/apikey)
+- Anthropic Claude (LLM): Get Anthropic API Key [here](https://console.anthropic.com/settings/keys)
+- Deepgram (STT): Get Deepgram API Key [here](https://console.deepgram.com/)
+- Local: Ollama (LLM) & Whisper (STT)
+
+See [`docs/AUDIO_AND_STT.md` §3](docs/AUDIO_AND_STT.md#3-stt--llm-provider-matrix) for the full STT/LLM capability matrix.
 
 ### Liquid Glass Design (coming soon)
 
@@ -129,20 +133,26 @@ Data is persisted to **SQLite** locally, or **Firebase** when signed in (the rep
 
 ### Listen feature
 
-**Audio sources:**
+**Audio sources — two-channel speaker attribution:**
 
-| Stream | Speaker tag | Source | Platforms |
+Glass runs **two independent STT sessions** and tags each transcript by *which audio source it arrived on* (source attribution, not voice diarization): your mic is `"Me"`, system/loopback audio is `"Them"`.
+
+| Speaker tag | Source | How it's captured | Platforms |
 |---|---|---|---|
-| Microphone | `"Me"` | Browser `getUserMedia()` | All |
-| System audio | `"Them"` | Native `SystemAudioDump` binary | **macOS only** |
+| `"Me"` | Microphone | Browser `getUserMedia()` | All |
+| `"Them"` | System audio | Native `SystemAudioDump` binary | macOS |
+| `"Them"` | System audio | Electron native loopback (`getDisplayMedia` → `audio: 'loopback'`, `src/index.js:175-182`) | Windows |
 
-On Windows/Linux only the user's mic is captured.
+On **Linux**, system-audio loopback is disabled (`getDisplayMedia({audio:false})`) — only the mic (`"Me"`) is captured. Acoustic echo cancellation (Rust/WASM, `aec.js`) runs on macOS and Windows, using the system-audio stream as the echo reference so the other party's voice leaking from your speakers isn't double-transcribed onto the `"Me"` channel.
+
+> 📄 See [`docs/AUDIO_AND_STT.md`](docs/AUDIO_AND_STT.md) for the full reference — provider matrix, Deepgram setup, AEC details, and STT resilience vs. failover.
 
 **Real-time STT pipeline** (`src/features/listen/stt/sttService.js`):
 
 - Two parallel STT sessions per provider (OpenAI Realtime, Gemini Live, Deepgram, or local Whisper)
 - Interim/partial results stream to the UI; final results flush through a 2-second debounce
 - Keep-alive heartbeat every 60s for OpenAI; session renewal every 20 minutes with a 2-second overlap to dodge provider hard timeouts
+- **No STT failover** — STT uses a single model (live sessions have no clean rotation semantics; the Gemini CSV failover is LLM-only). A socket that drops mid-session is logged but not auto-recovered. See [`docs/AUDIO_AND_STT.md` §5](docs/AUDIO_AND_STT.md#5-stt-resilience-vs-failover).
 - Each finalized utterance is inserted into the `transcripts` table tagged with `session_id`, `speaker`, `text`, `start_at`
 
 **Incremental summarization** (`src/features/listen/summary/summaryService.js`):
