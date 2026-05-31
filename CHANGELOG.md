@@ -6,6 +6,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 
 ## [Unreleased]
 
+### Interview Live Answer Lane (branch `feat/stt-interview-question-wiring`)
+
+#### Added
+
+- **Streaming Live Answer lane** — `summaryService.js` gains an additive answer lane beside Live Insights. When the interviewer (`them:`) asks a detectable question, an 800 ms debounced streaming LLM call produces a real-time markdown answer above the existing Live Insights panel. The analysis lane is unaffected (FR-017 lane independence).
+- **`live-answer-update` IPC channel** — new main→renderer channel in the `summaryView` preload namespace (`src/preload.js`). Two methods: `onLiveAnswerUpdate(cb)` and `removeAllLiveAnswerUpdateListeners()`. The existing `summary-update` channel is untouched.
+- **`<live-answer-view>` Lit element** (`src/ui/listen/summary/LiveAnswerView.js`) — renders streamed sanitized markdown in the insights pane above `<summary-view>`. Holds the previous answer between streams (never blanks). Subscribes to `live-answer-update`; tears down on disconnect. `resetAnswer()` clears on session reset.
+- **Pure helper exports** from `summaryService.js` for unit testing without Electron coupling: `isLikelyQuestion`, `normalizePassive`, `parseAnswerOrPassive`, `shouldTriggerAnswer`, `parseLiveAnswerSseLine`, `normalizeTail`.
+- **43 `node:test` tests** in `src/features/listen/summary/__tests__/liveAnswer.test.js` — pure-helper unit tests (TDD RED→GREEN), SSE line parser tests, and six integration scenarios: debounce coalescing (AS-4), de-dup same-tail (AS-6), abort-and-replace (AS-5), PASSIVE suppress hold-last (AS-3), mid-debounce/mid-stream session close (AS-8), lane independence (AS-7). LLM provider mocked throughout.
+
+#### Internal
+
+- `summaryService.js` constructor gains answer-lane state fields: `lastAnsweredTail`, `answerDebounceTimer`, `inFlightController`, `inFlight`, `hadFallback`, `lastAnswerTs`.
+- `resetLiveAnswer()` folded into `resetConversationHistory()` — no `listenService.js` edit required; existing reset calls at session start/close already suffice.
+- `ListenView.js` imports `LiveAnswerView.js` and places `<live-answer-view>` above `<summary-view>` with `resetAnswer()` wired into the session-reset block.
+
+#### Fixed
+
+- **Question detection hardened for real STT** (live-tested 2026-05-31) — `isLikelyQuestion` now detects a `?` **anywhere** in the turn and a question opener at the start of **any** sentence (word-boundary matched), not only a `?`-tail or first-word opener. Real interviewer turns arrive as long multi-sentence ASR blobs with the question buried mid-utterance (e.g. *"Start that's where it's at… what types can a map use as a key in Go? And this could…"*), which the original tail/first-word heuristic silently rejected.
+- **Terse answers no longer dropped** — `makeLiveAnswer` flushes an answer shorter than the ~16-char prefix-buffer threshold when the stream ends, instead of discarding it (e.g. *"42."*, *"Yes, it is."*).
+- **Native PASSIVE phrase suppressed mid-stream** — `parseAnswerOrPassive` treats a ≥16-char prefix of the native *"Not sure what you need help…"* phrase as PASSIVE at the buffer decision point (FR-010); previously only the literal `PASSIVE` token / full 42-char phrase suppressed, so the native phrase leaked to the panel.
+- **Held answer survives the transcript↔insights toggle** — `LiveAnswerView` re-renders the retained answer when the panel becomes visible again, instead of blanking until the next answer.
+
+#### Internal — diagnostics
+
+- Verbose live-answer trace logging gated behind the `LIVE_ANSWER_DEBUG=1` env var (`laDebug()` helper) — silent by default, never logs answer text.
+
 ### Documentation
 
 #### Added
