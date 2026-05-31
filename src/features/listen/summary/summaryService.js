@@ -18,51 +18,39 @@ function laDebug(...args) {
 // Recall-oriented: true when text ends with '?' OR starts with a question
 // opener (case-insensitive). When uncertain, favor true — PASSIVE suppresses.
 // ---------------------------------------------------------------------------
-const QUESTION_OPENERS = [
-    'what', 'how', 'why', 'when', 'where', 'which', 'who',
-    'can', 'could', 'would', 'do', 'does', 'did', 'is', 'are',
-    'tell me', 'walk me', 'describe', 'explain',
-];
-// Word-boundary opener matchers so "do" doesn't match "don't", "is" not "isn't".
-const QUESTION_OPENER_RES = QUESTION_OPENERS.map(o => new RegExp(`^${o}\\b`, 'i'));
+// Recall-maximal NON-question screen (FR-002).
+//
+// This is deliberately NOT a question detector. A keyword/opener list always
+// leaves gaps — imperative prompts ("Design a cache", "Compare X and Y"),
+// conjunction-led clauses ("okay so how..."), statement-form asks ("your
+// biggest weakness"), and punctuation-less STT all slip through. So we INVERT:
+// drop ONLY empty turns and pure acknowledgement/backchannel, and send
+// everything else to the model — which replies PASSIVE for non-questions
+// (suppressed; the panel holds the last answer). A real question is therefore
+// NEVER dropped. Recall over precision, with PASSIVE as the real filter.
+const BACKCHANNEL =
+    '(?:okay|ok|kay|alright|all ?right|sure|yeah|yea|yep|yup|yes|no|nope|nah|' +
+    'mm-?hmm|m?hmm|mm+|uh[ -]?huh|uh|um|er|oh|ah+|right|right on|cool|nice|' +
+    'great|perfect|awesome|amazing|excellent|interesting|gotcha|got it|' +
+    'makes sense|that makes sense|sounds good|exactly|totally|definitely|' +
+    'absolutely|indeed|fine|good|very good|thanks|thank you|thanks so much|' +
+    'no problem|no worries|for sure|fair enough|understood|i see|i understand|' +
+    'so|well|like|you know|i mean|anyway|anyways|hold on|hang on|one sec|' +
+    'one second|just a sec|just a second|let me see|lets see|let\'s see)';
+// Matches a turn composed ENTIRELY of backchannel phrases joined by spaces /
+// punctuation. The separator class excludes '?', so any literal question mark
+// forces a trigger.
+const PURE_FILLER_RE = new RegExp('^(?:' + BACKCHANNEL + '[\\s,.!…—–-]*)+$', 'i');
 
 function isLikelyQuestion(text) {
     if (typeof text !== 'string') return false;
     const trimmed = text.trim();
     if (trimmed.length === 0) return false;
-
-    // A question mark ANYWHERE is a strong signal. Real STT turns bury the
-    // question mid-utterance behind preamble and trailing words (observed:
-    // "...what types can a map use as a key...? And this could"), so scan the
-    // whole string — not just the tail.
-    if (trimmed.includes('?')) return true;
-
-    // Opener at the start of the turn OR at the start of any sentence within it.
-    // STT prepends filler ("okay, so, for this question, ..."), so the opener is
-    // rarely the literal first word of a long multi-sentence turn.
-    const segments = [trimmed, ...trimmed.split(/[.!?\n]+/)]
-        .map(s => s.trim())
-        .filter(Boolean);
-    for (const seg of segments) {
-        for (const re of QUESTION_OPENER_RES) {
-            if (re.test(seg)) return true;
-        }
-    }
-
-    // Guard against obvious filler phrases before the recall fallback.
-    const FILLER_PATTERNS = [
-        /^okay\b/i, /^ok\b/i, /^alright\b/i, /^sure\b/i, /^right\b/i,
-        /^got it\b/i, /^sounds good\b/i, /^great\b/i, /^perfect\b/i,
-        /^let me\b/i, /^i'll\b/i, /^i will\b/i, /^thanks\b/i, /^thank you\b/i,
-        /^yes\b/i, /^yeah\b/i, /^no\b/i, /^nope\b/i,
-    ];
-    for (const pat of FILLER_PATTERNS) {
-        if (pat.test(trimmed)) return false;
-    }
-    // Short ambiguous fragment without clear filler — favor recall
-    // (EC: "so the performance"). PASSIVE suppression is the backstop.
-    if (trimmed.split(/\s+/).length <= 6) return true;
-    return false;
+    // Drop ONLY pure backchannel/acknowledgement; trigger on everything else and
+    // let the model's PASSIVE reply suppress non-questions. Never miss a real
+    // question — a keyword list would always leave gaps (FR-002, recall-max).
+    if (PURE_FILLER_RE.test(trimmed)) return false;
+    return true;
 }
 
 // ---------------------------------------------------------------------------

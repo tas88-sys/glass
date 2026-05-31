@@ -7,29 +7,44 @@
 
 This file enumerates the edge cases each contracted function/surface MUST handle, tied to the spec's Acceptance Scenarios (AS) and Edge Cases (EC). Each row becomes a `node:test` case (or a manual-verification step) in `/tasks`.
 
-## `isLikelyQuestion(text)` — FR-002
+## `isLikelyQuestion(text)` — FR-002 (recall-maximal NON-question screen)
 
-| Input | Expected | Why |
-|-------|----------|-----|
-| `"Can you walk me through how a Go channel works?"` | `true` | `?`-tail + opener "can" |
-| `"tell me about your experience"` | `true` | opener "tell me" (no `?`) |
-| `"so the performance"` | `true` (favor recall) | incomplete; let PASSIVE decide |
-| `"Okay, great, let me share my screen"` | `false` | no opener, no `?` (AS-3) |
-| `"WHAT'S YOUR APPROACH"` | `true` | case-insensitive opener "what" |
-| `""` (empty) | `false` | nothing to answer |
-| `"   "` (whitespace) | `false` | trims to empty |
-| `"describe your testing strategy."` | `true` | opener "describe" |
-| `"Start that's where it's at. … what types can a map use as a key in the Go programming language? And this could…"` | `true` | `?` buried mid-utterance — real multi-sentence STT turn (no `?`-tail, no opener at the start) |
-| `"Let me think for a second. How does garbage collection work"` | `true` | opener "how" begins a LATER sentence (no `?`-tail) |
-| `"Okay. Hold on one second. My dog is barking. Let me get settled."` | `false` | multi-sentence ramble — no `?`, no sentence-start opener |
+> **Design (recall-max — redesigned 2026-05-31 after live STT testing).** This is
+> NOT a question detector. A keyword/opener list always leaves gaps — imperative
+> prompts ("Design a cache", "Compare X and Y"), conjunction-led clauses ("okay so
+> how…"), statement-form asks ("your biggest weakness"), and punctuation-less STT
+> all slip through. So it is **inverted**: drop ONLY empty turns and pure
+> acknowledgement/backchannel, and trigger on **everything else** — the model's
+> `PASSIVE` reply suppresses non-questions (panel holds the last answer). A real
+> question is therefore NEVER dropped. AS-3's "non-question → hold last answer" is
+> now enforced by PASSIVE, not by this heuristic.
 
-> **Heuristic (hardened 2026-05-31 after live STT testing):** real `Them:` turns
-> arrive as long multi-sentence ASR blobs with the question buried in the middle,
-> so `isLikelyQuestion` returns `true` when (a) a `?` appears **anywhere** in the
-> text, or (b) a question opener begins **any** sentence (word-boundary matched, so
-> "do" ≠ "don't") — not only a `?`-tail or first-word opener. The short-fragment
-> (≤6 words) recall fallback and the leading-filler guard are unchanged. Over-recall
-> is intentional; the streaming PASSIVE backstop suppresses non-answers.
+**Triggers (`true`) — every real question shape, plus anything substantive:**
+
+| Input | Note |
+|-------|------|
+| `"Can you walk me through how a Go channel works?"` | explicit `?` |
+| `"tell me about your experience"` | substantive (not backchannel) |
+| `"describe your testing strategy."` | substantive |
+| `"Give me an example of a deadlock"` | imperative prompt — no opener, no `?` |
+| `"Design a rate limiter that handles bursts"` | imperative prompt |
+| `"Compare TCP and UDP for this use case"` | imperative prompt |
+| `"Walk us through your approach"` | imperative prompt |
+| `"Okay so how does a hashmap work"` | opener after a conjunction/filler |
+| `"Your biggest weakness"` | statement-form prompt |
+| `"…what types can a map use as a key in Go? And this could…"` | `?` buried mid-utterance (live-observed) |
+| `"Okay, great, let me share my screen"` | not backchannel → triggers; **PASSIVE suppresses** (AS-3) |
+| `"Okay. Hold on one second. My dog is barking. Let me get settled."` | substantive monologue → triggers; PASSIVE suppresses |
+
+**Drops (`false`) — ONLY empty turns + pure acknowledgement/backchannel:**
+
+| Input | Why |
+|-------|-----|
+| `""`, `"   "` | nothing to answer |
+| `"okay"`, `"Okay, great, thanks"` | pure acknowledgement |
+| `"got it"`, `"got it, makes sense"` | backchannel |
+| `"mm-hmm"`, `"yeah totally"`, `"sounds good"` | backchannel |
+| `"cool, nice"`, `"sure, no problem"`, `"right, exactly"` | backchannel |
 
 ## `normalizePassive(text)` — FR-010
 
