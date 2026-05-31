@@ -7,44 +7,46 @@
 
 This file enumerates the edge cases each contracted function/surface MUST handle, tied to the spec's Acceptance Scenarios (AS) and Edge Cases (EC). Each row becomes a `node:test` case (or a manual-verification step) in `/tasks`.
 
-## `isLikelyQuestion(text)` — FR-002 (recall-maximal NON-question screen)
+## `isLikelyQuestion(text)` — FR-002 (balanced, quota-aware question gate)
 
-> **Design (recall-max — redesigned 2026-05-31 after live STT testing).** This is
-> NOT a question detector. A keyword/opener list always leaves gaps — imperative
-> prompts ("Design a cache", "Compare X and Y"), conjunction-led clauses ("okay so
-> how…"), statement-form asks ("your biggest weakness"), and punctuation-less STT
-> all slip through. So it is **inverted**: drop ONLY empty turns and pure
-> acknowledgement/backchannel, and trigger on **everything else** — the model's
-> `PASSIVE` reply suppresses non-questions (panel holds the last answer). A real
-> question is therefore NEVER dropped. AS-3's "non-question → hold last answer" is
-> now enforced by PASSIVE, not by this heuristic.
+> **Design (balanced — tuned 2026-05-31 after live STT testing + quota review).**
+> Triggers when the turn carries a real question SIGNAL; skips the interviewer's
+> declarative monologue so a low daily LLM quota isn't spent on non-questions
+> (which would otherwise risk draining the quota and failing real questions
+> later). A turn triggers when ANY of: (1) a `?` anywhere; (2) an
+> imperative/interview cue (design, compare, explain, give me, walk through, …);
+> (3) an embedded/indirect question ("…the question is what…"); (4) a wh-word or
+> yes/no auxiliary LEADS any clause (leading discourse markers like "okay so" are
+> peeled first). Otherwise it is declarative monologue and is skipped. **Known
+> by-design gap:** a cue-less statement-form prompt ("your biggest weakness") is
+> skipped — backstop with a manual trigger if needed. PASSIVE remains the final
+> filter for any false trigger.
 
-**Triggers (`true`) — every real question shape, plus anything substantive:**
+**Triggers (`true`):**
 
-| Input | Note |
-|-------|------|
-| `"Can you walk me through how a Go channel works?"` | explicit `?` |
-| `"tell me about your experience"` | substantive (not backchannel) |
-| `"describe your testing strategy."` | substantive |
-| `"Give me an example of a deadlock"` | imperative prompt — no opener, no `?` |
-| `"Design a rate limiter that handles bursts"` | imperative prompt |
-| `"Compare TCP and UDP for this use case"` | imperative prompt |
-| `"Walk us through your approach"` | imperative prompt |
-| `"Okay so how does a hashmap work"` | opener after a conjunction/filler |
-| `"Your biggest weakness"` | statement-form prompt |
-| `"…what types can a map use as a key in Go? And this could…"` | `?` buried mid-utterance (live-observed) |
-| `"Okay, great, let me share my screen"` | not backchannel → triggers; **PASSIVE suppresses** (AS-3) |
-| `"Okay. Hold on one second. My dog is barking. Let me get settled."` | substantive monologue → triggers; PASSIVE suppresses |
+| Input | Signal |
+|-------|--------|
+| `"What is a goroutine?"` | `?` |
+| `"How does garbage collection work"` | wh-word leads the clause |
+| `"Is it thread-safe"` | auxiliary leads the clause |
+| `"Give me an example of a deadlock"` | cue "give me" |
+| `"Design a rate limiter that handles bursts"` | cue "design" |
+| `"Compare TCP and UDP for this use case"` | cue "compare" |
+| `"Walk us through your approach"` | cue "walk us / through" |
+| `"Explain the difference between X and Y"` | cue "explain" / "difference between" |
+| `"Your thoughts on microservices"` | cue "your thoughts" / "thoughts on" |
+| `"Okay so how does a hashmap work"` | "how" leads after peeling "okay so" |
+| `"…the thing we are gonna look at is what types a map can use…"` | embedded "is what" (no `?`) |
 
-**Drops (`false`) — ONLY empty turns + pure acknowledgement/backchannel:**
+**Skipped (`false`) — saves quota:**
 
 | Input | Why |
 |-------|-----|
-| `""`, `"   "` | nothing to answer |
-| `"okay"`, `"Okay, great, thanks"` | pure acknowledgement |
-| `"got it"`, `"got it, makes sense"` | backchannel |
-| `"mm-hmm"`, `"yeah totally"`, `"sounds good"` | backchannel |
-| `"cool, nice"`, `"sure, no problem"`, `"right, exactly"` | backchannel |
+| `""`, `"   "`, `"okay"`, `"got it, makes sense"`, `"mm-hmm"`, `"sounds good"` | empty / backchannel |
+| `"So we use Redis for caching and it scales to a million RPS"` | declarative monologue — no question signal |
+| `"That's a great answer, I really like how you structured it"` | feedback — "how" is mid-clause, not a clause-lead |
+| `"Okay, sounds good, let's move on to the next section"` | transition |
+| `"Your biggest weakness"` | **known gap**: cue-less statement-form prompt (manual-trigger backstop) |
 
 ## `normalizePassive(text)` — FR-010
 
