@@ -19,6 +19,17 @@ This file enumerates the edge cases each contracted function/surface MUST handle
 | `""` (empty) | `false` | nothing to answer |
 | `"   "` (whitespace) | `false` | trims to empty |
 | `"describe your testing strategy."` | `true` | opener "describe" |
+| `"Start that's where it's at. … what types can a map use as a key in the Go programming language? And this could…"` | `true` | `?` buried mid-utterance — real multi-sentence STT turn (no `?`-tail, no opener at the start) |
+| `"Let me think for a second. How does garbage collection work"` | `true` | opener "how" begins a LATER sentence (no `?`-tail) |
+| `"Okay. Hold on one second. My dog is barking. Let me get settled."` | `false` | multi-sentence ramble — no `?`, no sentence-start opener |
+
+> **Heuristic (hardened 2026-05-31 after live STT testing):** real `Them:` turns
+> arrive as long multi-sentence ASR blobs with the question buried in the middle,
+> so `isLikelyQuestion` returns `true` when (a) a `?` appears **anywhere** in the
+> text, or (b) a question opener begins **any** sentence (word-boundary matched, so
+> "do" ≠ "don't") — not only a `?`-tail or first-word opener. The short-fragment
+> (≤6 words) recall fallback and the leading-filler guard are unchanged. Over-recall
+> is intentional; the streaming PASSIVE backstop suppresses non-answers.
 
 ## `normalizePassive(text)` — FR-010
 

@@ -13,20 +13,23 @@ architecture-level summaries in [`../ARCHITECTURE.md`](../ARCHITECTURE.md) §6 (
 Glass helps a live conversation in **two independent ways**. Keeping them straight is the key
 to understanding the interview scenario in §5.
 
-| | **Live Insights** (Listen) | **Ask** |
-|---|---|---|
-| Trigger | Automatic, while listening | On-demand (hotkey / typing / clicking a suggestion) |
-| Sees the audio transcript? | **Yes** — built *from* the transcript | **No** — transcript is never passed (§4) |
-| Sees the screen? | No | **Yes** — one fresh screenshot per press |
-| Cadence | Every **5th** finalized turn | Once per request |
-| LLM call | `llm.chat()` (non-streaming) | `streamChat()` (streaming) |
-| Output | Structured panel: Summary / Topic / Actions | Free-form streamed markdown answer |
-| Engine | `summaryService.js` | `askService.js` |
-| UI | `SummaryView` (the "Live insights" tab) | `AskView` (separate window) |
+| | **Live Insights** (Listen) | **Live Answer** (Listen) | **Ask** |
+|---|---|---|---|
+| Trigger | Automatic, while listening | Automatic — on `them:` question detected | On-demand (hotkey / typing / clicking a suggestion) |
+| Sees the audio transcript? | **Yes** — built *from* the transcript | **Yes** — uses same conversation history | **No** — transcript is never passed (§5) |
+| Sees the screen? | No | No | **Yes** — one fresh screenshot per press |
+| Cadence | Every **5th** finalized turn | On each detected `them:` question, 800 ms debounce | Once per request |
+| LLM call | `llm.chat()` (non-streaming) | `streamChat()` (streaming, two-arg `createStreamingLLM`) | `streamChat()` (streaming) |
+| Output | Structured panel: Summary / Topic / Actions | Streamed markdown answer rendered above Live Insights | Free-form streamed markdown answer |
+| PASSIVE suppression | No | Yes — stream prefix checked; if `PASSIVE`, holds last answer | No |
+| Engine | `summaryService.js` (analysis lane) | `summaryService.js` (answer lane — additive, independent) | `askService.js` |
+| UI | `SummaryView` (the "Live insights" tab) | `LiveAnswerView` (above `<summary-view>` in insights pane) | `AskView` (separate window) |
+| Safety | n/a | Answer rendered ONLY in the content-protected listen window; never logged | n/a |
 
-> **The one-sentence version:** *Live Insights is the only part of Glass that actually "hears"
-> the interviewer. Ask answers what you type or what's on your screen — it does not hear the
-> room.* The bridge between them (§3.5, §5) is the clickable suggestion in the insights panel.
+> **The one-sentence version:** *Live Insights summarizes; Live Answer directly answers. Both
+> "hear" the room. Ask answers what you type or what's on your screen.* The answer lane and the
+> insights lane share the conversation history but no mutable state — deleting either leaves the
+> other unchanged (FR-017).
 
 ---
 
@@ -162,7 +165,70 @@ the **clicked text** crosses over (see §4). It is **rejected unless Ask is in `
 
 ---
 
-## 4. Ask — and why it does not hear the interviewer
+## 4. Live Answer lane — automatic streaming answers for `them:` questions
+
+The Live Answer lane is an additive feature that runs **beside** the Live Insights engine in
+`summaryService.js`. Both read from the same `conversationHistory` but share no mutable state —
+deleting either leaves the other unchanged.
+
+### 4.1 How it triggers
+
+After every `addConversationTurn(speaker, text)` call, `triggerAnswerIfNeeded` runs beside
+`triggerAnalysisIfNeeded`. Four gates decide whether an answer stream starts:
+
+1. **Speaker gate** — `speaker.toLowerCase() !== 'them'` → skip. Only the interviewer's turns trigger answers (FR-001).
+2. **Question heuristic** — `isLikelyQuestion(text)` (FR-002): true when text ends with `?` or opens with a recognized question opener (`what`/`how`/`why`/…). When uncertain, favors `true` — the PASSIVE suppression step filters non-answers cheaply.
+3. **800 ms debounce** — multi-segment utterances (STT delivers words in fragments) coalesce into one trigger (FR-003).
+4. **De-dup + abort-or-suppress** in the debounce callback:
+   - Same normalized tail as `lastAnsweredTail` → skip (FR-004b).
+   - New tail while a stream is already in-flight → abort old stream, start new (FR-004a).
+   - Same question as in-flight → skip.
+
+### 4.2 PASSIVE suppression (streaming-aware prefix buffer)
+
+The model is prompted to reply `PASSIVE` when the question has no clear technical answer. Because
+the response arrives as a stream, the service buffers the prefix until the first `\n` or ~16 chars,
+then calls `parseAnswerOrPassive(prefix)`:
+
+- If the normalized prefix matches `"PASSIVE"` (any markdown wrapping) or the native phrase
+  `"Not sure what you need help with right now"` → suppress. No IPC emit; the panel holds the
+  last rendered answer unchanged (never blanks — Q1/G3/FR-010).
+- Otherwise → flush the buffered prefix as the first emit and stream subsequent deltas live.
+
+### 4.3 IPC channel: `live-answer-update`
+
+`summaryService.sendToRenderer('live-answer-update', { answer, ts })` is emitted on every
+non-suppressed delta. The payload accumulates the full markdown string up to that point; the
+renderer replaces its `innerHTML` on each event (single swap per frame — C5/FR-015).
+
+The channel is wired in `preload.js` via two new methods on the existing `summaryView` namespace
+(FR-013):
+
+```js
+// src/preload.js — summaryView namespace additions
+onLiveAnswerUpdate: (callback) => ipcRenderer.on('live-answer-update', callback),
+removeAllLiveAnswerUpdateListeners: () => ipcRenderer.removeAllListeners('live-answer-update'),
+```
+
+`LiveAnswerView.js` subscribes in `connectedCallback` and tears down in `disconnectedCallback`.
+
+### 4.4 Screen-share safety invariant (load-bearing)
+
+The answer renders **only** in the content-protected `listen` window (`windowManager.js:507`,
+`settingsService.js:217` default `contentProtection: true`). The implementation never calls
+`setContentProtection(false)` and never logs the answer text to any capturable sink. Verified
+by T-VERIFY-SAFETY.
+
+### 4.5 Session reset
+
+`resetLiveAnswer()` is folded into `resetConversationHistory()` (C4/D4 — `listenService.js`
+already calls `resetConversationHistory` at session start and close; no `listenService.js` edit
+needed). It clears the debounce timer, aborts any in-flight `AbortController`, and resets
+`lastAnsweredTail`, `inFlight`, and `hadFallback`.
+
+---
+
+## 5. Ask — and why it does not hear the interviewer
 
 The full Ask mechanics live in [`../ARCHITECTURE.md` §6](../ARCHITECTURE.md). The one fact that
 matters most for the interview scenario:
@@ -194,12 +260,12 @@ screen.
 
 ---
 
-## 5. Scenario: the interviewer asks a question — how do I get an answer?
+## 6. Scenario: the interviewer asks a question — how do I get an answer?
 
-Because Ask is transcript-blind (§4), there is no single "the interviewer spoke → Glass
+Because Ask is transcript-blind (§5), there is no single "the interviewer spoke → Glass
 auto-answers in Ask" path. Here is what actually happens and the proper flows to get an answer.
 
-### 5.1 What happens automatically
+### 6.1 What happens automatically
 
 ```mermaid
 sequenceDiagram
@@ -229,7 +295,7 @@ insights `pickle_glass_analysis` profile is explicitly built to *answer a questi
 of the transcript* (`promptTemplates.js:247-275`), so the panel's Summary/Actions often already
 contain the gist of an answer and suggested replies.
 
-### 5.2 The proper flows to get a usable answer
+### 6.2 The proper flows to get a usable answer
 
 Pick based on what kind of question it is:
 
@@ -252,9 +318,9 @@ Pick based on what kind of question it is:
 
 4. **Screenshot-only Ask (when the question is on the screen).** If the interviewer's prompt is
    visible (shared coding problem, design canvas, slide), press `Ctrl/Cmd+Enter` with the Ask
-   box open to send just the screenshot (§4); the model solves what it sees.
+   box open to send just the screenshot (§5); the model solves what it sees.
 
-### 5.3 Recommended interview setup
+### 6.3 Recommended interview setup
 
 - **Run Listen for the whole session** so the transcript + insights build continuously (this is
   the only component that captures the interviewer). On **Windows and macOS** you get the clean
@@ -269,10 +335,10 @@ Pick based on what kind of question it is:
 
 ---
 
-## 6. Implementation notes & quirks (verified)
+## 7. Implementation notes & quirks (verified)
 
 - **Insights never auto-open Ask.** A `summary-update` only repaints the panel; it never
-  launches an answer. Producing an answer always requires one of the §5.2 user actions.
+  launches an answer. Producing an answer always requires one of the §6.2 user actions.
 - **Stray template token in Ask `default` mode.** The Ask path builds the prompt with
   `getSystemPrompt('pickle_glass_analysis', conversationHistory, false)` (`askService.js:288`),
   which places the (empty) history in the *"User-provided context"* slot but does **not** replace
@@ -291,18 +357,20 @@ Pick based on what kind of question it is:
 
 ---
 
-## 7. File map
+## 8. File map
 
 | Concern | File |
 |---|---|
 | STT → transcript handoff | `src/features/listen/listenService.js` (`:99-127`) |
-| Live Insights engine | `src/features/listen/summary/summaryService.js` |
+| Live Insights + Live Answer engine | `src/features/listen/summary/summaryService.js` |
 | Live Insights UI ("No insights yet…") | `src/ui/listen/summary/SummaryView.js` |
+| Live Answer UI (streamed markdown, above `<summary-view>`) | `src/ui/listen/summary/LiveAnswerView.js` |
+| Live Answer tests (pure helpers + integration) | `src/features/listen/summary/__tests__/liveAnswer.test.js` |
 | Listen window / insights-vs-transcript toggle | `src/ui/listen/ListenView.js` |
 | Ask answer engine | `src/features/ask/askService.js` |
 | Ask UI | `src/ui/ask/AskView.js` |
 | Prompt profiles | `src/features/common/prompts/promptTemplates.js`, `promptBuilder.js` |
-| IPC wiring | `src/bridge/featureBridge.js`, `src/preload.js` |
+| IPC wiring (incl. `live-answer-update` channel) | `src/bridge/featureBridge.js`, `src/preload.js` |
 | Ask hotkey | `src/features/shortcuts/shortcutsService.js` (`:213-214`) |
 
 ---
