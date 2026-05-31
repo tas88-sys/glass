@@ -18,39 +18,65 @@ function laDebug(...args) {
 // Recall-oriented: true when text ends with '?' OR starts with a question
 // opener (case-insensitive). When uncertain, favor true — PASSIVE suppresses.
 // ---------------------------------------------------------------------------
-// Recall-maximal NON-question screen (FR-002).
+// Balanced, quota-aware question gate (FR-002).
 //
-// This is deliberately NOT a question detector. A keyword/opener list always
-// leaves gaps — imperative prompts ("Design a cache", "Compare X and Y"),
-// conjunction-led clauses ("okay so how..."), statement-form asks ("your
-// biggest weakness"), and punctuation-less STT all slip through. So we INVERT:
-// drop ONLY empty turns and pure acknowledgement/backchannel, and send
-// everything else to the model — which replies PASSIVE for non-questions
-// (suppressed; the panel holds the last answer). A real question is therefore
-// NEVER dropped. Recall over precision, with PASSIVE as the real filter.
-const BACKCHANNEL =
-    '(?:okay|ok|kay|alright|all ?right|sure|yeah|yea|yep|yup|yes|no|nope|nah|' +
-    'mm-?hmm|m?hmm|mm+|uh[ -]?huh|uh|um|er|oh|ah+|right|right on|cool|nice|' +
-    'great|perfect|awesome|amazing|excellent|interesting|gotcha|got it|' +
-    'makes sense|that makes sense|sounds good|exactly|totally|definitely|' +
-    'absolutely|indeed|fine|good|very good|thanks|thank you|thanks so much|' +
-    'no problem|no worries|for sure|fair enough|understood|i see|i understand|' +
-    'so|well|like|you know|i mean|anyway|anyways|hold on|hang on|one sec|' +
-    'one second|just a sec|just a second|let me see|lets see|let\'s see)';
-// Matches a turn composed ENTIRELY of backchannel phrases joined by spaces /
-// punctuation. The separator class excludes '?', so any literal question mark
-// forces a trigger.
-const PURE_FILLER_RE = new RegExp('^(?:' + BACKCHANNEL + '[\\s,.!…—–-]*)+$', 'i');
+// Triggers when the turn carries a real question SIGNAL, and skips the
+// interviewer's declarative monologue so we don't spend LLM calls (and the
+// daily quota) on talk that isn't a question. Catches ~every real question;
+// the only by-design gap is a cue-less statement-form prompt ("your biggest
+// weakness"). PASSIVE still suppresses any false trigger.
+//
+// A turn triggers when ANY of these holds:
+//   1. a '?' appears anywhere (STT usually punctuates questions)
+//   2. an imperative/interview cue appears (design, compare, give me, ...)
+//   3. an embedded/indirect question appears ("...the question is what...")
+//   4. a wh-word or yes/no auxiliary LEADS any clause (after peeling leading
+//      discourse markers, so "okay so how does X" counts)
+// Otherwise it is treated as declarative monologue and skipped.
+
+// wh-words + yes/no auxiliaries/modals that lead an interrogative clause.
+const CLAUSE_LEAD_RE =
+    /^(?:what|how|why|when|where|which|who|whom|whose|whether|is|are|am|was|were|do|does|did|can|could|would|will|should|shall|may|might|have|has|had|must)\b/i;
+// Discourse markers / fillers that can precede the real clause start.
+const LEAD_STRIP_RE =
+    /^(?:so|and|but|now|well|okay|ok|alright|right|um|uh|er|like|you know|i mean|then|yeah|no|oh|hmm)\b[\s,]*/i;
+// Imperative / interview cues — a strong question signal anywhere in the turn.
+const CONTENT_CUE_RE = new RegExp(
+    '\\b(?:tell me|tell us|walk me|walk us|walk through|give me|give us|show me|' +
+    'show us|describe|explain|compare|contrast|define|design|implement|write|' +
+    'build|create|solve|optimi[sz]e|refactor|debug|consider|suppose|imagine|' +
+    'assume|elaborate|outline|discuss|go over|step through|reason about|' +
+    'think about|talk about|what about|how about|what if|let\'s say|lets say|' +
+    'name (?:a|an|some|the)|list (?:a|an|some|the|out)|your thoughts|any thoughts|' +
+    'your take|thoughts on|difference between|pros and cons|trade-?offs)\\b',
+    'i'
+);
+// Indirect / embedded question: a copula or asking-verb followed by a wh-word.
+const EMBEDDED_Q_RE =
+    /\b(?:is|are|was|were|wonder|wondering|curious|know|asking|ask|want(?:ed)? to know|looking at|question is)\s+(?:what|how|why|when|where|which|who|whether|if)\b/i;
 
 function isLikelyQuestion(text) {
     if (typeof text !== 'string') return false;
     const trimmed = text.trim();
     if (trimmed.length === 0) return false;
-    // Drop ONLY pure backchannel/acknowledgement; trigger on everything else and
-    // let the model's PASSIVE reply suppress non-questions. Never miss a real
-    // question — a keyword list would always leave gaps (FR-002, recall-max).
-    if (PURE_FILLER_RE.test(trimmed)) return false;
-    return true;
+
+    if (trimmed.includes('?')) return true;            // 1. explicit question mark
+    if (CONTENT_CUE_RE.test(trimmed)) return true;     // 2. imperative/interview cue
+    if (EMBEDDED_Q_RE.test(trimmed)) return true;      // 3. embedded/indirect question
+
+    // 4. wh-word / auxiliary leading any clause (peel leading discourse markers
+    //    so "okay so how does X work" still counts).
+    for (const clause of trimmed.split(/[.!?;,\n]+/)) {
+        let c = clause.trim();
+        let prev;
+        do { prev = c; c = c.replace(LEAD_STRIP_RE, '').trim(); } while (c !== prev);
+        if (CLAUSE_LEAD_RE.test(c)) return true;
+    }
+
+    // 5. No question signal — declarative monologue; skip to save quota (PASSIVE
+    //    would have suppressed it anyway). Cue-less statement-form prompts are
+    //    the known by-design gap (FR-002 / EDGE_CASES).
+    return false;
 }
 
 // ---------------------------------------------------------------------------

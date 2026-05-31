@@ -220,45 +220,43 @@ describe('parseLiveAnswerSseLine', () => {
 // ---------------------------------------------------------------------------
 // P1.1 — isLikelyQuestion (FR-002)
 // ---------------------------------------------------------------------------
-describe('isLikelyQuestion (recall-maximal non-question screen)', () => {
+describe('isLikelyQuestion (balanced, quota-aware question gate)', () => {
   let isLikelyQuestion;
 
   before(() => {
     ({ isLikelyQuestion } = require('../summaryService'));
   });
 
-  // Every real question shape MUST trigger (recall over precision). A real
-  // question is NEVER dropped — non-questions among these are screened later by
-  // the model's PASSIVE reply, not by this heuristic.
+  // Real question shapes MUST trigger — interrogatives, imperatives, clause-lead
+  // wh/aux, and embedded/indirect questions (incl. punctuation-less STT).
   const triggers = [
-    // explicit interrogatives
+    // explicit '?'
     'Can you walk me through how a Go channel works?',
-    'tell me about your experience',
+    'What is a goroutine?',
+    // wh-word / auxiliary leading the clause (no '?')
     "WHAT'S YOUR APPROACH",
+    'How does garbage collection work',
+    'Is it thread-safe',
+    'Do you know what a closure is',
+    // imperative / interview cues
+    'tell me about your experience',
     'describe your testing strategy.',
-    'so the performance',
-    // imperative / interview-prompt forms — NO question mark, NO leading opener
     'Give me an example of a deadlock',
     'Design a rate limiter that handles bursts',
     'Compare TCP and UDP for this use case',
     'Walk us through your approach to caching',
     'Implement a function that reverses a linked list',
     'Explain the difference between processes and threads',
-    // opener pushed off the sentence-start by a conjunction / filler
+    'What are the trade-offs of SQL versus NoSQL',
+    'Your thoughts on microservices',
+    // opener pushed off the clause-start by a conjunction / filler
     'Okay so how does a hashmap work',
     'And what about scaling to a million users',
-    // statement-form prompt (no wh-word, no ?, no imperative cue)
-    'Your biggest weakness',
-    // question buried mid-utterance in a long STT blob (the live-observed bug)
-    "Start That's where it's at. Hold on one second. Hopefully, my dog's " +
-      'chilled out. For this question here, the question that we are gonna look ' +
-      'at is what types can a map use as a key in the Go programming language? ' +
-      'And this could',
-    'Let me think for a second. How does garbage collection work',
-    // non-question monologue ALSO triggers — PASSIVE suppresses it downstream,
-    // never the heuristic (this is how AS-3 is now enforced)
-    'Okay, great, let me share my screen',
-    'Okay. Hold on one second. My dog is barking. Let me get settled.',
+    // question buried mid-utterance — with '?' (live-observed) and without it
+    "Start That's where it's at. Hold on one second. For this question here, " +
+      'the thing we are gonna look at is what types can a map use as a key in ' +
+      'the Go programming language? And this could',
+    'For this question here, the thing we are gonna look at is what types a map can use as a key',
   ];
   for (const t of triggers) {
     it(`triggers: ${JSON.stringify(t.length > 48 ? t.slice(0, 45) + '…' : t)}`, () => {
@@ -266,24 +264,29 @@ describe('isLikelyQuestion (recall-maximal non-question screen)', () => {
     });
   }
 
-  // The ONLY things dropped: empty turns and pure acknowledgement / backchannel.
-  const dropped = [
+  // Skipped (false) to save quota: pure backchannel AND declarative monologue
+  // with no question signal. PASSIVE would have suppressed these anyway.
+  const skipped = [
     '',
     '   ',
+    // pure backchannel / acknowledgement
     'okay',
-    'Okay, great, thanks',
-    'got it',
     'got it, makes sense',
     'yeah totally',
     'mm-hmm',
     'sounds good',
-    'cool, nice',
-    'sure, no problem',
-    'right, exactly',
+    // declarative monologue — the quota savers (no ?, no cue, no clause-lead wh/aux)
+    'So we use Redis for caching and it scales to a million requests per second',
+    "That's a great answer, I really like how you structured it",
+    "Okay, sounds good, let's move on to the next section",
+    'so the performance',
+    'Okay, great, let me share my screen',
+    // KNOWN by-design gap: cue-less statement-form prompt (backstop = manual trigger)
+    'Your biggest weakness',
   ];
-  for (const d of dropped) {
-    it(`drops backchannel: ${JSON.stringify(d)}`, () => {
-      assert.equal(isLikelyQuestion(d), false);
+  for (const s of skipped) {
+    it(`skips (no question signal): ${JSON.stringify(s.length > 48 ? s.slice(0, 45) + '…' : s)}`, () => {
+      assert.equal(isLikelyQuestion(s), false);
     });
   }
 });
