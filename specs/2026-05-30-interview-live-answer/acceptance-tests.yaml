@@ -1,0 +1,684 @@
+_version: "1.0"
+_spec_id: "2026-05-30-interview-live-answer"
+_spec_name: "Interview Live Answer Lane"
+_branch_target: "feat/stt-interview-question-wiring"
+
+generation_context:
+  generated_at: "2026-05-31"
+  generated_by: "/tasks 2026-05-30-interview-live-answer"
+  spec_sha256: "b246497943c9a8de765f424a04eebef4d8a1cd10160e26aa16e6a956b5437a65"
+  plan_sha256: "59ec4ed3695f1a058627b509abb21cbde981300cb3ca3b232aa73fa359b1556c"
+  tasks_sha256: "0e89134cb8fef23dcd172a39a913a95fdc534cf8222ab097f493b9eb1f1da8d5"
+  framework_note: |
+    Repo follows the sibling spec 2026-05-26-gemini-failover-design convention.
+    This Electron repo has NO type-check / test:unit / test:integration / test:smoke
+    npm scripts — only `npm test` (= node --test src/**/__tests__/**/*.test.js,
+    package.json:15) and `npm run lint` (= eslint --ext .ts,.tsx,.js ., package.json:16).
+    All structural / negative-assertion checks are grep/node-based and runnable WITHOUT
+    booting Electron. LLM provider is mocked in every test (no live calls). No E2E /
+    renderer / live-audio harness exists — visual render + end-to-end audio are MANUAL
+    (manual_smoke_tests below; see quickstart.md).
+
+environments: [local]
+
+_references:
+  files:
+    new:
+      - "src/ui/listen/summary/LiveAnswerView.js"
+      - "src/features/listen/summary/__tests__/liveAnswer.test.js"
+    modified:
+      - "src/features/listen/summary/summaryService.js"
+      - "src/preload.js"
+      - "src/ui/listen/ListenView.js"
+      - "CHANGELOG.md"
+    closed_untouched:
+      - "src/ui/listen/summary/SummaryView.js"
+      - "src/features/common/prompts/promptTemplates.js"
+      - "src/features/ask/askService.js"
+      - "src/bridge/featureBridge.js"
+      - "src/features/listen/listenService.js"
+  ipc_channels:
+    new:
+      - "live-answer-update  (main → content-protected listen window; payload {answer, ts})"
+    modified: []
+    untouched:
+      - "summary-update  (existing summaryView-namespace channel; MUST stay byte-identical)"
+  service_surface:
+    new:
+      - "isLikelyQuestion(text) -> boolean  (FR-002, pure)"
+      - "normalizePassive(text) -> string  (FR-010, pure)"
+      - "parseAnswerOrPassive(prefix) -> {passive, flush}  (FR-010, pure)"
+      - "shouldTriggerAnswer(speaker, text, lastAnsweredTail, inFlight) -> boolean  (FR-001/FR-004, pure)"
+      - "triggerAnswerIfNeeded(speaker, text)  (orchestrator: 4 gates + 800ms debounce)"
+      - "makeLiveAnswer(conversationTexts)  (thin streaming orchestrator; two-arg createStreamingLLM)"
+      - "resetLiveAnswer()  (folded INTO resetConversationHistory; abort + clear)"
+  reused_unchanged:
+    - "formatConversationForPrompt(history, 30)  (summaryService.js:65)"
+    - "getSystemPrompt('pickle_glass_analysis','',false)  (promptBuilder.js; promptTemplates.js:238 unchanged)"
+    - "sendToRenderer (listen-window-targeted, isDestroyed()-guarded)  (summaryService.js:29)"
+    - "createStreamingLLM(provider, opts) + .streamChat()  (factory.js:128)"
+    - "SummaryView loadLibraries + renderMarkdownContent pattern  (SummaryView.js:291-307,375-397)  — MIRRORED, not imported"
+  tuning_defaults:
+    - "answer-lane debounce = 800ms (bounded 600ms-1s)  (FR-003/C3)"
+    - "maxTokens = 900  (FR-008)"
+    - "temperature = 0.7  (FR-008)"
+    - "min-interval guard = OFF (configurable)  (FR-005)"
+    - "PASSIVE prefix-buffer = first newline or ~16 chars  (FR-010/C2)"
+    - "conversation maxTurns = 30  (FR-006)"
+
+# --- Categories that DO NOT apply ---------------------------------------------
+# sql_tests:          n/a — in-memory only (C8); no SQLite schema change; the
+#                     summaryRepository.saveSummary path is deliberately NOT extended
+# http_tests:         n/a — no HTTP/REST routes; this is an in-process Electron
+#                     main→renderer IPC change (live-answer-update channel)
+# aws_tests:          n/a — no CDK / Lambda / SSM / S3
+# cli_tests:          n/a — no new shell scripts or npm scripts
+# data_integrity:     n/a — no thresholds, ratios, or data-quality SLAs
+# performance_checks: n/a — no latency SLA gate (streaming hides residual latency;
+#                     ~1 LLM call per detected interviewer question, not per turn)
+# ----------------------------------------------------------------------------
+
+structural_checks:
+  description: |
+    Automated grep / node checks that verify the touched files contain the edits
+    described in plan Phase 2 + spec FRs. Runnable without booting the app.
+  checks:
+    - id: SC-001
+      name: pure-helpers-exported
+      plan_ref: spec FR-018/C6 + data-model.md Pure Helper Signatures
+      description: "summaryService.js exports the four pure helpers so the node:test file can import them"
+      command: |
+        node -e "const s=require('./src/features/listen/summary/summaryService'); const need=['isLikelyQuestion','normalizePassive','parseAnswerOrPassive','shouldTriggerAnswer']; const missing=need.filter(k=>typeof s[k]!=='function'); if(missing.length){console.error('MISSING:',missing);process.exit(1)} else console.log('ALL_HELPERS_EXPORTED')"
+      expect:
+        exit_code: 0
+        stdout_contains: "ALL_HELPERS_EXPORTED"
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "All four helpers must be exported from summaryService.js (FR-018/C6): isLikelyQuestion, normalizePassive, parseAnswerOrPassive, shouldTriggerAnswer."
+          - "They must be PURE (no I/O, timers, or `this`) so makeLiveAnswer stays a thin orchestrator."
+          - "If the module exports a class instance, attach the helpers to module.exports alongside it (or export a sibling helpers object) so '../summaryService' resolves them."
+        related_files: ["src/features/listen/summary/summaryService.js"]
+
+    - id: SC-002
+      name: createstreaminglllm-imported
+      plan_ref: spec FR-008/C1 + plan Phase 0.7 (summaryService.js:3 currently imports only createLLM)
+      description: "summaryService.js adds the createStreamingLLM import from the ai factory"
+      command: |
+        grep -nE "createStreamingLLM" src/features/listen/summary/summaryService.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "summaryService.js:3 currently imports only createLLM. ADD createStreamingLLM: const { createLLM, createStreamingLLM } = require('../../common/ai/factory');"
+          - "Without it, makeLiveAnswer cannot make the two-arg streaming call (FR-008)."
+        related_files: ["src/features/listen/summary/summaryService.js"]
+
+    - id: SC-003
+      name: two-arg-streaming-call
+      plan_ref: spec FR-008/C1 (factory.js:128 createStreamingLLM(provider, opts))
+      description: "makeLiveAnswer calls the TWO-ARG createStreamingLLM(provider, {...}) — not the single-object createLLM({...}) design-sketch form"
+      command: |
+        grep -nE "createStreamingLLM\s*\(\s*[A-Za-z0-9_.]+\s*,\s*\{" src/features/listen/summary/summaryService.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "LOCKED C1/FR-008: createStreamingLLM(modelInfo.provider, { apiKey, model, temperature:0.7, maxTokens:900, usePortkey: provider==='openai-glass', portkeyVirtualKey: provider==='openai-glass'?apiKey:undefined })."
+          - "Do NOT use createLLM({...}) single-object form (the design doc's sketch is WRONG per C1)."
+          - "First resolve: const modelInfo = await modelStateService.getCurrentModelInfo('llm'); throw if !modelInfo || !modelInfo.apiKey."
+        related_files: ["src/features/listen/summary/summaryService.js"]
+
+    - id: SC-004
+      name: trigger-hung-off-conversation-hub
+      plan_ref: spec FR-001 (summaryService.js:45 addConversationTurn → triggerAnalysisIfNeeded)
+      description: "addConversationTurn calls triggerAnswerIfNeeded(speaker, text) beside the existing triggerAnalysisIfNeeded"
+      command: |
+        grep -nE "triggerAnswerIfNeeded\s*\(" src/features/listen/summary/summaryService.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "Hang this.triggerAnswerIfNeeded(speaker, text) inside addConversationTurn, beside this.triggerAnalysisIfNeeded() (summaryService.js:45)."
+          - "Do NOT alter the analysis trigger — additive sibling call only (FR-017)."
+        related_files: ["src/features/listen/summary/summaryService.js"]
+
+    - id: SC-005
+      name: sse-sentinels-honored
+      plan_ref: spec FR-009 (mirror askService._processStream without importing it)
+      description: "makeLiveAnswer's stream loop honors [DONE], _reset (discard + hadFallback), _final_model, and delta.content"
+      command: |
+        grep -E "_reset" src/features/listen/summary/summaryService.js && \
+        grep -E "_final_model" src/features/listen/summary/summaryService.js && \
+        grep -E "\[DONE\]" src/features/listen/summary/summaryService.js && \
+        grep -E "delta" src/features/listen/summary/summaryService.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "Replicate the askService SSE loop LOCALLY (FR-017 forbids importing askService): on [DONE] finalize; on _reset discard accumulated answer + set hadFallback=true; on _final_model record model; on choices[0].delta.content append + emit."
+          - "Extract the per-line parse into a pure testable function (mirror askService-sse.test.js processSseLines)."
+        related_files: ["src/features/listen/summary/summaryService.js"]
+
+    - id: SC-006
+      name: passive-prefix-buffer-streaming-aware
+      plan_ref: spec FR-010/C2 (streaming-aware PASSIVE before render)
+      description: "makeLiveAnswer uses the streaming-aware prefix-buffer via parseAnswerOrPassive (NOT a whole-string content.trim()==='PASSIVE' check)"
+      command: |
+        grep -nE "parseAnswerOrPassive\s*\(" src/features/listen/summary/summaryService.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "LOCKED C2/FR-010: buffer the stream prefix until first '\\n' or ~16 chars, then parseAnswerOrPassive(prefix). The whole-string content.trim()==='PASSIVE' design-sketch is insufficient for a stream."
+          - "On passive → suppress (emit nothing, hold last answer). Else flush prefix then stream deltas."
+        related_files: ["src/features/listen/summary/summaryService.js"]
+
+    - id: SC-007
+      name: reset-folded-into-resetconversationhistory
+      plan_ref: spec FR-011/C4/D4 (fold resetLiveAnswer into resetConversationHistory; summaryService.js:52)
+      description: "resetConversationHistory invokes resetLiveAnswer (so reset rides existing listenService calls with no listenService.js edit)"
+      command: |
+        node -e "const src=require('fs').readFileSync('src/features/listen/summary/summaryService.js','utf8'); const m=src.match(/resetConversationHistory\s*\([^)]*\)\s*\{([\s\S]*?)\n\s{4}\}/); if(m && /resetLiveAnswer\s*\(/.test(m[1])) {console.log('RESET_FOLDED')} else {console.error('resetLiveAnswer() NOT called inside resetConversationHistory()');process.exit(1)}"
+      expect:
+        exit_code: 0
+        stdout_contains: "RESET_FOLDED"
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "LOCKED C4/D4/FR-011: call this.resetLiveAnswer() from inside resetConversationHistory() (summaryService.js:52)."
+          - "resetLiveAnswer must (a) clear answerDebounceTimer, (b) abort inFlightController, (c) clear lastAnsweredTail + inFlight."
+          - "Do NOT edit listenService.js — it already calls resetConversationHistory at :146 (start) and :247 (close)."
+        related_files: ["src/features/listen/summary/summaryService.js"]
+
+    - id: SC-008
+      name: debounce-callback-bails-on-empty-history
+      plan_ref: spec FR-012 (listen window NOT destroyed on Stop → isDestroyed() can't guard a late timer)
+      description: "The debounce callback bails when conversationHistory is empty (race guard for a late timer after Stop)"
+      command: |
+        grep -nE "conversationHistory\.length\s*===\s*0|conversationHistory\.length\s*<\s*1|!this\.conversationHistory\.length" src/features/listen/summary/summaryService.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "FR-012: the listen window is NOT destroyed on Stop (listenService.js:72-78), so the isDestroyed() guard in sendToRenderer does NOT protect a late debounce timer."
+          - "The debounce callback MUST additionally bail if conversationHistory is empty before calling makeLiveAnswer."
+          - "Memory lesson (stt-session-not-active-is-stopstart-race): treat a deliberate Stop as deliberate — abort + clear, never re-fire."
+        related_files: ["src/features/listen/summary/summaryService.js"]
+
+    - id: SC-009
+      name: preload-live-answer-listeners-new-channel
+      plan_ref: spec FR-013 (preload.js:205 summaryView namespace)
+      description: "preload.js adds onLiveAnswerUpdate + removeAllLiveAnswerUpdateListeners on the NEW live-answer-update channel"
+      command: |
+        grep -E "onLiveAnswerUpdate" src/preload.js && \
+        grep -E "removeAllLiveAnswerUpdateListeners" src/preload.js && \
+        grep -E "live-answer-update" src/preload.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "Add to the EXISTING summaryView namespace (preload.js:205), beside the summary-update listeners:"
+          - "  onLiveAnswerUpdate: (callback) => ipcRenderer.on('live-answer-update', callback),"
+          - "  removeAllLiveAnswerUpdateListeners: () => ipcRenderer.removeAllListeners('live-answer-update')"
+          - "NEW channel name is 'live-answer-update' — do NOT reuse 'summary-update'."
+        related_files: ["src/preload.js"]
+
+    - id: SC-010
+      name: service-emits-on-new-channel
+      plan_ref: spec FR-013 (service sends on live-answer-update)
+      description: "summaryService emits the streamed answer on the live-answer-update channel via sendToRenderer"
+      command: |
+        grep -nE "sendToRenderer\s*\(\s*['\"]live-answer-update['\"]" src/features/listen/summary/summaryService.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "makeLiveAnswer must emit via this.sendToRenderer('live-answer-update', { answer, ts }) — the existing listen-window-targeted, isDestroyed()-guarded sender (summaryService.js:29)."
+          - "Payload is the full accumulated answer text each delta (mirrors askService's currentResponse broadcast)."
+        related_files: ["src/features/listen/summary/summaryService.js"]
+
+    - id: SC-011
+      name: liveanswerview-exists-with-resetanswer
+      plan_ref: spec FR-014/FR-015 (NEW LiveAnswerView Lit component)
+      description: "LiveAnswerView.js exists, registers <live-answer-view>, loads marked/DOMPurify idempotently, and exposes resetAnswer()"
+      command: |
+        test -f src/ui/listen/summary/LiveAnswerView.js && \
+        grep -E "customElements\.define\(\s*['\"]live-answer-view['\"]" src/ui/listen/summary/LiveAnswerView.js && \
+        grep -E "if\s*\(\s*!window\.marked" src/ui/listen/summary/LiveAnswerView.js && \
+        grep -E "DOMPurify" src/ui/listen/summary/LiveAnswerView.js && \
+        grep -E "resetAnswer\s*\(" src/ui/listen/summary/LiveAnswerView.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "Create src/ui/listen/summary/LiveAnswerView.js; register customElements.define('live-answer-view', LiveAnswerView)."
+          - "Idempotent loader guarded by if(!window.marked) (mirror SummaryView.js:293); read marked/hljs/DOMPurify into instance fields."
+          - "DOMPurify.sanitize every rendered delta (mirror SummaryView.js:375-397); plain-text fallback when libs absent (SummaryView.js:359)."
+          - "Expose resetAnswer(); do NOT subclass SummaryView (FR-017)."
+        related_files: ["src/ui/listen/summary/LiveAnswerView.js"]
+
+    - id: SC-012
+      name: liveanswerview-mounted-above-summary
+      plan_ref: spec FR-014/D3 (ListenView.js:681 — above <summary-view>)
+      description: "ListenView.js imports LiveAnswerView and renders <live-answer-view> above <summary-view>"
+      command: |
+        grep -E "LiveAnswerView" src/ui/listen/ListenView.js && \
+        grep -E "<live-answer-view" src/ui/listen/ListenView.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "Import './summary/LiveAnswerView.js' beside the SummaryView import."
+          - "Render <live-answer-view .isVisible=${this.viewMode === 'insights'}> ABOVE <summary-view> at ListenView.js:681 (D3 — answer reads first)."
+        related_files: ["src/ui/listen/ListenView.js"]
+
+    - id: SC-013
+      name: listenview-resets-live-answer
+      plan_ref: spec FR-016 (ListenView.js:467-469 reset block, beside resetAnalysis())
+      description: "ListenView.js reset block calls the live-answer-view's resetAnswer() beside summaryView.resetAnalysis()"
+      command: |
+        grep -nE "resetAnswer\s*\(\s*\)" src/ui/listen/ListenView.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "In the existing reset block (ListenView.js:467-469), query the <live-answer-view> and call its resetAnswer(), beside the existing summaryView.resetAnalysis()."
+          - "This clears the panel on explicit session reset (FR-016) — NOT between answers."
+        related_files: ["src/ui/listen/ListenView.js"]
+
+    - id: SC-014
+      name: liveanswer-test-uses-node-test
+      plan_ref: spec FR-018 (package.json:15 node --test; NOT Jest)
+      description: "liveAnswer.test.js exists and uses the Node built-in runner (require('node:test') + node:assert/strict)"
+      command: |
+        test -f src/features/listen/summary/__tests__/liveAnswer.test.js && \
+        grep -E "require\(['\"]node:test['\"]\)" src/features/listen/summary/__tests__/liveAnswer.test.js && \
+        grep -E "require\(['\"]node:assert/strict['\"]\)" src/features/listen/summary/__tests__/liveAnswer.test.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "Test file at src/features/listen/summary/__tests__/liveAnswer.test.js (matches the node --test src/**/__tests__/**/*.test.js glob)."
+          - "Use require('node:test') + require('node:assert/strict') — mirror geminiModelRotator.test.js. Do NOT add Jest/Vitest."
+        related_files: ["src/features/listen/summary/__tests__/liveAnswer.test.js"]
+
+    - id: SC-015
+      name: changelog-entry-added
+      plan_ref: plan Phase 2 step 8 / T-DOC-GATE
+      description: "CHANGELOG.md contains a Live Answer entry under [Unreleased]"
+      command: |
+        grep -iE "Live Answer" CHANGELOG.md
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: MEDIUM
+        rca_hints:
+          - "Add an [Unreleased] entry following the sibling 'Gemini Failover' / 'Ask Mode Shortcuts' format."
+          - "Added: streaming Live Answer lane, live-answer-update IPC channel, LiveAnswerView component. Internal: node:test coverage."
+        related_files: ["CHANGELOG.md"]
+
+negative_assertions:
+  description: |
+    Things that MUST NOT exist after this feature lands — the FR-017 CLOSED set
+    and the load-bearing screen-share safety invariant. Each is a hard guard.
+  checks:
+    - id: NA-001
+      name: askservice-not-imported-in-summaryservice
+      plan_ref: spec FR-017 (askService stays closed; replicate SSE shape, do not import)
+      description: "summaryService.js does NOT import askService (the SSE loop is replicated locally, not borrowed)"
+      command: |
+        ! grep -nE "require\([^)]*askService" src/features/listen/summary/summaryService.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "FR-017 keeps askService.js untouched AND un-imported. Replicate the _processStream loop shape locally in makeLiveAnswer."
+          - "Extract the pure per-line parse into a testable function instead of reaching into askService."
+        related_files: ["src/features/listen/summary/summaryService.js"]
+
+    - id: NA-002
+      name: closed-set-files-untouched
+      plan_ref: spec FR-017 (CLOSED set) + plan Project Structure
+      description: "The FR-017 CLOSED set is absent from the working diff (SummaryView.js, promptTemplates.js, askService.js, featureBridge.js, listenService.js)"
+      command: |
+        test -z "$(git diff --name-only HEAD 2>/dev/null | grep -E 'src/ui/listen/summary/SummaryView\.js|src/features/common/prompts/promptTemplates\.js|src/features/ask/askService\.js|src/bridge/featureBridge\.js|src/features/listen/listenService\.js' || true)"
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "FR-017: SummaryView.js, promptTemplates.js, askService.js, featureBridge.js, listenService.js MUST NOT be modified."
+          - "If one appears in the diff, the additive design has leaked — revert and reach the seam additively (e.g. fold reset into resetConversationHistory rather than editing listenService.js)."
+        related_files:
+          - "src/ui/listen/summary/SummaryView.js"
+          - "src/features/common/prompts/promptTemplates.js"
+          - "src/features/ask/askService.js"
+          - "src/bridge/featureBridge.js"
+          - "src/features/listen/listenService.js"
+
+    - id: NA-003
+      name: summary-update-channel-untouched
+      plan_ref: spec FR-013/FR-017 (existing summary-update channel left intact)
+      description: "The existing summary-update preload listeners are unchanged (only NEW live-answer-update listeners added)"
+      command: |
+        grep -E "onSummaryUpdate" src/preload.js && \
+        grep -E "removeAllSummaryUpdateListeners" src/preload.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "The summary-update listeners (preload.js:210-212) must remain. Add the live-answer-update listeners BESIDE them, do not replace."
+        related_files: ["src/preload.js"]
+
+    - id: NA-004
+      name: no-content-protection-disable
+      plan_ref: spec Enforcement Strategy (load-bearing safety invariant)
+      description: "No code path disables content protection (windowManager.js untouched; no setContentProtection(false) in the diff)"
+      command: |
+        test -z "$(git diff -U0 HEAD 2>/dev/null | grep -nE '^\+.*setContentProtection\s*\(\s*false' || true)" && \
+        test -z "$(git diff --name-only HEAD 2>/dev/null | grep -E 'src/window/windowManager\.js' || true)"
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "LOAD-BEARING: the answer renders only in the content-protected listen window. Never call setContentProtection(false)."
+          - "windowManager.js is NOT in the edit set — if it appears in the diff, the safety invariant is at risk."
+        related_files: ["src/window/windowManager.js"]
+
+    - id: NA-005
+      name: answer-text-never-logged
+      plan_ref: spec Enforcement Strategy (answer text never reaches a capturable sink)
+      description: "No added console.* line logs the answer body / accumulated response / delta content in summaryService.js or LiveAnswerView.js"
+      command: |
+        test -z "$(git diff -U0 HEAD 2>/dev/null -- src/features/listen/summary/summaryService.js src/ui/listen/summary/LiveAnswerView.js | grep -inE '^\+.*console\.(log|info|warn|error|debug).*(answer|fullResponse|currentResponse|delta\.content|\.content)' || true)"
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "Safety invariant: trigger/suppress/stream-error EVENTS may log, but the answer TEXT must never be logged to console or any sink outside the protected window."
+          - "Remove any console.* that interpolates the answer/delta/accumulated response."
+        related_files:
+          - "src/features/listen/summary/summaryService.js"
+          - "src/ui/listen/summary/LiveAnswerView.js"
+
+    - id: NA-006
+      name: liveanswerview-not-subclassing-summaryview
+      plan_ref: spec FR-015/FR-017 (mirror the pattern, do not subclass SummaryView)
+      description: "LiveAnswerView does NOT extend/import SummaryView (it replicates the loader+render pattern in new additive code)"
+      command: |
+        ! grep -nE "extends\s+SummaryView|require\([^)]*SummaryView|from\s+['\"][^'\"]*SummaryView" src/ui/listen/summary/LiveAnswerView.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "FR-017 keeps SummaryView.js untouched. LiveAnswerView must structurally CLONE its loader+render path, not subclass or import it."
+        related_files: ["src/ui/listen/summary/LiveAnswerView.js"]
+
+    - id: NA-007
+      name: no-db-persistence-of-live-answer
+      plan_ref: spec C8 (in-memory only; saveSummary path not extended)
+      description: "The live answer is NOT persisted — summaryService does not call summaryRepository.saveSummary for the answer lane"
+      command: |
+        test -z "$(git diff -U0 HEAD 2>/dev/null -- src/features/listen/summary/summaryService.js | grep -inE '^\+.*saveSummary' || true)"
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: MEDIUM
+        rca_hints:
+          - "C8: v1 is in-memory only. Do NOT extend the summaryRepository.saveSummary path for live answers."
+        related_files: ["src/features/listen/summary/summaryService.js"]
+
+test_gates:
+  description: |
+    Automated node:test gates required green before merge. Runner is the Node
+    built-in (`npm test` = node --test src/**/__tests__/**/*.test.js). The LLM
+    provider is mocked/injected in every integration case — no live calls.
+  gates:
+    - id: TG-001
+      name: pure-helper-unit-tests
+      plan_ref: plan Phase 2 steps 1-2 + spec FR-001/FR-002/FR-004/FR-010/FR-018
+      description: "Unit tests for the four pure helpers pass (RED-first, then GREEN)"
+      command: |
+        node --test src/features/listen/summary/__tests__/liveAnswer.test.js
+      expect:
+        exit_code: 0
+      assertions:
+        - "isLikelyQuestion('Can you walk me through how a Go channel works?') === true (?-tail + opener)"
+        - "isLikelyQuestion('tell me about your experience') === true (opener, no ?)"
+        - "isLikelyQuestion('Okay, great, let me share my screen') === false"
+        - "isLikelyQuestion('') === false and isLikelyQuestion('   ') === false"
+        - "normalizePassive('PASSIVE.') === 'PASSIVE' and normalizePassive('**PASSIVE**') === 'PASSIVE'"
+        - "normalizePassive('  passive\\n') === 'PASSIVE'"
+        - "normalizePassive of the native phrase 'Not sure what you need help with right now' equals its normalized suppress form"
+        - "parseAnswerOrPassive('PASSIVE') -> {passive:true, flush:''}"
+        - "parseAnswerOrPassive('A Go channel is a') -> {passive:false, flush:'A Go channel is a'}"
+        - "shouldTriggerAnswer('Me', q, null, false) === false (mic gate)"
+        - "shouldTriggerAnswer('Them', q, null, false) === true"
+        - "shouldTriggerAnswer('Them', q, normalize(q), false) === false (de-dup same tail)"
+        - "shouldTriggerAnswer('Them', newTail, normalize(old), true) === true (new question while in-flight)"
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "These MUST have failed FIRST (RED) before T-P2.1 implemented the helpers — Constitution Principle I."
+          - "De-dup tail normalize = trim + collapse whitespace + lowercase; PASSIVE compare is uppercase (data-model.md normalization rule)."
+        related_files:
+          - "src/features/listen/summary/summaryService.js"
+          - "src/features/listen/summary/__tests__/liveAnswer.test.js"
+
+    - id: TG-002
+      name: sse-line-parser-unit-test
+      plan_ref: plan Phase 2 step 3 + spec FR-009/FR-017/FR-018
+      description: "The extracted pure SSE-line parser handles [DONE]/_reset/_final_model/delta.content (mirror askService-sse.test.js; askService NOT imported)"
+      command: |
+        node --test src/features/listen/summary/__tests__/liveAnswer.test.js
+      expect:
+        exit_code: 0
+      assertions:
+        - "parse 'data: [DONE]' -> done sentinel"
+        - "parse 'data: {\"_reset\":true}' -> reset sentinel (consumer discards + sets hadFallback)"
+        - "parse 'data: {\"_final_model\":\"x\"}' -> finalModel 'x'"
+        - "parse 'data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}' -> delta 'hi'"
+        - "blank / non-data line -> ignored"
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "Extract the per-line parse into a standalone pure function and test it directly (mirror askService-sse.test.js processSseLines)."
+          - "Do NOT import askService (FR-017). Order: sentinels checked before the delta path."
+        related_files:
+          - "src/features/listen/summary/summaryService.js"
+          - "src/features/listen/summary/__tests__/liveAnswer.test.js"
+
+    - id: TG-003
+      name: orchestrator-integration-tests
+      plan_ref: plan Phase 2 steps 5,7 + spec FR-003/FR-004/FR-010/FR-011/FR-012/FR-017 (AS 3,4,5,6,7,8)
+      description: "Integration tests against an injected/mocked stream + fake clock pass — LLM provider mocked, no live calls"
+      command: |
+        node --test src/features/listen/summary/__tests__/liveAnswer.test.js
+      expect:
+        exit_code: 0
+      assertions:
+        - "AS-4 debounce coalescing: 3 them: fragments < 800ms apart -> exactly ONE stream / one LLM-seam invocation"
+        - "AS-6 de-dup: trailing same-normalized-tail fragment -> no second stream"
+        - "AS-5 abort-replace: new question mid-stream -> stream A AbortController.abort() called, stream B starts; no blank between"
+        - "AS-3 PASSIVE suppress: PASSIVE / **PASSIVE** / native-phrase prefix -> no emit, last answer held (no flicker to empty)"
+        - "AS-8 mid-debounce close: resetConversationHistory() clears timer + aborts stream -> no emit, no throw"
+        - "FR-012 late-timer race: debounce callback with empty conversationHistory -> bail, no emit"
+        - "AS-7 lane independence: summary-update still fires on its 5-turn cadence while answers stream; SummaryView output unchanged"
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "The LLM provider MUST be mocked/injected (synthetic SSE ReadableStream) BEFORE every integration test — no live calls."
+          - "Use a fake/injectable clock for the 800ms debounce."
+          - "AS-5/AS-3: assert the panel never emits an empty/blank update between answers (hold-last, Q1/G3)."
+          - "AS-8/FR-012: the listen window is NOT destroyed on Stop — the empty-history bail is the guard."
+        related_files:
+          - "src/features/listen/summary/summaryService.js"
+          - "src/features/listen/summary/__tests__/liveAnswer.test.js"
+
+    - id: TG-004
+      name: full-suite-no-regression
+      plan_ref: T-VERIFY-UNIT
+      description: "The full node:test suite is green — the new file passes and the pre-existing suite (geminiModelRotator, gemini, askService-sse) does not regress"
+      command: |
+        npm test
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "If a pre-existing test broke, the additive change leaked into a shared module (likely summaryService or preload) — re-check FR-017 boundaries."
+        related_files:
+          - "src/features/listen/summary/summaryService.js"
+          - "src/preload.js"
+
+    - id: TG-005
+      name: lint-changed-files
+      plan_ref: T-VERIFY-LINT
+      description: "ESLint passes (no errors) for the changed files"
+      command: |
+        npm run lint
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "Resolve eslint errors in summaryService.js / preload.js / ListenView.js / LiveAnswerView.js / liveAnswer.test.js."
+          - "Lit template files may not be fully covered by the config (best-effort, per the sibling spec's note) — focus on real errors."
+        related_files:
+          - "src/features/listen/summary/summaryService.js"
+          - "src/ui/listen/summary/LiveAnswerView.js"
+          - "src/ui/listen/ListenView.js"
+          - "src/preload.js"
+
+manual_smoke_tests:
+  description: |
+    From quickstart.md "Manual end-to-end verification" + "Safety verification".
+    No automated Electron-renderer or live-audio harness exists in this repo, so
+    these are MANUAL acceptance steps gated by the automated tests above.
+  tests:
+    - id: MST-001
+      name: streamed-answer-appears
+      plan_ref: quickstart steps 2-4 + spec AS-1
+      description: "Configure an LLM model, start a Listen session (insights pane visible), speak a question over SYSTEM audio (Them channel)."
+      expected: |
+        Within ~1-2s of the question settling, the Live Answer panel (ABOVE Live Insights)
+        streams a markdown answer. The candidate never types.
+      manual_only: true
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "No first token: confirm the 800ms debounce fired and makeLiveAnswer resolved a model (getCurrentModelInfo('llm'))."
+          - "No render: confirm preload.summaryView.onLiveAnswerUpdate is wired and <live-answer-view> is mounted + visible (viewMode==='insights')."
+
+    - id: MST-002
+      name: passive-holds-last-answer
+      plan_ref: quickstart step 5 + spec AS-3
+      description: "After an answer renders, speak small talk over system audio ('okay, let me pull up the next question')."
+      expected: |
+        The panel HOLDS the previous answer (no flicker to empty, no new answer) — PASSIVE suppressed before render.
+      manual_only: true
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "If it blanks: the prefix-buffer suppress path is clearing content instead of holding last (violates Q1/G3)."
+
+    - id: MST-003
+      name: mic-never-triggers
+      plan_ref: quickstart step 6 + spec AS-2
+      description: "Speak into the MIC (Me channel)."
+      expected: "NO answer is generated (speaker gate blocks Me)."
+      manual_only: true
+
+    - id: MST-004
+      name: multi-segment-coalesces
+      plan_ref: quickstart step 7 + spec AS-4
+      description: "Ask a multi-segment question with pauses over system audio."
+      expected: "A SINGLE coalesced answer (not one per fragment)."
+      manual_only: true
+
+    - id: MST-005
+      name: stop-mid-answer-clean
+      plan_ref: quickstart step 8 + spec AS-8
+      description: "Press Stop mid-answer; then start a new session."
+      expected: |
+        No error; the stream stops; starting a new session clears the panel
+        (resetConversationHistory -> resetLiveAnswer + LiveAnswerView.resetAnswer()).
+      manual_only: true
+
+    - id: MST-SAFETY-001
+      name: answer-excluded-from-shared-screen
+      plan_ref: quickstart "Safety verification" + spec Enforcement Strategy
+      description: "Screen-share during MST-001 and observe the SHARED screen (load-bearing)."
+      expected: |
+        The streamed answer does NOT appear on the shared screen — it renders only in the
+        content-protected listen window. (Automated guards: NA-004 setContentProtection,
+        NA-005 no answer logging, SC-010 listen-window-targeted emit.)
+      manual_only: true
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "If the answer is visible on the shared screen: content protection is disabled or the answer rendered in a non-protected window. Check NA-004 + SC-010 first."
+
+ipc_contract_validation:
+  description: |
+    Confirms the NEW live-answer-update channel is additive and the renderer
+    plumbing forwards it without disturbing the existing summary-update envelope.
+  channels:
+    - channel: "live-answer-update"
+      direction: "main -> renderer (push, listen window only)"
+      args_shape: |
+        { answer: string, ts: number }   // full accumulated answer text each delta
+      validation: |
+        Emitted ONLY via sendToRenderer (summaryService.js:29), which targets
+        windowPool.get('listen') with an isDestroyed() guard. Consumed by
+        LiveAnswerView via preload.summaryView.onLiveAnswerUpdate. The existing
+        summary-update channel is untouched (NA-003).
+      regression_check:
+        id: IPC-001
+        command: |
+          grep -nE "live-answer-update" src/preload.js && \
+          grep -nE "live-answer-update" src/features/listen/summary/summaryService.js
+        expect:
+          exit_code: 0
+          note: "Both the preload listener and the service emit reference the new channel name verbatim."
+        on_failure:
+          severity: HIGH
+          rca_hints:
+            - "Channel name must match exactly on both sides: 'live-answer-update'."
+            - "If preload forwards via a namespaced object, ensure onLiveAnswerUpdate is exposed on the summaryView namespace (FR-013)."
+          related_files: ["src/preload.js", "src/features/listen/summary/summaryService.js"]
+
+on_failure:
+  SC-001:
+    rca_hints: ["Export the four pure helpers from summaryService.js so node:test can import them (FR-018/C6)."]
+    related_files: ["src/features/listen/summary/summaryService.js"]
+  SC-003:
+    rca_hints: ["Two-arg createStreamingLLM(provider, opts) — NOT createLLM({...}). Resolve modelInfo first and guard !apiKey (C1/FR-008)."]
+    related_files: ["src/features/listen/summary/summaryService.js"]
+  SC-007:
+    rca_hints: ["Fold resetLiveAnswer() into resetConversationHistory(); never edit listenService.js (C4/D4/FR-011)."]
+    related_files: ["src/features/listen/summary/summaryService.js"]
+  NA-004:
+    rca_hints: ["Never call setContentProtection(false); windowManager.js stays out of the diff (load-bearing safety)."]
+    related_files: ["src/window/windowManager.js"]
+  NA-005:
+    rca_hints: ["Answer text must never be logged to a capturable sink — only trigger/suppress/error events may log."]
+    related_files: ["src/features/listen/summary/summaryService.js", "src/ui/listen/summary/LiveAnswerView.js"]

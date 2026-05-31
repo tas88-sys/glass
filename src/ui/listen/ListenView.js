@@ -1,6 +1,7 @@
 import { html, css, LitElement } from '../assets/lit-core-2.7.4.min.js';
 import './stt/SttView.js';
 import './summary/SummaryView.js';
+import './summary/LiveAnswerView.js';
 
 export class ListenView extends LitElement {
     static styles = css`
@@ -465,8 +466,10 @@ export class ListenView extends LitElement {
                     this.updateComplete.then(() => {
                         const sttView = this.shadowRoot.querySelector('stt-view');
                         const summaryView = this.shadowRoot.querySelector('summary-view');
+                        const liveAnswerView = this.shadowRoot.querySelector('live-answer-view');
                         if (sttView) sttView.resetTranscript();
                         if (summaryView) summaryView.resetAnalysis();
+                        if (liveAnswerView) liveAnswerView.resetAnswer();
                     });
                     this.requestUpdate();
                 }
@@ -678,7 +681,11 @@ export class ListenView extends LitElement {
                     @stt-messages-updated=${this.handleSttMessagesUpdated}
                 ></stt-view>
 
-                <summary-view 
+                <live-answer-view
+                    .isVisible=${this.viewMode === 'insights'}
+                ></live-answer-view>
+
+                <summary-view
                     .isVisible=${this.viewMode === 'insights'}
                     .hasCompletedRecording=${this.hasCompletedRecording}
                 ></summary-view>

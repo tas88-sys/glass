@@ -205,11 +205,15 @@ contextBridge.exposeInMainWorld('api', {
   summaryView: {
     // Message Handling
     sendQuestionFromSummary: (text) => ipcRenderer.invoke('ask:sendQuestionFromSummary', text),
-    
+
     // Listeners
     onSummaryUpdate: (callback) => ipcRenderer.on('summary-update', callback),
     removeOnSummaryUpdate: (callback) => ipcRenderer.removeListener('summary-update', callback),
-    removeAllSummaryUpdateListeners: () => ipcRenderer.removeAllListeners('summary-update')
+    removeAllSummaryUpdateListeners: () => ipcRenderer.removeAllListeners('summary-update'),
+
+    // src/ui/listen/summary/LiveAnswerView.js — live-answer-update channel (FR-013)
+    onLiveAnswerUpdate: (callback) => ipcRenderer.on('live-answer-update', callback),
+    removeAllLiveAnswerUpdateListeners: () => ipcRenderer.removeAllListeners('live-answer-update')
   },
 
   // src/ui/settings/SettingsView.js
