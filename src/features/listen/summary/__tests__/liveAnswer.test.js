@@ -220,71 +220,72 @@ describe('parseLiveAnswerSseLine', () => {
 // ---------------------------------------------------------------------------
 // P1.1 — isLikelyQuestion (FR-002)
 // ---------------------------------------------------------------------------
-describe('isLikelyQuestion', () => {
+describe('isLikelyQuestion (recall-maximal non-question screen)', () => {
   let isLikelyQuestion;
 
   before(() => {
-    // Will fail (RED) until summaryService exports this helper
     ({ isLikelyQuestion } = require('../summaryService'));
   });
 
-  it('returns true for ?-tail question', () => {
-    assert.equal(isLikelyQuestion('Can you walk me through how a Go channel works?'), true);
-  });
+  // Every real question shape MUST trigger (recall over precision). A real
+  // question is NEVER dropped — non-questions among these are screened later by
+  // the model's PASSIVE reply, not by this heuristic.
+  const triggers = [
+    // explicit interrogatives
+    'Can you walk me through how a Go channel works?',
+    'tell me about your experience',
+    "WHAT'S YOUR APPROACH",
+    'describe your testing strategy.',
+    'so the performance',
+    // imperative / interview-prompt forms — NO question mark, NO leading opener
+    'Give me an example of a deadlock',
+    'Design a rate limiter that handles bursts',
+    'Compare TCP and UDP for this use case',
+    'Walk us through your approach to caching',
+    'Implement a function that reverses a linked list',
+    'Explain the difference between processes and threads',
+    // opener pushed off the sentence-start by a conjunction / filler
+    'Okay so how does a hashmap work',
+    'And what about scaling to a million users',
+    // statement-form prompt (no wh-word, no ?, no imperative cue)
+    'Your biggest weakness',
+    // question buried mid-utterance in a long STT blob (the live-observed bug)
+    "Start That's where it's at. Hold on one second. Hopefully, my dog's " +
+      'chilled out. For this question here, the question that we are gonna look ' +
+      'at is what types can a map use as a key in the Go programming language? ' +
+      'And this could',
+    'Let me think for a second. How does garbage collection work',
+    // non-question monologue ALSO triggers — PASSIVE suppresses it downstream,
+    // never the heuristic (this is how AS-3 is now enforced)
+    'Okay, great, let me share my screen',
+    'Okay. Hold on one second. My dog is barking. Let me get settled.',
+  ];
+  for (const t of triggers) {
+    it(`triggers: ${JSON.stringify(t.length > 48 ? t.slice(0, 45) + '…' : t)}`, () => {
+      assert.equal(isLikelyQuestion(t), true);
+    });
+  }
 
-  it('returns true for "tell me" opener without ?', () => {
-    assert.equal(isLikelyQuestion('tell me about your experience'), true);
-  });
-
-  it('returns true for incomplete fragment (favor recall)', () => {
-    assert.equal(isLikelyQuestion('so the performance'), true);
-  });
-
-  it('returns false for non-question statement', () => {
-    assert.equal(isLikelyQuestion('Okay, great, let me share my screen'), false);
-  });
-
-  it('returns true for uppercase opener (case-insensitive)', () => {
-    assert.equal(isLikelyQuestion("WHAT'S YOUR APPROACH"), true);
-  });
-
-  it('returns false for empty string', () => {
-    assert.equal(isLikelyQuestion(''), false);
-  });
-
-  it('returns false for whitespace-only string', () => {
-    assert.equal(isLikelyQuestion('   '), false);
-  });
-
-  it('returns true for "describe" opener', () => {
-    assert.equal(isLikelyQuestion('describe your testing strategy.'), true);
-  });
-
-  it('returns true when a ? is buried mid-utterance (real STT ramble — regression)', () => {
-    // Observed live failure: the question mark sits in the MIDDLE of a long turn
-    // that starts with filler ("Start That's where it's at...") and ends with
-    // trailing words ("And this could") — no opener at the start, no ?-tail.
-    const stt =
-      "Start That's where it's at. Hold on one second. Hopefully, my dog's " +
-      "chilled out. For this question here, the question that we're gonna look " +
-      "at is what types can a map use as a key in the Go programming language? " +
-      'And this could';
-    assert.equal(isLikelyQuestion(stt), true);
-  });
-
-  it('returns true when a later sentence starts with an opener (no ?-tail)', () => {
-    assert.equal(
-      isLikelyQuestion('Let me think for a second. How does garbage collection work'),
-      true
-    );
-  });
-
-  it('returns false for a multi-sentence ramble with no ? and no question opener', () => {
-    assert.equal(
-      isLikelyQuestion('Okay. Hold on one second. My dog is barking. Let me get settled.'),
-      false
-    );
-  });
+  // The ONLY things dropped: empty turns and pure acknowledgement / backchannel.
+  const dropped = [
+    '',
+    '   ',
+    'okay',
+    'Okay, great, thanks',
+    'got it',
+    'got it, makes sense',
+    'yeah totally',
+    'mm-hmm',
+    'sounds good',
+    'cool, nice',
+    'sure, no problem',
+    'right, exactly',
+  ];
+  for (const d of dropped) {
+    it(`drops backchannel: ${JSON.stringify(d)}`, () => {
+      assert.equal(isLikelyQuestion(d), false);
+    });
+  }
 });
 
 // ---------------------------------------------------------------------------
