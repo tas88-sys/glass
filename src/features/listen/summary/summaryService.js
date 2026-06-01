@@ -202,6 +202,10 @@ class SummaryService {
         this.inFlight = false;
         this.hadFallback = false;
         this.lastAnswerTs = 0;
+        // Monotonic id per answer — stable across one answer's stream, new per
+        // question. Lets the renderer coalesce streaming deltas into one history
+        // entry vs. pushing a new one (in-session answer history).
+        this.answerSeq = 0;
     }
 
     setCallbacks({ onAnalysisComplete, onStatusUpdate }) {
@@ -232,8 +236,14 @@ class SummaryService {
      * @param {AbortSignal} [signal] — from the in-flight AbortController
      * @returns {Promise<{answer:string,ts:number}|null>}
      */
-    async makeLiveAnswer(conversationTexts, signal) {
+    async makeLiveAnswer(conversationTexts, signal, meta = {}) {
         if (!conversationTexts || conversationTexts.length === 0) return null;
+
+        // id is constant for this answer's whole stream; question is the
+        // triggering them: turn. Both ride on every live-answer-update so the
+        // renderer can build an in-session history (newest-first).
+        const answerId = meta.id != null ? meta.id : Date.now();
+        const question = meta.question || '';
 
         const recent = this.formatConversationForPrompt(conversationTexts, 30);
         const basePrompt = getSystemPrompt('pickle_glass_analysis', '', false);
@@ -330,6 +340,8 @@ class SummaryService {
                                     // Flush the buffered prefix as first emit
                                     fullResponse += decision.flush;
                                     this.sendToRenderer('live-answer-update', {
+                                        id: answerId,
+                                        question,
                                         answer: fullResponse,
                                         ts: Date.now(),
                                     });
@@ -340,6 +352,8 @@ class SummaryService {
                             // Normal streaming after prefix committed
                             fullResponse += parsed.delta;
                             this.sendToRenderer('live-answer-update', {
+                                id: answerId,
+                                question,
                                 answer: fullResponse,
                                 ts: Date.now(),
                             });
@@ -360,7 +374,7 @@ class SummaryService {
                 passiveSuppressed = true;
             } else if (decision.flush) {
                 fullResponse += decision.flush;
-                this.sendToRenderer('live-answer-update', { answer: fullResponse, ts: Date.now() });
+                this.sendToRenderer('live-answer-update', { id: answerId, question, answer: fullResponse, ts: Date.now() });
             }
         }
 
@@ -430,8 +444,11 @@ class SummaryService {
             this.inFlightController = new AbortController();
             const signal = this.inFlightController.signal;
 
+            // New id per accepted answer — the renderer keys its history on this.
+            const answerId = ++this.answerSeq;
+
             try {
-                await this.makeLiveAnswer(this.conversationHistory, signal);
+                await this.makeLiveAnswer(this.conversationHistory, signal, { id: answerId, question: text });
             } catch (err) {
                 if (signal.aborted) {
                     // Expected control flow on abort-and-replace — swallow (FR-009)
