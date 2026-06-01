@@ -691,11 +691,13 @@ export class ListenView extends LitElement {
 
                 <live-answer-view
                     .isVisible=${this.viewMode === 'insights'}
+                    @live-answer-updated=${this.handleSttMessagesUpdated}
                 ></live-answer-view>
 
                 <summary-view
                     .isVisible=${this.viewMode === 'insights'}
                     .hasCompletedRecording=${this.hasCompletedRecording}
+                    @summary-updated=${this.handleSttMessagesUpdated}
                 ></summary-view>
             </div>
         `;

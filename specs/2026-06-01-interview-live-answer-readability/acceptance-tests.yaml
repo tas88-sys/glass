@@ -1,0 +1,681 @@
+_version: "2"
+spec_id: "2026-06-01-interview-live-answer-readability"
+spec_name: "Interview Live Answer — Readability (Bullet Format + Question Label)"
+_branch_target: "main"
+
+# --- Staleness Detection (v2 required) ---
+generation_context:
+  generated_at: "2026-06-01"
+  generated_by: "/tasks 2026-06-01-interview-live-answer-readability"
+  spec_hash: "e07a3b264e5b33664183f91fca6772f15990b2a736dd14e9fa38bcda5bb39d7e"
+  plan_hash: "fe8563623900b6d00b9d80841c38b3ce0dc1caab6bf99feec35662aa6dfdb692"
+  tasks_hash: "de645647d8c52b6936060abc0d926b7b174dd6db736be081456b22bcea1a8695"
+  framework_note: |
+    Follows the parent spec 2026-05-30-interview-live-answer/acceptance-tests.yaml
+    convention. This Electron repo has NO type-check / test:unit / test:integration /
+    test:smoke npm scripts — only `npm test` (= node --test src/**/__tests__/**/*.test.js,
+    package.json:15) and `npm run lint` (= eslint --ext .ts,.tsx,.js ., package.json:16).
+    All structural / negative-assertion checks are grep/node-based and runnable WITHOUT
+    booting Electron. The LLM provider is mocked in every test (no live calls). No E2E /
+    renderer / live-audio harness exists — the rendered <ul><li> bullets, no-freeze, no-clip,
+    and the cleaner Q: label are MANUAL (manual_smoke_tests below; see quickstart.md). This is
+    an in-memory-only, additive follow-on.
+
+    RECONCILED 2026-06-01 (commit 1d74c07): the original manifest assumed all production edits
+    land in ONE file (summaryService.js). Live testing revealed Improvement 1 did not visibly
+    render (raw markdown), froze mid-stream, and was clipped — so Improvement 3 (FR-013–FR-016)
+    adds rendering-correctness fixes in src/ui/listen/summary/LiveAnswerView.js and
+    src/ui/listen/ListenView.js. Those two renderer files are now in `files.modified` and are
+    guarded POSITIVELY by SC-011..SC-014 (NOT forbidden by NA-003 any more). The CLOSED set still
+    holds for promptTemplates.js, the summary lane, SummaryView.js, askService.js, featureBridge.js,
+    listenService.js, preload.js, and windowManager.js. The live-answer-update IPC payload/channel
+    and the in-memory invariant (C3/C8/FR-011) are unchanged. The spec_hash/plan_hash/tasks_hash
+    above reflect the ORIGINAL /tasks generation (7d52971) and are intentionally NOT recomputed —
+    spec.md was hand-amended post-implementation; treat a spec_hash mismatch as expected drift, not
+    a regeneration trigger.
+
+# --- Supported Environments ---
+environments: [local]
+
+# --- Drift Detection (v2 required) ---
+_references:
+  tables: []
+  routes: []
+  files:
+    modified:
+      - "src/features/listen/summary/summaryService.js  (extractQuestion peels last clause; injected bullet message; :451 label wiring)"
+      - "src/ui/listen/summary/LiveAnswerView.js  (FR-013–FR-016, commit 1d74c07 — asset path ../assets/, marked.parse, empty .answer-body / no-freeze, never-blank fallback, live-answer-updated dispatch)"
+      - "src/ui/listen/ListenView.js  (FR-016, commit 1d74c07 — @live-answer-updated → window resize)"
+    test_edits:
+      - "src/features/listen/summary/__tests__/liveAnswer.test.js  (extractQuestion T1–T8; T5 pinned to peeled 'where are you based?')"
+    doc_edits:
+      - "CHANGELOG.md"
+    read_only_reference:
+      - "src/ui/listen/summary/LiveAnswerView.js  (.answer-question label path renders ${a.question} — NOT edited for the label, D3/FR-008; the .answer-body RENDER path IS edited for FR-013–FR-016)"
+      - "src/features/common/prompts/promptTemplates.js  (pickle_glass_analysis :238, structure :252-258 — CLOSED, FR-002)"
+    closed_untouched:
+      - "src/features/common/prompts/promptTemplates.js"
+      - "src/ui/listen/summary/SummaryView.js"
+      - "src/preload.js"
+      - "src/features/ask/askService.js"
+      - "src/bridge/featureBridge.js"
+      - "src/features/listen/listenService.js"
+      - "src/window/windowManager.js"
+  ecs_tasks: []
+  ipc_channels:
+    new: []
+    modified: []
+    untouched:
+      - "live-answer-update  (payload shape {id, question, answer, ts} UNCHANGED; only the `question` VALUE changes — raw turn → extractQuestion(text))"
+      - "summary-update  (existing summaryView-namespace channel; MUST stay byte-identical)"
+  renderer_events:
+    # In-renderer DOM CustomEvent (NOT an IPC channel, NOT persisted) — FR-016
+    new:
+      - "live-answer-updated  (bubbles+composed; LiveAnswerView.updated() → ListenView re-measures + resizes the listen window so a streaming answer is not clipped)"
+  service_surface:
+    new:
+      - "extractQuestion(text) -> string  (FR-006/FR-007/FR-009, pure + total; reuses the four existing question signals)"
+    amended_value_only:
+      - "messages[1].content (injected user message) in makeLiveAnswer  (FR-001/FR-003/FR-004; always-on headline+bullets, EXACT-PASSIVE preserved)"
+      - "question: text -> question: extractQuestion(text) at summaryService.js:451  (FR-008)"
+  reused_unchanged:
+    - "CLAUSE_LEAD_RE (summaryService.js:38), LEAD_STRIP_RE (:41), CONTENT_CUE_RE (:44), EMBEDDED_Q_RE (:55)  — the four question signals (C2/FR-006)"
+    - "isLikelyQuestion clause-split (split(/[.!?;,\\n]+/)) + discourse-marker peel loop (:69-73) + empty/non-string guards (:59-61)"
+    - "pure-helper export block (:792-798)  — append module.exports.extractQuestion"
+    - "marked + DOMPurify renderer path (LiveAnswerView.js renderAnswers)  — renders real - / * lines as <ul><li>; REPAIRED by FR-013–FR-015 (it was 404ing the loader + calling the marked namespace object as a function, so markdown never rendered)"
+    - "injectable SummaryService subclass test seam (liveAnswer.test.js:45-63)  — for the integration non-regression assertions"
+  invariants:
+    - "In-memory only (C3/C8/FR-011) — nothing persisted to the session DB / summaryRepository / config table"
+    - "Bullets ALWAYS-ON for v1 (D4) — NO prose toggle, NO new config surface"
+    - "EXACT-PASSIVE directive preserved verbatim (FR-003) — bullet instruction is additive, never a replacement"
+    - "Content-protected listen window only (inherited safety invariant) — no window/content-protection code touched"
+
+# --- Categories that DO NOT apply ---------------------------------------------
+# sql_tests:          n/a — in-memory only (C3/C8/FR-011); no SQLite schema change.
+#                     The bullet_json column (config/schema.js:57) is the CLOSED
+#                     summary lane's and is NOT touched.
+# http_tests:         n/a — no HTTP/REST routes; the only data shape is an
+#                     in-process pure-helper return + an unchanged IPC payload.
+# aws_tests:          n/a — no CDK / Lambda / SSM / S3.
+# cli_tests:          n/a — no new shell scripts or npm scripts (structural_checks
+#                     below ARE node/grep commands, listed there).
+# data_integrity:     n/a — no thresholds, ratios, or data-quality SLAs.
+# performance_checks: n/a — no latency SLA gate; same call volume + maxTokens=900 as
+#                     the parent spec (the bullet instruction adds a few tokens only).
+# error_scans:        n/a — no error-table / zero-error log query surface; extractQuestion
+#                     is total (never throws) and introduces no new throw site.
+# ----------------------------------------------------------------------------
+
+structural_checks:
+  description: |
+    Automated grep / node checks that verify the touched file (summaryService.js)
+    contains the three edits described in plan Phase 2 + quickstart.md, and that the
+    new pure helper is exported for node:test. Runnable without booting the app.
+  checks:
+    - id: SC-001
+      name: extractquestion-exported
+      plan_ref: spec FR-006/FR-007/FR-009 + data-model.md §E3
+      description: "summaryService.js exports the new pure helper extractQuestion so the node:test file can import it"
+      command: |
+        node -e "const s=require('./src/features/listen/summary/summaryService'); if(typeof s.extractQuestion!=='function'){console.error('extractQuestion NOT exported');process.exit(1)} else console.log('EXTRACTQUESTION_EXPORTED')"
+      expect:
+        exit_code: 0
+        stdout_contains: "EXTRACTQUESTION_EXPORTED"
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "Append `module.exports.extractQuestion = extractQuestion;` after summaryService.js:798, alongside the existing pure-helper export block (FR-009)."
+          - "It must be a PURE free function (no I/O, no timers, no `this`) defined near isLikelyQuestion (~:80), like its siblings."
+        related_files: ["src/features/listen/summary/summaryService.js"]
+
+    - id: SC-002
+      name: extractquestion-is-total-and-pure
+      plan_ref: spec FR-007 (total function; never throws, never null/undefined) + data-model.md §E3 truth-table
+      description: "extractQuestion satisfies the load-bearing rows of the truth-table directly (T1 identity, T2 span isolation, T5 LAST clause, T6 empty, T7 non-string, T8 fallback) — a fast behavioral guard outside the test file"
+      command: |
+        node -e "const {extractQuestion:e}=require('./src/features/listen/summary/summaryService'); const A=require('node:assert/strict'); A.equal(e(''),''); A.equal(e('   '),''); A.equal(e(null),''); A.equal(e(undefined),''); A.equal(e(42),''); A.equal(e('how does garbage collection actually work in Go?'),'how does garbage collection actually work in Go?'); A.equal(e('Okay so, um, the thing I wanted to ask is — how would you design a rate limiter?'),'how would you design a rate limiter?'); A.equal(e(\"What's your name? And where are you based?\"),'where are you based?'); A.equal(e('Yes — Go is statically typed.'),'Yes — Go is statically typed.'); A.ok(e('Walk me through your last project.').length>0); console.log('EXTRACTQUESTION_TRUTH_TABLE_OK')"
+      expect:
+        exit_code: 0
+        stdout_contains: "EXTRACTQUESTION_TRUTH_TABLE_OK"
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "Truth-table (data-model.md §E3): T1 clean wh-question → identity; T2 filler-wrapped → isolated span; T5 multi-question → LAST interrogative clause ('where are you based?'); T6 empty/whitespace → ''; T7 non-string → ''; T8 declarative → full trimmed text."
+          - "Guards must mirror isLikelyQuestion (:59-61): non-string → '', empty → ''. Never throw. Non-empty input always yields non-empty output."
+          - "If T2/T5 fail: clause split is `split(/[.!?;,\\n]+/)`; peel LEAD_STRIP_RE; pick the LAST signal-bearing clause (prefer one ending in '?', else CLAUSE_LEAD_RE/CONTENT_CUE_RE/EMBEDDED_Q_RE)."
+        related_files: ["src/features/listen/summary/summaryService.js"]
+
+    - id: SC-003
+      name: extractquestion-reuses-existing-signals
+      plan_ref: spec FR-006/C2 (reuse the SAME four signals as isLikelyQuestion — no divergent heuristic)
+      description: "extractQuestion does NOT introduce a new, divergent question-signal regex set — the four module-scope signal constants remain the single source of truth"
+      command: |
+        node -e "const src=require('fs').readFileSync('src/features/listen/summary/summaryService.js','utf8'); const m=(src.match(/const\s+[A-Z][A-Z0-9_]*_RE\b/g)||[]); const names=new Set(m.map(s=>s.replace(/^const\s+/,''))); const expected=['CLAUSE_LEAD_RE','LEAD_STRIP_RE','CONTENT_CUE_RE','EMBEDDED_Q_RE']; const extra=[...names].filter(n=>!expected.includes(n)); if(extra.length){console.error('NEW signal regex(es) introduced (possible divergent heuristic):',extra);process.exit(1)} else console.log('SIGNALS_REUSED_NO_DIVERGENCE')"
+      expect:
+        exit_code: 0
+        stdout_contains: "SIGNALS_REUSED_NO_DIVERGENCE"
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "C2/FR-006: extractQuestion MUST reuse CLAUSE_LEAD_RE/LEAD_STRIP_RE/CONTENT_CUE_RE/EMBEDDED_Q_RE — the label's notion of a question must equal the lane's gate (isLikelyQuestion)."
+          - "If you added a new *_RE constant, fold it back into reuse of the four existing signals. (A local non-_RE-named helper regex for clause splitting that mirrors the existing split is acceptable, but do NOT add a new question-SIGNAL regex.)"
+        related_files: ["src/features/listen/summary/summaryService.js"]
+
+    - id: SC-004
+      name: label-call-site-uses-extractquestion
+      plan_ref: "spec FR-008/D3 (summaryService.js:451 — question: text -> question: extractQuestion(text))"
+      description: "the single makeLiveAnswer call site passes the extracted span as the question label (not the raw turn)"
+      command: |
+        grep -nE "question:\s*extractQuestion\s*\(\s*text\s*\)" src/features/listen/summary/summaryService.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "Change summaryService.js:451 from `{ id: answerId, question: text }` to `{ id: answerId, question: extractQuestion(text) }` (FR-008)."
+          - "This is the ONLY wiring change — LiveAnswerView.js renders ${a.question} verbatim (CSS Q: prefix at :148-149); do NOT edit the renderer."
+        related_files: ["src/features/listen/summary/summaryService.js"]
+
+    - id: SC-005
+      name: raw-question-text-no-longer-passed
+      plan_ref: spec FR-008 (the raw turn is replaced by the extracted span at :451)
+      description: "the bare `question: text` form is gone from summaryService.js (replaced by the extractQuestion wrapping)"
+      command: |
+        test -z "$(grep -nE "question:\s*text\b" src/features/listen/summary/summaryService.js || true)"
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "A bare `question: text` remains — FR-008 requires the value be `extractQuestion(text)` at the single call site (:451)."
+          - "If a legitimate second occurrence exists, confirm it too should carry the extracted span; the spec names exactly one call site."
+        related_files: ["src/features/listen/summary/summaryService.js"]
+
+    - id: SC-006
+      name: injected-message-preserves-exact-passive
+      plan_ref: "spec FR-003 (the amended user message keeps 'reply EXACTLY: PASSIVE' verbatim)"
+      description: "the injected user message (:256-259) still contains the verbatim EXACT-PASSIVE directive after the bullet reinforcement is added"
+      command: |
+        grep -nE "reply EXACTLY:?\s*PASSIVE" src/features/listen/summary/summaryService.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "LOCKED FR-003: the bullet instruction is ADDITIVE — keep the 'reply EXACTLY: PASSIVE' clause byte-for-byte so parseAnswerOrPassive still suppresses non-questions."
+          - "If the directive was reworded or dropped, streaming-aware PASSIVE suppression (the parent FR-010) breaks — restore it verbatim."
+        related_files: ["src/features/listen/summary/summaryService.js"]
+
+    - id: SC-007
+      name: injected-message-reinforces-bullets
+      plan_ref: spec FR-001/FR-004/D4 (always-on headline + markdown bullets in the injected user message)
+      description: "the injected user message now reinforces a headline + markdown-bullet structure (mentions bullets/headline) on the open content surface"
+      command: |
+        node -e "const src=require('fs').readFileSync('src/features/listen/summary/summaryService.js','utf8'); const m=src.match(/role:\s*'user'[\s\S]{0,600}?\}/); const blk=m?m[0]:''; if(/bullet|headline|^[\s\S]*- /im.test(blk) && /bullet|headline/i.test(blk)){console.log('BULLET_REINFORCEMENT_PRESENT')} else {console.error('Injected user message does not reinforce headline+bullets');process.exit(1)}"
+      expect:
+        exit_code: 0
+        stdout_contains: "BULLET_REINFORCEMENT_PRESENT"
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "FR-001/D4: amend messages[1].content to ask for a short headline then markdown bullet list items (lines beginning '- ' / '* ') WHEN there are supporting points — always-on (no toggle)."
+          - "FR-001/AS-2: phrase bullets as 'when there are supporting points' — do NOT instruct the model to fabricate bullets for a trivial one-line answer."
+          - "Reinforce ONLY here — do NOT edit promptTemplates.js (it already requests headline+bullets at :252-258 and is CLOSED, FR-002)."
+        related_files: ["src/features/listen/summary/summaryService.js"]
+
+    - id: SC-008
+      name: streaming-mechanics-unchanged
+      plan_ref: spec FR-005 (maxTokens=900, temperature=0.7, two-arg createStreamingLLM unchanged)
+      description: "the bullet edit did not change the streaming mechanics — maxTokens:900, temperature:0.7, and the two-arg createStreamingLLM(provider, {...}) call all remain"
+      command: |
+        grep -E "maxTokens:\s*900" src/features/listen/summary/summaryService.js && \
+        grep -E "temperature:\s*0\.7" src/features/listen/summary/summaryService.js && \
+        grep -nE "createStreamingLLM\s*\(\s*[A-Za-z0-9_.]+\s*,\s*\{" src/features/listen/summary/summaryService.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "FR-005: change ONLY the user-message content string. maxTokens (900), temperature (0.7), the two-arg createStreamingLLM call, the messages array shape, and the SSE loop are UNCHANGED."
+          - "If maxTokens/temperature drifted, revert — the bullet instruction adds a few tokens to the message, it does not change the token budget."
+        related_files: ["src/features/listen/summary/summaryService.js"]
+
+    - id: SC-009
+      name: liveanswer-test-uses-node-test
+      plan_ref: spec FR-012 (package.json:15 node --test; NOT Jest)
+      description: "liveAnswer.test.js uses the Node built-in runner and contains an extractQuestion describe-block"
+      command: |
+        test -f src/features/listen/summary/__tests__/liveAnswer.test.js && \
+        grep -E "require\(['\"]node:test['\"]\)" src/features/listen/summary/__tests__/liveAnswer.test.js && \
+        grep -E "require\(['\"]node:assert/strict['\"]\)" src/features/listen/summary/__tests__/liveAnswer.test.js && \
+        grep -iE "describe\(\s*['\"]extractQuestion" src/features/listen/summary/__tests__/liveAnswer.test.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "Add a describe('extractQuestion', …) block to the EXISTING src/features/listen/summary/__tests__/liveAnswer.test.js (matches the node --test src/**/__tests__/**/*.test.js glob)."
+          - "Use require('node:test') + require('node:assert/strict') — mirror the existing isLikelyQuestion block (:223-227). Do NOT add Jest/Vitest."
+        related_files: ["src/features/listen/summary/__tests__/liveAnswer.test.js"]
+
+    - id: SC-010
+      name: changelog-entry-added
+      plan_ref: plan Phase 2 / T-DOC-GATE
+      description: "CHANGELOG.md contains a readability/bullet/question-label entry under [Unreleased]"
+      command: |
+        grep -iE "readabilit|bullet|question label|extractQuestion" CHANGELOG.md
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: MEDIUM
+        rca_hints:
+          - "Add an [Unreleased] entry following the sibling 'Live Answer' format."
+          - "Improved: Live Answer readability — always-on headline+bullets reinforcement; the history Q: label now shows only the extracted question span (new pure extractQuestion helper). Fixed: markdown now renders (asset path), no mid-stream freeze, no clipping. Internal: node:test coverage for extractQuestion (T1–T8)."
+        related_files: ["CHANGELOG.md"]
+
+    # --- Improvement 3 — rendering-correctness fixes (FR-013–FR-016, commit 1d74c07) ---
+    - id: SC-011
+      name: markdown-asset-path-resolves
+      plan_ref: spec FR-013 (libs load from ../assets/ relative to content.html — NOT ../../../assets/ which 404s)
+      description: "LiveAnswerView loads the markdown libs from ../assets/ (correct, relative to content.html in src/ui/app/) and NO load call uses the old repo-root-resolving ../../../assets/ path (the old path may still appear in an explanatory comment — only load calls are checked)"
+      command: |
+        grep -nE "(tryLoad|loadScript)\(['\"]\.\./assets/" src/ui/listen/summary/LiveAnswerView.js && \
+        test -z "$(grep -nE "(tryLoad|loadScript)\(['\"]\.\./\.\./\.\./assets/" src/ui/listen/summary/LiveAnswerView.js || true)"
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "FR-013: content.html lives in src/ui/app/, so assets resolve at ../assets/. The old ../../../assets/ resolved to the repo root (glass/assets/), 404'd, and the throw aborted loadLibraries before isLibrariesLoaded was set — so marked never ran and the answer showed raw markdown."
+          - "Each library load must be independent (best-effort try/catch) so one 404 does not abort the rest."
+        related_files: ["src/ui/listen/summary/LiveAnswerView.js"]
+
+    - id: SC-012
+      name: marked-invoked-via-parse
+      plan_ref: spec FR-015 (marked v4 UMD is a namespace object — call .parse(), not marked(text))
+      description: "renderAnswers invokes marked via .parse() (a bare this.marked(text) call throws on the v4 namespace object)"
+      command: |
+        grep -E "marked\.parse" src/ui/listen/summary/LiveAnswerView.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "FR-015: marked v4's UMD build exposes {parse, setOptions, …} — `this.marked(text)` throws. Use `this.marked.parse(text)` when present (fall back to a direct call for builds where marked itself is the function)."
+        related_files: ["src/ui/listen/summary/LiveAnswerView.js"]
+
+    - id: SC-013
+      name: answer-body-has-no-lit-child-binding
+      plan_ref: spec FR-014 (render() emits an EMPTY .answer-body — no ${a.text} child binding — so renderAnswers' innerHTML never fights Lit reconciliation)
+      description: "the .answer-body div in render() carries NO ${a.text} child binding (the no-mid-stream-freeze fix); renderAnswers owns the children"
+      command: |
+        node -e "const s=require('fs').readFileSync('src/ui/listen/summary/LiveAnswerView.js','utf8'); const bad=s.split(String.fromCharCode(10)).some(l=>l.includes('answer-body')&&l.includes('a.text')); if(bad){console.error('answer-body still binds a.text as a Lit child (mid-stream freeze risk)');process.exit(1)} else console.log('ANSWER_BODY_EMPTY_CONTAINER')"
+      expect:
+        exit_code: 0
+        stdout_contains: "ANSWER_BODY_EMPTY_CONTAINER"
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "FR-014: binding ${a.text} as a Lit child AND overwriting the same node's innerHTML in renderAnswers corrupts Lit reconciliation under per-token streaming and freezes the answer mid-stream."
+          - "render() must emit `<div class=\"answer-body\" data-answer-id=\"${a.id}\"></div>` (empty); renderAnswers() fills it from this.answers."
+        related_files: ["src/ui/listen/summary/LiveAnswerView.js"]
+
+    - id: SC-014
+      name: streaming-resize-event-wired
+      plan_ref: spec FR-016 (LiveAnswerView dispatches live-answer-updated; ListenView listens and resizes)
+      description: "the resize-on-stream path is wired — LiveAnswerView dispatches `live-answer-updated` and ListenView binds a listener for it"
+      command: |
+        grep -E "live-answer-updated" src/ui/listen/summary/LiveAnswerView.js && \
+        grep -E "live-answer-updated" src/ui/listen/ListenView.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: MEDIUM
+        rca_hints:
+          - "FR-016: LiveAnswerView.updated() must dispatch `new CustomEvent('live-answer-updated', { bubbles: true, composed: true })` and ListenView must bind `@live-answer-updated` to its window-resize handler (mirrors stt-view's @stt-messages-updated)."
+          - "Without this the listen window resizes only on a view-mode toggle, so a long streaming answer stays clipped by the overflow:hidden assistant container."
+        related_files:
+          - "src/ui/listen/summary/LiveAnswerView.js"
+          - "src/ui/listen/ListenView.js"
+
+negative_assertions:
+  description: |
+    Things that MUST NOT exist after this feature lands — the FR-010 CLOSED set,
+    the in-memory-only invariant (FR-011), the no-renderer-edit rule (D3/FR-008),
+    and the inherited screen-share safety invariant. Each is a hard guard.
+  checks:
+    - id: NA-001
+      name: prompttemplates-untouched
+      plan_ref: spec FR-002/C1/C5 (promptTemplates.js is CLOSED — the bullet reinforcement lives in the injected message, not the template)
+      description: "promptTemplates.js is absent from the working diff (the pickle_glass_analysis template is NOT edited)"
+      command: |
+        test -z "$(git diff --name-only HEAD 2>/dev/null | grep -E 'src/features/common/prompts/promptTemplates\.js' || true)"
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "LOCKED FR-002/C1: the pickle_glass_analysis template (:238, structure :252-258) is CLOSED and already requests headline+bullets."
+          - "Move the bullet reinforcement to the OPEN injected user-message content (summaryService.js:256-259) and revert any promptTemplates.js change."
+        related_files: ["src/features/common/prompts/promptTemplates.js"]
+
+    - id: NA-002
+      name: closed-set-files-untouched
+      plan_ref: spec FR-010 (CLOSED set) + plan Project Structure
+      description: "the FR-010 CLOSED set is absent from the working diff (summary lane, SummaryView.js, askService.js, featureBridge.js, listenService.js)"
+      command: |
+        test -z "$(git diff --name-only HEAD 2>/dev/null | grep -E 'src/ui/listen/summary/SummaryView\.js|src/features/ask/askService\.js|src/bridge/featureBridge\.js|src/features/listen/listenService\.js' || true)"
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "FR-010: SummaryView.js, askService.js, featureBridge.js, listenService.js (and makeOutlineAndRequests / triggerAnalysisIfNeeded / the summary-update channel) MUST NOT be modified."
+          - "If one appears in the diff, the additive design has leaked — the only production file this spec edits is summaryService.js."
+        related_files:
+          - "src/ui/listen/summary/SummaryView.js"
+          - "src/features/ask/askService.js"
+          - "src/bridge/featureBridge.js"
+          - "src/features/listen/listenService.js"
+
+    - id: NA-003
+      name: no-ipc-plumbing-edit
+      plan_ref: spec FR-008/D3 (the cleaner LABEL flows verbatim — no IPC change) + FR-016 (renderer-only DOM event)
+      description: |
+        No IPC plumbing edit — preload.js is absent from the diff (the live-answer-update channel
+        + payload shape are UNCHANGED). NOTE: LiveAnswerView.js and ListenView.js ARE edited for the
+        rendering-correctness fixes FR-013–FR-016 (commit 1d74c07) and are NO LONGER forbidden here —
+        they are guarded positively by SC-011..SC-014. The FR-008 LABEL wiring still needs no renderer edit.
+      command: |
+        test -z "$(git diff --name-only HEAD 2>/dev/null | grep -E 'src/preload\.js' || true)"
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "FR-016 adds an in-renderer DOM CustomEvent (live-answer-updated), NOT an IPC channel — preload.js must stay out of the diff and the live-answer-update payload shape is UNCHANGED (value-only label change, FR-008)."
+          - "If preload.js changed, the additive IPC boundary leaked — the renderer fixes use a DOM CustomEvent between LiveAnswerView and ListenView, no preload/IPC edit."
+        related_files:
+          - "src/preload.js"
+
+    - id: NA-004
+      name: no-content-protection-disable
+      plan_ref: spec Enforcement Strategy (inherited load-bearing safety invariant)
+      description: "no code path disables content protection (windowManager.js untouched; no setContentProtection(false) in the diff)"
+      command: |
+        test -z "$(git diff -U0 HEAD 2>/dev/null | grep -nE '^\+.*setContentProtection\s*\(\s*false' || true)" && \
+        test -z "$(git diff --name-only HEAD 2>/dev/null | grep -E 'src/window/windowManager\.js' || true)"
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "INHERITED load-bearing invariant: the bulleted answer + cleaner Q: label render only in the content-protected listen window. Never call setContentProtection(false)."
+          - "windowManager.js is NOT in the edit set — this spec touches no window code."
+        related_files: ["src/window/windowManager.js"]
+
+    - id: NA-005
+      name: no-db-persistence
+      plan_ref: spec FR-011/C3/C8 (in-memory only; nothing persisted)
+      description: "neither the injected-message change nor the label change persists anything — no saveSummary / repository / config-schema write added"
+      command: |
+        test -z "$(git diff -U0 HEAD 2>/dev/null -- src/features/listen/summary/summaryService.js | grep -inE '^\+.*(saveSummary|summaryRepository|INSERT INTO|UPDATE .* SET|db\.(prepare|run|exec))' || true)"
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "FR-011/C3/C8: both changes are in-memory only. Do NOT add a summaryRepository.saveSummary call or any DB/config-table write for the label or the answer."
+          - "The bullet_json column (config/schema.js:57) is the CLOSED summary lane's — not this spec's surface."
+        related_files: ["src/features/listen/summary/summaryService.js"]
+
+    - id: NA-006
+      name: no-prose-toggle-or-config-surface
+      plan_ref: spec FR-004/D4 (bullets always-on for v1 — NO toggle, NO new config surface)
+      description: "no prose-vs-bullets toggle / new env var (e.g. LIVE_ANSWER_FORMAT) is wired into the answer lane (deferred to future work)"
+      command: |
+        test -z "$(git diff -U0 HEAD 2>/dev/null | grep -inE '^\+.*(LIVE_ANSWER_FORMAT|process\.env\.[A-Z_]*FORMAT|prose.*toggle|toggle.*prose)' || true)"
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: MEDIUM
+        rca_hints:
+          - "LOCKED D4/FR-004: v1 is bullets-always. A prose switch (env var like LIVE_ANSWER_FORMAT=prose, or an in-app control) is explicitly Out of Scope / future work."
+          - "Remove any added format-toggle / env-var read — the injected message unconditionally reinforces headline+bullets."
+        related_files: ["src/features/listen/summary/summaryService.js"]
+
+    - id: NA-007
+      name: summary-lane-helpers-untouched
+      plan_ref: spec FR-010 (makeOutlineAndRequests / triggerAnalysisIfNeeded / summary-update unchanged)
+      description: "the summary lane and its update channel are unchanged — the existing summary-update preload listeners remain (only summaryService.js production code changes)"
+      command: |
+        test -z "$(git diff --name-only HEAD 2>/dev/null | grep -E 'src/preload\.js' || true)" && \
+        grep -E "onSummaryUpdate" src/preload.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "FR-010: the summary lane (makeOutlineAndRequests, triggerAnalysisIfNeeded) and the summary-update channel are untouched. preload.js must not appear in the diff (NA-003 also guards this)."
+          - "If preload.js changed, the additive boundary leaked — this spec edits only summaryService.js + the test file."
+        related_files: ["src/preload.js"]
+
+test_gates:
+  description: |
+    Automated node:test gates required green before merge. Runner is the Node
+    built-in (`npm test` = node --test src/**/__tests__/**/*.test.js). The LLM
+    provider is mocked/injected in every integration case — no live calls. Baseline
+    is 65/65 green; target is 65 + ~6–9 new, with ZERO baseline regressions.
+  gates:
+    - id: TG-001
+      name: extractquestion-unit-truth-table
+      plan_ref: plan Phase 2 steps 1-2 + spec FR-006/FR-007/FR-012 + data-model.md §E3
+      description: "Unit tests for the new pure helper extractQuestion pass (RED-first, then GREEN) — the full T1–T8 truth-table"
+      command: |
+        node --test src/features/listen/summary/__tests__/liveAnswer.test.js
+      expect:
+        exit_code: 0
+      assertions:
+        - "T1 extractQuestion('how does garbage collection actually work in Go?') === 'how does garbage collection actually work in Go?' (clean wh-question == whole sentence, unmangled)"
+        - "T2 extractQuestion('Okay so, um, the thing I wanted to ask is — how would you design a rate limiter?') === 'how would you design a rate limiter?' (filler-wrapped → isolated span)"
+        - "T3 extractQuestion('Walk me through your last project.') === 'Walk me through your last project.' (bare imperative cue → full-text fallback)"
+        - "T4 extractQuestion('compare a process and a thread') is non-empty (cue, no '?' → cue clause or full text; never empty)"
+        - "T5 extractQuestion(\"What's your name? And where are you based?\") === 'where are you based?' (multiple questions → LAST interrogative clause — PINNED, RD5)"
+        - "T6 extractQuestion('') === '' and extractQuestion('   ') === '' (empty/whitespace guard)"
+        - "T7 extractQuestion(null) === '' , extractQuestion(undefined) === '' , extractQuestion(42) === '' (non-string guard; never throws)"
+        - "T8 extractQuestion('Yes — Go is statically typed.') === 'Yes — Go is statically typed.' (declarative, no signal → full-text fallback)"
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "These MUST have failed FIRST (RED) before T-P2.1 implemented the helper — Constitution Principle I."
+          - "Reuse the four existing signals (C2/FR-006); multi-question pick is the LAST signal-bearing clause (RD5); empty/non-string → '' (mirrors :59-61); total function (never throws)."
+          - "Clause iteration mirrors :69-73: split(/[.!?;,\\n]+/), peel LEAD_STRIP_RE, then test CLAUSE_LEAD_RE/CONTENT_CUE_RE/EMBEDDED_Q_RE (prefer a clause ending in '?')."
+        related_files:
+          - "src/features/listen/summary/summaryService.js"
+          - "src/features/listen/summary/__tests__/liveAnswer.test.js"
+
+    - id: TG-002
+      name: label-and-passive-integration
+      plan_ref: plan Phase 2 step 5 + spec FR-003/FR-008/FR-010 (Acceptance Scenarios 1/3/6/7)
+      description: "Integration non-regression against a mocked stream — emitted question value + PASSIVE-suppress + lane-independence under the amended message (LLM provider mocked, no live calls)"
+      command: |
+        node --test src/features/listen/summary/__tests__/liveAnswer.test.js
+      expect:
+        exit_code: 0
+      assertions:
+        - "FR-008 emitted-label: with the mocked stream, the live-answer-update payload's `question` field equals extractQuestion(text) for a filler-wrapped turn (e.g. 'how would you design a rate limiter?')"
+        - "FR-003 PASSIVE-suppress (parent AS-3, describe at :559): under the AMENDED injected message, a PASSIVE-prefixed mocked stream still emits nothing and holds the last answer — the bullet instruction never overrides the EXACT-PASSIVE directive"
+        - "FR-010 lane-independence (parent AS-7, describe at :611): summary-update still fires on its 5-turn cadence and the summary lane output is unchanged under the amended message"
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "The LLM provider MUST be mocked/injected (reuse the existing SummaryService subclass seam, liveAnswer.test.js:45-63) — no live calls."
+          - "If PASSIVE-suppress (:559) regressed: the amended message dropped/reworded 'reply EXACTLY: PASSIVE' — restore it verbatim (FR-003 / SC-006)."
+          - "If lane-independence (:611) regressed: a shared-state leak — confirm only the user-message content + the :451 value changed (FR-005/FR-010)."
+        related_files:
+          - "src/features/listen/summary/summaryService.js"
+          - "src/features/listen/summary/__tests__/liveAnswer.test.js"
+
+    - id: TG-003
+      name: full-suite-no-regression
+      plan_ref: T-VERIFY-UNIT + quickstart.md baseline (65/65)
+      description: "The full node:test suite is green — the new extractQuestion + integration cases pass and the pre-existing suite (baseline 65) does not regress"
+      command: |
+        npm test
+      expect:
+        exit_code: 0
+      assertions:
+        - "Baseline 65 tests still pass (geminiModelRotator, gemini, askService-sse, and all prior liveAnswer cases incl. isLikelyQuestion / parseAnswerOrPassive / shouldTriggerAnswer / the AS-3..AS-8 integration blocks)"
+        - "Total = 65 + ~6–9 new/changed, all passing; 0 regressions"
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "If a pre-existing test broke, the change leaked beyond the user-message content + the :451 value — re-check FR-005/FR-010 boundaries (only summaryService.js production code, value/wording only)."
+          - "A Node 22 / Windows test-runner IPC artifact ('Unable to deserialize cloned data', file-level uncaughtException) is NOT a code regression — re-run to confirm; subtest assertions are authoritative."
+        related_files:
+          - "src/features/listen/summary/summaryService.js"
+          - "src/features/listen/summary/__tests__/liveAnswer.test.js"
+
+    - id: TG-004
+      name: lint-changed-files
+      plan_ref: T-FINAL lint check
+      description: "ESLint passes (no errors) for the changed files"
+      command: |
+        npm run lint
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "Resolve eslint errors in summaryService.js / liveAnswer.test.js."
+          - "Per the parent spec's note, eslint may not be installed in this checkout (absent from node_modules) — if `npm run lint` cannot execute, mark SKIP-WITH-REASON (eslint not installed) rather than FAIL."
+        related_files:
+          - "src/features/listen/summary/summaryService.js"
+          - "src/features/listen/summary/__tests__/liveAnswer.test.js"
+
+manual_smoke_tests:
+  description: |
+    From quickstart.md "Manual smoke check". No automated Electron-renderer or
+    live-audio harness exists in this repo, so the rendered <ul><li> bullets and the
+    cleaner Q: label are MANUAL acceptance steps, gated by the automated tests above.
+  tests:
+    - id: MST-001
+      name: streamed-answer-renders-bullets
+      plan_ref: quickstart manual step 3 + spec AS-1
+      description: "Start a Listen session; have the interviewer ask a multi-part technical question over SYSTEM audio (e.g. 'How does garbage collection work in Go, and when does it run?')."
+      expected: |
+        The streamed answer in <live-answer-view> renders as a short headline followed
+        by a real bulleted <ul><li> list (marked turns the '- '/'* ' lines into list items),
+        NOT one run-on paragraph with inline ' - ' separators.
+      manual_only: true
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "If still a run-on paragraph: the injected user message (summaryService.js:256-259) is not reinforcing markdown bullets, or it asks for inline separators instead of newline-led '- '/'* ' lines (FR-001/SC-007)."
+          - "Confirm promptTemplates.js was NOT edited (FR-002/NA-001) — the fix is the injected message only."
+
+    - id: MST-002
+      name: trivial-answer-not-padded
+      plan_ref: quickstart + spec AS-2 / Edge Cases
+      description: "Ask a question with a single, simple answer ('Is Go statically typed?')."
+      expected: |
+        The answer leads with the short headline and does NOT invent filler bullets to
+        pad a trivial response (bullets appear only when there are real supporting points).
+      manual_only: true
+      on_failure:
+        severity: MEDIUM
+        rca_hints:
+          - "If the model fabricates bullets for a one-liner: re-phrase the injected instruction as 'headline, then bullets WHEN there are supporting points' (FR-001/AS-2) — do not force bullets."
+
+    - id: MST-003
+      name: question-label-shows-only-the-question
+      plan_ref: quickstart manual steps 4-5 + spec AS-3
+      description: "Ask a filler-wrapped question over system audio ('Okay so, um, the thing I wanted to ask is — how would you design a rate limiter?')."
+      expected: |
+        The small Q: label above the answer in the history shows only
+        'how would you design a rate limiter?', NOT the full filler-laden turn.
+      manual_only: true
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "If the label still shows the whole turn: confirm :451 passes extractQuestion(text) (SC-004) and the helper isolates the span for this input (TG-001 T2)."
+
+    - id: MST-004
+      name: passive-holds-last-answer
+      plan_ref: quickstart manual step 6 + spec AS-7 (parent AS-3)
+      description: "After an answer renders, say a non-question statement over system audio ('okay, let me pull up the next question')."
+      expected: |
+        The panel HOLDS the last answer (no flicker to empty, no new answer) — PASSIVE
+        suppression still fires under the amended (always-on bullets) injected message.
+      manual_only: true
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "If it blanks or answers: the amended message broke the EXACT-PASSIVE directive (FR-003/SC-006) — restore 'reply EXACTLY: PASSIVE' verbatim. Also confirm TG-002 (:559) is green."
+
+    - id: MST-005
+      name: answer-renders-markdown-not-raw-syntax
+      plan_ref: quickstart + spec AS-8 / FR-013/FR-015 (commit 1d74c07)
+      description: "During MST-001, watch the answer body as it renders (this is the bug 1d74c07 fixed)."
+      expected: |
+        The answer shows RENDERED markdown — a bold headline and real <ul><li> bullets — NOT
+        the raw characters '**' and '- ' as literal text. (If raw syntax shows, the markdown
+        libs did not load — check the ../assets/ path, SC-011, and marked.parse, SC-012.)
+      manual_only: true
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "Raw '**'/'- ' on screen = marked never ran. Root causes fixed in 1d74c07: asset path was ../../../assets/ (404 → loader aborted before isLibrariesLoaded), and marked v4 namespace was called as a function (threw). Verify SC-011 + SC-012."
+
+    - id: MST-006
+      name: streaming-answer-does-not-freeze-or-clip
+      plan_ref: quickstart + spec AS-9/AS-10 / FR-014/FR-016 (commit 1d74c07)
+      description: "Ask a question whose answer is long enough to stream over several seconds and exceed one window height."
+      expected: |
+        The answer keeps updating token-by-token to completion (does NOT freeze partway), and
+        the listen window grows to keep the whole answer visible (it is NOT clipped until you
+        toggle transcript↔insights). On toggling away and back, the answer is still there.
+      manual_only: true
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "Freeze mid-stream = the .answer-body still binds ${a.text} as a Lit child while renderAnswers overwrites innerHTML (Lit reconciliation conflict). render() must emit an EMPTY .answer-body (SC-013)."
+          - "Clipped until toggle = the live-answer-updated → ListenView resize path is not wired (SC-014, FR-016)."
+
+    - id: MST-SAFETY-001
+      name: answer-and-label-excluded-from-shared-screen
+      plan_ref: quickstart manual step 7 + spec Enforcement Strategy (inherited)
+      description: "Screen-share during MST-001/MST-003 and observe the SHARED screen (load-bearing, inherited invariant)."
+      expected: |
+        Neither the bulleted answer nor the cleaner Q: label appears on the shared screen —
+        both render only in the content-protected listen window. (Automated guards: NA-004
+        setContentProtection untouched + windowManager.js out of the diff. The FR-013–FR-016
+        renderer edits touch no window-creation/content-protection code.)
+      manual_only: true
+      on_failure:
+        severity: BLOCKER
+        rca_hints:
+          - "If visible on the shared screen: content protection is disabled or a non-protected window rendered the panel. The renderer fixes (FR-013–FR-016) touch no window code — check NA-004 first."
+
+on_failure:
+  SC-001:
+    rca_hints: ["Export extractQuestion from summaryService.js (after :798) so node:test can import it (FR-009)."]
+    related_files: ["src/features/listen/summary/summaryService.js"]
+  SC-004:
+    rca_hints: ["Change summaryService.js:451 to `question: extractQuestion(text)` — the single wiring change (FR-008/D3); do NOT edit the renderer."]
+    related_files: ["src/features/listen/summary/summaryService.js"]
+  SC-006:
+    rca_hints: ["Keep 'reply EXACTLY: PASSIVE' verbatim in the amended injected message — the bullet instruction is additive, never a replacement (FR-003)."]
+    related_files: ["src/features/listen/summary/summaryService.js"]
+  NA-001:
+    rca_hints: ["promptTemplates.js is CLOSED (FR-002/C1) — reinforce bullets in the injected user message (:256-259) only; revert any template edit."]
+    related_files: ["src/features/common/prompts/promptTemplates.js"]
+  NA-003:
+    rca_hints: ["No IPC/preload edit — the label change is value-only (FR-008) and FR-016 uses a renderer DOM CustomEvent, not IPC. LiveAnswerView.js/ListenView.js ARE edited for FR-013–FR-016 (guarded positively by SC-011..SC-014); preload.js must stay out of the diff."]
+    related_files: ["src/preload.js"]
+  NA-004:
+    rca_hints: ["Never call setContentProtection(false); windowManager.js stays out of the diff (inherited load-bearing safety)."]
+    related_files: ["src/window/windowManager.js"]
+  NA-005:
+    rca_hints: ["In-memory only (FR-011/C3/C8) — no saveSummary / repository / config-table write for the label or answer."]
+    related_files: ["src/features/listen/summary/summaryService.js"]

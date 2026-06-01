@@ -80,6 +80,83 @@ function isLikelyQuestion(text) {
 }
 
 // ---------------------------------------------------------------------------
+// Pure helper: extractQuestion (FR-006/FR-007/FR-009/FR-012)
+// Given a raw transcription turn, extract the most-specific interrogative
+// span. Reuses the four module-scope signal regexes and the clause-split /
+// discourse-marker-peel shape from isLikelyQuestion.
+//
+// Algorithm:
+//   guard: non-string → ''; trim; empty → ''
+//   split into clauses on sentence-boundary punctuation
+//   for each clause: peel discourse markers (LEAD_STRIP_RE), then test signals
+//   track the LAST signal-bearing clause (prefer '?'-ending, else CLAUSE_LEAD_RE/
+//   CONTENT_CUE_RE/EMBEDDED_Q_RE)
+//   return that peeled clause (discourse markers stripped), else full trimmed text
+//
+// Total / pure: never throws, never returns null/undefined. Non-empty input
+// always yields non-empty output (falls back to the full trimmed turn).
+// ---------------------------------------------------------------------------
+function extractQuestion(text) {
+    if (typeof text !== 'string') return '';
+    const trimmed = text.trim();
+    if (trimmed.length === 0) return '';
+
+    // Split on sentence-boundary punctuation AND em-dash (—) to isolate
+    // interrogative spans from filler prefixes like "the thing I wanted to ask is —"
+    const clauses = trimmed.split(/[.!?;,\n—]+/);
+    let lastClause = null;      // peeled interrogative span (discourse markers stripped)
+    let lastHasQ = false;       // did the original segment end with '?'
+    let hasStrongSignal = false; // true when signal is '?' or CLAUSE_LEAD_RE (not cue-only)
+
+    for (let i = 0; i < clauses.length; i++) {
+        const rawClause = clauses[i].trim();
+        if (rawClause.length === 0) continue;
+
+        // Determine if the '?' follows this clause in the original text.
+        // We check if the character immediately after this clause segment is '?'.
+        const segEnd = trimmed.indexOf(rawClause) + rawClause.length;
+        const nextChar = trimmed[segEnd] || '';
+        const hasQuestionMark = nextChar === '?';
+
+        // Peel leading discourse markers
+        let c = rawClause;
+        let prev;
+        do { prev = c; c = c.replace(LEAD_STRIP_RE, '').trim(); } while (c !== prev);
+
+        if (c.length === 0) continue;
+
+        const hasClauseLead = CLAUSE_LEAD_RE.test(c);
+        const hasCue = CONTENT_CUE_RE.test(c);
+        const hasEmbedded = EMBEDDED_Q_RE.test(c);
+
+        // Strong signal: explicit '?' or CLAUSE_LEAD_RE (wh-word / auxiliary leading
+        // an interrogative clause). These reliably identify extractable spans.
+        // Weak signal: CONTENT_CUE_RE / EMBEDDED_Q_RE — still a question signal but
+        // insufficient to extract a sub-span; the full turn is the best label.
+        const isStrong = hasQuestionMark || hasClauseLead || hasEmbedded;
+        const isWeak = hasCue;
+        const isSignal = isStrong || isWeak;
+
+        if (isSignal) {
+            lastClause = c;
+            lastHasQ = hasQuestionMark;
+            if (isStrong) hasStrongSignal = true;
+        }
+    }
+
+    if (lastClause !== null && hasStrongSignal) {
+        // Strong signal: return the narrowest interrogative span with leading
+        // discourse markers peeled (LEAD_STRIP_RE) — so "And where are you based"
+        // surfaces as "where are you based", dropping filler from the Q: label (G2).
+        // Append '?' if the original turn had one after this clause.
+        return lastHasQ ? lastClause + '?' : lastClause;
+    }
+
+    // Fallback: full trimmed text (T3 cue-only, T4, T8 declarative, no strong signal)
+    return trimmed;
+}
+
+// ---------------------------------------------------------------------------
 // Pure helper: normalizePassive (FR-010)
 // Strip markdown emphasis (* _ ` #), strip surrounding punctuation,
 // collapse + trim whitespace, uppercase.
@@ -255,6 +332,10 @@ class SummaryService {
                 role: 'user',
                 content:
                     'Answer the interviewer\'s most recent question directly and concisely. ' +
+                    'Start with a short headline answer (one sentence). ' +
+                    'When there are supporting points, format them as a markdown bullet list ' +
+                    '(each point on its own line beginning with "- "). ' +
+                    'Do not fabricate bullets for a trivial one-line answer. ' +
                     'If there is no clear question or nothing useful to answer, reply EXACTLY: PASSIVE',
             },
         ];
@@ -448,7 +529,7 @@ class SummaryService {
             const answerId = ++this.answerSeq;
 
             try {
-                await this.makeLiveAnswer(this.conversationHistory, signal, { id: answerId, question: text });
+                await this.makeLiveAnswer(this.conversationHistory, signal, { id: answerId, question: extractQuestion(text) });
             } catch (err) {
                 if (signal.aborted) {
                     // Expected control flow on abort-and-replace — swallow (FR-009)
@@ -795,4 +876,5 @@ module.exports.normalizePassive = normalizePassive;
 module.exports.parseAnswerOrPassive = parseAnswerOrPassive;
 module.exports.shouldTriggerAnswer = shouldTriggerAnswer;
 module.exports.normalizeTail = normalizeTail;
-module.exports.parseLiveAnswerSseLine = parseLiveAnswerSseLine; 
+module.exports.parseLiveAnswerSseLine = parseLiveAnswerSseLine;
+module.exports.extractQuestion = extractQuestion;
