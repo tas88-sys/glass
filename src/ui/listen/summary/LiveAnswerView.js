@@ -5,14 +5,17 @@
  * (FR-014/FR-015/FR-016) as an in-session, newest-first HISTORY of answers.
  *
  * Design rules (LOCKED — do not re-derive):
- *   Render model: DECLARATIVE — render() emits every answer's text into the
- *           template (plain-text fallback) and updated() UNCONDITIONALLY
- *           upgrades each block to sanitized markdown. This mirrors
- *           SummaryView's proven loader+render path (the earlier empty-
- *           container + guarded-innerHTML approach blanked on the
- *           transcript↔insights toggle because the answer lived only in a DOM
- *           node that render() destroyed). Source of truth is `this.answers`,
- *           NOT the DOM — so re-show always re-renders and never blanks.
+ *   Render model: render() emits each answer's body as an EMPTY container
+ *           (<div class="answer-body" data-answer-id> — NO Lit child binding);
+ *           updated() → renderAnswers() owns its content: plain text until the
+ *           markdown libs load, then sanitized markdown. The body is
+ *           deliberately NOT a Lit `${text}` child — binding the text in the
+ *           template AND overwriting innerHTML is a Lit anti-pattern that, under
+ *           per-token streaming, corrupts the child binding and freezes the
+ *           answer mid-stream (only a full re-render recovered it). Lit owns
+ *           ONLY the attribute; renderAnswers owns the children — no conflict.
+ *           Source of truth is `this.answers`, NOT the DOM, so a re-show (the
+ *           transcript↔insights toggle) re-renders from state and never blanks.
  *   History: newest answer on top; each answer keyed by a stable `id` from the
  *           service (streaming deltas update the same entry; a new question
  *           pushes a new entry). Capped to MAX_ANSWERS. In-session only — NOT
@@ -216,61 +219,58 @@ export class LiveAnswerView extends LitElement {
     }
 
     /**
-     * Idempotent library loader (mirroring SummaryView.loadLibraries:291-307).
-     * Guarded by if (!window.marked) etc.
+     * Best-effort markdown library loader. content.html already loads `marked`
+     * globally via <script src="../assets/marked-4.3.0.min.js">; we additionally
+     * fetch highlight + DOMPurify RELATIVE TO content.html (src/ui/app/) — i.e.
+     * `../assets/`, NOT `../../../assets/`. The old `../../../assets/` resolved to
+     * the repo root (glass/assets/), 404'd, and the throw aborted the loader
+     * before isLibrariesLoaded was set — so markdown never rendered (raw ** / -).
+     * Each load is independent (one failure never aborts the rest), and markdown
+     * renders as long as `marked` is present — hljs only adds code highlighting.
      */
     async loadLibraries() {
-        try {
-            if (!window.marked) {
-                await this.loadScript('../../../assets/marked-4.3.0.min.js');
+        const tryLoad = async (src) => {
+            try {
+                await this.loadScript(src);
+            } catch (err) {
+                console.warn('[live-answer] could not load', src, err && err.message);
             }
-            if (!window.hljs) {
-                await this.loadScript('../../../assets/highlight-11.9.0.min.js');
-            }
-            if (!window.DOMPurify) {
-                await this.loadScript('../../../assets/dompurify-3.0.7.min.js');
-            }
+        };
 
-            this.marked = window.marked;
-            this.hljs = window.hljs;
-            this.DOMPurify = window.DOMPurify;
+        if (!window.marked) await tryLoad('../assets/marked-4.3.0.min.js');
+        if (!window.hljs) await tryLoad('../assets/highlight-11.9.0.min.js');
+        if (!window.DOMPurify) await tryLoad('../assets/dompurify-3.0.7.min.js');
 
-            if (this.marked && this.hljs) {
-                this.marked.setOptions({
-                    highlight: (code, lang) => {
-                        if (lang && this.hljs.getLanguage(lang)) {
-                            try {
-                                return this.hljs.highlight(code, { language: lang }).value;
-                            } catch (err) {
-                                console.warn('[live-answer] Highlight error:', err);
-                            }
-                        }
+        this.marked = window.marked || null;
+        this.hljs = window.hljs || null;
+        this.DOMPurify = window.DOMPurify || null;
+
+        if (this.marked) {
+            const options = { breaks: true, gfm: true, pedantic: false, smartypants: false, xhtml: false };
+            if (this.hljs) {
+                options.highlight = (code, lang) => {
+                    if (lang && this.hljs.getLanguage(lang)) {
                         try {
-                            return this.hljs.highlightAuto(code).value;
+                            return this.hljs.highlight(code, { language: lang }).value;
                         } catch (err) {
-                            console.warn('[live-answer] Auto highlight error:', err);
+                            console.warn('[live-answer] Highlight error:', err);
                         }
-                        return code;
-                    },
-                    breaks: true,
-                    gfm: true,
-                    pedantic: false,
-                    smartypants: false,
-                    xhtml: false,
-                });
-                this.isLibrariesLoaded = true;
+                    }
+                    try {
+                        return this.hljs.highlightAuto(code).value;
+                    } catch (err) {
+                        console.warn('[live-answer] Auto highlight error:', err);
+                    }
+                    return code;
+                };
             }
-
-            if (this.DOMPurify) {
-                this.isDOMPurifyLoaded = true;
-            }
-
-            // Libraries arrived after the first render — upgrade the plain-text
-            // fallback already in the DOM to rendered markdown.
-            this.requestUpdate();
-        } catch (error) {
-            console.error('[live-answer] Failed to load libraries:', error);
+            this.marked.setOptions(options);
+            this.isLibrariesLoaded = true; // markdown needs only marked
         }
+        if (this.DOMPurify) this.isDOMPurifyLoaded = true;
+
+        // Libs may arrive after the first render — re-render to upgrade fallback → markdown.
+        this.requestUpdate();
     }
 
     loadScript(src) {
@@ -284,18 +284,16 @@ export class LiveAnswerView extends LitElement {
     }
 
     /**
-     * Upgrade every answer block's plain-text fallback to sanitized markdown.
-     * Mirrors SummaryView.renderMarkdownContent (SummaryView.js:375-403):
-     * runs UNCONDITIONALLY on each update so a re-show or a streaming delta
-     * always re-renders from `this.answers` (the source of truth). When the
-     * libraries are not yet loaded it no-ops, leaving the template's escaped
-     * plain text in place (FR-015) — it NEVER blanks.
+     * Render every answer block's body from `this.answers` (the source of
+     * truth). Runs UNCONDITIONALLY on each update so a streaming delta or a
+     * re-show always re-renders. Until the markdown libs load it fills the body
+     * with plain text (never blank); once loaded it upgrades to sanitized
+     * markdown. The body div carries NO Lit child binding, so writing its
+     * innerHTML here never fights Lit's reconciliation (see class header).
      *
      * SAFETY: answer text is NEVER logged.
      */
     renderAnswers() {
-        if (!this.isLibrariesLoaded || !this.marked) return;
-
         const textById = new Map(this.answers.map(a => [a.id, a.text]));
         const blocks = this.shadowRoot.querySelectorAll('.answer-body');
 
@@ -304,19 +302,32 @@ export class LiveAnswerView extends LitElement {
             const text = textById.get(id);
             if (!text) return;
 
+            // Libraries not loaded yet → plain-text fallback (never blank).
+            if (!this.isLibrariesLoaded || !this.marked) {
+                el.textContent = text;
+                return;
+            }
+
+            // Without DOMPurify we must NOT inject unsanitized LLM markdown via
+            // innerHTML (XSS) — fall back to safe plain text.
+            if (!this.isDOMPurifyLoaded || !this.DOMPurify) {
+                el.textContent = text;
+                return;
+            }
+
             try {
-                let parsedHTML = this.marked(text);
-
-                if (this.isDOMPurifyLoaded && this.DOMPurify) {
-                    parsedHTML = this.DOMPurify.sanitize(parsedHTML);
-
-                    if (this.DOMPurify.removed && this.DOMPurify.removed.length > 0) {
-                        console.warn('[live-answer] Unsafe content sanitized — showing plain text');
-                        el.textContent = '⚠️ ' + text;
-                        return;
-                    }
+                // marked v4 UMD exposes a NAMESPACE object (window.marked = {parse, setOptions,…}),
+                // NOT a callable — so `this.marked(text)` throws. Use .parse() when present;
+                // fall back to calling it directly for builds where marked itself is the function.
+                const rawHtml = typeof this.marked.parse === 'function'
+                    ? this.marked.parse(text)
+                    : this.marked(text);
+                const parsedHTML = this.DOMPurify.sanitize(rawHtml);
+                if (this.DOMPurify.removed && this.DOMPurify.removed.length > 0) {
+                    console.warn('[live-answer] Unsafe content sanitized — showing plain text');
+                    el.textContent = '⚠️ ' + text;
+                    return;
                 }
-
                 el.innerHTML = parsedHTML;
             } catch (error) {
                 console.error('[live-answer] Render error:', error);
@@ -327,10 +338,16 @@ export class LiveAnswerView extends LitElement {
 
     updated(changedProperties) {
         super.updated(changedProperties);
-        // Unconditional upgrade — same contract as SummaryView. The declarative
-        // template already carries the text, so even if this is skipped the
-        // panel shows plain text rather than blanking.
+        // renderAnswers() owns the body content (the template renders an empty
+        // container). Runs on every update so streaming deltas and re-shows
+        // both re-render from this.answers — plain text until libs load, then
+        // sanitized markdown.
         this.renderAnswers();
+        // Tell ListenView to re-measure + resize the listen window as the answer
+        // streams/grows. Without this, the window is only resized on a viewMode
+        // toggle, so a long streaming answer stays clipped until you toggle.
+        // Mirrors stt-view's @stt-messages-updated → adjustWindowHeightThrottled.
+        this.dispatchEvent(new CustomEvent('live-answer-updated', { bubbles: true, composed: true }));
     }
 
     render() {
@@ -343,7 +360,7 @@ export class LiveAnswerView extends LitElement {
                     (a, i) => html`
                         <div class="answer-block ${i === 0 ? 'current' : 'past'}">
                             ${a.question ? html`<div class="answer-question">${a.question}</div>` : ''}
-                            <div class="answer-body" data-answer-id="${a.id}">${a.text}</div>
+                            <div class="answer-body" data-answer-id="${a.id}"></div>
                         </div>
                     `
                 )}

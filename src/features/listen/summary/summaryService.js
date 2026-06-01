@@ -91,7 +91,7 @@ function isLikelyQuestion(text) {
 //   for each clause: peel discourse markers (LEAD_STRIP_RE), then test signals
 //   track the LAST signal-bearing clause (prefer '?'-ending, else CLAUSE_LEAD_RE/
 //   CONTENT_CUE_RE/EMBEDDED_Q_RE)
-//   return that clause trimmed, or fall back to full trimmed text
+//   return that peeled clause (discourse markers stripped), else full trimmed text
 //
 // Total / pure: never throws, never returns null/undefined. Non-empty input
 // always yields non-empty output (falls back to the full trimmed turn).
@@ -104,7 +104,7 @@ function extractQuestion(text) {
     // Split on sentence-boundary punctuation AND em-dash (—) to isolate
     // interrogative spans from filler prefixes like "the thing I wanted to ask is —"
     const clauses = trimmed.split(/[.!?;,\n—]+/);
-    let lastRawClause = null;   // raw (pre-peel) trimmed clause
+    let lastClause = null;      // peeled interrogative span (discourse markers stripped)
     let lastHasQ = false;       // did the original segment end with '?'
     let hasStrongSignal = false; // true when signal is '?' or CLAUSE_LEAD_RE (not cue-only)
 
@@ -138,17 +138,18 @@ function extractQuestion(text) {
         const isSignal = isStrong || isWeak;
 
         if (isSignal) {
-            lastRawClause = rawClause;
+            lastClause = c;
             lastHasQ = hasQuestionMark;
             if (isStrong) hasStrongSignal = true;
         }
     }
 
-    if (lastRawClause !== null && hasStrongSignal) {
-        // Strong signal: return the extracted clause (the narrowest interrogative span).
-        // Return the raw (un-peeled) clause so "And where are you based" stays intact.
+    if (lastClause !== null && hasStrongSignal) {
+        // Strong signal: return the narrowest interrogative span with leading
+        // discourse markers peeled (LEAD_STRIP_RE) — so "And where are you based"
+        // surfaces as "where are you based", dropping filler from the Q: label (G2).
         // Append '?' if the original turn had one after this clause.
-        return lastHasQ ? lastRawClause + '?' : lastRawClause;
+        return lastHasQ ? lastClause + '?' : lastClause;
     }
 
     // Fallback: full trimmed text (T3 cue-only, T4, T8 declarative, no strong signal)

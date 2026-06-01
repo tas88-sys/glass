@@ -955,11 +955,12 @@ describe('extractQuestion', () => {
     assert.ok(result.length > 0, 'result must be non-empty for non-empty input');
   });
 
-  // T5: multiple questions → LAST interrogative clause (PINNED — RD5)
+  // T5: multiple questions → LAST interrogative clause, leading discourse marker
+  // peeled (PINNED — RD5; spec.md Edge Cases + data-model §E3 + acceptance SC-002/TG-001)
   it('T5: returns LAST interrogative clause when multiple questions present', () => {
     const input = "What's your name? And where are you based?";
     const result = extractQuestion(input);
-    assert.equal(result, 'And where are you based?');
+    assert.equal(result, 'where are you based?');
   });
 
   // T6: empty string / whitespace → ''
