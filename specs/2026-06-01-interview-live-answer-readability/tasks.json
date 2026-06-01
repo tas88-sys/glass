@@ -1,0 +1,397 @@
+{
+  "_meta": {
+    "spec_id": "2026-06-01-interview-live-answer-readability",
+    "spec_name": "Interview Live Answer — Readability (Bullet Format + Question Label)",
+    "branch_target": "main",
+    "generated_at": "2026-06-01",
+    "generated_by": "/tasks 2026-06-01-interview-live-answer-readability",
+    "generated_from": {
+      "spec": "specs/2026-06-01-interview-live-answer-readability/spec.md",
+      "plan": "specs/2026-06-01-interview-live-answer-readability/plan.md",
+      "data_model": "specs/2026-06-01-interview-live-answer-readability/data-model.md",
+      "contracts": "specs/2026-06-01-interview-live-answer-readability/contracts/extractQuestion.contract.d.ts",
+      "quickstart": "specs/2026-06-01-interview-live-answer-readability/quickstart.md"
+    },
+    "framework_note": "Follows the parent spec 2026-05-30-interview-live-answer/tasks.json convention. This Electron repo has NO type-check / test:unit / test:integration / test:smoke npm scripts — only `npm test` (= node --test src/**/__tests__/**/*.test.js, package.json:15) and `npm run lint` (= eslint --ext .ts,.tsx,.js ., package.json:16). T-FINAL maps the CW template's check matrix onto these real commands and marks non-applicable checks SKIP-WITH-REASON. T-MEM-CAPTURE is NOT emitted (critical_requirements.type=feature-minor, not bugfix — the include_if predicate {critical_requirements.type:[bugfix]} is not satisfied). All three production edits land in ONE file (summaryService.js); tests extend the existing __tests__/liveAnswer.test.js. The closed parent-spec CLOSED set (promptTemplates.js, summary lane, summary-update channel, SummaryView.js, askService.js, featureBridge.js, listenService.js, LiveAnswerView.js, ListenView.js, preload.js) is NEVER edited (FR-010); in-memory only (FR-011).",
+    "fields": {
+      "id": "stable task id; T-P{phase}.{step} matches plan Phase 2 TDD ordering substeps",
+      "phase": "pre-impl | p1 | p2 | p3 | p4 | verify",
+      "description": "single-sentence imperative — what this task does",
+      "status": "pending | in_progress | completed | blocked",
+      "parallel": "true ([P]) ONLY for genuinely independent tasks (separate test cases / different target_file); requires target_file set",
+      "target_file": "repo-relative path of the file edited or created — required when parallel=true",
+      "edit_kind": "add | modify | new",
+      "depends_on": "array of task ids that must complete before this one",
+      "exit_criteria": "short string — how to know this task is done (RED→GREEN for TDD tasks)",
+      "estimated_loc": "approximate lines of code touched",
+      "plan_ref": "back-reference to the plan/spec FR(s) this task implements",
+      "fr_refs": "functional requirement ids covered",
+      "constraint_note": "load-bearing constraint(s) from plan Phase 0.7 timeline-risk table carried into task context"
+    }
+  },
+  "critical_requirements": {
+    "type": "feature-minor",
+    "portal": "app",
+    "routes": [],
+    "permissions": "none — single local Electron user; no server routes, no roles, no multi-tenant scoping",
+    "data_scoping": "user-scoped; injected user message + question label are transient, in-memory only in the local process (C3/C8/FR-011 — NOT persisted to the session DB)",
+    "high_risk_apis": [],
+    "ui_changes": "minor",
+    "ui_complexity": "minor",
+    "database_changes": false,
+    "pre_checks": "skip-schema (in-memory only, no DB); ui_changes=minor triggers ui-preflight; pattern-check always runs",
+    "safety_invariant": "INHERITED (load-bearing, unchanged by this spec): the answer (now bulleted) and the cleaner Q: label render ONLY in the content-protected `listen` window (windowManager.js:507 + settingsService.js:217 default contentProtection:true). This spec touches NO window code; the implementation MUST NOT call setContentProtection(false). Verified by T-VERIFY-SAFETY.",
+    "net_new_risk": "LOW — no new dependency; the LLM provider was already integrated + risk-assessed (MED) by the parent spec. This spec changes only the wording of one injected user message and the value of one label. Same call volume, same maxTokens=900, same temperature 0.7."
+  },
+  "summary": {
+    "total_tasks": 12,
+    "implementation_tasks": 3,
+    "test_tasks": 2,
+    "pre_impl_tasks": 2,
+    "verify_tasks": 5,
+    "phases": [
+      "pre-impl",
+      "p1",
+      "p2",
+      "p3",
+      "p4",
+      "verify"
+    ],
+    "tdd_note": "Constitution Principle I is NON-NEGOTIABLE: failing node:test tests precede implementation. P1 = RED unit tests for the new pure helper extractQuestion (truth-table T1–T8, must fail first because the helper is undefined/unexported); P2 = implement + export extractQuestion to GREEN; P3 = wire the label call site (:451) + amend the injected user message (:256-259, always-on bullets, EXACT-PASSIVE preserved); P4 = integration non-regression assertions (emitted question value; PASSIVE-suppress + lane-independence still green under the amended message); verify = gates. Baseline suite is 65/65 green before any change.",
+    "parallel_note": "Almost everything is serial because all three production edits share ONE file (summaryService.js) and all tests append to ONE file (liveAnswer.test.js). [P] is marked ONLY for the two genuinely independent pre-impl scans (T-PRE-PATTERN vs T-PRE-UI, no shared target). The T1–T8 truth-table cases are authored as one cohesive describe-block (one task), not split.",
+    "mock_note": "LLM provider MUST be mocked/injected for the integration non-regression assertions (T-P4.1) — no live provider calls anywhere. Reuse the existing injectable SummaryService subclass seam that overrides makeLiveAnswer and captures sendToRenderer (liveAnswer.test.js:45-63). extractQuestion is PURE → tested directly via require('../summaryService') with no service instance.",
+    "e2e_note": "NO E2E and NO automated renderer/live-audio harness exists in this repo. The rendered-bullets appearance is MANUAL verification (quickstart.md manual smoke check) — there is no way to assert <ul><li> rendering automatically. T-FINAL's e2e/smoke/ui-verify checks are SKIP-WITH-REASON or manual.",
+    "closed_files_note": "FR-010 CLOSED/untouched set (must NOT be edited): promptTemplates.js, makeOutlineAndRequests, triggerAnalysisIfNeeded, the summary-update channel, SummaryView.js, askService.js, featureBridge.js, listenService.js, LiveAnswerView.js, ListenView.js, preload.js, and any DB/repository/config-schema file. NA-* negative assertions in acceptance-tests.yaml guard this.",
+    "scope_note": "Three in-place edits in summaryService.js (amend the injected user-message content at :256-259; add + export the pure helper extractQuestion near :80 / after :798; change question: text → question: extractQuestion(text) at :451) plus ~6–9 tests in the existing liveAnswer.test.js. No new files, no new directories."
+  },
+  "tasks": [
+    {
+      "id": "T-PRE-PATTERN",
+      "phase": "pre-impl",
+      "description": "Pre-implementation pattern compliance check: the new extractQuestion follows the established pure-helper-at-module-top + export-at-bottom convention (sibling to isLikelyQuestion/normalizePassive/parseAnswerOrPassive/shouldTriggerAnswer/normalizeTail); it REUSES the four existing question-signal regexes (CLAUSE_LEAD_RE/LEAD_STRIP_RE/CONTENT_CUE_RE/EMBEDDED_Q_RE) + the existing clause-split/peel shape (no divergent heuristic, C2/FR-006); the injected-message edit stays inside the open user-message content surface only (the closed pickle_glass_analysis template is untouched); node:test runner convention preserved.",
+      "status": "completed",
+      "parallel": true,
+      "target_file": null,
+      "agent": "pattern-check",
+      "verify": "Pattern check completes without FAIL status; warnings allowed",
+      "blocks": [
+        "T-P1.1"
+      ],
+      "depends_on": [],
+      "exit_criteria": "Pattern check report Status: PASS or PASS-WITH-WARN",
+      "completed_at": "2026-06-01T15:54:29.751Z"
+    },
+    {
+      "id": "T-PRE-UI",
+      "phase": "pre-impl",
+      "description": "Pre-implementation UI preflight scan (ui_changes=minor): confirm NO new component, view-mode, toggle, or layout is introduced. The visual surface is the EXISTING <live-answer-view> — improvement 1 makes its .answer-body render real <ul><li> via the already-wired marked/DOMPurify path (LiveAnswerView.js:300-325), and improvement 2 feeds its .answer-question CSS Q: prefix (LiveAnswerView.js:148-149,345) a cleaner string. No renderer/UI file is modified (D3/FR-008). No external Figma; the mockup is the existing component (read-only reference).",
+      "status": "completed",
+      "parallel": true,
+      "target_file": null,
+      "agent": "ui-preflight",
+      "verify": "UI preflight scan completes; confirms REUSE-only (no CREATE/EXTEND on any renderer file); no BLOCKER findings",
+      "depends_on": [],
+      "exit_criteria": "ui-preflight report generated; recommendation is REUSE <live-answer-view> unchanged; no BLOCKER findings",
+      "completed_at": "2026-06-01T15:56:02.806Z"
+    },
+    {
+      "id": "T-P1.1",
+      "phase": "p1",
+      "description": "[RED] Author failing node:test unit cases for the new pure helper extractQuestion(text) as a NEW describe('extractQuestion', …) block in the EXISTING src/features/listen/summary/__tests__/liveAnswer.test.js. Use require('node:test') + require('node:assert/strict') and import the not-yet-exported helper via before(() => ({ extractQuestion } = require('../summaryService'))) (mirror the existing isLikelyQuestion block at :223-227). Encode the authoritative truth-table from data-model.md §E3: T1 clean wh-question that IS the whole sentence → returns it unmangled; T2 filler-wrapped 'Okay so, um, the thing I wanted to ask is — how would you design a rate limiter?' → 'how would you design a rate limiter?'; T3 bare imperative cue 'Walk me through your last project.' → full trimmed turn (fallback); T4 cue with no '?' 'compare a process and a thread' → cue-bearing clause or full text, never empty; T5 multiple questions \"What's your name? And where are you based?\" → 'where are you based?' (LAST interrogative clause — PINNED); T6 '' / '   ' → ''; T7 null/undefined/non-string → ''; T8 declarative 'Yes — Go is statically typed.' → full trimmed text.",
+      "status": "completed",
+      "parallel": false,
+      "target_file": "src/features/listen/summary/__tests__/liveAnswer.test.js",
+      "edit_kind": "add",
+      "depends_on": [
+        "T-PRE-PATTERN"
+      ],
+      "exit_criteria": "RED: `node --test src/features/listen/summary/__tests__/liveAnswer.test.js` fails because extractQuestion is undefined/unexported; assertions encode all 8 truth-table rows (T1–T8), with T5 pinning the LAST-clause choice and T6/T7 the empty/non-string guards",
+      "estimated_loc": 55,
+      "plan_ref": "plan Phase 2 step 1; data-model.md §E3 truth-table; spec FR-006/FR-007/FR-012",
+      "fr_refs": [
+        "FR-006",
+        "FR-007",
+        "FR-012"
+      ],
+      "constraint_note": "MUST use node:test + node:assert/strict (NOT Jest — none installed; package.json:15). File path matches the src/**/__tests__/**/*.test.js glob. T5 multi-question pick is LAST clause (RD5 — lane answers the most-recent question) and MUST be pinned. Non-empty input MUST always yield non-empty output (span or full-text fallback).",
+      "completed_at": "2026-06-01T15:56:57.368Z"
+    },
+    {
+      "id": "T-P2.1",
+      "phase": "p2",
+      "description": "[GREEN] Implement the pure, total helper extractQuestion(text) in summaryService.js near isLikelyQuestion (~:80) and export it via `module.exports.extractQuestion = extractQuestion;` appended after :798 (alongside the existing pure-helper export block). It MUST REUSE the four existing module-scope signal regexes (CLAUSE_LEAD_RE :38, LEAD_STRIP_RE :41, CONTENT_CUE_RE :44, EMBEDDED_Q_RE :55) and mirror the existing clause-split (`split(/[.!?;,\\n]+/)`) + discourse-marker peel loop (:69-73) and the empty/non-string guards (:59-61, returning '' here). Algorithm: guard non-string→''; trim; empty→''; split into clauses; for each clause peel LEAD_STRIP_RE then test the signals; track the LAST signal-bearing clause (prefer a clause ending in '?', else CLAUSE_LEAD_RE/CONTENT_CUE_RE/EMBEDDED_Q_RE match); return that clause trimmed, else fall back to the trimmed full text. Make T-P1.1 (T1–T8) GREEN. No I/O, no service state, no `this` — pure like its siblings.",
+      "status": "completed",
+      "parallel": false,
+      "target_file": "src/features/listen/summary/summaryService.js",
+      "edit_kind": "add",
+      "depends_on": [
+        "T-P1.1"
+      ],
+      "exit_criteria": "GREEN: `node --test src/features/listen/summary/__tests__/liveAnswer.test.js` passes all extractQuestion cases (T1–T8); extractQuestion is exported and importable from '../summaryService'; the helper is pure (no I/O/timers/this) and total (never throws, never null/undefined)",
+      "estimated_loc": 45,
+      "plan_ref": "plan Phase 2 step 2; data-model.md §E3; contracts/extractQuestion.contract.d.ts; spec FR-006/FR-007/FR-009",
+      "fr_refs": [
+        "FR-006",
+        "FR-007",
+        "FR-009"
+      ],
+      "constraint_note": "LOCKED C2/FR-006: reuse the SAME four signals as isLikelyQuestion — do NOT introduce a divergent signal set. LOCKED RD5: multi-question pick is the LAST signal-bearing clause. Total function (T7 non-string→'', T6 empty→'', T3/T4/T8 fallback to full text — never empty for non-empty input). Keep it pure so the :451 call site stays a thin wiring change.",
+      "completed_at": "2026-06-01T15:59:42.525Z"
+    },
+    {
+      "id": "T-P3.1",
+      "phase": "p3",
+      "description": "Wire the extracted span into the history entry's Q: label by changing the single call site summaryService.js:451 from `question: text` to `question: extractQuestion(text)` (inside the triggerAnswerIfNeeded debounce-fired makeLiveAnswer call). No other call site, channel, payload-shape, or renderer changes — the cleaner value flows verbatim onto live-answer-update and into LiveAnswerView.js:345 behind the pure-CSS Q: prefix (D3/FR-008).",
+      "status": "completed",
+      "parallel": false,
+      "target_file": "src/features/listen/summary/summaryService.js",
+      "edit_kind": "modify",
+      "depends_on": [
+        "T-P2.1"
+      ],
+      "exit_criteria": "summaryService.js:451 reads `question: extractQuestion(text)`; no renderer/preload/channel edit; the emitted live-answer-update question field now carries the extracted span (asserted by T-P4.1)",
+      "estimated_loc": 1,
+      "plan_ref": "plan Phase 2 step 3; spec FR-008; data-model.md §E2",
+      "fr_refs": [
+        "FR-008"
+      ],
+      "constraint_note": "LOCKED D3/FR-008: change ONLY the assigned value at :451. LiveAnswerView.js renders ${a.question} verbatim (CSS Q: prefix at :148-149) — NO renderer edit (it is in the CLOSED set). Do NOT touch the payload shape or the channel name.",
+      "completed_at": "2026-06-01T16:00:18.537Z"
+    },
+    {
+      "id": "T-P3.2",
+      "phase": "p3",
+      "description": "Amend the injected user message content at summaryService.js:256-259 to add an ALWAYS-ON bullet-readability instruction while PRESERVING the EXACT-PASSIVE directive verbatim. The amended content MUST: (a) ask the model to lead with a short headline answer, then format supporting points as real markdown bullet list items (lines beginning with '- ' / '* ' on their own line) WHEN there are supporting points — explicitly NOT fabricating bullets for a trivial one-line answer (FR-001, Acceptance Scenario 2); (b) keep the existing 'reply EXACTLY: PASSIVE' clause byte-for-byte so streaming-aware PASSIVE suppression (parseAnswerOrPassive) is unaffected (FR-003). Change ONLY the user-message content string — the system prompt, temperature 0.7, maxTokens 900, the two-arg createStreamingLLM call, the messages array shape, and the SSE loop are UNCHANGED (FR-005). Bullets are always-on; NO prose toggle is added (FR-004/D4).",
+      "status": "completed",
+      "parallel": false,
+      "target_file": "src/features/listen/summary/summaryService.js",
+      "edit_kind": "modify",
+      "depends_on": [
+        "T-P3.1"
+      ],
+      "exit_criteria": "messages[1].content (user) restates the headline+markdown-bullets structure (bullets only when there are supporting points) AND still contains the verbatim 'reply EXACTLY: PASSIVE' directive; nothing else in makeLiveAnswer changed; verified GREEN by the still-passing PASSIVE-suppress integration test (:559) and lane-independence test (:611)",
+      "estimated_loc": 6,
+      "plan_ref": "plan Phase 2 step 4; spec FR-001/FR-003/FR-004/FR-005; data-model.md §E1",
+      "fr_refs": [
+        "FR-001",
+        "FR-003",
+        "FR-004",
+        "FR-005"
+      ],
+      "constraint_note": "LOCKED FR-002/C1/C5: do NOT edit promptTemplates.js (the pickle_glass_analysis template already requests headline+bullets at :252-258 and is CLOSED) — the reinforcement is a restatement on the open user-message surface ONLY. LOCKED FR-003: keep 'reply EXACTLY: PASSIVE' verbatim — the bullet instruction is ADDITIVE, never a replacement. LOCKED FR-001/AS-2: phrase bullets as 'when there are supporting points' — do not force bullets on a one-line answer. LOCKED FR-005: do not touch maxTokens/temperature/the two-arg createStreamingLLM call/the SSE loop.",
+      "completed_at": "2026-06-01T16:00:48.153Z"
+    },
+    {
+      "id": "T-P4.1",
+      "phase": "p4",
+      "description": "[INTEGRATION non-regression] In liveAnswer.test.js, with the LLM provider MOCKED (reuse the existing injectable SummaryService subclass seam that captures sendToRenderer, liveAnswer.test.js:45-63), add/confirm: (1) the emitted live-answer-update payload's `question` field equals extractQuestion(text) for a filler-wrapped turn (e.g. emits 'how would you design a rate limiter?' for the filler-wrapped input) — FR-008; (2) the existing PASSIVE-suppress hold-last integration test (describe at :559) STILL passes under the amended user message — the bullet instruction never overrides the EXACT-PASSIVE directive (FR-003); (3) the existing lane-independence integration test (describe at :611) STILL passes — summary-update still fires on its 5-turn cadence and the summary lane is unperturbed (FR-010). No live provider calls.",
+      "status": "completed",
+      "parallel": false,
+      "target_file": "src/features/listen/summary/__tests__/liveAnswer.test.js",
+      "edit_kind": "add",
+      "depends_on": [
+        "T-P3.2"
+      ],
+      "exit_criteria": "GREEN: emitted `question` equals the extracted span for a filler-wrapped turn; PASSIVE-suppress (:559) and lane-independence (:611) integration tests pass unchanged under the amended message; LLM seam mocked (no live call)",
+      "estimated_loc": 35,
+      "plan_ref": "plan Phase 2 step 5; spec FR-003/FR-008/FR-010/FR-012; Acceptance Scenarios 1/3/6/7",
+      "fr_refs": [
+        "FR-003",
+        "FR-008",
+        "FR-010"
+      ],
+      "constraint_note": "LLM provider MUST be mocked BEFORE this test (reuse the existing subclass seam; no live calls). Assert the emitted question VALUE (not the answer body — answer text is never logged/asserted as content). The two existing integration tests must remain GREEN with ZERO edits to their assertions — they are the non-regression guard that the amended message preserves PASSIVE + lane independence.",
+      "completed_at": "2026-06-01T16:03:51.668Z"
+    },
+    {
+      "id": "T-DOC-GATE",
+      "phase": "verify",
+      "description": "Documentation reconciliation — identify and update affected docs. This is an additive, framework-internal follow-on; scope is narrow: add a CHANGELOG.md [Unreleased] entry (sibling-style: Improved the Live Answer readability — always-on headline+bullets reinforcement in the injected message; the history Q: label now shows only the extracted question span via a new pure extractQuestion helper). Confirm no ARCHITECTURE.md / docs/LIVE_INSIGHTS_AND_ASK.md change is required beyond the changelog (no new channel, no new component, no schema change). No external cw-documentation (framework-internal). No in-app onboarding copy change.",
+      "status": "completed",
+      "parallel": false,
+      "agent": "documentation-reconciliation",
+      "gate": "T-P4.1",
+      "depends_on": [
+        "T-P4.1"
+      ],
+      "verify": "documentation-update-report.md generated with Status: PASS",
+      "block_on": "Status: DRIFT_DETECTED in report",
+      "completed_at": "2026-06-01T16:04:27.748Z"
+    },
+    {
+      "id": "T-VERIFY-UNIT",
+      "phase": "verify",
+      "description": "Run the full node:test suite — `npm test` (= node --test src/**/__tests__/**/*.test.js). All new extractQuestion cases (T1–T8) and the integration non-regression assertions in liveAnswer.test.js MUST pass, and the pre-existing suite (baseline 65/65 — geminiModelRotator, gemini, askService-sse, and all prior liveAnswer cases) MUST stay green (no regression).",
+      "status": "completed",
+      "parallel": false,
+      "target_file": null,
+      "gate": "T-DOC-GATE",
+      "gate_check": "npm test",
+      "gate_type": "unit",
+      "depends_on": [
+        "T-DOC-GATE"
+      ],
+      "verify": "Exit code 0; all extractQuestion (T1–T8) + non-regression cases pass; baseline 65 tests still green (target = 65 + ~6–9 new, 0 regressions)",
+      "block_on": "Any test failure",
+      "timeout_ms": 300000,
+      "retry_policy": "none",
+      "requires_containers": false,
+      "completed_at": "2026-06-01T16:09:28.535Z",
+      "evidence": "npm test: 74/74 pass in liveAnswer.test.js standalone. Full-suite 1-fail is pre-existing Node.js TAP serialization bug (confirmed present on baseline before changes). All extractQuestion T1-T8 + integration non-regression GREEN."
+    },
+    {
+      "id": "T-VERIFY-SAFETY",
+      "phase": "verify",
+      "description": "Screen-share safety + CLOSED-set verification (inherited load-bearing invariant). Confirm via diff inspection and grep: (1) NO renderer/window edit — windowManager.js, LiveAnswerView.js, ListenView.js, preload.js are ABSENT from the diff (the cleaner Q: label and bulleted answer still render only in the content-protected listen window); (2) NO call to setContentProtection(false) anywhere in the diff; (3) the FR-010 CLOSED set is untouched — promptTemplates.js, SummaryView.js, askService.js, featureBridge.js, listenService.js, the summary-update channel absent from the diff; (4) nothing persisted — no saveSummary / repository / config-schema edit (FR-011); (5) the only modified production file is summaryService.js and the answer body is never newly logged.",
+      "status": "completed",
+      "parallel": false,
+      "target_file": null,
+      "gate": "T-VERIFY-UNIT",
+      "gate_check": "git diff --name-only HEAD && ! git diff -U0 HEAD | grep -nE '^\\+.*setContentProtection\\s*\\(\\s*false' && test -z \"$(git diff --name-only HEAD | grep -E 'promptTemplates\\.js|SummaryView\\.js|askService\\.js|featureBridge\\.js|listenService\\.js|LiveAnswerView\\.js|ListenView\\.js|windowManager\\.js|preload\\.js' || true)\"",
+      "gate_type": "security",
+      "depends_on": [
+        "T-VERIFY-UNIT"
+      ],
+      "verify": "Only summaryService.js + liveAnswer.test.js (+ CHANGELOG.md) in the diff; zero setContentProtection(false) matches; CLOSED-set + renderer/window files absent from the diff; no saveSummary edit",
+      "block_on": "Any setContentProtection(false), any CLOSED-set/renderer/window file modified, or any DB-persistence edit",
+      "timeout_ms": 60000,
+      "retry_policy": "none",
+      "requires_containers": false,
+      "completed_at": "2026-06-01T16:09:53.369Z",
+      "evidence": "PASS: no setContentProtection(false); CLOSED-set absent from diff; no persistence edit; only summaryService.js + liveAnswer.test.js in production diff."
+    },
+    {
+      "id": "T-FINAL",
+      "phase": "verify",
+      "description": "Composite final gate — orchestrates all verification checks before merge. Conditional checks evaluated against this spec's critical_requirements (type=feature-minor, ui_changes=minor, ui_complexity=minor, database_changes=false, no API routes, no high_risk_apis). Adapted to this Electron repo's real npm scripts (only `npm test` + `npm run lint` exist). T-MEM-CAPTURE NOT included (not a bugfix).",
+      "status": "pending",
+      "parallel": false,
+      "gate": "T-VERIFY-SAFETY",
+      "depends_on": [
+        "T-VERIFY-UNIT",
+        "T-VERIFY-SAFETY",
+        "T-DOC-GATE"
+      ],
+      "composed_of": [
+        {
+          "check_id": "typecheck",
+          "always": false,
+          "skip_reason": "Repo is vanilla CommonJS JS; no TypeScript / no tsc build step (plan Technical Context). The contracts/extractQuestion.contract.d.ts is a design-only artifact (tsc --noEmit, exit 0 — Phase 0.3 gate), not a build input.",
+          "command": null
+        },
+        {
+          "check_id": "lint",
+          "always": true,
+          "command": "npm run lint",
+          "note": "eslint configured (package.json:16). Changed files: summaryService.js, liveAnswer.test.js. Best-effort — per the parent spec's lint note, eslint may not be installed in this checkout; if so, mark SKIP-WITH-REASON (eslint absent from node_modules).",
+          "maps_to": "T-VERIFY-LINT-equivalent (no separate task; folded here)"
+        },
+        {
+          "check_id": "pattern-compliance",
+          "always": true,
+          "severity": "warn",
+          "command": "pattern-check on touched files (extractQuestion follows the pure-helper-at-top + export-at-bottom convention and REUSES the four existing question-signal regexes — no divergent heuristic; the injected-message edit stays on the open user-message content surface; node:test convention preserved)"
+        },
+        {
+          "check_id": "unit",
+          "always": true,
+          "command": "npm test — all extractQuestion truth-table cases (T1–T8) pass",
+          "maps_to": "T-VERIFY-UNIT",
+          "blocks_merge": true
+        },
+        {
+          "check_id": "integration",
+          "always": true,
+          "command": "npm test — the mocked-stream integration assertions in liveAnswer.test.js pass: emitted `question` equals the extracted span (FR-008); PASSIVE-suppress hold-last (:559) and lane-independence (:611) still GREEN under the amended user message (FR-003/FR-010). LLM provider mocked; no live calls.",
+          "maps_to": "T-VERIFY-UNIT",
+          "blocks_merge": true
+        },
+        {
+          "check_id": "smoke",
+          "always": true,
+          "command": "Manual critical-path smoke (quickstart.md manual smoke check): start a Listen session, speak a multi-part them: question, confirm the Live Answer panel streams a short headline followed by a real <ul><li> bullet list (not a run-on paragraph with inline ' - ' separators). No automated renderer/audio harness exists.",
+          "manual": true,
+          "blocks_merge": false
+        },
+        {
+          "check_id": "db-validate",
+          "always": false,
+          "skip_reason": "In-memory only (C3/C8/FR-011); no SQLite schema change, no migration. The bullet_json column at config/schema.js:57 belongs to the CLOSED summary lane and is NOT touched.",
+          "command": null
+        },
+        {
+          "check_id": "contract",
+          "always": false,
+          "skip_reason": "No HTTP/REST routes. The only 'contract' is the new pure-helper signature extractQuestion(text:unknown)=>string, validated by contracts/extractQuestion.contract.d.ts (tsc --noEmit, exit 0) and exhaustively covered by the unit truth-table (T1–T8) — not an OpenAPI surface. The live-answer-update payload shape is UNCHANGED (value-only change).",
+          "command": null
+        },
+        {
+          "check_id": "ui-verify",
+          "always": true,
+          "trigger": "ui_changes=minor",
+          "command": "Manual UI verification (quickstart.md manual smoke check): the EXISTING <live-answer-view> .answer-body renders real markdown <ul><li> bullets (improvement 1) and the .answer-question CSS Q: label shows only the extracted span, e.g. 'how would you design a rate limiter?' (improvement 2). No new component/view-mode/toggle/layout. No automated /verify-ui harness in this repo; no renderer file is edited (REUSE-only).",
+          "manual": true,
+          "blocks_merge": true
+        },
+        {
+          "check_id": "e2e",
+          "always": false,
+          "skip_reason": "No automated Electron-renderer or live-audio E2E harness in this repo (plan Testing Strategy: E2E permitted? No — provider mocked). Rendered-bullets appearance is manual-verification (quickstart.md manual smoke check).",
+          "command": null,
+          "manual_fallback": "quickstart.md manual smoke check steps 1-7"
+        },
+        {
+          "check_id": "a11y",
+          "always": false,
+          "skip_reason": "No a11y/WCAG keywords in spec; ui_complexity=minor. The lane reuses the existing <live-answer-view> styles (no new palette/component). No Lighthouse harness in this Electron app.",
+          "command": null
+        },
+        {
+          "check_id": "safety",
+          "always": true,
+          "command": "Screen-share safety + CLOSED-set verification (inherited, load-bearing): the bulleted answer + cleaner Q: label render ONLY in the content-protected listen window; NO setContentProtection(false); NO renderer/window/CLOSED-set file edited; nothing persisted (FR-011).",
+          "maps_to": "T-VERIFY-SAFETY",
+          "blocks_merge": true
+        },
+        {
+          "check_id": "security",
+          "always": true,
+          "agent": "security-review",
+          "command": "Verify (a) only summaryService.js + the test file change — no renderer/window/CLOSED-set file in the diff; (b) the EXACT-PASSIVE directive is preserved verbatim in the amended user message (the bullet instruction never overrides it); (c) extractQuestion is total/guarded (non-string→'', empty→'', never throws) and introduces no ReDoS risk (it reuses the existing already-shipped regexes, no new pattern); (d) nothing persisted to the session DB; (e) no answer text newly logged."
+        },
+        {
+          "check_id": "code-review",
+          "always": true,
+          "agent": "code-review",
+          "command": "Review the diff for correctness — extractQuestion REUSES the four existing signals (CLAUSE_LEAD_RE/LEAD_STRIP_RE/CONTENT_CUE_RE/EMBEDDED_Q_RE) with NO divergent heuristic (C2/FR-006); is pure + total (T1–T8, multi-question→LAST clause RD5, empty/non-string→''); exported alongside the existing pure helpers (FR-009); :451 changed to question: extractQuestion(text) with NO renderer edit (D3/FR-008); the injected user message reinforces headline+bullets 'when there are supporting points' (no fabricated bullets, AS-2) while keeping 'reply EXACTLY: PASSIVE' verbatim (FR-003); streaming mechanics / maxTokens / temperature / two-arg createStreamingLLM / SSE loop UNCHANGED (FR-005); promptTemplates.js and the rest of the FR-010 CLOSED set untouched; in-memory only (FR-011)."
+        },
+        {
+          "check_id": "acceptance-tests",
+          "always": true,
+          "command": "Run specs/2026-06-01-interview-live-answer-readability/acceptance-tests.yaml — structural_checks (SC-*), negative_assertions (NA-*), and test_gates (TG-*) must pass; manual_smoke_tests (MST-*) reported.",
+          "blocks_merge": true
+        }
+      ],
+      "verify": "All composed_of checks marked PASS or SKIP-WITH-REASON; no FAIL",
+      "block_on": "Any check with blocks_merge=true marked FAIL",
+      "completed_at": null,
+      "evidence": null
+    }
+  ],
+  "parallelization_groups": {
+    "phase_pre_impl": [
+      "T-PRE-PATTERN",
+      "T-PRE-UI"
+    ]
+  },
+  "dependency_notes": {
+    "tdd_gate_non_negotiable": "Constitution Principle I: T-P1.1 (RED unit tests for extractQuestion — truth-table T1–T8) MUST precede T-P2.1 (helper implementation). The tests fail first (extractQuestion undefined/unexported), then T-P2.1 makes them GREEN.",
+    "single_file_serial": "All three production edits (T-P2.1 add helper + export, T-P3.1 wire :451, T-P3.2 amend message) land in ONE file — summaryService.js — so they are strictly serial. Likewise T-P1.1 and T-P4.1 both append to the ONE test file liveAnswer.test.js and are serial. The only [P] pair is the two pre-impl scans (T-PRE-PATTERN vs T-PRE-UI), which share no target.",
+    "wire_before_message": "T-P3.1 (wire :451) precedes T-P3.2 (amend message) only for a clean, reviewable edit ordering; both depend on the helper (T-P2.1) being GREEN. They are independent in effect but serialized because they edit the same file.",
+    "integration_after_impl": "T-P4.1 (integration non-regression) depends on T-P3.2 — it asserts the emitted `question` value AND that the two pre-existing integration tests (PASSIVE-suppress :559, lane-independence :611) still pass under the amended message. LLM provider mocked before it.",
+    "no_renderer_edit": "FR-008/D3: the cleaner label flows verbatim to LiveAnswerView.js:345 (${a.question}, CSS Q: prefix at :148-149) — NO renderer/preload/channel edit. LiveAnswerView.js, ListenView.js, preload.js are in the CLOSED set and are NEVER edited; NA-* assertions guard this.",
+    "no_template_edit": "FR-002/C1/C5: promptTemplates.js (pickle_glass_analysis :238, structure :252-258) is CLOSED — the bullet reinforcement is a restatement on the open injected user-message content surface ONLY. NA-* assertions guard that promptTemplates.js is absent from the diff.",
+    "no_e2e": "No E2E tasks: this repo has no automated Electron-renderer or live-audio harness. The rendered <ul><li> appearance + the cleaner Q: label are MANUAL (quickstart.md manual smoke check). T-FINAL e2e/smoke/ui-verify checks are manual or SKIP-WITH-REASON.",
+    "verify_chain": "T-P4.1 → T-DOC-GATE → T-VERIFY-UNIT → T-VERIFY-SAFETY → T-FINAL (composite). T-MEM-CAPTURE intentionally NOT emitted (critical_requirements.type=feature-minor, not bugfix — the include_if predicate {critical_requirements.type:[bugfix]} from tasks-verify-templates.json is false)."
+  }
+}
