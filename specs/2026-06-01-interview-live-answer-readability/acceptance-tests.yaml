@@ -17,10 +17,22 @@ generation_context:
     package.json:15) and `npm run lint` (= eslint --ext .ts,.tsx,.js ., package.json:16).
     All structural / negative-assertion checks are grep/node-based and runnable WITHOUT
     booting Electron. The LLM provider is mocked in every test (no live calls). No E2E /
-    renderer / live-audio harness exists — the rendered <ul><li> bullets + the cleaner Q:
-    label are MANUAL (manual_smoke_tests below; see quickstart.md). This is a feature-minor,
-    in-memory-only, additive follow-on: all three production edits land in ONE file
-    (summaryService.js); the parent-spec CLOSED set is never touched.
+    renderer / live-audio harness exists — the rendered <ul><li> bullets, no-freeze, no-clip,
+    and the cleaner Q: label are MANUAL (manual_smoke_tests below; see quickstart.md). This is
+    an in-memory-only, additive follow-on.
+
+    RECONCILED 2026-06-01 (commit 1d74c07): the original manifest assumed all production edits
+    land in ONE file (summaryService.js). Live testing revealed Improvement 1 did not visibly
+    render (raw markdown), froze mid-stream, and was clipped — so Improvement 3 (FR-013–FR-016)
+    adds rendering-correctness fixes in src/ui/listen/summary/LiveAnswerView.js and
+    src/ui/listen/ListenView.js. Those two renderer files are now in `files.modified` and are
+    guarded POSITIVELY by SC-011..SC-014 (NOT forbidden by NA-003 any more). The CLOSED set still
+    holds for promptTemplates.js, the summary lane, SummaryView.js, askService.js, featureBridge.js,
+    listenService.js, preload.js, and windowManager.js. The live-answer-update IPC payload/channel
+    and the in-memory invariant (C3/C8/FR-011) are unchanged. The spec_hash/plan_hash/tasks_hash
+    above reflect the ORIGINAL /tasks generation (7d52971) and are intentionally NOT recomputed —
+    spec.md was hand-amended post-implementation; treat a spec_hash mismatch as expected drift, not
+    a regeneration trigger.
 
 # --- Supported Environments ---
 environments: [local]
@@ -31,19 +43,19 @@ _references:
   routes: []
   files:
     modified:
-      - "src/features/listen/summary/summaryService.js"
+      - "src/features/listen/summary/summaryService.js  (extractQuestion peels last clause; injected bullet message; :451 label wiring)"
+      - "src/ui/listen/summary/LiveAnswerView.js  (FR-013–FR-016, commit 1d74c07 — asset path ../assets/, marked.parse, empty .answer-body / no-freeze, never-blank fallback, live-answer-updated dispatch)"
+      - "src/ui/listen/ListenView.js  (FR-016, commit 1d74c07 — @live-answer-updated → window resize)"
     test_edits:
-      - "src/features/listen/summary/__tests__/liveAnswer.test.js"
+      - "src/features/listen/summary/__tests__/liveAnswer.test.js  (extractQuestion T1–T8; T5 pinned to peeled 'where are you based?')"
     doc_edits:
       - "CHANGELOG.md"
     read_only_reference:
-      - "src/ui/listen/summary/LiveAnswerView.js  (renders ${a.question} + .answer-body markdown — NOT edited, D3/FR-008)"
+      - "src/ui/listen/summary/LiveAnswerView.js  (.answer-question label path renders ${a.question} — NOT edited for the label, D3/FR-008; the .answer-body RENDER path IS edited for FR-013–FR-016)"
       - "src/features/common/prompts/promptTemplates.js  (pickle_glass_analysis :238, structure :252-258 — CLOSED, FR-002)"
     closed_untouched:
       - "src/features/common/prompts/promptTemplates.js"
       - "src/ui/listen/summary/SummaryView.js"
-      - "src/ui/listen/summary/LiveAnswerView.js"
-      - "src/ui/listen/ListenView.js"
       - "src/preload.js"
       - "src/features/ask/askService.js"
       - "src/bridge/featureBridge.js"
@@ -56,6 +68,10 @@ _references:
     untouched:
       - "live-answer-update  (payload shape {id, question, answer, ts} UNCHANGED; only the `question` VALUE changes — raw turn → extractQuestion(text))"
       - "summary-update  (existing summaryView-namespace channel; MUST stay byte-identical)"
+  renderer_events:
+    # In-renderer DOM CustomEvent (NOT an IPC channel, NOT persisted) — FR-016
+    new:
+      - "live-answer-updated  (bubbles+composed; LiveAnswerView.updated() → ListenView re-measures + resizes the listen window so a streaming answer is not clipped)"
   service_surface:
     new:
       - "extractQuestion(text) -> string  (FR-006/FR-007/FR-009, pure + total; reuses the four existing question signals)"
@@ -66,7 +82,7 @@ _references:
     - "CLAUSE_LEAD_RE (summaryService.js:38), LEAD_STRIP_RE (:41), CONTENT_CUE_RE (:44), EMBEDDED_Q_RE (:55)  — the four question signals (C2/FR-006)"
     - "isLikelyQuestion clause-split (split(/[.!?;,\\n]+/)) + discourse-marker peel loop (:69-73) + empty/non-string guards (:59-61)"
     - "pure-helper export block (:792-798)  — append module.exports.extractQuestion"
-    - "marked + DOMPurify renderer path (LiveAnswerView.js:300-325)  — renders real - / * lines as <ul><li> with NO renderer edit"
+    - "marked + DOMPurify renderer path (LiveAnswerView.js renderAnswers)  — renders real - / * lines as <ul><li>; REPAIRED by FR-013–FR-015 (it was 404ing the loader + calling the marked namespace object as a function, so markdown never rendered)"
     - "injectable SummaryService subclass test seam (liveAnswer.test.js:45-63)  — for the integration non-regression assertions"
   invariants:
     - "In-memory only (C3/C8/FR-011) — nothing persisted to the session DB / summaryRepository / config table"
@@ -254,8 +270,73 @@ structural_checks:
         severity: MEDIUM
         rca_hints:
           - "Add an [Unreleased] entry following the sibling 'Live Answer' format."
-          - "Improved: Live Answer readability — always-on headline+bullets reinforcement; the history Q: label now shows only the extracted question span (new pure extractQuestion helper). Internal: node:test coverage for extractQuestion (T1–T8)."
+          - "Improved: Live Answer readability — always-on headline+bullets reinforcement; the history Q: label now shows only the extracted question span (new pure extractQuestion helper). Fixed: markdown now renders (asset path), no mid-stream freeze, no clipping. Internal: node:test coverage for extractQuestion (T1–T8)."
         related_files: ["CHANGELOG.md"]
+
+    # --- Improvement 3 — rendering-correctness fixes (FR-013–FR-016, commit 1d74c07) ---
+    - id: SC-011
+      name: markdown-asset-path-resolves
+      plan_ref: spec FR-013 (libs load from ../assets/ relative to content.html — NOT ../../../assets/ which 404s)
+      description: "LiveAnswerView loads the markdown libs from ../assets/ (correct, relative to content.html in src/ui/app/) and NO load call uses the old repo-root-resolving ../../../assets/ path (the old path may still appear in an explanatory comment — only load calls are checked)"
+      command: |
+        grep -nE "(tryLoad|loadScript)\(['\"]\.\./assets/" src/ui/listen/summary/LiveAnswerView.js && \
+        test -z "$(grep -nE "(tryLoad|loadScript)\(['\"]\.\./\.\./\.\./assets/" src/ui/listen/summary/LiveAnswerView.js || true)"
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "FR-013: content.html lives in src/ui/app/, so assets resolve at ../assets/. The old ../../../assets/ resolved to the repo root (glass/assets/), 404'd, and the throw aborted loadLibraries before isLibrariesLoaded was set — so marked never ran and the answer showed raw markdown."
+          - "Each library load must be independent (best-effort try/catch) so one 404 does not abort the rest."
+        related_files: ["src/ui/listen/summary/LiveAnswerView.js"]
+
+    - id: SC-012
+      name: marked-invoked-via-parse
+      plan_ref: spec FR-015 (marked v4 UMD is a namespace object — call .parse(), not marked(text))
+      description: "renderAnswers invokes marked via .parse() (a bare this.marked(text) call throws on the v4 namespace object)"
+      command: |
+        grep -E "marked\.parse" src/ui/listen/summary/LiveAnswerView.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "FR-015: marked v4's UMD build exposes {parse, setOptions, …} — `this.marked(text)` throws. Use `this.marked.parse(text)` when present (fall back to a direct call for builds where marked itself is the function)."
+        related_files: ["src/ui/listen/summary/LiveAnswerView.js"]
+
+    - id: SC-013
+      name: answer-body-has-no-lit-child-binding
+      plan_ref: spec FR-014 (render() emits an EMPTY .answer-body — no ${a.text} child binding — so renderAnswers' innerHTML never fights Lit reconciliation)
+      description: "the .answer-body div in render() carries NO ${a.text} child binding (the no-mid-stream-freeze fix); renderAnswers owns the children"
+      command: |
+        node -e "const s=require('fs').readFileSync('src/ui/listen/summary/LiveAnswerView.js','utf8'); const bad=s.split(String.fromCharCode(10)).some(l=>l.includes('answer-body')&&l.includes('a.text')); if(bad){console.error('answer-body still binds a.text as a Lit child (mid-stream freeze risk)');process.exit(1)} else console.log('ANSWER_BODY_EMPTY_CONTAINER')"
+      expect:
+        exit_code: 0
+        stdout_contains: "ANSWER_BODY_EMPTY_CONTAINER"
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "FR-014: binding ${a.text} as a Lit child AND overwriting the same node's innerHTML in renderAnswers corrupts Lit reconciliation under per-token streaming and freezes the answer mid-stream."
+          - "render() must emit `<div class=\"answer-body\" data-answer-id=\"${a.id}\"></div>` (empty); renderAnswers() fills it from this.answers."
+        related_files: ["src/ui/listen/summary/LiveAnswerView.js"]
+
+    - id: SC-014
+      name: streaming-resize-event-wired
+      plan_ref: spec FR-016 (LiveAnswerView dispatches live-answer-updated; ListenView listens and resizes)
+      description: "the resize-on-stream path is wired — LiveAnswerView dispatches `live-answer-updated` and ListenView binds a listener for it"
+      command: |
+        grep -E "live-answer-updated" src/ui/listen/summary/LiveAnswerView.js && \
+        grep -E "live-answer-updated" src/ui/listen/ListenView.js
+      expect:
+        exit_code: 0
+      on_failure:
+        severity: MEDIUM
+        rca_hints:
+          - "FR-016: LiveAnswerView.updated() must dispatch `new CustomEvent('live-answer-updated', { bubbles: true, composed: true })` and ListenView must bind `@live-answer-updated` to its window-resize handler (mirrors stt-view's @stt-messages-updated)."
+          - "Without this the listen window resizes only on a view-mode toggle, so a long streaming answer stays clipped by the overflow:hidden assistant container."
+        related_files:
+          - "src/ui/listen/summary/LiveAnswerView.js"
+          - "src/ui/listen/ListenView.js"
 
 negative_assertions:
   description: |
@@ -298,21 +379,23 @@ negative_assertions:
           - "src/features/listen/listenService.js"
 
     - id: NA-003
-      name: no-renderer-or-preload-edit
-      plan_ref: spec FR-008/D3 (the cleaner label flows verbatim to the existing renderer — no UI edit)
-      description: "no renderer / IPC plumbing edit — LiveAnswerView.js, ListenView.js, and preload.js are absent from the diff"
+      name: no-ipc-plumbing-edit
+      plan_ref: spec FR-008/D3 (the cleaner LABEL flows verbatim — no IPC change) + FR-016 (renderer-only DOM event)
+      description: |
+        No IPC plumbing edit — preload.js is absent from the diff (the live-answer-update channel
+        + payload shape are UNCHANGED). NOTE: LiveAnswerView.js and ListenView.js ARE edited for the
+        rendering-correctness fixes FR-013–FR-016 (commit 1d74c07) and are NO LONGER forbidden here —
+        they are guarded positively by SC-011..SC-014. The FR-008 LABEL wiring still needs no renderer edit.
       command: |
-        test -z "$(git diff --name-only HEAD 2>/dev/null | grep -E 'src/ui/listen/summary/LiveAnswerView\.js|src/ui/listen/ListenView\.js|src/preload\.js' || true)"
+        test -z "$(git diff --name-only HEAD 2>/dev/null | grep -E 'src/preload\.js' || true)"
       expect:
         exit_code: 0
       on_failure:
         severity: BLOCKER
         rca_hints:
-          - "D3/FR-008: passing a cleaner `question` value at :451 is sufficient — LiveAnswerView.js renders ${a.question} (CSS Q: prefix at :148-149) and .answer-body already renders markdown bullets via marked/DOMPurify."
-          - "Revert any LiveAnswerView.js / ListenView.js / preload.js change; the live-answer-update payload shape and channel are UNCHANGED (value-only change)."
+          - "FR-016 adds an in-renderer DOM CustomEvent (live-answer-updated), NOT an IPC channel — preload.js must stay out of the diff and the live-answer-update payload shape is UNCHANGED (value-only label change, FR-008)."
+          - "If preload.js changed, the additive IPC boundary leaked — the renderer fixes use a DOM CustomEvent between LiveAnswerView and ListenView, no preload/IPC edit."
         related_files:
-          - "src/ui/listen/summary/LiveAnswerView.js"
-          - "src/ui/listen/ListenView.js"
           - "src/preload.js"
 
     - id: NA-004
@@ -530,6 +613,35 @@ manual_smoke_tests:
         rca_hints:
           - "If it blanks or answers: the amended message broke the EXACT-PASSIVE directive (FR-003/SC-006) — restore 'reply EXACTLY: PASSIVE' verbatim. Also confirm TG-002 (:559) is green."
 
+    - id: MST-005
+      name: answer-renders-markdown-not-raw-syntax
+      plan_ref: quickstart + spec AS-8 / FR-013/FR-015 (commit 1d74c07)
+      description: "During MST-001, watch the answer body as it renders (this is the bug 1d74c07 fixed)."
+      expected: |
+        The answer shows RENDERED markdown — a bold headline and real <ul><li> bullets — NOT
+        the raw characters '**' and '- ' as literal text. (If raw syntax shows, the markdown
+        libs did not load — check the ../assets/ path, SC-011, and marked.parse, SC-012.)
+      manual_only: true
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "Raw '**'/'- ' on screen = marked never ran. Root causes fixed in 1d74c07: asset path was ../../../assets/ (404 → loader aborted before isLibrariesLoaded), and marked v4 namespace was called as a function (threw). Verify SC-011 + SC-012."
+
+    - id: MST-006
+      name: streaming-answer-does-not-freeze-or-clip
+      plan_ref: quickstart + spec AS-9/AS-10 / FR-014/FR-016 (commit 1d74c07)
+      description: "Ask a question whose answer is long enough to stream over several seconds and exceed one window height."
+      expected: |
+        The answer keeps updating token-by-token to completion (does NOT freeze partway), and
+        the listen window grows to keep the whole answer visible (it is NOT clipped until you
+        toggle transcript↔insights). On toggling away and back, the answer is still there.
+      manual_only: true
+      on_failure:
+        severity: HIGH
+        rca_hints:
+          - "Freeze mid-stream = the .answer-body still binds ${a.text} as a Lit child while renderAnswers overwrites innerHTML (Lit reconciliation conflict). render() must emit an EMPTY .answer-body (SC-013)."
+          - "Clipped until toggle = the live-answer-updated → ListenView resize path is not wired (SC-014, FR-016)."
+
     - id: MST-SAFETY-001
       name: answer-and-label-excluded-from-shared-screen
       plan_ref: quickstart manual step 7 + spec Enforcement Strategy (inherited)
@@ -537,12 +649,13 @@ manual_smoke_tests:
       expected: |
         Neither the bulleted answer nor the cleaner Q: label appears on the shared screen —
         both render only in the content-protected listen window. (Automated guards: NA-004
-        setContentProtection untouched, NA-003 no renderer/window edit.)
+        setContentProtection untouched + windowManager.js out of the diff. The FR-013–FR-016
+        renderer edits touch no window-creation/content-protection code.)
       manual_only: true
       on_failure:
         severity: BLOCKER
         rca_hints:
-          - "If visible on the shared screen: content protection is disabled or a non-protected window rendered the panel. This spec touches no window code — check NA-004 + NA-003 first."
+          - "If visible on the shared screen: content protection is disabled or a non-protected window rendered the panel. The renderer fixes (FR-013–FR-016) touch no window code — check NA-004 first."
 
 on_failure:
   SC-001:
@@ -558,8 +671,8 @@ on_failure:
     rca_hints: ["promptTemplates.js is CLOSED (FR-002/C1) — reinforce bullets in the injected user message (:256-259) only; revert any template edit."]
     related_files: ["src/features/common/prompts/promptTemplates.js"]
   NA-003:
-    rca_hints: ["No renderer/preload edit (D3/FR-008) — the cleaner label flows verbatim to LiveAnswerView.js:345; revert any LiveAnswerView.js/ListenView.js/preload.js change."]
-    related_files: ["src/ui/listen/summary/LiveAnswerView.js", "src/ui/listen/ListenView.js", "src/preload.js"]
+    rca_hints: ["No IPC/preload edit — the label change is value-only (FR-008) and FR-016 uses a renderer DOM CustomEvent, not IPC. LiveAnswerView.js/ListenView.js ARE edited for FR-013–FR-016 (guarded positively by SC-011..SC-014); preload.js must stay out of the diff."]
+    related_files: ["src/preload.js"]
   NA-004:
     rca_hints: ["Never call setContentProtection(false); windowManager.js stays out of the diff (inherited load-bearing safety)."]
     related_files: ["src/window/windowManager.js"]
