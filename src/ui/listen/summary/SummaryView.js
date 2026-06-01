@@ -288,59 +288,59 @@ export class SummaryView extends LitElement {
         this.requestUpdate();
     }
 
+    /**
+     * Best-effort markdown library loader. content.html already loads `marked`
+     * globally via <script src="../assets/marked-4.3.0.min.js">; we additionally
+     * fetch highlight + DOMPurify RELATIVE TO content.html (src/ui/app/) — i.e.
+     * `../assets/`, NOT `../../../assets/`. The old `../../../assets/` resolved to
+     * the repo root (glass/assets/), 404'd, and the throw aborted the loader
+     * before isLibrariesLoaded was set — so markdown never rendered (raw ** / -).
+     * Each load is independent (one failure never aborts the rest), and markdown
+     * renders as long as `marked` is present — hljs only adds code highlighting.
+     */
     async loadLibraries() {
-        try {
-            if (!window.marked) {
-                await this.loadScript('../../../assets/marked-4.3.0.min.js');
+        const tryLoad = async (src) => {
+            try {
+                await this.loadScript(src);
+            } catch (err) {
+                console.warn('[summary] could not load', src, err && err.message);
             }
+        };
 
-            if (!window.hljs) {
-                await this.loadScript('../../../assets/highlight-11.9.0.min.js');
-            }
+        if (!window.marked) await tryLoad('../assets/marked-4.3.0.min.js');
+        if (!window.hljs) await tryLoad('../assets/highlight-11.9.0.min.js');
+        if (!window.DOMPurify) await tryLoad('../assets/dompurify-3.0.7.min.js');
 
-            if (!window.DOMPurify) {
-                await this.loadScript('../../../assets/dompurify-3.0.7.min.js');
-            }
+        this.marked = window.marked || null;
+        this.hljs = window.hljs || null;
+        this.DOMPurify = window.DOMPurify || null;
 
-            this.marked = window.marked;
-            this.hljs = window.hljs;
-            this.DOMPurify = window.DOMPurify;
-
-            if (this.marked && this.hljs) {
-                this.marked.setOptions({
-                    highlight: (code, lang) => {
-                        if (lang && this.hljs.getLanguage(lang)) {
-                            try {
-                                return this.hljs.highlight(code, { language: lang }).value;
-                            } catch (err) {
-                                console.warn('Highlight error:', err);
-                            }
-                        }
+        if (this.marked) {
+            const options = { breaks: true, gfm: true, pedantic: false, smartypants: false, xhtml: false };
+            if (this.hljs) {
+                options.highlight = (code, lang) => {
+                    if (lang && this.hljs.getLanguage(lang)) {
                         try {
-                            return this.hljs.highlightAuto(code).value;
+                            return this.hljs.highlight(code, { language: lang }).value;
                         } catch (err) {
-                            console.warn('Auto highlight error:', err);
+                            console.warn('[summary] Highlight error:', err);
                         }
-                        return code;
-                    },
-                    breaks: true,
-                    gfm: true,
-                    pedantic: false,
-                    smartypants: false,
-                    xhtml: false,
-                });
-
-                this.isLibrariesLoaded = true;
-                console.log('Markdown libraries loaded successfully');
+                    }
+                    try {
+                        return this.hljs.highlightAuto(code).value;
+                    } catch (err) {
+                        console.warn('[summary] Auto highlight error:', err);
+                    }
+                    return code;
+                };
             }
-
-            if (this.DOMPurify) {
-                this.isDOMPurifyLoaded = true;
-                console.log('DOMPurify loaded successfully in SummaryView');
-            }
-        } catch (error) {
-            console.error('Failed to load libraries:', error);
+            this.marked.setOptions(options);
+            this.isLibrariesLoaded = true; // markdown needs only marked
         }
+        if (this.DOMPurify) this.isDOMPurifyLoaded = true;
+
+        // Libs may arrive after the first render — re-render to upgrade fallback → markdown.
+        this.requestUpdate();
     }
 
     loadScript(src) {
@@ -361,7 +361,12 @@ export class SummaryView extends LitElement {
         }
 
         try {
-            return this.marked(text);
+            // marked v4 UMD exposes a NAMESPACE object (window.marked = {parse, setOptions,…}),
+            // NOT a callable — so `this.marked(text)` throws. Use .parse() when present;
+            // fall back to calling it directly for builds where marked itself is the function.
+            return typeof this.marked.parse === 'function'
+                ? this.marked.parse(text)
+                : this.marked(text);
         } catch (error) {
             console.error('Markdown parsing error:', error);
             return text;
@@ -373,6 +378,8 @@ export class SummaryView extends LitElement {
     }
 
     renderMarkdownContent() {
+        // Libraries not loaded yet → leave the template's escaped plain-text
+        // fallback (`${bullet}`) in place. It NEVER blanks.
         if (!this.isLibrariesLoaded || !this.marked) {
             return;
         }
@@ -380,25 +387,28 @@ export class SummaryView extends LitElement {
         const markdownElements = this.shadowRoot.querySelectorAll('[data-markdown-id]');
         markdownElements.forEach(element => {
             const originalText = element.getAttribute('data-original-text');
-            if (originalText) {
-                try {
-                    let parsedHTML = this.parseMarkdown(originalText);
+            if (!originalText) return;
 
-                    if (this.isDOMPurifyLoaded && this.DOMPurify) {
-                        parsedHTML = this.DOMPurify.sanitize(parsedHTML);
+            // Without DOMPurify we must NOT inject unsanitized LLM markdown via
+            // innerHTML (XSS) — fall back to safe plain text.
+            if (!this.isDOMPurifyLoaded || !this.DOMPurify) {
+                element.textContent = originalText;
+                return;
+            }
 
-                        if (this.DOMPurify.removed && this.DOMPurify.removed.length > 0) {
-                            console.warn('Unsafe content detected in insights, showing plain text');
-                            element.textContent = '⚠️ ' + originalText;
-                            return;
-                        }
-                    }
+            try {
+                const parsedHTML = this.DOMPurify.sanitize(this.parseMarkdown(originalText));
 
-                    element.innerHTML = parsedHTML;
-                } catch (error) {
-                    console.error('Error rendering markdown for element:', error);
-                    element.textContent = originalText;
+                if (this.DOMPurify.removed && this.DOMPurify.removed.length > 0) {
+                    console.warn('Unsafe content detected in insights, showing plain text');
+                    element.textContent = '⚠️ ' + originalText;
+                    return;
                 }
+
+                element.innerHTML = parsedHTML;
+            } catch (error) {
+                console.error('Error rendering markdown for element:', error);
+                element.textContent = originalText;
             }
         });
     }
@@ -450,6 +460,12 @@ export class SummaryView extends LitElement {
     updated(changedProperties) {
         super.updated(changedProperties);
         this.renderMarkdownContent();
+        // Tell ListenView to re-measure + resize the listen window as the summary
+        // grows. Without this, the window is only resized on a viewMode toggle, so
+        // a long summary (e.g. content after the "Actions" heading) stays clipped
+        // with no scroll until you toggle. Mirrors LiveAnswerView's
+        // live-answer-updated → adjustWindowHeightThrottled.
+        this.dispatchEvent(new CustomEvent('summary-updated', { bubbles: true, composed: true }));
     }
 
     render() {
