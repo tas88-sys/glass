@@ -26,6 +26,7 @@ summary:
     - {id: D2, decision: "extractQuestion is a sibling pure helper next to isLikelyQuestion, exported the same way (module.exports.extractQuestion at the bottom of summaryService.js)", rationale: "Matches the FR-018/C6 pure-helper + thin-orchestrator convention; reuses the existing signal regexes; directly unit-testable via node:test"}
     - {id: D3, decision: "extractQuestion is wired in at the single call site summaryService.js:451 — `question: extractQuestion(text)` replaces `question: text`", rationale: "The cleaner value flows straight to the renderer's Q: label (LiveAnswerView.js:148-149,345) with NO renderer/UI change"}
     - {id: D4, decision: "Bullets are ALWAYS-ON for v1 — no bullet-vs-prose toggle. The injected user message unconditionally reinforces the headline+bullets structure; prose mode is NOT exposed", rationale: "[LOCKED with user 2026-06-01] Directly solves 'make it easier to understand' with the smallest change; the app has no preference store wired to the answer lane (config is env-var only, C3/C8 forbid DB persistence). A prose switch is deferred to future work"}
+    - {id: D5, decision: "Renderer files LiveAnswerView.js + ListenView.js moved OUT of the CLOSED set for rendering-correctness bug fixes (FR-013–FR-016), added post-implementation in commit 1d74c07. extractQuestion now PEELS leading discourse markers from the returned clause (LEAD_STRIP_RE) — multi-question turn returns the peeled last clause ('where are you based?', not 'And where are you based?')", rationale: "[2026-06-01] Live testing showed G1 was not delivered by the prompt change alone — the answer rendered as raw markdown (asset path 404'd the loader), froze mid-stream (Lit child-binding/innerHTML conflict), and was clipped (no resize-on-stream). Fixing G1's visible bullets REQUIRED editing the renderer. promptTemplates.js / summary lane / SummaryView.js / askService.js / featureBridge.js / listenService.js / preload.js REMAIN closed; payload shape + in-memory invariant (C3/C8) unchanged"}
 
 # CRITICAL REQUIREMENTS - Must verify during implementation
 # These survive context compaction and generate T-VERIFY tasks
@@ -54,7 +55,7 @@ critical_requirements:
 ### Relationship to the original spec
 - **Parent spec**: `specs/2026-05-30-interview-live-answer/spec.md` (the shipped Live Answer lane, including its 2026-06-01 newest-first history amendment).
 - **Inherited constraints that still hold**: C7 (reuse `pickle_glass_analysis` UNCHANGED; `promptTemplates.js` stays closed), C8 (in-memory only; no DB persistence), C6/FR-018 (pure helpers + thin orchestrator; node:test, not Jest), FR-017 (purely additive; summary lane / `summary-update` / `SummaryView.js` / `askService.js` / `featureBridge.js` / `listenService.js` untouched).
-- **What this spec changes**: only the **injected user message** string and the **question label value** in `summaryService.js`, plus a **new pure helper** and its **unit tests**. Nothing in the parent spec's locked decisions (D1–D4) or corrections (C1–C8) is re-litigated.
+- **What this spec changes**: the **injected user message** string and the **question label value** in `summaryService.js`, plus a **new pure helper** (`extractQuestion`) and its **unit tests**; and — added post-implementation (commit `1d74c07`, Improvement 3 / FR-013–FR-016) — **rendering-correctness fixes** in the parent lane's renderer `LiveAnswerView.js` and host `ListenView.js` so the headline+bullets markdown actually renders, does not freeze mid-stream, and is not clipped. Nothing in the parent spec's locked decisions (D1–D4) or corrections (C1–C8) is re-litigated; `promptTemplates.js`, the summary lane, `SummaryView.js`, `askService.js`, `featureBridge.js`, `listenService.js`, and `preload.js` stay closed.
 
 ---
 
@@ -75,8 +76,16 @@ critical_requirements:
 ### Session 2026-06-01
 
 - **Q: How is "bullet vs. prose" exposed as a user option?** The codebase has **no existing user-preference store** for the answer lane — `summaryService` reads runtime config only via environment variables (e.g. `LIVE_ANSWER_DEBUG`, `summaryService.js:11`), and the original spec's FR-005 expressed its one optional knob (min-interval) as "configurable but OFF for v1." There is no settings UI seam wired to the answer lane, and the session/config DB is closed by C3/C8. → **A: [LOCKED D4] Bullets are ALWAYS-ON for v1 — NO toggle.** The injected user message unconditionally reinforces the headline+bullets structure; prose mode is not exposed. This is the smallest change that directly satisfies the readability goal and adds no config surface. A prose switch (env var or in-app control) is explicitly deferred to future work.
-- **Q: Does the question label change require any renderer/UI edit?** → **A: No.** `LiveAnswerView.js:345` already renders `${a.question}` and the `Q: ` prefix is pure CSS (`LiveAnswerView.js:148-149`). Passing a cleaner `question` value at `summaryService.js:451` is sufficient; the view is untouched. (Recorded so `/plan` does not scope a UI change.)
+- **Q: Does the question label change require any renderer/UI edit?** → **A: No (for the label).** `LiveAnswerView.js:345` already renders `${a.question}` and the `Q: ` prefix is pure CSS (`LiveAnswerView.js:148-149`). Passing a cleaner `question` value at `summaryService.js:451` is sufficient; the **label** path needs no view edit. (Recorded so `/plan` does not scope a UI change for the label. The *rendering* path of the same view is separately repaired by FR-013–FR-016 — see the post-implementation clarification below.)
 - **Q: Does reinforcing bullets require editing the prompt template?** → **A: No (LOCKED D1).** `pickle_glass_analysis` (`promptTemplates.js:252-258`) ALREADY requests "Short headline answer (≤6 words) + Main points (1–2 bullets ≤15 words) + Sub-details." The template is CLOSED (original FR-006/FR-017). The fix reinforces that *existing* structure from the open **injected user message** only.
+
+### Post-implementation correction — Session 2026-06-01 (commit `1d74c07`)
+
+Live testing after the first implementation (`7d52971`) showed the readability goal G1 was **not actually delivered by the prompt-wording change alone**: the streamed answer rendered as **raw markdown syntax** (`**`, `- `) rather than `<ul><li>` bullets, **froze mid-stream**, and got **clipped** by the assistant container. Root causes were three pre-existing bugs in the shipped lane's renderer (`LiveAnswerView.js`) and its host (`ListenView.js`) — not in the prompt:
+
+- **Q: Why did the headline+bullets markdown not render even though `marked` is available?** → **A:** `LiveAnswerView.loadLibraries` loaded the markdown libs from `../../../assets/`, which resolved to the repo root and 404'd; the throw aborted the loader before `isLibrariesLoaded` was set, so `marked` never ran. Additionally marked v4's UMD build is a *namespace object*, so `this.marked(text)` threw. Fixing G1 (visible bullets) therefore REQUIRED editing `LiveAnswerView.js`. → The renderer is **no longer in the CLOSED set** for these specific rendering-correctness fixes (FR-013–FR-016). `promptTemplates.js`, the summary lane, `SummaryView.js`, `askService.js`, `featureBridge.js`, `listenService.js`, and `preload.js` REMAIN closed.
+- **Q: Was the original "no renderer/UI edit" decision (D3) wrong?** → **A: No — D3 holds for the *question-label* wiring** (FR-008 still flows the cleaner value to the existing template with no renderer edit). D3's "no renderer edit" scope was the label only; the rendering-correctness bugs (markdown not rendering, mid-stream freeze, clipping) are a *separate* concern surfaced by live testing and are addressed by FR-013–FR-016, which DO touch `LiveAnswerView.js` and `ListenView.js`.
+- **Q: Do the renderer fixes change the IPC contract or persist anything?** → **A: No.** The `live-answer-update` payload shape is unchanged and everything stays in-memory (C3/C8/FR-011). The only new signal is an in-renderer DOM `CustomEvent` (`live-answer-updated`) used by `ListenView` to resize the window — no IPC channel, no DB write.
 
 ---
 
@@ -97,11 +106,15 @@ With this change: (1) the streamed answer renders as a short headline plus real 
 5. **Given** a turn whose question span is the whole sentence already (a clean "What is a closure?"), **When** `extractQuestion` runs, **Then** the label equals that sentence (no truncation or mangling).
 6. **Given** the original Live Answer behaviors, **When** these two changes are applied, **Then** triggering/gating (`shouldTriggerAnswer`, `isLikelyQuestion`), PASSIVE suppression (`parseAnswerOrPassive`), the newest-first history, the de-dup/abort logic, and the summary lane all behave identically (purely additive — FR-017 of the parent spec still holds).
 7. **Given** the model emits the PASSIVE sentinel for a non-question turn, **When** the bullet reinforcement is in the injected user message, **Then** PASSIVE suppression still fires unchanged (the bullet instruction never overrides the EXACT-`PASSIVE` directive; the panel holds the last answer).
+8. **Given** the model returns headline + markdown bullets (FR-001), **When** the answer renders in `<live-answer-view>`, **Then** it appears as actual rendered markdown (`<ul><li>` bullets, bold headline) — NOT raw `**`/`- ` syntax — because the markdown libraries load from the correct `../assets/` path and `marked` is invoked via `.parse()` (FR-013/FR-015).
+9. **Given** the answer streams in token-by-token, **When** deltas arrive, **Then** the visible answer keeps updating to completion and does NOT freeze mid-stream (the `.answer-body` carries no Lit child binding; `renderAnswers()` owns its content) (FR-014).
+10. **Given** a long answer that grows past the current window height while streaming, **When** new tokens arrive, **Then** the listen window resizes to keep the answer fully visible — it is NOT clipped until a view-mode toggle (FR-016).
+11. **Given** the markdown libraries have not finished loading (or `DOMPurify` is unavailable), **When** an answer arrives, **Then** the body shows safe **plain text** (never blank, never unsanitized `innerHTML`) and upgrades to sanitized markdown once the libraries load (FR-015).
 
 ### Edge Cases
 
 - **Empty / whitespace / non-string turn passed to `extractQuestion`**: returns the input's safe fallback (empty string in → empty string out; non-string in → empty string), never throws — mirrors the defensive guards in `isLikelyQuestion` (`summaryService.js:59-61`).
-- **Multiple questions in one turn** ("What's your name? And where are you based?"): `extractQuestion` returns a clean, non-empty interrogative span. Which clause is the by-design choice (first vs last) and MUST be pinned in tests; the parent lane already answers the most-recent question, so the label SHOULD prefer the last/most-recent interrogative clause for consistency.
+- **Multiple questions in one turn** ("What's your name? And where are you based?"): `extractQuestion` returns the **last/most-recent** interrogative clause (pinned in tests — the parent lane already answers the most-recent question, so the label matches it), **with its leading discourse markers peeled** (`LEAD_STRIP_RE`). The conjunction-led span surfaces bare → `"where are you based?"`, NOT `"And where are you based?"`. Peeling the returned clause (not just using the signals for detection) is the load-bearing behavior locked by the bug-fix commit `1d74c07`.
 - **Question signal is a cue, not a `?`** ("compare a process and a thread"): no `?` to anchor on; `extractQuestion` isolates the cue-bearing clause or falls back to the full text — never empty.
 - **Bullet instruction vs. a genuinely one-line answer** ("Yes — Go is statically typed."): the headline-first structure still allows a short answer; the reinforcement asks for bullets *when there are supporting points*, it does not pad a trivial answer into fake bullets.
 - **Answer already short / no supporting points**: the always-on bullet reinforcement asks for a headline plus bullets *when there are supporting points*; a one-line answer leads with the headline and is not padded into fake bullets (it never overrides correctness for the sake of structure).
@@ -122,14 +135,23 @@ With this change: (1) the streamed answer renders as a short headline plus real 
 
 #### Improvement 2 — Question label (interrogative-span extraction)
 
-- **FR-006** *(C2 — HIGH)*: The system MUST add a pure, directly unit-testable helper `extractQuestion(text)` that isolates the interrogative span (the sentence/clause carrying the question signal) from an interviewer turn. It MUST REUSE the same question signals already used by `isLikelyQuestion` (`summaryService.js:58-80`): the leading wh-word/auxiliary pattern `CLAUSE_LEAD_RE` (`:38`), the discourse-marker peeler `LEAD_STRIP_RE` (`:41`), the imperative/interview cue pattern `CONTENT_CUE_RE` (`:44`), and the embedded-question pattern `EMBEDDED_Q_RE` (`:55`). It MUST NOT introduce a new, divergent set of question signals.
-- **FR-007**: `extractQuestion(text)` MUST fall back to the **full input text** (trimmed) when no clean interrogative span is found, and MUST return a safe empty string for empty/whitespace/non-string input — never `null`/`undefined`, never throw. It MUST be a pure function (no I/O, no service state) like the sibling helpers `isLikelyQuestion` / `normalizePassive` / `parseAnswerOrPassive` / `shouldTriggerAnswer` / `normalizeTail`.
-- **FR-008** *(D3)*: The system MUST pass the extracted span as the history entry's question label by changing the single call site `summaryService.js:451` from `question: text` to `question: extractQuestion(text)`. No other call site, channel, or renderer code changes — the cleaner value flows to `LiveAnswerView.js:345` (rendered behind the CSS `Q: ` prefix at `:148-149`) with no UI edit.
+- **FR-006** *(C2 — HIGH)*: The system MUST add a pure, directly unit-testable helper `extractQuestion(text)` that isolates the interrogative span (the sentence/clause carrying the question signal) from an interviewer turn. It MUST REUSE the same question signals already used by `isLikelyQuestion` (`summaryService.js:58-80`): the leading wh-word/auxiliary pattern `CLAUSE_LEAD_RE` (`:38`), the discourse-marker peeler `LEAD_STRIP_RE` (`:41`), the imperative/interview cue pattern `CONTENT_CUE_RE` (`:44`), and the embedded-question pattern `EMBEDDED_Q_RE` (`:55`). It MUST NOT introduce a new, divergent set of question signals. When several clauses carry a question signal, it MUST return the **last** signal-bearing clause (most-recent question).
+- **FR-007**: `extractQuestion(text)` MUST return the chosen interrogative clause **with leading discourse markers peeled** (`LEAD_STRIP_RE`) so a conjunction-/filler-led question surfaces bare — e.g. *"What's your name? And where are you based?"* → `"where are you based?"` (the returned clause is peeled, not just used for detection; pinned by `1d74c07`). It MUST fall back to the **full input text** (trimmed) when no clean interrogative span is found, and MUST return a safe empty string for empty/whitespace/non-string input — never `null`/`undefined`, never throw. It MUST be a pure function (no I/O, no service state) like the sibling helpers `isLikelyQuestion` / `normalizePassive` / `parseAnswerOrPassive` / `shouldTriggerAnswer` / `normalizeTail`.
+- **FR-008** *(D3)*: The system MUST pass the extracted span as the history entry's question label by changing the single call site `summaryService.js:451` from `question: text` to `question: extractQuestion(text)`. No other call site or channel changes, and the **label** needs no renderer edit — the cleaner value flows to `LiveAnswerView.js:345` (rendered behind the CSS `Q: ` prefix at `:148-149`) unchanged. (The renderer's *answer-body rendering* path is edited separately for FR-013–FR-016; FR-008's label wiring is not.)
 - **FR-009**: `extractQuestion` MUST be exported from `summaryService.js` the same way as the existing pure helpers (`module.exports.extractQuestion = extractQuestion;`, alongside `:793-798`) so it is importable by the node:test suite without instantiating the service.
+
+#### Improvement 3 — Rendering correctness *(post-implementation; commit `1d74c07`)*
+
+*Live testing of `7d52971` showed Improvement 1 did not visibly deliver scannable bullets: the answer rendered as raw markdown syntax, froze mid-stream, and was clipped. The following requirements correct the shipped lane's renderer (`LiveAnswerView.js`) and host (`ListenView.js`) so the headline+bullets structure from FR-001 actually renders. These are bug fixes to the parent lane's renderer, kept in-memory and additive — no IPC/DB/template change.*
+
+- **FR-013** *(markdown actually renders)*: The streamed answer MUST render as real markdown — the `- `/`* ` bullets FR-001 produces become an actual `<ul><li>` list — not raw `**`/`- ` text. The markdown libraries (`marked`, optionally `highlight.js`/`DOMPurify`) MUST be loaded from a path that resolves relative to `content.html` (`src/ui/app/`, i.e. `../assets/`, NOT `../../../assets/` which resolves to the repo root and 404s). Each library load MUST be independent (one failure MUST NOT abort the rest); markdown renders whenever `marked` is present.
+- **FR-014** *(no mid-stream freeze)*: `LiveAnswerView` MUST NOT both bind the answer text as a Lit child (`${a.text}`) and overwrite the same node's `innerHTML` — that conflict corrupts Lit's child reconciliation under per-token streaming and freezes the answer mid-stream. `render()` MUST emit the `.answer-body` as an **empty** container (no Lit child binding); `renderAnswers()` MUST own its content exclusively.
+- **FR-015** *(never blank; safe fallback)*: `renderAnswers()` MUST run on **every** update and fill each body from `this.answers` (the source of truth) — plain text until the libraries load, sanitized markdown afterward — so a re-show (the transcript↔insights toggle) re-renders from state and NEVER blanks. It MUST invoke marked v4's namespace build via `.parse()` (a bare `this.marked(text)` call throws on the v4 UMD object). Without `DOMPurify` it MUST fall back to plain text rather than inject unsanitized LLM markdown via `innerHTML` (XSS guard).
+- **FR-016** *(no clipping during stream)*: The listen window MUST resize as the answer streams/grows so a long answer is not clipped by the `overflow:hidden` assistant container until a view-mode toggle. `LiveAnswerView` MUST emit a growth signal (a `live-answer-updated` DOM `CustomEvent`, bubbling + composed) on each update and `ListenView` MUST re-measure + resize on it (mirroring stt-view's `@stt-messages-updated` → `adjustWindowHeightThrottled`). This adds no IPC channel and persists nothing.
 
 #### Independence & non-regression (inherited)
 
-- **FR-010**: Both changes MUST be purely additive. `promptTemplates.js`, `makeOutlineAndRequests`, `triggerAnalysisIfNeeded`, the `summary-update` channel, `SummaryView.js`, `askService.js`, `featureBridge.js`, and `listenService.js` MUST NOT be modified (the parent spec's FR-017 / CLOSED set continues to hold). If the two changes were reverted, the Live Answer lane MUST behave exactly as it does today.
+- **FR-010**: The changes MUST be purely additive to the summary lane. `promptTemplates.js`, `makeOutlineAndRequests`, `triggerAnalysisIfNeeded`, the `summary-update` channel, `SummaryView.js`, `askService.js`, `featureBridge.js`, `listenService.js`, and `preload.js` MUST NOT be modified (the parent spec's FR-017 / CLOSED set continues to hold for these). `LiveAnswerView.js` and `ListenView.js` ARE edited — but only for the rendering-correctness fixes FR-013–FR-016, and only in ways that preserve the `live-answer-update` payload shape and the lane's observable behavior (no summary-lane impact). If Improvements 1–3 were reverted, the summary lane MUST behave exactly as it does today.
 - **FR-011**: The changes MUST be in-memory only (parent C8). Neither the injected-message change nor the question-label change writes to the session DB, `summaryRepository`, or any config table.
 
 #### Testability (inherited convention)
@@ -140,7 +162,7 @@ With this change: (1) the streamed answer renders as a short headline plus real 
 
 - **Injected user message** (transient, in-memory): the `{ role: 'user', content: ... }` element of the `messages` array passed to `createStreamingLLM(...).streamChat(messages)` in `makeLiveAnswer` (`summaryService.js:252-260`). This spec amends its `content` string (unconditionally — always-on bullet reinforcement, D4) and nothing else in the array.
 - **Question label** (transient, in-memory): the `question` field on each `live-answer-update` payload and on each renderer history entry `{ id, question, text, ts }` (`LiveAnswerView.js:169,345`). This spec changes the *value* assigned at `summaryService.js:451` (from the raw turn to `extractQuestion(text)`); the field, channel, and renderer are unchanged.
-- **`extractQuestion(text)`** (new pure helper): input is an interviewer turn string; output is the isolated interrogative span, or the trimmed full text when none is cleanly found, or `''` for empty/non-string input. No state, no I/O.
+- **`extractQuestion(text)`** (new pure helper): input is an interviewer turn string; output is the isolated interrogative span (the **last** signal-bearing clause, with leading discourse markers peeled via `LEAD_STRIP_RE`), or the trimmed full text when none is cleanly found, or `''` for empty/non-string input. No state, no I/O.
 
 ### External Dependencies & Risk Assessment *(mandatory)*
 
@@ -164,6 +186,7 @@ This follow-on's testable core is the new pure helper `extractQuestion`; the bul
 | FR-008 (label wiring) | Unit/Integration | Assert the call site passes `extractQuestion(text)` (e.g. via the existing mocked-trigger integration harness asserting the emitted `question` field) |
 | FR-001 / FR-003 / FR-004 (always-on bullet reinforcement + PASSIVE preserved) | Integration (mocked stream) | With the amended (always-on bullets) injected message: PASSIVE sentinel still suppresses (the bullet instruction never overrides EXACT-`PASSIVE`); a normal answer still streams/emits |
 | FR-010 (independence) | Integration (mocked stream) | `summary-update` still fires on its 5-turn cadence; summary lane output unchanged |
+| FR-013 / FR-014 / FR-015 / FR-016 (rendering correctness) | Static grep + Manual | No Electron-renderer harness exists. Static checks assert the renderer code shape (asset path `../assets/`, `marked.parse`, empty `.answer-body`, `live-answer-updated` dispatch + `ListenView` listener); the rendered `<ul><li>`, no-freeze, and no-clip behaviors are manual smoke checks |
 
 **Distribution Estimate**:
 - Feature type: [x] Mixed (a pure-logic helper + a prompt-wording change in the streaming shell)
@@ -213,22 +236,26 @@ This follow-on's testable core is the new pure helper `extractQuestion`; the bul
 
 **Feature Classification**:
 - [ ] Backend-only
-- [x] **Minor UI** (no new components or layout; the streamed answer's content becomes scannable bullets via the existing `marked` renderer, and the existing `Q:` label receives a cleaner value — no `LiveAnswerView`/`ListenView` structural change) → Design reference optional
+- [x] **Minor UI** (no new components or layout; the streamed answer's content becomes scannable bullets via the `marked` renderer, the existing `Q:` label receives a cleaner value, and the existing `<live-answer-view>`/`ListenView` are bug-fixed in place (FR-013–FR-016) — no NEW component, view-mode, or layout) → Design reference optional
 - [ ] Moderate UI
 - [ ] Major UI
 
 **Design Reference**:
-- Figma/Mockup Source: Not applicable — no new component. The visual surface is the **existing** `<live-answer-view>` (`src/ui/listen/summary/LiveAnswerView.js`); improvement 1 makes its `.answer-body` render real `<ul><li>` markdown (already supported by the `marked`/`DOMPurify` path), and improvement 2 feeds its `.answer-question` label (`:345`, CSS `Q: ` prefix at `:148-149`) a cleaner string. No new view-mode, toggle, or layout.
-- Design Component Name(s): `LiveAnswerView` (`<live-answer-view>`) — **read-only reference; not modified by this spec.**
+- Figma/Mockup Source: Not applicable — no new component. The visual surface is the **existing** `<live-answer-view>` (`src/ui/listen/summary/LiveAnswerView.js`); improvement 1 makes its `.answer-body` render real `<ul><li>` markdown via the `marked`/`DOMPurify` path (which improvement 3 / FR-013–FR-015 had to *repair* — the path was 404ing so markdown never rendered), and improvement 2 feeds its `.answer-question` label (`:345`, CSS `Q: ` prefix at `:148-149`) a cleaner string. No new view-mode, toggle, or layout.
+- Design Component Name(s): `LiveAnswerView` (`<live-answer-view>`) — **modified in place for the rendering-correctness fixes (FR-013–FR-016); no new component or layout.**
 - Mockup covers ALL functional requirements above: [x] Yes (no new UI surface; the requirements are a prompt-wording change + a label-value change rendered by existing components).
 
 **Component Inventory Preview**:
 ```
-Reused (unchanged):
-- <live-answer-view> .answer-body: already renders sanitized markdown via marked/DOMPurify → will now show real <ul><li> bullets
-- <live-answer-view> .answer-question (CSS "Q: " prefix): already renders ${a.question} → will now show the extracted span
+Reused (label path unchanged):
+- <live-answer-view> .answer-question (CSS "Q: " prefix): already renders ${a.question} → now shows the extracted span (no edit needed for the label — D3/FR-008)
 
-New components: NONE (no renderer/UI files are modified)
+Modified (rendering-correctness fixes only — FR-013–FR-016):
+- <live-answer-view> .answer-body: now an EMPTY container in render(); renderAnswers() fills it (plain text → sanitized markdown via marked.parse/DOMPurify). Fixes raw-markdown (asset path), mid-stream freeze, and never-blank fallback.
+- <live-answer-view> updated(): dispatches `live-answer-updated` so the window resizes during streaming
+- ListenView: listens for `live-answer-updated` and re-measures + resizes the listen window
+
+New components: NONE (no NEW renderer/UI components; the two existing ones are bug-fixed in place)
 ```
 
 ### Permissions & Access Control *(mandatory)*
@@ -265,7 +292,8 @@ New components: NONE (no renderer/UI files are modified)
 - [x] Reuses the existing question signals (`CLAUSE_LEAD_RE` / `LEAD_STRIP_RE` / `CONTENT_CUE_RE` / `EMBEDDED_Q_RE`) — no divergent heuristic (C2/FR-006).
 - [x] Reuses the existing prompt (`pickle_glass_analysis`) and streaming path; `promptTemplates.js` stays closed (C1/C5/FR-002).
 - [x] Pure logic separated from I/O for unit testing (C4 / parent C6/FR-018).
-- [x] No renderer/UI edit — the cleaner label flows to the existing `<live-answer-view>` (D3/FR-008).
+- [x] No renderer/UI edit **for the label** — the cleaner `question` value flows to the existing `<live-answer-view>` with no template change (D3/FR-008).
+- [x] Renderer edited **only for rendering-correctness fixes** (FR-013–FR-016) — `LiveAnswerView.js` (asset path, `marked.parse`, empty-container/no-freeze, never-blank fallback) and `ListenView.js` (resize-on-stream listener); the `live-answer-update` payload shape and the summary lane are unchanged.
 
 **Existing Services/Code to Reuse** *(prevents duplication)*:
 | Existing Code | Location | Can Reuse For |
@@ -276,14 +304,15 @@ New components: NONE (no renderer/UI files are modified)
 | Injected user message array | `summaryService.js:252-260` | Amend the `user` message `content` (always-on bullet reinforcement, D4) — FR-001/FR-004 |
 | Question-label call site | `summaryService.js:451` (`question: text`) | Change to `question: extractQuestion(text)` — FR-008 |
 | Closed template structure block (read-only reference) | `promptTemplates.js:252-258` | Mirror its "headline + bullets" wording in the injected message WITHOUT editing the template — FR-002 |
-| Renderer label + body (read-only reference) | `LiveAnswerView.js:148-149,345` | Confirm no UI edit needed (cleaner `question` value flows straight in) |
+| Renderer label path (read-only reference) | `LiveAnswerView.js:148-149,345` | Confirm no UI edit needed for the LABEL (cleaner `question` value flows straight in). The `.answer-body` render path is edited for FR-013–FR-016. |
 | `LIVE_ANSWER_DEBUG` env-var pattern | `summaryService.js:11` | Reference pattern ONLY for a FUTURE prose toggle (deferred per D4) — not added in v1 |
 | Existing node:test suite | `src/features/listen/summary/__tests__/liveAnswer.test.js` | Add `extractQuestion` unit cases + non-regression integration assertions — FR-012 |
 
 **Files**:
-- **Additive/in-place edits**: `src/features/listen/summary/summaryService.js` (new pure helper `extractQuestion` + its export; amended injected user message in `makeLiveAnswer` with always-on bullet reinforcement (D4); change `question: text` → `question: extractQuestion(text)` at `:451`).
-- **Test edits**: `src/features/listen/summary/__tests__/liveAnswer.test.js` (new `describe('extractQuestion', ...)` block + integration non-regression assertions).
-- **Closed/untouched**: `promptTemplates.js`, `makeOutlineAndRequests`, the `summary-update` channel, `SummaryView.js`, `askService.js`, `featureBridge.js`, `listenService.js`, `LiveAnswerView.js`, `ListenView.js`, `preload.js` (the renderer/IPC plumbing from the parent spec needs no change).
+- **Additive/in-place edits**: `src/features/listen/summary/summaryService.js` (new pure helper `extractQuestion` + its export, returning the peeled last interrogative clause; amended injected user message in `makeLiveAnswer` with always-on bullet reinforcement (D4); change `question: text` → `question: extractQuestion(text)` at `:451`).
+- **Renderer-correctness edits (FR-013–FR-016, commit `1d74c07`)**: `src/ui/listen/summary/LiveAnswerView.js` (`loadLibraries` asset path `../assets/` + independent best-effort loads; `renderAnswers` uses `marked.parse`, runs unconditionally with plain-text/`DOMPurify` fallback; `render()` emits an empty `.answer-body`; `updated()` dispatches `live-answer-updated`) and `src/ui/listen/ListenView.js` (`@live-answer-updated` → window resize). The `live-answer-update` IPC payload and channel are unchanged.
+- **Test edits**: `src/features/listen/summary/__tests__/liveAnswer.test.js` (new `describe('extractQuestion', ...)` block — incl. T5 pinned to the peeled `"where are you based?"` — + integration non-regression assertions).
+- **Closed/untouched**: `promptTemplates.js`, `makeOutlineAndRequests`, the `summary-update` channel, `SummaryView.js`, `askService.js`, `featureBridge.js`, `listenService.js`, `preload.js` (the IPC plumbing from the parent spec needs no change).
 
 ---
 
@@ -293,6 +322,7 @@ New components: NONE (no renderer/UI files are modified)
 - **Template-level structure tuning**: any change to the `pickle_glass_analysis` headline/bullet wording itself belongs in a separate spec that re-opens `promptTemplates.js` — explicitly out of scope here (C1/C5).
 - **Smarter multi-question handling**: richer parsing (e.g. answering and labelling several questions from one turn separately) is out of scope; `extractQuestion` returns a single span.
 - **Persisting the cleaned question label / bulleted answer cross-session**: still gated by C3/C8 (in-memory only); cross-session DB persistence remains the parent spec's future work.
+- **Automated renderer/E2E coverage for FR-013–FR-016**: this repo has no Electron-renderer or live-audio test harness, so the rendered `<ul><li>` bullets, no-mid-stream-freeze, and no-clip behaviors are verified by static-shape grep checks (SC-011–SC-014) plus manual smoke tests (MST-005/MST-006). A real renderer harness is future work.
 
 ---
 
@@ -306,14 +336,14 @@ New components: NONE (no renderer/UI files are modified)
 - [x] Data sensitivity classified — in-memory transcript/answer/label, single local user, not persisted (C3/C8); no Confidential/Restricted handling
 - [x] External APIs identified (LLM provider — unchanged by this spec, LOW net-new risk, mocked in tests)
 - [x] Error handling defined (`extractQuestion` total/guarded; PASSIVE preserved; prose-vs-bullets both valid)
-- [x] UI complexity classified (Minor — no new components; existing renderer shows bullets + cleaner label)
-- [x] Deprecation decision made — N/A; purely additive, deprecates nothing (FR-010)
-- [x] Bug evidence — N/A; `critical_requirements.type` is `feature-minor`, not `bugfix` (the run-on-text symptom is documented in the Primary User Story and parent-spec context)
+- [x] UI complexity classified (Minor — no NEW components; the existing renderer shows bullets + cleaner label and is bug-fixed in place for FR-013–FR-016)
+- [x] Deprecation decision made — N/A; additive, deprecates nothing (the FR-014 render-model change supersedes the interim declarative approach within the same unshipped branch, not a shipped behavior — FR-010)
+- [x] Bug evidence — the readability feature is `feature-minor`, but Improvement 3 (FR-013–FR-016, commit `1d74c07`) folds in three renderer bug fixes surfaced by live testing: markdown rendered as raw `**`/`- ` (asset-path 404 aborted the lib loader + marked-v4 namespace called as a function), the answer froze mid-stream (Lit child-binding/innerHTML conflict), and a long answer was clipped (no resize-on-stream). Evidence + root cause are in the post-implementation clarification (Session 2026-06-01) and the commit body.
 
 ---
 
 ## Next Steps
 
-- Review and refine this spec: `specs/2026-06-01-interview-live-answer-readability/spec.md`
-- Clarification complete (Session 2026-06-01 — bullet-vs-prose resolved as bullets-always/no-toggle, D4). No open questions remain.
-- Run `/plan` next.
+- **Implemented & pushed** on branch `feat/live-answer-readability`: Improvement 1+2 in commit `7d52971`, Improvement 3 (renderer-correctness fixes FR-013–FR-016) + the `extractQuestion` peel fix in commit `1d74c07`. This spec, `acceptance-tests.yaml`, and `CHANGELOG.md` were reconciled post-implementation on 2026-06-01 to match the shipped code.
+- Clarification complete (Session 2026-06-01 — bullet-vs-prose resolved as bullets-always/no-toggle, D4; renderer scope expansion recorded in the post-implementation clarification). No open questions remain.
+- Verify against the acceptance manifest (`SC-001`..`SC-014`, `TG-001`..`TG-004`, manual `MST-001`..`MST-006`) before merge to `main`.
