@@ -108,12 +108,14 @@ This file enumerates the edge cases each contracted function/surface MUST handle
 
 ## Renderer edge cases (`LiveAnswerView`) — FR-014/FR-015/FR-016
 
+> **Amended 2026-06-01** — the lane now renders a newest-first, in-session HISTORY (keyed by the payload `id`, capped, scrollable) instead of a single hold-last answer, and renders **declaratively from reactive state** so it never blanks on the transcript↔insights toggle. The rows below are updated accordingly.
+
 | Scenario | Expected behavior | Spec ref |
 |----------|-------------------|----------|
 | `marked`/`hljs`/`DOMPurify` not yet on `window` | render escaped plain text; upgrade to markdown once libs attach | EC "Markdown libraries not yet loaded", FR-015 |
 | DOMPurify strips unsafe content | show `'⚠️ ' + plain text` (mirror SummaryView:390-393) | FR-015 |
-| New answer begins (incl. abort-replace) | hold previous rendered markdown until first new token, then single `innerHTML` swap; never blank | Q1/G3, FR-015 |
-| `resetAnswer()` on session reset | clear `liveAnswer`; panel empties only on explicit reset (not between answers) | FR-016 |
+| New answer begins (incl. abort-replace) | prepend a new newest-first history entry; the new entry streams while older entries are retained; never blank | Q1/G3, FR-015 (amended 2026-06-01) |
+| `resetAnswer()` on session reset | clear the whole `answers` history; panel empties only on explicit reset (not between answers) | FR-016 |
 | `isVisible === false` (transcript mode) | hidden like `<summary-view>` | FR-014 |
 | Long answer | scrolls within existing `insights-container` (no new scroll handling) | EC "Long answer" |
 
