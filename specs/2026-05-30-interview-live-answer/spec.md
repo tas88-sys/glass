@@ -7,7 +7,7 @@ meta:
   status: draft
   phase: clarify
   created: 2026-05-31
-  updated: 2026-05-31
+  updated: 2026-06-01
 
 # Quick Reference (for checkpoint resume)
 summary:
@@ -116,6 +116,8 @@ A candidate is in a live remote interview. They share their screen with the inte
 
 ## Requirements *(mandatory)*
 
+> **⚠ Post-v1 amendment (2026-06-01)** — The Live Answer lane shipped v1 as a single "hold-last" panel (one answer, replaced on each new question). It has since been changed to a **newest-first, in-session history**: each interviewer question's answer is retained as its own entry (newest on top, labelled with its question), capped at the 20 most recent, scrollable, and cleared on session reset. This change also fixed a bug where the single answer blanked on **every** transcript↔insights toggle. The "hold-last / never-blank-between-answers" language in FR-010/FR-015 and Clarification Q1 describes the v1 render model and is preserved for the historical record; the current model renders the history **declaratively from reactive state** (so it never blanks on toggle) and only the newest entry streams. In-memory only — C8 still holds; cross-session DB persistence remains future work. See `CHANGELOG.md` and `docs/future-work.md`.
+
 ### Functional Requirements
 
 #### Trigger & gating (auto-only, v1)
@@ -143,7 +145,7 @@ A candidate is in a live remote interview. They share their screen with the inte
 
 - **FR-013**: The system MUST add two listeners to the existing `summaryView` namespace in `preload.js` (`:205`): `onLiveAnswerUpdate(cb)` → `ipcRenderer.on('live-answer-update', cb)` and `removeAllLiveAnswerUpdateListeners()` → `ipcRenderer.removeAllListeners('live-answer-update')`. The service MUST send on a NEW `live-answer-update` channel (the existing `summary-update` channel MUST be left untouched).
 - **FR-014**: The system MUST add a new `LiveAnswerView` Lit component at `src/ui/listen/summary/LiveAnswerView.js`, registered and rendered in `ListenView.js` as `<live-answer-view>` placed ABOVE `<summary-view>` (`ListenView.js:681`) so the answer reads first, sharing the insights pane with no new view-mode or toggle. Visibility MUST track `this.viewMode === 'insights'` like the sibling summary view.
-- **FR-015** *(C5 — MED)*: `LiveAnswerView` MUST be self-sufficient for markdown: it MUST call the same idempotent `loadLibraries` pattern (guarded by `if (!window.marked)` to avoid double-loading), read the `marked`/`hljs`/`DOMPurify` globals into instance fields, re-parse/re-render on each streamed delta (like `SummaryView.updated → renderMarkdownContent`), DOMPurify-sanitize the output, fall back to escaped plain text when libraries are not yet loaded (mirror `SummaryView.js:359`), and expose a `resetAnswer()` method. When a new answer begins (including abort-and-replace), the view MUST retain the previously rendered markdown until the first token of the new answer is ready, then swap it in via a single content assignment (mirroring `SummaryView`'s single-`innerHTML`-assignment convention at `SummaryView.js:375-397`) — it MUST NOT clear the panel to empty between answers (no blank/"thinking" frame in v1; see G3 and FR-010).
+- **FR-015** *(C5 — MED)*: `LiveAnswerView` MUST be self-sufficient for markdown: it MUST call the same idempotent `loadLibraries` pattern (guarded by `if (!window.marked)` to avoid double-loading), read the `marked`/`hljs`/`DOMPurify` globals into instance fields, re-parse/re-render on each streamed delta (like `SummaryView.updated → renderMarkdownContent`), DOMPurify-sanitize the output, fall back to escaped plain text when libraries are not yet loaded (mirror `SummaryView.js:359`), and expose a `resetAnswer()` method. When a new answer begins (including abort-and-replace), the view MUST retain the previously rendered markdown until the first token of the new answer is ready, then swap it in via a single content assignment (mirroring `SummaryView`'s single-`innerHTML`-assignment convention at `SummaryView.js:375-397`) — it MUST NOT clear the panel to empty between answers (no blank/"thinking" frame in v1; see G3 and FR-010). *(Amended 2026-06-01: the lane now keeps a newest-first history of answers rather than a single hold-last panel, and renders that history declaratively from reactive state so it never blanks on the transcript↔insights toggle — see the Post-v1 amendment under Requirements.)*
 - **FR-016**: `ListenView.js` MUST clear the live answer on session reset by calling the new `resetAnswer()` in the existing reset block (`ListenView.js:467-469`, beside `summaryView.resetAnalysis()`).
 
 #### Independence & non-regression
@@ -157,7 +159,7 @@ A candidate is in a live remote interview. They share their screen with the inte
 ### Key Entities *(include if feature involves data)*
 
 - **Conversation turn**: `${speaker.toLowerCase()}: ${text.trim()}` lines accumulated in `summaryService.conversationHistory` (in-memory array; speakers `me`/`them`). Read-only input to this feature.
-- **Live answer (transient)**: the streamed markdown answer text plus a timestamp. In-memory only; pushed to the renderer via `live-answer-update`; NOT persisted (C8).
+- **Live answer (transient)**: a streamed markdown answer plus a stable `id` and the triggering `question` (the latter two added 2026-06-01), pushed to the renderer via `live-answer-update`. The renderer keeps a newest-first, in-session **history** of these (keyed by `id`, capped at the 20 most recent). In-memory only; NOT persisted (C8).
 - **Answer-lane state (in-memory, on the service)**: `lastAnsweredTail` (normalized tail of the last answered question, for de-dup), the debounce timer handle, the in-flight `AbortController`, and an in-flight boolean — all cleared by `resetLiveAnswer()`.
 
 ### External Dependencies & Risk Assessment *(mandatory)*
@@ -329,7 +331,7 @@ Potentially related memory entries:
 
 - **v2 — Manual override**: a "answer now / re-roll" affordance with its own Listen-pane hotkey/button (explicitly NOT Ask's Cmd/Ctrl+1), including de-dup against an in-flight auto call.
 - **v2 — Personalized answers**: wire the candidate's résumé/bio into the prompt's currently-empty `customPrompt` slot (`promptBuilder.js` injects "User-provided context"; currently "User context unavailable") to unlock personalized behavioral/statement answers.
-- **Persistence**: saving live answers to the session DB (the summary lane's `summaryRepository.saveSummary` path is deliberately not extended here).
+- **Persistence (cross-session)**: saving live answers to the session DB so they survive an app restart (the summary lane's `summaryRepository.saveSummary` path is deliberately not extended here). *(Note: an in-session, in-memory newest-first history shipped 2026-06-01; only cross-session DB persistence remains out of scope.)*
 - **Ask transcript wiring**: making Ask receive the live transcript — a separate, pre-existing gap that `./design.md` and `./prompts.md` raise but explicitly leave open.
 
 ---

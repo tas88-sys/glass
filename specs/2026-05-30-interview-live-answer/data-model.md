@@ -19,15 +19,17 @@ The existing buffer this feature reads but does not own.
 - **Ownership**: read-only here; the summary lane owns it.
 
 ### 2. Live answer (transient, emitted)
-The streamed result. Never persisted.
+The streamed result. Never persisted. *(Amended 2026-06-01: gained `id` + `question`; the renderer now keeps a newest-first in-session history of these — see Entity 4.)*
 
 | Field | Type | Notes |
 |-------|------|-------|
+| id | `number` | Stable per-answer id (monotonic `++answerSeq`). Constant across one answer's whole stream — including a `_reset` restart — and new per question. The renderer keys its history on this. |
+| question | `string` | The triggering interviewer (`them:`) turn, shown as the history entry's label. |
 | answer | `string` | Accumulated markdown answer text (full text re-sent on each delta, mirroring askService's `currentResponse` broadcast). |
 | ts | `number` | `Date.now()` when the (re)emit happened. |
 
-- **Lifecycle**: created when the first non-suppressed token flushes; updated each delta; discarded on `_reset` (Gemini failover) and re-accumulated; replaced by the next question's stream.
-- **IPC shape**: `LiveAnswerUpdatePayload = { answer: string; ts: number }` over `live-answer-update`.
+- **Lifecycle**: created when the first non-suppressed token flushes; updated each delta; discarded on `_reset` (Gemini failover) and re-accumulated under the SAME `id`; a new question emits under a NEW `id`, which the renderer prepends as a new history entry (the previous one is retained, not replaced).
+- **IPC shape**: `LiveAnswerUpdatePayload = { id: number; question: string; answer: string; ts: number }` over `live-answer-update`.
 
 ### 3. Answer-lane state (in-memory, on the service instance)
 Cleared by `resetLiveAnswer()`.
@@ -42,6 +44,15 @@ Cleared by `resetLiveAnswer()`.
 | `lastAnswerTs` | `number` | `0` | Optional min-interval guard timestamp (FR-005; guard default OFF). |
 
 - **Lifecycle**: all fields reset by `resetLiveAnswer()`, which is invoked from `resetConversationHistory()` (`summaryService.js:52`) on session start and close.
+
+### 4. Live answer history (transient, renderer-side) — *added 2026-06-01*
+The newest-first, in-session list the `<live-answer-view>` keeps. In renderer memory only; cleared by `resetAnswer()` on session reset. NOT persisted (C8).
+
+| Field | Type | Notes |
+|-------|------|-------|
+| answers | `Array<{id, question, text, ts}>` | Newest-first. Folded by the pure reducer `applyLiveAnswerUpdate(answers, payload, max)` (`src/ui/listen/summary/liveAnswerHistory.js`): a same-`id` payload updates one entry in place (streaming); a new `id` is prepended; entries past `MAX_ANSWERS` (20) are dropped from the tail (oldest). Returns a new array (never mutates) for reactive binding. |
+
+- **Why a separate reducer**: keeps the coalesce/prepend/cap logic pure and DOM-free so it is unit-testable (FR-018/C6) — see `src/ui/listen/summary/__tests__/liveAnswerHistory.test.js`.
 
 ## Pure Helper Signatures (extracted for unit testing — FR-018/C6)
 
