@@ -697,6 +697,7 @@ export class ListenView extends LitElement {
                 <summary-view
                     .isVisible=${this.viewMode === 'insights'}
                     .hasCompletedRecording=${this.hasCompletedRecording}
+                    @summary-updated=${this.handleSttMessagesUpdated}
                 ></summary-view>
             </div>
         `;
