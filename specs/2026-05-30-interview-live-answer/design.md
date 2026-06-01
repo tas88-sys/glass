@@ -4,6 +4,8 @@
 **Status:** Validated design, not yet implemented
 **Related:** `./prompts.md` (original brief / UX discussion, migrated into this spec dir)
 
+> **Post-v1 amendment (2026-06-01)** — Shipped v1 as a single hold-last answer panel. Since changed to a **newest-first, in-session history** (one entry per interviewer question, newest on top, labelled with its question, capped, scrollable; in-memory only). This also fixed the single answer blanking on every transcript↔insights toggle. This doc's single-answer "UI and IPC" prose is preserved as the original design record; for current behavior see `CHANGELOG.md`, `spec.md` (Post-v1 amendment under Requirements), and `docs/future-work.md`.
+
 ## Problem
 
 During an interview, when the interviewer asks a question over system audio, the

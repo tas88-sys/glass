@@ -70,6 +70,15 @@ export declare function shouldTriggerAnswer(
 
 /** Payload sent main→renderer on each non-suppressed delta. */
 export interface LiveAnswerUpdatePayload {
+  /**
+   * Stable per-answer id (added 2026-06-01). Constant across one answer's whole
+   * stream (including a Gemini `_reset` restart); new per question. The renderer
+   * keys its newest-first history on this: same-id deltas update one entry in
+   * place, a new id prepends a new entry.
+   */
+  id: number;
+  /** The triggering interviewer (them:) question, shown as the history entry's label (added 2026-06-01). */
+  question: string;
   /** Full accumulated markdown answer text so far. */
   answer: string;
   /** Date.now() at emit time. */
@@ -145,13 +154,17 @@ export interface LiveAnswerServiceSurface {
 // Renderer surface (LiveAnswerView.js) — FR-014/FR-015/FR-016.
 // ───────────────────────────────────────────────────────────────────────────
 
-/** Public surface of the <live-answer-view> Lit element. */
+/**
+ * Public surface of the <live-answer-view> Lit element.
+ * (Amended 2026-06-01: renders a newest-first, in-session history of answers
+ * rather than a single `liveAnswer` string.)
+ */
 export interface LiveAnswerViewSurface {
-  /** Reactive: full accumulated answer markdown (bound from IPC). */
-  liveAnswer: string;
+  /** Reactive: newest-first history of answers (keyed by payload id, capped). */
+  answers: ReadonlyArray<{ id: string; question: string; text: string; ts: number }>;
   /** Reactive: visibility, bound to `viewMode === 'insights'`. */
   isVisible: boolean;
-  /** FR-016 — clear the rendered answer on session reset. */
+  /** FR-016 — clear the whole history on session reset. */
   resetAnswer(): void;
 }
 

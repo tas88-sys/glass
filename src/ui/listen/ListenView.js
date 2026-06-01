@@ -529,7 +529,15 @@ export class ListenView extends LitElement {
 
                 const topBarHeight = topBar.offsetHeight;
 
-                const contentHeight = activeContent.scrollHeight;
+                let contentHeight = activeContent.scrollHeight;
+
+                // Insights mode stacks the Live Answer lane ABOVE the summary in
+                // an overflow:hidden container — count it so a growing answer
+                // history isn't clipped.
+                if (this.viewMode === 'insights') {
+                    const liveAnswerView = this.shadowRoot.querySelector('live-answer-view');
+                    if (liveAnswerView) contentHeight += liveAnswerView.scrollHeight;
+                }
 
                 const idealHeight = topBarHeight + contentHeight;
 

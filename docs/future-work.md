@@ -58,5 +58,5 @@ These are recorded in `specs/2026-05-30-interview-live-answer/spec.md` (§ Out o
 |------|-------|
 | **Manual override (v2)** | A "answer now / re-roll" affordance with its own Listen-pane hotkey/button (explicitly **not** Ask's `Cmd/Ctrl+1`), including de-dup against an in-flight auto call. |
 | **Personalized answers (v2)** | Wire the candidate's résumé/bio into the prompt's currently-empty `customPrompt` slot (`promptBuilder.js` injects "User-provided context"; today it's empty → behavioral answers are generic "User context unavailable"). Unlocks personalized behavioral/statement answers. |
-| **Persistence** | Saving live answers to the session DB (the summary lane's `summaryRepository.saveSummary` path is deliberately not extended for v1). |
+| **Persistence (cross-session)** | A newest-first **in-session** answer history now ships (renderer memory, cleared on Stop / new session — see CHANGELOG "Live Answer is now a newest-first history"). Still open: persisting answers to the session DB so they survive an app restart (the summary lane's `summaryRepository.saveSummary` path is deliberately not extended). |
 | **Ask transcript wiring** | Make Ask receive the live transcript — a separate, pre-existing gap that the design doc and prompts brief raise but leave open. |
