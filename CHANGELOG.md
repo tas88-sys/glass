@@ -29,6 +29,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 - `resetLiveAnswer()` folded into `resetConversationHistory()` — no `listenService.js` edit required; existing reset calls at session start/close already suffice.
 - `ListenView.js` imports `LiveAnswerView.js` and places `<live-answer-view>` above `<summary-view>` with `resetAnswer()` wired into the session-reset block.
 
+### Interview Live Answer — Readability (branch `feat/live-answer-readability`)
+
+#### Changed
+
+- **Improved Live Answer readability** — the injected user message in `summaryService.makeLiveAnswer` now unconditionally reinforces a headline + markdown bullet list structure: a short one-sentence headline answer is always requested first, followed by supporting points formatted as real `- ` markdown bullet lines when there are multiple points. Single-line answers are not forced into bullets. The PASSIVE directive (`reply EXACTLY: PASSIVE`) is preserved verbatim and unaffected.
+- **History Q: label shows only the extracted question span** — a new pure helper `extractQuestion(text)` in `summaryService.js` isolates the interrogative span from filler-laden interviewer turns (e.g. *"Okay so, um, the thing I wanted to ask is — how would you design a rate limiter?"* → *"how would you design a rate limiter?"*). The helper reuses the four existing question-signal regexes (`CLAUSE_LEAD_RE`/`LEAD_STRIP_RE`/`CONTENT_CUE_RE`/`EMBEDDED_Q_RE`) with no divergent heuristic; for multi-question turns it returns the **last** interrogative clause (most-recent question, RD5). Non-string or empty inputs always return `''`; non-empty inputs never return empty (falls back to the full trimmed turn).
+
+#### Internal
+
+- `extractQuestion` is exported from `summaryService.js` alongside the existing pure helpers (FR-009/FR-018). 9 new `node:test` cases in `liveAnswer.test.js`: truth-table T1–T8 (unit) + 1 integration non-regression assertion that the emitted `live-answer-update` `question` field carries the extracted span for a filler-wrapped turn (FR-008).
+
 #### Fixed
 
 - **Question detection is balanced + quota-aware** (live-tested 2026-05-31) — `isLikelyQuestion` triggers on a real question signal (`?` anywhere, an imperative/interview cue, an embedded/indirect question, or a wh-word/auxiliary leading any clause after peeling "okay so…") and skips the interviewer's declarative monologue so a low daily LLM quota isn't spent on non-questions. Catches questions the original `?`-tail/first-word-opener heuristic missed (imperative prompts "Design a cache", conjunction-led "okay so how…", buried/indirect questions) while not firing on every turn. Known by-design gap: cue-less statement-form prompts; PASSIVE remains the backstop for any false trigger.
