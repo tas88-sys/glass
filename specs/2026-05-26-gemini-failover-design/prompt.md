@@ -15,3 +15,7 @@ This order should be followed for every request.
 THe model in use should be displayed somewhere in the app.
 
 Help me decide if this is the best approach or if I am missing something and this feature could be implemented with something else aswell.
+
+### TLDR:
+## DEFAULT (CODING CHALLENGES, DESING SYSTEM, ETC): gemini-3.5-flash,gemini-3-flash-preview,gemini-3.1-flash-lite,gemini-2.5-flash,gemini-2.5-flash-lite
+## SPEED (ORAL TECH INTERVIEWS): gemini-3.1-flash-lite,gemini-3.5-flash,gemini-3-flash-preview,gemini-2.5-flash,gemini-2.5-flash-lite
