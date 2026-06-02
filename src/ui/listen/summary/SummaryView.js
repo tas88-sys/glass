@@ -76,14 +76,16 @@ export class SummaryView extends LitElement {
             color: #ff79c6 !important;
         }
 
+        /* Scrolling + height bounding are owned by the parent .insights-pane in
+           ListenView. This lane grows to its natural content height; the pane
+           scrolls when the combined lanes exceed the window. (Previously this had
+           overflow-y:auto + max-height:600px, which only engaged once the summary
+           ALONE passed 600px — so a shorter summary stacked under the Live Answer
+           lane got clipped by the window edge with no scrollbar.) */
         .insights-container {
-            overflow-y: auto;
             padding: 12px 16px 16px 16px;
             position: relative;
             z-index: 1;
-            min-height: 150px;
-            max-height: 600px;
-            flex: 1;
         }
 
         /* Visibility handled by parent component */

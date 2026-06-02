@@ -126,7 +126,13 @@ export class ListenView extends LitElement {
             overflow: hidden;
             border-radius: 12px;
             width: 100%;
-            height: 100%;
+            /* 100vh (not 100%) gives the flex column a DEFINITE height tied to the
+               window — the ancestor chain (:host → body) is auto-height, so height:100%
+               would collapse to content and the inner scroll region could never bound
+               itself. With a definite height, .insights-pane (flex:1; min-height:0)
+               scrolls whenever content exceeds the window instead of being clipped by
+               the OS window edge. */
+            height: 100vh;
         }
 
         .assistant-container::after {
@@ -158,6 +164,35 @@ export class ListenView extends LitElement {
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
             border-radius: 12px;
             z-index: -1;
+        }
+
+        /* The single scroll region for insights mode. It fills the window below the
+           fixed top-bar and owns ALL overflow for the Live Answer + Summary lanes,
+           which now grow naturally (their old per-lane max-height/overflow are
+           removed). This replaces the two independent fixed-threshold scrollers
+           (live-answer 280px, summary 600px) whose summed height could exceed the
+           700px window cap and clip the bottom of the summary with no scrollbar. */
+        .insights-pane {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .insights-pane::-webkit-scrollbar {
+            width: 8px;
+        }
+        .insights-pane::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.1);
+            border-radius: 4px;
+        }
+        .insights-pane::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
+        }
+        .insights-pane::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.5);
         }
 
         .top-bar {
@@ -521,23 +556,22 @@ export class ListenView extends LitElement {
         this.updateComplete
             .then(() => {
                 const topBar = this.shadowRoot.querySelector('.top-bar');
+                // The active scroll region: transcript mode → stt-view (its own
+                // bounded scroller); insights mode → .insights-pane, the single
+                // scroller that wraps the Live Answer + Summary lanes. Measuring the
+                // pane's scrollHeight yields the TRUE combined content height (incl.
+                // both lanes and the gap between them), even while it is scrolled —
+                // so the window grows to fit content up to the 700px cap, then the
+                // pane scrolls beyond it instead of clipping at the window edge.
                 const activeContent = this.viewMode === 'transcript'
                     ? this.shadowRoot.querySelector('stt-view')
-                    : this.shadowRoot.querySelector('summary-view');
+                    : this.shadowRoot.querySelector('.insights-pane');
 
                 if (!topBar || !activeContent) return;
 
                 const topBarHeight = topBar.offsetHeight;
 
-                let contentHeight = activeContent.scrollHeight;
-
-                // Insights mode stacks the Live Answer lane ABOVE the summary in
-                // an overflow:hidden container — count it so a growing answer
-                // history isn't clipped.
-                if (this.viewMode === 'insights') {
-                    const liveAnswerView = this.shadowRoot.querySelector('live-answer-view');
-                    if (liveAnswerView) contentHeight += liveAnswerView.scrollHeight;
-                }
+                const contentHeight = activeContent.scrollHeight;
 
                 const idealHeight = topBarHeight + contentHeight;
 
@@ -689,16 +723,18 @@ export class ListenView extends LitElement {
                     @stt-messages-updated=${this.handleSttMessagesUpdated}
                 ></stt-view>
 
-                <live-answer-view
-                    .isVisible=${this.viewMode === 'insights'}
-                    @live-answer-updated=${this.handleSttMessagesUpdated}
-                ></live-answer-view>
+                <div class="insights-pane">
+                    <live-answer-view
+                        .isVisible=${this.viewMode === 'insights'}
+                        @live-answer-updated=${this.handleSttMessagesUpdated}
+                    ></live-answer-view>
 
-                <summary-view
-                    .isVisible=${this.viewMode === 'insights'}
-                    .hasCompletedRecording=${this.hasCompletedRecording}
-                    @summary-updated=${this.handleSttMessagesUpdated}
-                ></summary-view>
+                    <summary-view
+                        .isVisible=${this.viewMode === 'insights'}
+                        .hasCompletedRecording=${this.hasCompletedRecording}
+                        @summary-updated=${this.handleSttMessagesUpdated}
+                    ></summary-view>
+                </div>
             </div>
         `;
     }
