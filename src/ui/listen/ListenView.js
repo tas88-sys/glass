@@ -166,33 +166,20 @@ export class ListenView extends LitElement {
             z-index: -1;
         }
 
-        /* The single scroll region for insights mode. It fills the window below the
-           fixed top-bar and owns ALL overflow for the Live Answer + Summary lanes,
-           which now grow naturally (their old per-lane max-height/overflow are
-           removed). This replaces the two independent fixed-threshold scrollers
-           (live-answer 280px, summary 600px) whose summed height could exceed the
-           700px window cap and clip the bottom of the summary with no scrollbar. */
+        /* Insights-mode flex distributor — NOT a scroller itself. It gives the two
+           lanes a DEFINITE height to divide so each scrolls INDEPENDENTLY within its
+           own region (Live Answer pinned/compact on top, Summary taking the rest
+           below). Because both lane heights are bounded by this flex layout, neither
+           can overflow the 700px-capped window and clip with no scrollbar (the
+           original bug — fixed max-heights of 280 + 600 summed past the cap). Lane
+           flex roles live in each component's :host (live-answer-view: flex 0 0 auto
+           + its own ≤280px scroll; summary-view: flex 1 1 0 + its own scroll). */
         .insights-pane {
             flex: 1 1 auto;
             min-height: 0;
-            overflow-y: auto;
+            overflow: hidden;
             display: flex;
             flex-direction: column;
-        }
-
-        .insights-pane::-webkit-scrollbar {
-            width: 8px;
-        }
-        .insights-pane::-webkit-scrollbar-track {
-            background: rgba(0, 0, 0, 0.1);
-            border-radius: 4px;
-        }
-        .insights-pane::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.3);
-            border-radius: 4px;
-        }
-        .insights-pane::-webkit-scrollbar-thumb:hover {
-            background: rgba(255, 255, 255, 0.5);
         }
 
         .top-bar {
@@ -556,22 +543,35 @@ export class ListenView extends LitElement {
         this.updateComplete
             .then(() => {
                 const topBar = this.shadowRoot.querySelector('.top-bar');
-                // The active scroll region: transcript mode → stt-view (its own
-                // bounded scroller); insights mode → .insights-pane, the single
-                // scroller that wraps the Live Answer + Summary lanes. Measuring the
-                // pane's scrollHeight yields the TRUE combined content height (incl.
-                // both lanes and the gap between them), even while it is scrolled —
-                // so the window grows to fit content up to the 700px cap, then the
-                // pane scrolls beyond it instead of clipping at the window edge.
-                const activeContent = this.viewMode === 'transcript'
-                    ? this.shadowRoot.querySelector('stt-view')
-                    : this.shadowRoot.querySelector('.insights-pane');
-
-                if (!topBar || !activeContent) return;
+                if (!topBar) return;
 
                 const topBarHeight = topBar.offsetHeight;
 
-                const contentHeight = activeContent.scrollHeight;
+                // Height needed to show everything with no scrolling, per mode. The
+                // window grows to this, capped at 700; beyond the cap the relevant
+                // lane(s) scroll within their own bounded regions.
+                let contentHeight;
+                if (this.viewMode === 'transcript') {
+                    const sttView = this.shadowRoot.querySelector('stt-view');
+                    if (!sttView) return;
+                    contentHeight = sttView.scrollHeight;
+                } else {
+                    // Two independently-scrolling lanes. Live Answer's host
+                    // scrollHeight already reflects its capped (≤280px) contribution;
+                    // Summary reports its FULL content via getContentHeight() because
+                    // its host is flex-bounded — host scrollHeight would only report
+                    // the clipped, visible height, under-measuring so the window never
+                    // grows to show the whole summary before it starts scrolling.
+                    const liveAnswerView = this.shadowRoot.querySelector('live-answer-view');
+                    const summaryView = this.shadowRoot.querySelector('summary-view');
+                    contentHeight = 0;
+                    if (liveAnswerView) contentHeight += liveAnswerView.scrollHeight;
+                    if (summaryView) {
+                        contentHeight += typeof summaryView.getContentHeight === 'function'
+                            ? summaryView.getContentHeight()
+                            : summaryView.scrollHeight;
+                    }
+                }
 
                 const idealHeight = topBarHeight + contentHeight;
 
