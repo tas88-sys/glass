@@ -3,8 +3,15 @@ import { html, css, LitElement } from '../../assets/lit-core-2.7.4.min.js';
 export class SummaryView extends LitElement {
     static styles = css`
         :host {
-            display: block;
+            display: flex;
+            flex-direction: column;
             width: 100%;
+            /* Bounded flex item in ListenView's .insights-pane: take the remaining
+               height (flex 1 1 0) and clip, so the inner .insights-container scrolls
+               within that space — independently of the Live Answer lane above. */
+            flex: 1 1 0;
+            min-height: 0;
+            overflow: hidden;
         }
 
         /* Inherit font styles from parent */
@@ -76,13 +83,16 @@ export class SummaryView extends LitElement {
             color: #ff79c6 !important;
         }
 
-        /* Scrolling + height bounding are owned by the parent .insights-pane in
-           ListenView. This lane grows to its natural content height; the pane
-           scrolls when the combined lanes exceed the window. (Previously this had
-           overflow-y:auto + max-height:600px, which only engaged once the summary
-           ALONE passed 600px — so a shorter summary stacked under the Live Answer
-           lane got clipped by the window edge with no scrollbar.) */
+        /* Scrolls independently within the height the flex layout gives the summary
+           host: fills it (flex 1; min-height 0) and scrolls its own overflow. NOTE:
+           no fixed max-height — the bound is the AVAILABLE space, not an arbitrary
+           600px threshold. That arbitrary cap was the original bug: combined with the
+           Live Answer lane it exceeded the 700px window and clipped below the window
+           edge before this lane's own scroll ever engaged. */
         .insights-container {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-y: auto;
             padding: 12px 16px 16px 16px;
             position: relative;
             z-index: 1;
@@ -457,6 +467,18 @@ export class SummaryView extends LitElement {
         }
 
         return sections.join('\n\n').trim();
+    }
+
+    /**
+     * Full natural content height of the scroll region, ignoring the flex clip.
+     * ListenView uses this to size the listen window so it grows to show the whole
+     * summary up to the 700px cap, after which this lane scrolls internally. Reading
+     * the host's scrollHeight would only report the clipped (visible) height — the
+     * host is a flex-bounded column — which would under-measure and prevent growth.
+     */
+    getContentHeight() {
+        const container = this.shadowRoot && this.shadowRoot.querySelector('.insights-container');
+        return container ? container.scrollHeight : 0;
     }
 
     updated(changedProperties) {

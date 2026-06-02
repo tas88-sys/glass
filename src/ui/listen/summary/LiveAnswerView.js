@@ -33,16 +33,23 @@ export class LiveAnswerView extends LitElement {
         :host {
             display: block;
             width: 100%;
+            /* Compact, pinned lane in ListenView's .insights-pane: sized to its
+               content but capped by .live-answer-container's max-height, and it
+               neither grows nor shrinks (flex 0 0 auto) so the Summary lane below
+               gets the remaining space. Its own ≤280px scroll handles a long
+               answer history independently of the Summary lane. */
+            flex: 0 0 auto;
         }
 
-        /* Scrolling + height bounding are owned by the parent .insights-pane in
-           ListenView — this lane grows to its natural height and the pane scrolls
-           when the Live Answer + Summary lanes together exceed the window. (The old
-           max-height:280px + overflow-y:auto made this an independent scroller whose
-           height, added to the summary's, could exceed the 700px window cap and clip
-           the summary below it with no visible scrollbar.) */
+        /* Scrolls independently, capped at 280px so the lane stays compact and leaves
+           room for the Summary lane below; a longer answer history scrolls within
+           this region. The fix for the original clipping bug is NOT removing this cap
+           — it is bounding the Summary lane to the flex layout (see SummaryView) so
+           the two capped lanes can never overflow the window. */
         .live-answer-container {
             padding: 8px 16px 12px;
+            max-height: 280px;
+            overflow-y: auto;
         }
 
         .live-answer-container::-webkit-scrollbar {
