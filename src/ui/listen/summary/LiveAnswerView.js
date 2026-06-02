@@ -35,10 +35,14 @@ export class LiveAnswerView extends LitElement {
             width: 100%;
         }
 
+        /* Scrolling + height bounding are owned by the parent .insights-pane in
+           ListenView — this lane grows to its natural height and the pane scrolls
+           when the Live Answer + Summary lanes together exceed the window. (The old
+           max-height:280px + overflow-y:auto made this an independent scroller whose
+           height, added to the summary's, could exceed the 700px window cap and clip
+           the summary below it with no visible scrollbar.) */
         .live-answer-container {
             padding: 8px 16px 12px;
-            max-height: 280px;
-            overflow-y: auto;
         }
 
         .live-answer-container::-webkit-scrollbar {
