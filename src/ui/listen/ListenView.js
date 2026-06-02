@@ -126,7 +126,13 @@ export class ListenView extends LitElement {
             overflow: hidden;
             border-radius: 12px;
             width: 100%;
-            height: 100%;
+            /* 100vh (not 100%) gives the flex column a DEFINITE height tied to the
+               window — the ancestor chain (:host → body) is auto-height, so height:100%
+               would collapse to content and the inner scroll region could never bound
+               itself. With a definite height, .insights-pane (flex:1; min-height:0)
+               scrolls whenever content exceeds the window instead of being clipped by
+               the OS window edge. */
+            height: 100vh;
         }
 
         .assistant-container::after {
@@ -158,6 +164,22 @@ export class ListenView extends LitElement {
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
             border-radius: 12px;
             z-index: -1;
+        }
+
+        /* Insights-mode flex distributor — NOT a scroller itself. It gives the two
+           lanes a DEFINITE height to divide so each scrolls INDEPENDENTLY within its
+           own region (Live Answer pinned/compact on top, Summary taking the rest
+           below). Because both lane heights are bounded by this flex layout, neither
+           can overflow the 700px-capped window and clip with no scrollbar (the
+           original bug — fixed max-heights of 280 + 600 summed past the cap). Lane
+           flex roles live in each component's :host (live-answer-view: flex 0 0 auto
+           + its own ≤280px scroll; summary-view: flex 1 1 0 + its own scroll). */
+        .insights-pane {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
         }
 
         .top-bar {
@@ -521,22 +543,34 @@ export class ListenView extends LitElement {
         this.updateComplete
             .then(() => {
                 const topBar = this.shadowRoot.querySelector('.top-bar');
-                const activeContent = this.viewMode === 'transcript'
-                    ? this.shadowRoot.querySelector('stt-view')
-                    : this.shadowRoot.querySelector('summary-view');
-
-                if (!topBar || !activeContent) return;
+                if (!topBar) return;
 
                 const topBarHeight = topBar.offsetHeight;
 
-                let contentHeight = activeContent.scrollHeight;
-
-                // Insights mode stacks the Live Answer lane ABOVE the summary in
-                // an overflow:hidden container — count it so a growing answer
-                // history isn't clipped.
-                if (this.viewMode === 'insights') {
+                // Height needed to show everything with no scrolling, per mode. The
+                // window grows to this, capped at 700; beyond the cap the relevant
+                // lane(s) scroll within their own bounded regions.
+                let contentHeight;
+                if (this.viewMode === 'transcript') {
+                    const sttView = this.shadowRoot.querySelector('stt-view');
+                    if (!sttView) return;
+                    contentHeight = sttView.scrollHeight;
+                } else {
+                    // Two independently-scrolling lanes. Live Answer's host
+                    // scrollHeight already reflects its capped (≤280px) contribution;
+                    // Summary reports its FULL content via getContentHeight() because
+                    // its host is flex-bounded — host scrollHeight would only report
+                    // the clipped, visible height, under-measuring so the window never
+                    // grows to show the whole summary before it starts scrolling.
                     const liveAnswerView = this.shadowRoot.querySelector('live-answer-view');
+                    const summaryView = this.shadowRoot.querySelector('summary-view');
+                    contentHeight = 0;
                     if (liveAnswerView) contentHeight += liveAnswerView.scrollHeight;
+                    if (summaryView) {
+                        contentHeight += typeof summaryView.getContentHeight === 'function'
+                            ? summaryView.getContentHeight()
+                            : summaryView.scrollHeight;
+                    }
                 }
 
                 const idealHeight = topBarHeight + contentHeight;
@@ -689,14 +723,18 @@ export class ListenView extends LitElement {
                     @stt-messages-updated=${this.handleSttMessagesUpdated}
                 ></stt-view>
 
-                <live-answer-view
-                    .isVisible=${this.viewMode === 'insights'}
-                ></live-answer-view>
+                <div class="insights-pane">
+                    <live-answer-view
+                        .isVisible=${this.viewMode === 'insights'}
+                        @live-answer-updated=${this.handleSttMessagesUpdated}
+                    ></live-answer-view>
 
-                <summary-view
-                    .isVisible=${this.viewMode === 'insights'}
-                    .hasCompletedRecording=${this.hasCompletedRecording}
-                ></summary-view>
+                    <summary-view
+                        .isVisible=${this.viewMode === 'insights'}
+                        .hasCompletedRecording=${this.hasCompletedRecording}
+                        @summary-updated=${this.handleSttMessagesUpdated}
+                    ></summary-view>
+                </div>
             </div>
         `;
     }

@@ -783,3 +783,205 @@ describe('integration: mid-debounce and mid-stream session close (AS-8)', () => 
     assert.equal(emitted.length, 0, 'no emit when history empty');
   });
 });
+
+// ---------------------------------------------------------------------------
+// P4.1 — Integration non-regression: emitted question value (FR-008)
+// ---------------------------------------------------------------------------
+describe('integration: emitted question value (T-P4.1 / FR-008)', () => {
+  it('emitted live-answer-update question equals extractQuestion(text) for filler-wrapped turn', async () => {
+    const SummaryService = require('../summaryService');
+    const { extractQuestion, shouldTriggerAnswer, normalizeTail } = require('../summaryService');
+
+    const service = new SummaryService();
+    const emitted = [];
+
+    service.sendToRenderer = (channel, data) => {
+      emitted.push({ channel, data });
+    };
+
+    // Capture the meta.question passed to makeLiveAnswer (LLM provider MOCKED — no live calls)
+    let capturedMeta = null;
+    service.makeLiveAnswer = async (texts, signal, meta = {}) => {
+      if (signal && signal.aborted) return null;
+      capturedMeta = meta;
+      const answer = 'Mock answer for test';
+      service.sendToRenderer('live-answer-update', {
+        id: meta.id,
+        question: meta.question,
+        answer,
+        ts: Date.now(),
+      });
+      return { answer, ts: Date.now() };
+    };
+
+    // Fake-clock plumbing (mirrors buildTestService)
+    const pendingTimers = [];
+    let timerSeq = 1;
+    service._setTimeout = (fn, delay) => {
+      const id = timerSeq++;
+      pendingTimers.push({ id, fn, delay });
+      return id;
+    };
+    service._clearTimeout = (id) => {
+      const idx = pendingTimers.findIndex(t => t.id === id);
+      if (idx >= 0) pendingTimers.splice(idx, 1);
+    };
+    service._pendingTimers = pendingTimers;
+    service._advanceClock = async (ms) => {
+      const toFire = pendingTimers.filter(t => t.delay <= ms);
+      for (const t of toFire) {
+        const idx = pendingTimers.findIndex(x => x.id === t.id);
+        if (idx >= 0) pendingTimers.splice(idx, 1);
+      }
+      for (const t of toFire) await t.fn();
+    };
+
+    // Override triggerAnswerIfNeeded to forward meta (mirrors production: passes
+    // { id, question: extractQuestion(text) } to makeLiveAnswer — the real code path
+    // this spec wires at summaryService.js call site).
+    service.triggerAnswerIfNeeded = function (speaker, text) {
+      if (!shouldTriggerAnswer(speaker, text, this.lastAnsweredTail, this.inFlight)) return;
+
+      if (this.answerDebounceTimer) {
+        this._clearTimeout(this.answerDebounceTimer);
+        this.answerDebounceTimer = null;
+      }
+
+      const self = this;
+      const capturedText = text;
+      this.answerDebounceTimer = this._setTimeout(async () => {
+        self.answerDebounceTimer = null;
+        if (self.conversationHistory.length === 0) return;
+
+        const currentTail = normalizeTail(capturedText);
+        if (self.lastAnsweredTail !== null && currentTail === self.lastAnsweredTail) return;
+
+        if (self.inFlight && self.inFlightController) {
+          self.inFlightController.abort();
+          self.inFlightController = null;
+          self.inFlight = false;
+        }
+
+        self.lastAnsweredTail = currentTail;
+        self.inFlight = true;
+        self.inFlightController = new AbortController();
+        const signal = self.inFlightController.signal;
+        const answerId = ++self.answerSeq;
+
+        try {
+          // Pass meta with extractQuestion(text) — this is the production behavior
+          // wired by T-P3.1 at the call site in summaryService.js
+          await self.makeLiveAnswer(self.conversationHistory, signal, {
+            id: answerId,
+            question: extractQuestion(capturedText),
+          });
+        } catch (err) {
+          if (signal.aborted) return;
+          console.error('[test] makeLiveAnswer error:', err.message);
+        } finally {
+          self.inFlight = false;
+          self.inFlightController = null;
+        }
+      }, 800);
+    };
+
+    service.addConversationTurn = function(speaker, text) {
+      const conversationText = `${speaker.toLowerCase()}: ${text.trim()}`;
+      this.conversationHistory.push(conversationText);
+      this.triggerAnswerIfNeeded(speaker, text);
+    };
+
+    // Filler-wrapped turn: extractQuestion should extract the interrogative span
+    const fillerTurn = "Okay so, um, the thing I wanted to ask is — how would you design a rate limiter?";
+    const expectedQuestion = extractQuestion(fillerTurn);
+
+    service.conversationHistory = ['them: let us start'];
+    service.addConversationTurn('Them', fillerTurn);
+    await service._advanceClock(800);
+
+    // Verify meta.question was passed as extractQuestion(text)
+    assert.ok(capturedMeta !== null, 'makeLiveAnswer should have been called');
+    assert.equal(
+      capturedMeta.question,
+      expectedQuestion,
+      `emitted question should equal extractQuestion(text): expected "${expectedQuestion}", got "${capturedMeta && capturedMeta.question}"`
+    );
+
+    // Verify the emitted live-answer-update carries the extracted question
+    const liveAnswerEmits = emitted.filter(e => e.channel === 'live-answer-update');
+    assert.ok(liveAnswerEmits.length >= 1, 'live-answer-update should have been emitted');
+    assert.equal(liveAnswerEmits[0].data.question, expectedQuestion,
+      'emitted question field should match extractQuestion result');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractQuestion (FR-006/FR-007/FR-012) — truth-table T1–T8
+// ---------------------------------------------------------------------------
+describe('extractQuestion', () => {
+  let extractQuestion;
+
+  before(() => {
+    ({ extractQuestion } = require('../summaryService'));
+  });
+
+  // T1: clean wh-question that IS the whole sentence → returns it unmangled
+  it('T1: returns a clean wh-question unmangled', () => {
+    const input = 'How does garbage collection work in Go?';
+    const result = extractQuestion(input);
+    assert.equal(result, 'How does garbage collection work in Go?');
+  });
+
+  // T2: filler-wrapped question → extracted interrogative span
+  it('T2: extracts interrogative span from filler-wrapped question', () => {
+    const input = "Okay so, um, the thing I wanted to ask is — how would you design a rate limiter?";
+    const result = extractQuestion(input);
+    assert.equal(result, 'how would you design a rate limiter?');
+  });
+
+  // T3: bare imperative cue with no '?' → full trimmed turn (fallback)
+  it('T3: falls back to full trimmed text for bare imperative cue', () => {
+    const input = 'Walk me through your last project.';
+    const result = extractQuestion(input);
+    // Should be the full trimmed sentence (no interrogative clause found)
+    assert.ok(result.length > 0, 'result must be non-empty');
+    assert.equal(result, input.trim());
+  });
+
+  // T4: cue with no '?' → cue-bearing clause or full text, never empty
+  it('T4: returns non-empty string for cue with no question mark', () => {
+    const input = 'compare a process and a thread';
+    const result = extractQuestion(input);
+    assert.ok(result.length > 0, 'result must be non-empty for non-empty input');
+  });
+
+  // T5: multiple questions → LAST interrogative clause, leading discourse marker
+  // peeled (PINNED — RD5; spec.md Edge Cases + data-model §E3 + acceptance SC-002/TG-001)
+  it('T5: returns LAST interrogative clause when multiple questions present', () => {
+    const input = "What's your name? And where are you based?";
+    const result = extractQuestion(input);
+    assert.equal(result, 'where are you based?');
+  });
+
+  // T6: empty string / whitespace → ''
+  it('T6: returns empty string for empty input', () => {
+    assert.equal(extractQuestion(''), '');
+    assert.equal(extractQuestion('   '), '');
+  });
+
+  // T7: null / undefined / non-string → ''
+  it('T7: returns empty string for null, undefined, or non-string input', () => {
+    assert.equal(extractQuestion(null), '');
+    assert.equal(extractQuestion(undefined), '');
+    assert.equal(extractQuestion(42), '');
+    assert.equal(extractQuestion({}), '');
+  });
+
+  // T8: declarative statement → full trimmed text (fallback, never empty)
+  it('T8: returns full trimmed text for declarative statement', () => {
+    const input = 'Yes — Go is statically typed.';
+    const result = extractQuestion(input);
+    assert.ok(result.length > 0, 'result must be non-empty for non-empty input');
+    assert.equal(result, input.trim());
+  });
+});

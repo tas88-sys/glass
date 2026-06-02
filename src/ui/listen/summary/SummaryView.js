@@ -3,8 +3,15 @@ import { html, css, LitElement } from '../../assets/lit-core-2.7.4.min.js';
 export class SummaryView extends LitElement {
     static styles = css`
         :host {
-            display: block;
+            display: flex;
+            flex-direction: column;
             width: 100%;
+            /* Bounded flex item in ListenView's .insights-pane: take the remaining
+               height (flex 1 1 0) and clip, so the inner .insights-container scrolls
+               within that space — independently of the Live Answer lane above. */
+            flex: 1 1 0;
+            min-height: 0;
+            overflow: hidden;
         }
 
         /* Inherit font styles from parent */
@@ -76,14 +83,19 @@ export class SummaryView extends LitElement {
             color: #ff79c6 !important;
         }
 
+        /* Scrolls independently within the height the flex layout gives the summary
+           host: fills it (flex 1; min-height 0) and scrolls its own overflow. NOTE:
+           no fixed max-height — the bound is the AVAILABLE space, not an arbitrary
+           600px threshold. That arbitrary cap was the original bug: combined with the
+           Live Answer lane it exceeded the 700px window and clipped below the window
+           edge before this lane's own scroll ever engaged. */
         .insights-container {
+            flex: 1 1 auto;
+            min-height: 0;
             overflow-y: auto;
             padding: 12px 16px 16px 16px;
             position: relative;
             z-index: 1;
-            min-height: 150px;
-            max-height: 600px;
-            flex: 1;
         }
 
         /* Visibility handled by parent component */
@@ -288,59 +300,59 @@ export class SummaryView extends LitElement {
         this.requestUpdate();
     }
 
+    /**
+     * Best-effort markdown library loader. content.html already loads `marked`
+     * globally via <script src="../assets/marked-4.3.0.min.js">; we additionally
+     * fetch highlight + DOMPurify RELATIVE TO content.html (src/ui/app/) — i.e.
+     * `../assets/`, NOT `../../../assets/`. The old `../../../assets/` resolved to
+     * the repo root (glass/assets/), 404'd, and the throw aborted the loader
+     * before isLibrariesLoaded was set — so markdown never rendered (raw ** / -).
+     * Each load is independent (one failure never aborts the rest), and markdown
+     * renders as long as `marked` is present — hljs only adds code highlighting.
+     */
     async loadLibraries() {
-        try {
-            if (!window.marked) {
-                await this.loadScript('../../../assets/marked-4.3.0.min.js');
+        const tryLoad = async (src) => {
+            try {
+                await this.loadScript(src);
+            } catch (err) {
+                console.warn('[summary] could not load', src, err && err.message);
             }
+        };
 
-            if (!window.hljs) {
-                await this.loadScript('../../../assets/highlight-11.9.0.min.js');
-            }
+        if (!window.marked) await tryLoad('../assets/marked-4.3.0.min.js');
+        if (!window.hljs) await tryLoad('../assets/highlight-11.9.0.min.js');
+        if (!window.DOMPurify) await tryLoad('../assets/dompurify-3.0.7.min.js');
 
-            if (!window.DOMPurify) {
-                await this.loadScript('../../../assets/dompurify-3.0.7.min.js');
-            }
+        this.marked = window.marked || null;
+        this.hljs = window.hljs || null;
+        this.DOMPurify = window.DOMPurify || null;
 
-            this.marked = window.marked;
-            this.hljs = window.hljs;
-            this.DOMPurify = window.DOMPurify;
-
-            if (this.marked && this.hljs) {
-                this.marked.setOptions({
-                    highlight: (code, lang) => {
-                        if (lang && this.hljs.getLanguage(lang)) {
-                            try {
-                                return this.hljs.highlight(code, { language: lang }).value;
-                            } catch (err) {
-                                console.warn('Highlight error:', err);
-                            }
-                        }
+        if (this.marked) {
+            const options = { breaks: true, gfm: true, pedantic: false, smartypants: false, xhtml: false };
+            if (this.hljs) {
+                options.highlight = (code, lang) => {
+                    if (lang && this.hljs.getLanguage(lang)) {
                         try {
-                            return this.hljs.highlightAuto(code).value;
+                            return this.hljs.highlight(code, { language: lang }).value;
                         } catch (err) {
-                            console.warn('Auto highlight error:', err);
+                            console.warn('[summary] Highlight error:', err);
                         }
-                        return code;
-                    },
-                    breaks: true,
-                    gfm: true,
-                    pedantic: false,
-                    smartypants: false,
-                    xhtml: false,
-                });
-
-                this.isLibrariesLoaded = true;
-                console.log('Markdown libraries loaded successfully');
+                    }
+                    try {
+                        return this.hljs.highlightAuto(code).value;
+                    } catch (err) {
+                        console.warn('[summary] Auto highlight error:', err);
+                    }
+                    return code;
+                };
             }
-
-            if (this.DOMPurify) {
-                this.isDOMPurifyLoaded = true;
-                console.log('DOMPurify loaded successfully in SummaryView');
-            }
-        } catch (error) {
-            console.error('Failed to load libraries:', error);
+            this.marked.setOptions(options);
+            this.isLibrariesLoaded = true; // markdown needs only marked
         }
+        if (this.DOMPurify) this.isDOMPurifyLoaded = true;
+
+        // Libs may arrive after the first render — re-render to upgrade fallback → markdown.
+        this.requestUpdate();
     }
 
     loadScript(src) {
@@ -361,7 +373,12 @@ export class SummaryView extends LitElement {
         }
 
         try {
-            return this.marked(text);
+            // marked v4 UMD exposes a NAMESPACE object (window.marked = {parse, setOptions,…}),
+            // NOT a callable — so `this.marked(text)` throws. Use .parse() when present;
+            // fall back to calling it directly for builds where marked itself is the function.
+            return typeof this.marked.parse === 'function'
+                ? this.marked.parse(text)
+                : this.marked(text);
         } catch (error) {
             console.error('Markdown parsing error:', error);
             return text;
@@ -373,6 +390,8 @@ export class SummaryView extends LitElement {
     }
 
     renderMarkdownContent() {
+        // Libraries not loaded yet → leave the template's escaped plain-text
+        // fallback (`${bullet}`) in place. It NEVER blanks.
         if (!this.isLibrariesLoaded || !this.marked) {
             return;
         }
@@ -380,25 +399,28 @@ export class SummaryView extends LitElement {
         const markdownElements = this.shadowRoot.querySelectorAll('[data-markdown-id]');
         markdownElements.forEach(element => {
             const originalText = element.getAttribute('data-original-text');
-            if (originalText) {
-                try {
-                    let parsedHTML = this.parseMarkdown(originalText);
+            if (!originalText) return;
 
-                    if (this.isDOMPurifyLoaded && this.DOMPurify) {
-                        parsedHTML = this.DOMPurify.sanitize(parsedHTML);
+            // Without DOMPurify we must NOT inject unsanitized LLM markdown via
+            // innerHTML (XSS) — fall back to safe plain text.
+            if (!this.isDOMPurifyLoaded || !this.DOMPurify) {
+                element.textContent = originalText;
+                return;
+            }
 
-                        if (this.DOMPurify.removed && this.DOMPurify.removed.length > 0) {
-                            console.warn('Unsafe content detected in insights, showing plain text');
-                            element.textContent = '⚠️ ' + originalText;
-                            return;
-                        }
-                    }
+            try {
+                const parsedHTML = this.DOMPurify.sanitize(this.parseMarkdown(originalText));
 
-                    element.innerHTML = parsedHTML;
-                } catch (error) {
-                    console.error('Error rendering markdown for element:', error);
-                    element.textContent = originalText;
+                if (this.DOMPurify.removed && this.DOMPurify.removed.length > 0) {
+                    console.warn('Unsafe content detected in insights, showing plain text');
+                    element.textContent = '⚠️ ' + originalText;
+                    return;
                 }
+
+                element.innerHTML = parsedHTML;
+            } catch (error) {
+                console.error('Error rendering markdown for element:', error);
+                element.textContent = originalText;
             }
         });
     }
@@ -447,9 +469,27 @@ export class SummaryView extends LitElement {
         return sections.join('\n\n').trim();
     }
 
+    /**
+     * Full natural content height of the scroll region, ignoring the flex clip.
+     * ListenView uses this to size the listen window so it grows to show the whole
+     * summary up to the 700px cap, after which this lane scrolls internally. Reading
+     * the host's scrollHeight would only report the clipped (visible) height — the
+     * host is a flex-bounded column — which would under-measure and prevent growth.
+     */
+    getContentHeight() {
+        const container = this.shadowRoot && this.shadowRoot.querySelector('.insights-container');
+        return container ? container.scrollHeight : 0;
+    }
+
     updated(changedProperties) {
         super.updated(changedProperties);
         this.renderMarkdownContent();
+        // Tell ListenView to re-measure + resize the listen window as the summary
+        // grows. Without this, the window is only resized on a viewMode toggle, so
+        // a long summary (e.g. content after the "Actions" heading) stays clipped
+        // with no scroll until you toggle. Mirrors LiveAnswerView's
+        // live-answer-updated → adjustWindowHeightThrottled.
+        this.dispatchEvent(new CustomEvent('summary-updated', { bubbles: true, composed: true }));
     }
 
     render() {
