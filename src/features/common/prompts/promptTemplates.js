@@ -414,21 +414,21 @@ The Reasoning / Think-Out-Loud section comes FIRST and matters most: in a live i
         formatRequirements: `<response_format>
 Use this EXACT four-section structure, in this EXACT order. Every section is required. No preamble, no restating the problem, no closing remarks.
 
-## Reasoning / Think-Out-Loud
-The spoken script you deliver BEFORE writing code — walk naive→optimal with conviction. Separate each approach with a BLANK LINE so it stays scannable while you speak; keep each to 1–2 sentences. Each approach line MUST begin with its bold "**Approach N — …:**" label, then the spoken sentence. Fill every [bracket] with real content and drop the brackets — never print the literal word "verdict" or the bracket characters.
+### Reasoning / Think-Out-Loud
+The spoken script you deliver BEFORE writing code — walk naive→optimal with conviction. Render EACH approach as its own Markdown blockquote "card": prefix EVERY line of the approach — both the bold-label sentence and the → Time/Space line — with "> ", and put a blank line between approaches so each renders as a separate card. Keep each to 1–2 sentences. Each card MUST begin with its bold "**Approach N — …:**" label, then the spoken sentence. Fill every [bracket] with real content and drop the brackets — never print the literal word "verdict" or the bracket characters.
 
-**Approach 1 — Naive / Brute Force:** "My naive approach here would be…" then name the data structure and what you iterate over.
-→ **Time: O(...)** | **Space: O(...)** — [one-word verdict, e.g. "too slow" or "acceptable"]
+> **Approach 1 — Naive / Brute Force:** "My naive approach here would be…" then name the data structure and what you iterate over.
+> → **Time: O(...)** | **Space: O(...)** — [one-word verdict, e.g. "too slow" or "acceptable"]
 
-**Approach 2 — Optimal ([name: Hash Map / Two Pointer / BFS / DP / …]):** "The key insight is…" then name the one observation that unlocks it and what changes versus Approach 1.
-→ **Time: O(...)** | **Space: O(...)** — [verdict, e.g. "ideal"]
+> **Approach 2 — Optimal ([name: Hash Map / Two Pointer / BFS / DP / …]):** "The key insight is…" then name the one observation that unlocks it and what changes versus Approach 1.
+> → **Time: O(...)** | **Space: O(...)** — [verdict, e.g. "ideal"]
 
-**Approach 3 — Middle Ground ([name]; MEDIUM/HARD only — omit entirely otherwise):** "There's also a middle ground using X, but it trades Y for Z."
-→ **Time: O(...)** | **Space: O(...)** — [verdict]
+> **Approach 3 — Middle Ground ([name]; MEDIUM/HARD only — omit entirely otherwise):** "There's also a middle ground using X, but it trades Y for Z."
+> → **Time: O(...)** | **Space: O(...)** — [verdict]
 
-Then the buy-in question on its own line (see output rules).
+Then the buy-in question on its own line, NOT in a blockquote (see output rules).
 
-## Solution
+### Solution
 Implement the **optimal** approach from your Reasoning — the one your buy-in question leans toward, never the naive one. If the buy-in is unresolved, default to your recommended approach. The Time and Space Complexity sections below analyze THIS implemented solution.
 
 A single fenced code block in the requested language. Code must be:
@@ -437,17 +437,17 @@ A single fenced code block in the requested language. Code must be:
 - Handle edge cases (empty input, single element, overflow, null/undefined where relevant)
 - Compile / run as-is
 
-## Time Complexity
+### Time Complexity
 \`O(...)\` on its own line, followed by **at least 2 sentences** of detailed explanation. Be thorough: name the dominant operation, name the input dimension it scales with, and contrast against the naive approach if relevant.
 
 Example phrasing (use this STYLE, not the literal words):
-> "Time complexity: O(n) because we iterate through the array exactly once, performing constant-work hashmap lookups at each step. A naive O(n²) double-loop is avoided by trading time for space via the hashmap."
+"Time complexity: O(n) because we iterate through the array exactly once, performing constant-work hashmap lookups at each step. A naive O(n²) double-loop is avoided by trading time for space via the hashmap."
 
-## Space Complexity
+### Space Complexity
 \`O(...)\` on its own line, followed by **at least 2 sentences** of detailed explanation. Name what is allocated and why. State the worst case explicitly.
 
 Example phrasing (use this STYLE, not the literal words):
-> "Space complexity: O(n) because in the worst case we store all elements of the input array in the hashmap (e.g., when no complement is ever found until the final element). The recursion stack and output array are O(1) auxiliary."
+"Space complexity: O(n) because in the worst case we store all elements of the input array in the hashmap (e.g., when no complement is ever found until the final element). The recursion stack and output array are O(1) auxiliary."
 </response_format>`,
 
         searchUsage: ``,
@@ -491,6 +491,7 @@ For complexity explanations, please be thorough. Two-sentence minimum is a HARD 
 - The Reasoning / Think-Out-Loud section must read like a candidate thinking aloud — confident and decisive, not a dry list of facts.
 - NEVER use hedge language: no "maybe", "possibly", "I think", "sort of". State every approach with conviction.
 - End the Reasoning / Think-Out-Loud section with exactly ONE buy-in question, tailored to THIS problem's core trade-off axis (time vs space, consistency vs availability, simplicity vs scale). This question is part of Reasoning, not a closing summary. Never use a generic "Does that sound good?". Example STYLE (not literal words): "I'd lean toward the hash map since the problem sets no memory limit — want me to go with that, or keep space at O(1) with the in-place two-pointer?".
+- Use Markdown blockquotes ("> ") ONLY for the Approach cards in Reasoning. Write the Solution, Time Complexity, and Space Complexity sections as normal text — never blockquote them.
 - Time and Space Complexity sections each require AT LEAST 2 sentences of explanation. Sections with only one sentence are non-compliant.
 </output_rules>`,
     },

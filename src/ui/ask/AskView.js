@@ -135,11 +135,24 @@ export class AskView extends LitElement {
             display: block !important;
         }
 
-        .response-container p code {
+        .response-container p code, .response-container blockquote code {
             background: rgba(255, 255, 255, 0.1) !important;
             padding: 2px 4px !important;
             border-radius: 3px !important;
             color: #ffd700 !important;
+        }
+
+        /* Reasoning "Approach" cards: each approach is emitted as a Markdown blockquote */
+        .response-container blockquote {
+            margin: 8px 0 !important;
+            padding: 8px 12px !important;
+            border-left: 3px solid rgba(255, 255, 255, 0.25) !important;
+            background: rgba(255, 255, 255, 0.04) !important;
+            border-radius: 4px !important;
+        }
+
+        .response-container blockquote p {
+            margin: 0 !important;
         }
 
         .hljs-keyword {
