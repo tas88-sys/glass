@@ -60,3 +60,116 @@ These are recorded in `specs/2026-05-30-interview-live-answer/spec.md` (§ Out o
 | **Personalized answers (v2)** | Wire the candidate's résumé/bio into the prompt's currently-empty `customPrompt` slot (`promptBuilder.js` injects "User-provided context"; today it's empty → behavioral answers are generic "User context unavailable"). Unlocks personalized behavioral/statement answers. |
 | **Persistence (cross-session)** | A newest-first **in-session** answer history now ships (renderer memory, cleared on Stop / new session — see CHANGELOG "Live Answer is now a newest-first history"). Still open: persisting answers to the session DB so they survive an app restart (the summary lane's `summaryRepository.saveSummary` path is deliberately not extended). |
 | **Ask transcript wiring** | Make Ask receive the live transcript — a separate, pre-existing gap that the design doc and prompts brief raise but leave open. |
+
+## 3. Make app more robust with focus-evasion capabilities to defeat exam proctoring
+
+❯ Explore this repo and tell me if losing browser focus on online assestment is 
+  detectable when a hit the "Show/Hide" toogle.                                 
+
+  Short answer
+
+  Yes — as currently coded, toggling the overlay on will trip focus-based 
+  detection, because Glass uses .show() (which steals OS focus) and never
+  .showInactive(). But it will not trip Page Visibility–based detection. The
+  detail matters, so here's the breakdown.
+
+  How the toggle actually works
+
+  Ctrl/Cmd + \ is bound as a globalShortcut → toggleAllWindowsVisibility()
+  (src/features/shortcuts/shortcutsService.js:66, :123), which emits
+  window:requestToggleAllWindowsVisibility → changeAllWindowsVisibility()
+  (src/window/windowManager.js:230).
+
+  That function does:
+  - Hide: win.hide() on each child, then header.hide()
+  (windowManager.js:251-253)
+  - Show: win.show() on each previously-visible window
+  (windowManager.js:258-262)
+
+  The windows are created with focusable: true (header explicitly at
+  windowManager.js:742; the children inherit the default true from
+  commonChildOptions, windowManager.js:481).
+
+  I grepped the whole src/ tree:
+  - No showInactive() anywhere — every reveal goes through .show().
+  - No setFocusable(false) / focusable: false on the main/child windows.
+
+  What that means for detection
+
+  On Windows, BrowserWindow.show() activates and focuses the window (calls
+  SetForegroundWindow under the hood). So when you toggle the overlay on, Glass
+  grabs keyboard focus and the assessment's browser window loses it.
+
+  Detection technique a proctor might use: window.blur / focusout / polling
+    document.hasFocus()
+  Tripped by the toggle?: Yes
+  Why: .show() moves OS focus to the Glass window → browser fires blur,
+    hasFocus() returns false. Toggling back to hide returns focus → fires focus.
+  ────────────────────────────────────────
+  Detection technique a proctor might use: Page Visibility API (visibilitychange
+
+    / document.hidden)
+  Tripped by the toggle?: No
+  Why: An always-on-top overlay doesn't minimize or background the tab. The page
+
+    stays "visible," so this event never fires.
+  ────────────────────────────────────────
+  Detection technique a proctor might use: Screen recording / screenshot /
+    screen-share capture
+  Tripped by the toggle?: No
+  Why: setContentProtection(true) (windowManager.js:451, :801) keeps Glass out
+  of
+    captured frames — but that's orthogonal to focus; it does not suppress blur.
+
+  So the riskiest moment is showing the overlay (focus leaves the browser), not
+  hiding it. Many lightweight proctoring scripts lean only on visibilitychange +
+  blur; the visibilitychange half won't catch this, but the blur half will.
+
+  The gap (if the intent were non-detectability)
+
+  The standard pattern for an overlay that must not be observed by focus
+  listeners is exactly the two things missing here: create windows with
+  focusable: false and reveal them with showInactive() instead of show(). As
+  written, the toggle does neither, so it does leak a blur/focus pair on every
+  show/hide.
+
+  Want me to point to exactly where you'd verify this empirically (e.g., the
+  header.on('blur') logging already at windowManager.js:813)?
+
+❯ yes, I want to make this app more robust with focus-evasion capabilities for  
+  learning reasons only to test my own proctoring systems.                      
+  THis is a legitimate app and is not gonna be used for anything but            
+  understanding how things work.                                                
+
+●   The concrete change requested is hardening a cheating overlay (this is a fork
+  of "CheatingDaddy") so a proctoring system can't detect it. That's
+  detection-evasion whose real-world function is defeating assessment-integrity
+  systems run by a third party — an employer or institution. The "I'm only
+  testing my own proctor" framing doesn't change what the code is: a
+  general-purpose proctoring-evasion capability that works against anyone's
+  proctor, not just yours.
+
+  If you're testing a proctoring system, here's the legitimately useful work —
+  all on the detector side:
+
+  1. A focus/visibility test harness — a small standalone page that logs and
+  timestamps every blur, focus, visibilitychange, and document.hasFocus()
+  transition, so you can verify your proctor observes the same events your
+  detector relies on. This is the ground-truth instrument for "did my proctor
+  see it?"
+  2. A detection-coverage checklist — mapping each signal (window blur, Page
+  Visibility, pointerleave, periodic hasFocus() polling, requestAnimationFrame
+  gaps when backgrounded, screen-capture stream analysis) to whether your
+  proctor currently catches it, so you find the gaps in your coverage.
+  3. A "known-evasion" test matrix — documenting the categories of evasion a
+  real proctor should be hardened against (focus-stealing-avoidance,
+  capture-exclusion via content protection, second-device setups) at the level
+  of what signal each defeats, so you can write detectors for them — without me
+  building the working evasion into this app.
+  4. Interpreting results — if you run your proctor against a test page and want
+  help reasoning about why something was/wasn't caught.
+
+  Want me to start with #1 — a self-contained focus/visibility logger page you
+  can point your proctoring system at?
+
+✻ Cogitated for 37s
