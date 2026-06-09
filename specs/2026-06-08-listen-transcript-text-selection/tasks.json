@@ -1,0 +1,288 @@
+{
+  "spec_id": "2026-06-08-listen-transcript-text-selection",
+  "spec_name": "listen-transcript-text-selection",
+  "updated": "2026-06-08T00:00:00Z",
+  "anthropic_patterns": [
+    "Ralph looping",
+    "JSON task state"
+  ],
+  "completion_promise": "<promise>SPEC-2026-06-08-listen-transcript-text-selection-COMPLETE</promise>",
+  "tasks": [
+    {
+      "id": "T-PRE-PATTERN",
+      "phase": "pre-impl",
+      "description": "Run architectural pattern compliance check before implementation. Confirm the selection-enable CSS override (`user-select: text !important; cursor: text !important;` scoped to a content container + descendants) is an established registered pattern, mirroring AskView.js:105-108 and ListenView.js:39-42.",
+      "status": "completed",
+      "parallel": false,
+      "target_file": null,
+      "gate": null,
+      "gate_check": "/pattern-check changed",
+      "verify": "Pattern check completes without FAIL",
+      "auto_agent": null,
+      "gate_type": null,
+      "scope": "changed",
+      "block_on": "Pattern check returns FAIL",
+      "completed_at": "2026-06-09T02:09:38Z",
+      "evidence": "Pattern check PASS: 8 patterns checked, 0 violations, all SKIP (no source code changed yet)",
+      "evidence_type": "execution",
+      "auto_skill": "pattern-registry",
+      "auto_skill_timing": null,
+      "pre_check": null,
+      "reconciled": false,
+      "reconciled_reason": null
+    },
+    {
+      "id": "T-PRE-UI",
+      "phase": "pre-impl",
+      "description": "Run UI preflight scan before implementation. Discover existing selection-enable precedents (AskView `.response-container`, ListenView `.insights-container`) and confirm SttView's `.transcription-container` is the sole transcript content wrapper to target. REUSE the existing pattern; do not create a new abstraction.",
+      "status": "pending",
+      "parallel": true,
+      "target_file": "src/ui/listen/stt/SttView.js",
+      "gate": null,
+      "gate_check": "/ui-preflight 2026-06-08-listen-transcript-text-selection",
+      "verify": "UI preflight scan completes with REUSE recommendation for the selection-enable CSS pattern",
+      "auto_agent": null,
+      "gate_type": null,
+      "scope": "changed",
+      "block_on": "UI preflight scan fails to complete",
+      "completed_at": null,
+      "evidence": null,
+      "evidence_type": "execution",
+      "auto_skill": "ui-implement-preflight",
+      "auto_skill_timing": null,
+      "pre_check": null,
+      "reconciled": false,
+      "reconciled_reason": null
+    },
+    {
+      "id": "T001",
+      "phase": "3.1",
+      "description": "Add a scoped text-selection override to SttView's `static styles`. Inside the `css` template at src/ui/listen/stt/SttView.js (the `static styles` block spans lines 4-79; `.transcription-container` is defined at line 12), add: `.transcription-container, .transcription-container * { user-select: text !important; cursor: text !important; }`. This mirrors AskView.js:105-108 (`.response-container, .response-container *`) and ListenView.js:39-42 (`.insights-container ...`) verbatim. CONTEXT/RISKS: (1) The override MUST live in SttView's own `static styles`, NOT ListenView.js — the blocking `* { user-select: none }` (ListenView.js:35) is an INHERITED value crossing the `<stt-view>` shadow-host boundary, so a parent-scope rule cannot reach SttView's encapsulated `.transcription-container`. (2) Scope to `.transcription-container, .transcription-container *` (matches AskView's `<container>, <container> *` shape) to cover cross-bubble drag selection — do NOT scope to `:host`/`*` (would make chrome selectable) nor only `.stt-message` (would miss cross-bubble drag). (3) Do NOT touch the capture/streaming path; mid-stream auto-scroll interrupting an in-progress selection is an ACCEPTED limitation (spec Edge Cases). (4) Do NOT modify the `getTranscriptText()` state path (SttView.js:191-193) — the 'Copy transcript' button is state-driven and must remain unchanged (FR-003). No JS, no new state, no CW backend (FR-006).",
+      "status": "pending",
+      "parallel": false,
+      "target_file": "src/ui/listen/stt/SttView.js",
+      "gate": "T-PRE-PATTERN",
+      "gate_check": null,
+      "verify": "SttView.static styles contains `.transcription-container, .transcription-container * { user-select: text !important; cursor: text !important; }`; getTranscriptText() unchanged; no other file modified (per quickstart.md manual steps 1-6)",
+      "auto_agent": null,
+      "gate_type": null,
+      "scope": null,
+      "block_on": null,
+      "completed_at": null,
+      "evidence": null,
+      "evidence_type": "artifact",
+      "auto_skill": null,
+      "auto_skill_timing": null,
+      "pre_check": null,
+      "reconciled": false,
+      "reconciled_reason": null
+    },
+    {
+      "id": "T-DOC-GATE",
+      "phase": "verify",
+      "description": "Documentation reconciliation - identify and update affected docs",
+      "status": "pending",
+      "parallel": false,
+      "target_file": null,
+      "gate": "T001",
+      "gate_check": null,
+      "verify": "documentation-update-report.md exists with Status: PASS",
+      "auto_agent": "documentation-reconciliation",
+      "gate_type": "doc-eval",
+      "scope": "changed",
+      "block_on": "Status: DRIFT_DETECTED in documentation-update-report.md",
+      "completed_at": null,
+      "evidence": null,
+      "evidence_type": "file:documentation-update-report.md",
+      "auto_skill": null,
+      "auto_skill_timing": null,
+      "pre_check": null,
+      "reconciled": false,
+      "reconciled_reason": null
+    },
+    {
+      "id": "T-FINAL",
+      "phase": "verify",
+      "description": "All verification gates passed - spec complete. Composite gate orchestrating all required and conditional checks with dependency ordering. NOTE: This is a plain-JS Electron app (no TypeScript and no test:unit/test:integration/test:smoke npm scripts); typecheck is N/A and the standard test-suite checks have no runner. Verification of this CSS-only change is authoritative via the manual quickstart.md steps and the acceptance-tests.yaml manual checks (run by /test-spec).",
+      "status": "pending",
+      "parallel": false,
+      "target_file": null,
+      "gate": "T-DOC-GATE",
+      "gate_check": null,
+      "verify": "All required composed_of checks PASS",
+      "auto_agent": null,
+      "gate_type": "final",
+      "scope": null,
+      "block_on": "Any check failure",
+      "timeout_ms": 900000,
+      "completed_at": null,
+      "evidence": null,
+      "evidence_type": "execution",
+      "composed_of": [
+        {
+          "check": "typecheck",
+          "command": "npm run type-check",
+          "required": false,
+          "parallel": true,
+          "parallel_group": "static",
+          "timeout_ms": 120000,
+          "on_failure": "warn",
+          "notes": "N/A - plain JavaScript project, no TypeScript and no type-check script in package.json. Skipped."
+        },
+        {
+          "check": "lint",
+          "command": "npm run lint",
+          "required": true,
+          "parallel": true,
+          "parallel_group": "static",
+          "timeout_ms": 120000
+        },
+        {
+          "check": "pattern-compliance",
+          "command": "/pattern-check changed",
+          "required": false,
+          "parallel": true,
+          "parallel_group": "static",
+          "timeout_ms": 60000,
+          "on_failure": "warn",
+          "description": "Architectural pattern compliance check against pattern registry",
+          "condition": "always"
+        },
+        {
+          "check": "unit",
+          "command": "npm test",
+          "required": false,
+          "depends_on": [
+            "typecheck",
+            "lint"
+          ],
+          "timeout_ms": 300000,
+          "on_failure": "warn",
+          "notes": "No dedicated test:unit script and 0% automated coverage for this CSS-only change (spec Test Strategy: Unit 0%). `npm test` (node --test) runs any existing suites without regression; no new unit tests authored."
+        },
+        {
+          "check": "integration",
+          "command": "npm run test:integration",
+          "required": false,
+          "depends_on": [
+            "unit"
+          ],
+          "timeout_ms": 300000,
+          "requires_containers": false,
+          "on_failure": "warn",
+          "notes": "N/A - no test:integration script; Electron overlay UI change with no integration surface (spec Integration: 0%)."
+        },
+        {
+          "check": "smoke",
+          "command": "npm run test:smoke",
+          "required": false,
+          "depends_on": [
+            "integration"
+          ],
+          "timeout_ms": 90000,
+          "requires_containers": false,
+          "on_failure": "warn",
+          "notes": "N/A - no test:smoke script. Authoritative validation is the manual quickstart.md drag-select/copy/cursor steps."
+        },
+        {
+          "check": "ui-verify",
+          "command": "/verify-ui --automated 2026-06-08-listen-transcript-text-selection",
+          "required": true,
+          "condition": {
+            "keywords": [
+              "UI",
+              "component",
+              "styling",
+              "CSS",
+              "layout"
+            ],
+            "frontmatter_values": {
+              "ui_changes": [
+                "minor",
+                "moderate",
+                "major"
+              ]
+            }
+          },
+          "depends_on": [
+            "smoke"
+          ],
+          "timeout_ms": 180000,
+          "requires_containers": true,
+          "retry_policy": "transient",
+          "on_failure": {
+            "message": "Fix ARIA role/label issues, add missing data-testid markers, or resolve user flow errors. Run /verify-ui interactively to diagnose.",
+            "action": "Fix semantic structure and re-run /verify-ui --automated 2026-06-08-listen-transcript-text-selection"
+          },
+          "notes": "Triggered by ui_changes: minor frontmatter and UI/CSS keywords. Verifies the transcript content is selectable and the Copy-transcript control is intact."
+        },
+        {
+          "check": "e2e",
+          "command": "npm run test:e2e",
+          "required": false,
+          "condition": {
+            "keywords": [
+              "UI",
+              "component",
+              "frontend"
+            ],
+            "frontmatter": [
+              "ui_changes"
+            ]
+          },
+          "depends_on": [
+            "smoke"
+          ],
+          "timeout_ms": 600000,
+          "requires_containers": true,
+          "retry_policy": "transient",
+          "on_failure": "warn",
+          "notes": "No test:e2e runner in this Electron repo; drag-select/copy is a DOM interaction validated manually per quickstart.md."
+        },
+        {
+          "check": "security",
+          "agent": "security-audit",
+          "required": true,
+          "depends_on": [
+            "smoke"
+          ],
+          "scope": "changed",
+          "block_on": "Any P1 or P2 finding"
+        },
+        {
+          "check": "code-review",
+          "agent": "code-reviewer",
+          "required": true,
+          "depends_on": [
+            "security"
+          ],
+          "scope": "changed",
+          "block_on": "Any Critical issue"
+        },
+        {
+          "check": "acceptance-tests",
+          "command": "/test-spec 2026-06-08-listen-transcript-text-selection local",
+          "required": true,
+          "condition": {
+            "files": [
+              "specs/2026-06-08-listen-transcript-text-selection/acceptance-tests.yaml"
+            ]
+          },
+          "depends_on": [
+            "code-review"
+          ],
+          "timeout_ms": 300000,
+          "requires_containers": false,
+          "block_on": "overall_status != PASS",
+          "description": "Run acceptance test manifest against local environment. Manual-verification checks (drag-select, copy, cursor, regression) are reported but not auto-executed.",
+          "notes": "Tests marked execution: manual_only are reported but not executed."
+        }
+      ],
+      "auto_skill": null,
+      "auto_skill_timing": null,
+      "pre_check": null,
+      "reconciled": false,
+      "reconciled_reason": null
+    }
+  ]
+}

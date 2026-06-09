@@ -39,6 +39,13 @@ export class SttView extends LitElement {
             background: rgba(255, 255, 255, 0.5);
         }
 
+        /* Allow free mouse selection of transcript text (mirrors AskView/ListenView) */
+        .transcription-container,
+        .transcription-container * {
+            user-select: text !important;
+            cursor: text !important;
+        }
+
         .stt-message {
             padding: 8px 12px;
             border-radius: 12px;
