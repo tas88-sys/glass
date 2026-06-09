@@ -260,6 +260,18 @@ function changeAllWindowsVisibility(windowPool, targetVisibility) {
       if (win && !win.isDestroyed())
         win.show();
     });
+
+    // FR-003: restore OS focus to the ask window so the renderer can hold the caret.
+    // Only when ask was in the visible set before hide (FR-004 edge: no-steal if ask absent).
+    // MUST NOT call setIgnoreMouseEvents or setAlwaysOnTop (FR-005).
+    // Mirrors the settings/mode-picker moveTop pattern (lines ~316, ~350).
+    if (lastVisibleWindows.has('ask')) {
+      const askWin = windowPool.get('ask');
+      if (askWin && !askWin.isDestroyed()) {
+        askWin.focus();
+        askWin.moveTop();
+      }
+    }
   }
 
 /**
@@ -888,4 +900,5 @@ module.exports = {
     getHeaderPosition,
     moveHeaderTo,
     adjustWindowHeight,
+    changeAllWindowsVisibility,
 };

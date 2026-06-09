@@ -1,5 +1,7 @@
 import { html, css, LitElement } from '../../ui/assets/lit-core-2.7.4.min.js';
 import { parser, parser_write, parser_end, default_renderer } from '../../ui/assets/smd.js';
+import { buildSnapshot, clampRange } from './caretSnapshot.js';
+import { onBlur as focusRestoreOnBlur, shouldRestoreOnVisible } from './focusRestoreDecision.js';
 
 export class AskView extends LitElement {
     static properties = {
@@ -758,6 +760,10 @@ export class AskView extends LitElement {
         this.smdContainer = null;
         this.lastProcessedLength = 0;
 
+        // Focus/caret restore state (FR-001/FR-002/FR-004)
+        this.isInputFocused = false;
+        this._caretSnapshot = null;
+
         this.handleSendText = this.handleSendText.bind(this);
         this.handleTextKeydown = this.handleTextKeydown.bind(this);
         this.handleCopy = this.handleCopy.bind(this);
@@ -766,6 +772,8 @@ export class AskView extends LitElement {
         this.handleScroll = this.handleScroll.bind(this);
         this.handleCloseAskWindow = this.handleCloseAskWindow.bind(this);
         this.handleCloseIfNoContent = this.handleCloseIfNoContent.bind(this);
+        this.handleInputBlur = this.handleInputBlur.bind(this);
+        this.handleVisibilityChange = this.handleVisibilityChange.bind(this);
 
         this.loadLibraries();
 
@@ -779,6 +787,7 @@ export class AskView extends LitElement {
         console.log('📱 AskView connectedCallback - IPC 이벤트 리스너 설정');
 
         document.addEventListener('keydown', this.handleEscKey);
+        document.addEventListener('visibilitychange', this.handleVisibilityChange);
 
         this.resizeObserver = new ResizeObserver(entries => {
             for (const entry of entries) {
@@ -842,6 +851,7 @@ export class AskView extends LitElement {
         console.log('📱 AskView disconnectedCallback - IPC 이벤트 리스너 제거');
 
         document.removeEventListener('keydown', this.handleEscKey);
+        document.removeEventListener('visibilitychange', this.handleVisibilityChange);
 
         if (this.copyTimeout) {
             clearTimeout(this.copyTimeout);
@@ -957,11 +967,53 @@ export class AskView extends LitElement {
         this.isInputFocused = true;
     }
 
-    focusTextInput() {
+    /**
+     * Blur handler for #textInput (FR-004 no-steal guard).
+     * Delegates to the pure focusRestoreDecision helper to decide whether
+     * this blur is hide-induced (PRESERVE snapshot) or genuine (CLEAR).
+     */
+    handleInputBlur() {
+        const textInput = this.shadowRoot?.getElementById('textInput');
+        const decision = focusRestoreOnBlur(
+            document.hidden,
+            this.isInputFocused,
+            () => buildSnapshot(textInput?.selectionStart, textInput?.selectionEnd)
+        );
+        this._caretSnapshot = decision.snapshot;
+        this.isInputFocused = decision.isInputFocused;
+    }
+
+    /**
+     * visibilitychange handler (FR-006 timing: fires after the window is shown).
+     * Restores focus + caret to #textInput when the document becomes visible,
+     * but only if the input was focused at hide time (FR-004 guard via snapshot).
+     */
+    handleVisibilityChange() {
+        if (document.visibilityState === 'visible' && shouldRestoreOnVisible(this._caretSnapshot)) {
+            const snapshot = this._caretSnapshot;
+            this._caretSnapshot = null; // clear before rAF to avoid double-restore on rapid toggle
+            this.focusTextInput(snapshot);
+        }
+    }
+
+    /**
+     * Focus #textInput, optionally restoring a saved caret range.
+     * Deferred to requestAnimationFrame so it runs after show/layout completes (FR-006).
+     * Reuses the existing rAF pattern — no second deferral added.
+     *
+     * @param {{ start: number, end: number } | null} [caretSnapshot]
+     */
+    focusTextInput(caretSnapshot) {
         requestAnimationFrame(() => {
             const textInput = this.shadowRoot?.getElementById('textInput');
             if (textInput) {
                 textInput.focus();
+                if (caretSnapshot) {
+                    const clamped = clampRange(caretSnapshot, textInput.value.length);
+                    if (clamped) {
+                        textInput.setSelectionRange(clamped.start, clamped.end);
+                    }
+                }
             }
         });
     }
@@ -1423,6 +1475,7 @@ export class AskView extends LitElement {
                         placeholder="Ask about your screen or audio"
                         @keydown=${this.handleTextKeydown}
                         @focus=${this.handleInputFocus}
+                        @blur=${this.handleInputBlur}
                     />
                     <button
                         class="submit-btn"

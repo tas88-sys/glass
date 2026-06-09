@@ -1,0 +1,480 @@
+{
+  "spec_id": "2026-06-08-cursor-visibility-toggle",
+  "spec_name": "cursor-visibility-toggle",
+  "updated": "2026-06-09T03:09:08Z",
+  "anthropic_patterns": [
+    "Ralph looping",
+    "JSON task state"
+  ],
+  "completion_promise": "<promise>SPEC-2026-06-08-cursor-visibility-toggle-COMPLETE</promise>",
+  "tasks": [
+    {
+      "id": "T001",
+      "phase": "setup",
+      "description": "Verify the node:test runner and pure-helper test convention are usable: confirm `npm test` resolves the glob src/**/__tests__/**/*.test.js (existing example: src/ui/listen/summary/__tests__/liveAnswerHistory.test.js) and that the new test dir src/ui/ask/__tests__/ will be picked up with zero config change.",
+      "status": "completed",
+      "parallel": false,
+      "target_file": null,
+      "gate": null,
+      "gate_check": "npm test",
+      "verify": "npm test discovers existing __tests__ files and exits 0 (baseline green before new failing tests are added)",
+      "auto_agent": null,
+      "gate_type": null,
+      "scope": null,
+      "block_on": null,
+      "completed_at": "2026-06-09T12:14:14Z",
+      "evidence": "npm test: 126 tests, 0 failures. src/**/__tests__/**/*.test.js glob resolves correctly. Baseline green.",
+      "evidence_type": "execution",
+      "auto_skill": null,
+      "auto_skill_timing": null,
+      "pre_check": null,
+      "reconciled": false,
+      "reconciled_reason": null
+    },
+    {
+      "id": "T-PRE-PATTERN",
+      "phase": "pre-impl",
+      "description": "Architectural pattern compliance pre-check against the pattern registry for the renderer/main glue touched by this fix (reuse of focusTextInput rAF pattern, settings/mode-picker moveTop show-path pattern, co-located pure-helper + __tests__ convention). Confirms the planned changes follow registered patterns before implementation begins.",
+      "status": "completed",
+      "parallel": false,
+      "target_file": null,
+      "gate": null,
+      "gate_check": "/pattern-check changed",
+      "verify": "Pattern check completes without FAIL",
+      "auto_agent": null,
+      "gate_type": null,
+      "scope": "changed",
+      "block_on": "Pattern check returns FAIL",
+      "completed_at": "2026-06-09T12:12:37Z",
+      "evidence": "Pattern check PASS (0 violations, spec-only changed files). UI preflight: REUSE/EXTEND recommendation, no CREATE blockers.",
+      "evidence_type": "execution",
+      "auto_skill": "pattern-check",
+      "auto_skill_timing": "before",
+      "pre_check": "/pattern-check changed",
+      "reconciled": false,
+      "reconciled_reason": null
+    },
+    {
+      "id": "T-PRE-UI",
+      "phase": "pre-impl",
+      "description": "UI preflight scan (critical_requirements.ui_changes: minor). Confirm no new UI components/layers are needed and the change is confined to focus/caret behavior on the existing #textInput in AskView (REUSE/EXTEND only). Produces REUSE/EXTEND/CREATE recommendation; expectation is REUSE/EXTEND (no CREATE). Logically independent of T-PRE-PATTERN but kept parallel:false (produces no target_file, so it cannot be flagged parallel per the schema rule).",
+      "status": "completed",
+      "parallel": false,
+      "target_file": null,
+      "gate": null,
+      "gate_check": "/ui-preflight 2026-06-08-cursor-visibility-toggle",
+      "verify": "UI preflight scan completes; recommendation is REUSE/EXTEND (no new components)",
+      "auto_agent": null,
+      "gate_type": null,
+      "scope": "changed",
+      "block_on": null,
+      "completed_at": "2026-06-09T12:12:37Z",
+      "evidence": "Pattern check PASS (0 violations, spec-only changed files). UI preflight: REUSE/EXTEND recommendation, no CREATE blockers.",
+      "evidence_type": "inspection",
+      "auto_skill": "ui-implement-preflight",
+      "auto_skill_timing": "before",
+      "pre_check": null,
+      "reconciled": false,
+      "reconciled_reason": null
+    },
+    {
+      "id": "T002",
+      "phase": "3.1",
+      "description": "TDD (Red): Write failing unit tests for the pure caret helper per contracts/caretSnapshot.d.ts + data-model. Cover: buildSnapshot returns normalized {start,end}; buildSnapshot returns null when either arg is non-finite (NaN/undefined); clampRange null-in -> null-out; clampRange clamps start/end independently into [0, valueLength]; inverted-after-clamp swaps start/end; range entirely past end -> caret-at-end {start:len,end:len}; never throws. Tests MUST fail (module not yet implemented).",
+      "status": "completed",
+      "parallel": true,
+      "target_file": "src/ui/ask/__tests__/caretSnapshot.test.js",
+      "gate": "T-PRE-PATTERN",
+      "gate_check": "node --test src/ui/ask/__tests__/caretSnapshot.test.js",
+      "verify": "Test file exists and FAILS (Red) because src/ui/ask/caretSnapshot.js does not yet exist",
+      "auto_agent": null,
+      "gate_type": null,
+      "scope": null,
+      "block_on": null,
+      "completed_at": "2026-06-09T12:15:35Z",
+      "evidence": "Test file created at src/ui/ask/__tests__/caretSnapshot.test.js. FAILS (Red) - ERR_MODULE_NOT_FOUND for ../caretSnapshot (not yet implemented). 12 test cases covering buildSnapshot + clampRange per contract.",
+      "evidence_type": "execution",
+      "auto_skill": null,
+      "auto_skill_timing": null,
+      "pre_check": null,
+      "reconciled": false,
+      "reconciled_reason": null
+    },
+    {
+      "id": "T003",
+      "phase": "3.1",
+      "description": "TDD (Red): Write failing unit tests for the pure focus-restore decision helper per contracts/focusRestoreDecision.d.ts + data-model (FR-004 guard, D2/D3). Cover: onBlur(documentHidden=true, isInputFocused=true, factory) -> PRESERVE (snapshot=factory(), isInputFocused=true); onBlur(documentHidden=false, ...) -> CLEAR (snapshot=null, isInputFocused=false); onBlur(documentHidden=true, isInputFocused=false) -> CLEAR; shouldRestoreOnVisible(snapshot) true iff non-null. Use a stub snapshotFactory (no DOM). Tests MUST fail (module not yet implemented).",
+      "status": "completed",
+      "parallel": true,
+      "target_file": "src/ui/ask/__tests__/focusRestoreDecision.test.js",
+      "gate": "T-PRE-PATTERN",
+      "gate_check": "node --test src/ui/ask/__tests__/focusRestoreDecision.test.js",
+      "verify": "Test file exists and FAILS (Red) because src/ui/ask/focusRestoreDecision.js does not yet exist",
+      "auto_agent": null,
+      "gate_type": null,
+      "scope": null,
+      "block_on": null,
+      "completed_at": "2026-06-09T12:15:35Z",
+      "evidence": "Test file created at src/ui/ask/__tests__/focusRestoreDecision.test.js. FAILS (Red) - ERR_MODULE_NOT_FOUND for ../focusRestoreDecision (not yet implemented). 10 test cases covering onBlur + shouldRestoreOnVisible per contract.",
+      "evidence_type": "execution",
+      "auto_skill": null,
+      "auto_skill_timing": null,
+      "pre_check": null,
+      "reconciled": false,
+      "reconciled_reason": null
+    },
+    {
+      "id": "T004",
+      "phase": "3.2",
+      "description": "TDD (Green): Implement the pure caret helper src/ui/ask/caretSnapshot.js to satisfy T002 \u00e2\u20ac\u201d buildSnapshot(start,end) and clampRange(snapshot,valueLength) per contracts/caretSnapshot.d.ts. No DOM/Electron import (must run headless under node:test), mirroring src/ui/listen/summary/liveAnswerHistory.js. Implements FR-002 clamp/swap/caret-at-end rules.",
+      "status": "completed",
+      "parallel": true,
+      "target_file": "src/ui/ask/caretSnapshot.js",
+      "gate": "T002",
+      "gate_check": "node --test src/ui/ask/__tests__/caretSnapshot.test.js",
+      "verify": "All caretSnapshot.test.js assertions pass (Green); module exports buildSnapshot + clampRange with no DOM/Electron import",
+      "auto_agent": null,
+      "gate_type": null,
+      "scope": null,
+      "block_on": null,
+      "completed_at": "2026-06-09T12:19:59Z",
+      "evidence": "src/ui/ask/caretSnapshot.js created. 17/17 caretSnapshot.test.js assertions pass (Green). Exports buildSnapshot + clampRange, no DOM/Electron import.",
+      "evidence_type": "execution",
+      "auto_skill": null,
+      "auto_skill_timing": null,
+      "pre_check": null,
+      "reconciled": false,
+      "reconciled_reason": null
+    },
+    {
+      "id": "T005",
+      "phase": "3.2",
+      "description": "TDD (Green): Implement the pure decision helper src/ui/ask/focusRestoreDecision.js to satisfy T003 \u00e2\u20ac\u201d onBlur(documentHidden,isInputFocused,snapshotFactory) and shouldRestoreOnVisible(snapshot) per contracts/focusRestoreDecision.d.ts. No DOM/Electron import. Encodes the FR-004 no-steal guard (hide-induced blur PRESERVES, genuine blur CLEARS).",
+      "status": "completed",
+      "parallel": true,
+      "target_file": "src/ui/ask/focusRestoreDecision.js",
+      "gate": "T003",
+      "gate_check": "node --test src/ui/ask/__tests__/focusRestoreDecision.test.js",
+      "verify": "All focusRestoreDecision.test.js assertions pass (Green); module exports onBlur + shouldRestoreOnVisible with no DOM/Electron import",
+      "auto_agent": null,
+      "gate_type": null,
+      "scope": null,
+      "block_on": null,
+      "completed_at": "2026-06-09T12:19:59Z",
+      "evidence": "src/ui/ask/focusRestoreDecision.js created. 10/10 focusRestoreDecision.test.js assertions pass (Green). Exports onBlur + shouldRestoreOnVisible, no DOM/Electron import.",
+      "evidence_type": "execution",
+      "auto_skill": null,
+      "auto_skill_timing": null,
+      "pre_check": null,
+      "reconciled": false,
+      "reconciled_reason": null
+    },
+    {
+      "id": "T006",
+      "phase": "3.2",
+      "description": "TDD (Red): Write a failing main-process stub test for the windowManager show-branch focus per contracts/windowManager.show-focus.md. NOTE: T007 adds the `changeAllWindowsVisibility` export to windowManager.js \u00e2\u20ac\u201d until T007 lands, require('../windowManager').changeAllWindowsVisibility is undefined and this test fails (correct Red). lastVisibleWindows is module-level and is NOT exported \u00e2\u20ac\u201d the test SEEDS it by calling the hide branch first. require('../windowManager').changeAllWindowsVisibility. Stub windowPool (a Map) with mock BrowserWindows exposing isVisible/isDestroyed/show/hide/focus/moveTop/setIgnoreMouseEvents/setAlwaysOnTop spies. Per case: build the mock pool, call changeAllWindowsVisibility(pool, false) ONCE with header.isVisible()===true to populate lastVisibleWindows via the hide branch, then flip every window's isVisible() to return false and call changeAllWindowsVisibility(pool, true) to exercise the show branch; assert on the show-branch spies. Cases: (1) pool={header,ask} both initially visible -> after show branch, ask.focus() and ask.moveTop() each called exactly once; ask.setIgnoreMouseEvents and (any window).setAlwaysOnTop NOT called (FR-003/FR-005 \u00e2\u20ac\u201d folds in AT-NEG-001); (2) pool={header} only (ask absent / not visible at hide) -> no focus/moveTop on any ask window (FR-004 edge); (3) ask.isDestroyed()===true at show time -> no throw, no focus call. Test MUST fail until T007 lands.",
+      "status": "completed",
+      "parallel": false,
+      "target_file": "src/window/__tests__/changeAllWindowsVisibility.show-focus.test.js",
+      "gate": "T-PRE-PATTERN",
+      "gate_check": "node --test src/window/__tests__/changeAllWindowsVisibility.show-focus.test.js",
+      "verify": "Test file exists and FAILS (Red) \u00e2\u20ac\u201d the show branch does not yet call focus()/moveTop()",
+      "auto_agent": null,
+      "gate_type": null,
+      "scope": null,
+      "block_on": null,
+      "completed_at": "2026-06-09T12:19:04Z",
+      "evidence": "Test file created at src/window/__tests__/changeAllWindowsVisibility.show-focus.test.js. 3 tests FAIL (Red) - changeAllWindowsVisibility not exported (T007 will fix). Covers FR-003, FR-004 edge, FR-005, crash-safe guard.",
+      "evidence_type": "execution",
+      "auto_skill": null,
+      "auto_skill_timing": null,
+      "pre_check": null,
+      "reconciled": false,
+      "reconciled_reason": null
+    },
+    {
+      "id": "T007",
+      "phase": "3.3",
+      "description": "Edit src/window/windowManager.js. (a) Add `changeAllWindowsVisibility` to module.exports (~line 873) so T006 can import it \u00e2\u20ac\u201d this export is part of THIS implementation diff (it is NOT pre-added during /tasks). (b) In changeAllWindowsVisibility() show branch (after the lastVisibleWindows.forEach show loop, ~lines 258-262), make the ask window OS-focus-eligible: IF lastVisibleWindows.has('ask') AND askWin AND !askWin.isDestroyed() -> askWin.focus() then askWin.moveTop(). MUST NOT call setAlwaysOnTop(true) and MUST NOT call setIgnoreMouseEvents(...) (FR-005). Mirrors the settings/mode-picker moveTop pattern (:316/:350) minus always-on-top (no teardown exists for the toggle). Satisfies T006.",
+      "status": "completed",
+      "parallel": false,
+      "target_file": "src/window/windowManager.js",
+      "gate": "T006",
+      "gate_check": "node --test src/window/__tests__/changeAllWindowsVisibility.show-focus.test.js",
+      "verify": "changeAllWindowsVisibility.show-focus.test.js passes (Green): focus()+moveTop() called only when ask in visible set; setAlwaysOnTop/setIgnoreMouseEvents never called; isDestroyed guard holds",
+      "auto_agent": null,
+      "gate_type": null,
+      "scope": null,
+      "block_on": null,
+      "completed_at": "2026-06-09T12:20:37Z",
+      "evidence": "windowManager.js: (a) changeAllWindowsVisibility exported in module.exports; (b) show branch adds askWin.focus()+askWin.moveTop() guarded by lastVisibleWindows.has(ask) + isDestroyed(). 3/3 show-focus tests pass (Green). No setAlwaysOnTop/setIgnoreMouseEvents calls (FR-005).",
+      "evidence_type": "artifact",
+      "auto_skill": null,
+      "auto_skill_timing": null,
+      "pre_check": null,
+      "reconciled": false,
+      "reconciled_reason": null
+    },
+    {
+      "id": "T008",
+      "phase": "3.3",
+      "description": "Wire the renderer self-restore into src/ui/ask/AskView.js using the two pure helpers (no new IPC channel; D1). (a) Initialize isInputFocused=false in the constructor and bind handleInputBlur + handleVisibilityChange via .bind(this) following the existing constructor binding convention (~:761-768). (b) Add @blur=${this.handleInputBlur} adjacent to the existing @focus binding on #textInput (~:1425); handleInputBlur calls focusRestoreDecision.onBlur(document.hidden, this.isInputFocused, () => buildSnapshot(textInput.selectionStart, textInput.selectionEnd)) and stores this._caretSnapshot + isInputFocused from the result. (c) In connectedCallback add document.addEventListener('visibilitychange', this.handleVisibilityChange) after existing IPC setup; in disconnectedCallback remove it (alongside existing teardown ~:844-865) to avoid leaks. (d) handleVisibilityChange: when document.visibilityState==='visible' AND shouldRestoreOnVisible(this._caretSnapshot), defer to requestAnimationFrame and call focusTextInput() then apply clampRange(this._caretSnapshot, textInput.value.length) via setSelectionRange; then clear this._caretSnapshot. (e) Extend focusTextInput() to optionally apply a caret range inside its existing rAF (reuse :960-967, do not add a second deferral). Null-guard #textInput. Guards: FR-004 (no snapshot -> no-op), FR-005 (no click-through change), FR-006 (rAF after show).",
+      "status": "completed",
+      "parallel": false,
+      "target_file": "src/ui/ask/AskView.js",
+      "gate": "T007",
+      "gate_check": "npm test",
+      "verify": "AskView imports + calls caretSnapshot and focusRestoreDecision helpers; @blur bound on #textInput; visibilitychange listener added in connectedCallback and removed in disconnectedCallback; isInputFocused initialized in constructor; npm test stays green",
+      "auto_agent": null,
+      "gate_type": null,
+      "scope": null,
+      "block_on": null,
+      "completed_at": "2026-06-09T12:22:17Z",
+      "evidence": "AskView.js: imports caretSnapshot+focusRestoreDecision; isInputFocused=false/_caretSnapshot=null in constructor; handleInputBlur+handleVisibilityChange bound; @blur on #textInput; visibilitychange listener add/remove in connectedCallback/disconnectedCallback; focusTextInput extended with optional caret param. npm test: 156/156 pass.",
+      "evidence_type": "artifact",
+      "auto_skill": null,
+      "auto_skill_timing": null,
+      "pre_check": null,
+      "reconciled": false,
+      "reconciled_reason": null
+    },
+    {
+      "id": "T009",
+      "phase": "verify",
+      "description": "Manual quickstart verification (no E2E/DOM harness exists). Build + launch (npm run build:renderer && electron . OR npm start) and run quickstart.md Scenarios 1-7: caret-at-end restore (FR-001/002/006), mid-text caret (FR-002), no-steal when input not focused (FR-004), ask-not-in-visible-set (Edge), rapid double-toggle (Edge), click-through untouched (FR-005), cross-platform Cmd+\\ vs Ctrl+\\ (FR-007). Record a one-line observed result per scenario plus the npm test output (Constitution III evidence).",
+      "status": "pending",
+      "parallel": false,
+      "target_file": null,
+      "gate": "T008",
+      "gate_check": "npm run build:renderer",
+      "verify": "All 7 quickstart scenarios observed PASS on-screen; one-line result per scenario pasted into task evidence; npm test output pasted",
+      "auto_agent": null,
+      "gate_type": null,
+      "scope": null,
+      "block_on": "Any quickstart scenario does not behave as Expected",
+      "completed_at": null,
+      "evidence": null,
+      "evidence_type": "inspection",
+      "auto_skill": null,
+      "auto_skill_timing": null,
+      "pre_check": null,
+      "reconciled": false,
+      "reconciled_reason": null
+    },
+    {
+      "id": "T-DOC-GATE",
+      "phase": "verify",
+      "description": "Documentation reconciliation - identify and update affected docs",
+      "status": "pending",
+      "parallel": false,
+      "target_file": null,
+      "gate": "T009",
+      "gate_check": null,
+      "verify": "documentation-update-report.md generated with Status: PASS",
+      "auto_agent": "documentation-reconciliation",
+      "gate_type": "doc-eval",
+      "scope": "changed",
+      "block_on": "Status: DRIFT_DETECTED in documentation-update-report.md",
+      "completed_at": null,
+      "evidence": null,
+      "evidence_type": "file:documentation-update-report.md",
+      "auto_skill": null,
+      "auto_skill_timing": null,
+      "pre_check": null,
+      "reconciled": false,
+      "reconciled_reason": null
+    },
+    {
+      "id": "T-FINAL",
+      "phase": "verify",
+      "description": "Composite verification gate - all required checks must pass for spec completion. NOTE: this repo exposes only `npm test` (node --test glob), `npm run lint`, and `npm run build:renderer`; it has no `type-check`/`test:unit`/`test:integration`/`test:smoke`/`test:contract` scripts and no DOM/E2E/a11y harness. The command-based checks below are the template defaults; the runnable signal for this spec is `npm test` (all node:test pure-helper + main-stub tests) plus the manual quickstart (T009). lint requires eslint which is NOT currently installed (the `lint` script will fail until eslint is added) \u00e2\u20ac\u201d treat lint as non-blocking/install-or-skip. db-validate, contract, e2e, and a11y checks are NOT included (no DB/API keywords; ui_changes is minor, not moderate/major).",
+      "status": "pending",
+      "parallel": false,
+      "target_file": null,
+      "gate": "T-DOC-GATE",
+      "gate_check": null,
+      "verify": "All required composed_of checks pass; spec complete",
+      "auto_agent": null,
+      "gate_type": null,
+      "scope": null,
+      "block_on": "Any check failure",
+      "completed_at": null,
+      "evidence": null,
+      "evidence_type": "execution",
+      "auto_skill": null,
+      "auto_skill_timing": null,
+      "pre_check": null,
+      "reconciled": false,
+      "reconciled_reason": null,
+      "composed_of": [
+        {
+          "check": "typecheck",
+          "command": "npm run type-check",
+          "required": true,
+          "parallel": true,
+          "parallel_group": "static",
+          "timeout_ms": 120000,
+          "notes": "No `type-check` npm script exists in this repo. Substitute the contract type-check from quickstart.md: ./node_modules/.bin/tsc --noEmit --strict specs/2026-06-08-cursor-visibility-toggle/contracts/*.d.ts (tsc is installed locally; expected: Found 0 errors)."
+        },
+        {
+          "check": "lint",
+          "command": "npm run lint",
+          "required": true,
+          "parallel": true,
+          "parallel_group": "static",
+          "timeout_ms": 120000,
+          "notes": "eslint is NOT installed (node_modules/.bin/eslint absent); the lint script currently fails. Install eslint or treat as non-blocking until the lint toolchain is present."
+        },
+        {
+          "check": "pattern-compliance",
+          "command": "/pattern-check changed",
+          "required": false,
+          "parallel": true,
+          "parallel_group": "static",
+          "timeout_ms": 60000,
+          "on_failure": "warn",
+          "description": "Architectural pattern compliance check against pattern registry",
+          "condition": "always"
+        },
+        {
+          "check": "unit",
+          "command": "npm run test:unit",
+          "required": true,
+          "depends_on": [
+            "typecheck",
+            "lint"
+          ],
+          "timeout_ms": 300000,
+          "notes": "No `test:unit` script. Use `npm test` (node --test src/**/__tests__/**/*.test.js) \u00e2\u20ac\u201d covers caretSnapshot, focusRestoreDecision, and the windowManager show-focus stub test."
+        },
+        {
+          "check": "integration",
+          "command": "npm run test:integration",
+          "required": true,
+          "depends_on": [
+            "unit"
+          ],
+          "timeout_ms": 300000,
+          "requires_containers": false,
+          "retry_policy": "transient",
+          "notes": "No `test:integration` script and no containers. The main-process stub test (changeAllWindowsVisibility.show-focus.test.js) runs under the same `npm test` node:test command \u00e2\u20ac\u201d covered by `unit` above. Remaining integration signal is the manual quickstart (T009)."
+        },
+        {
+          "check": "smoke",
+          "command": "npm run test:smoke",
+          "required": true,
+          "depends_on": [
+            "integration"
+          ],
+          "timeout_ms": 90000,
+          "requires_containers": false,
+          "retry_policy": "transient",
+          "notes": "No automated smoke/Playwright harness in this repo. Smoke coverage = manual quickstart Scenario 1 (T009): hide -> show -> caret restored, type appends with no click."
+        },
+        {
+          "check": "ui-verify",
+          "command": "/verify-ui --automated 2026-06-08-cursor-visibility-toggle",
+          "required": true,
+          "condition": {
+            "frontmatter_values": {
+              "ui_changes": [
+                "minor",
+                "moderate",
+                "major"
+              ]
+            }
+          },
+          "depends_on": [
+            "smoke"
+          ],
+          "timeout_ms": 180000,
+          "requires_containers": false,
+          "retry_policy": "transient",
+          "notes": "Triggered by critical_requirements.ui_changes: minor. No automated ui-verify harness; this maps to the manual quickstart focus/caret scenarios (T009). No new ARIA/components added (behavioral focus restore on existing #textInput).",
+          "on_failure": {
+            "message": "Fix ARIA role/label issues, add missing data-testid markers, or resolve user flow errors. Run /verify-ui interactively to diagnose.",
+            "action": "Fix semantic structure and re-run /verify-ui --automated 2026-06-08-cursor-visibility-toggle"
+          }
+        },
+        {
+          "check": "security",
+          "agent": "security-audit",
+          "required": true,
+          "depends_on": [
+            "smoke"
+          ],
+          "scope": "changed",
+          "block_on": "Any P1 or P2 finding"
+        },
+        {
+          "check": "code-review",
+          "agent": "code-reviewer",
+          "required": true,
+          "depends_on": [
+            "security"
+          ],
+          "scope": "changed",
+          "block_on": "Any Critical issue"
+        },
+        {
+          "check": "acceptance-tests",
+          "command": "/test-spec 2026-06-08-cursor-visibility-toggle local",
+          "required": true,
+          "condition": {
+            "files": [
+              "specs/2026-06-08-cursor-visibility-toggle/acceptance-tests.yaml"
+            ]
+          },
+          "depends_on": [
+            "code-review"
+          ],
+          "timeout_ms": 300000,
+          "requires_containers": false,
+          "block_on": "overall_status != PASS",
+          "description": "Run acceptance test manifest against local environment. Executes all checks with environments: [local].",
+          "notes": "Tests marked execution: manual_only are reported but not executed."
+        }
+      ],
+      "block_on_composite": "Any required check failure",
+      "timeout_ms": 900000
+    },
+    {
+      "id": "T-MEM-CAPTURE",
+      "phase": "verify",
+      "description": "Memory capture for bugfix. Validates that a type:bug memory entry was authored for this fix. The gate_check resolves the entry path from spec.md meta.memory_entry (primary) or MEMORY_ENTRY_PATH env (fallback per Q3), then invokes memory-schema-enforcer/verify.sh against it. Pass requires all 6 schema rules satisfied.",
+      "status": "pending",
+      "parallel": false,
+      "target_file": null,
+      "gate": "T-FINAL",
+      "gate_check": "bash -c 'MEM_PATH=\"${MEMORY_ENTRY_PATH:-$(grep -E \"^memory_entry:\" specs/${SPEC_DIR}/spec.md | sed -E \"s/^memory_entry:[[:space:]]*//\")}\"; if [ -z \"$MEM_PATH\" ] || [ \"$MEM_PATH\" = \"null\" ]; then echo \"[T-MEM-CAPTURE] memory entry path not set (neither meta.memory_entry in spec.md nor MEMORY_ENTRY_PATH env)\" >&2; exit 1; fi; bash .claude/skills/memory-schema-enforcer/verify.sh \"$MEM_PATH\"'",
+      "gate_type": "memory-capture",
+      "block_on": "Missing memory entry path, schema validation failure, or unfilled TBD placeholders",
+      "always_include": false,
+      "include_if": {
+        "critical_requirements.type": [
+          "bugfix"
+        ]
+      },
+      "condition": {
+        "frontmatter_values": {
+          "type": [
+            "bugfix"
+          ]
+        }
+      },
+      "timeout_ms": 30000,
+      "retry_policy": "none",
+      "requires_containers": false,
+      "depends_on": [
+        "T-VERIFY-SMOKE"
+      ],
+      "on_failure": {
+        "message": "Author a type:bug memory entry capturing this fix's root cause, symptoms, and affected files. Set meta.memory_entry in spec.md or export MEMORY_ENTRY_PATH before re-running. Schema rules at .claude/skills/memory-schema-enforcer/validate.py.",
+        "action": "Create/fix the memory entry, then re-run /implement"
+      },
+      "completed_at": null,
+      "evidence": null,
+      "evidence_type": "execution"
+    }
+  ]
+}
