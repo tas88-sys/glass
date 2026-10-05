@@ -153,7 +153,7 @@ async function callWithFailover(modelList, doCall) {
 /**
  * Creates a Gemini LLM instance with proper text response handling
  */
-function createLLM({ apiKey, model = "gemini-3.8-flash", temperature = 0.7, maxTokens = 65536, ...config }) {
+function createLLM({ apiKey, model = "gemini-3-flash-preview", temperature = 0.7, maxTokens = 65536, ...config }) {
   const client = new GoogleGenerativeAI(apiKey)
   const modelList = rotator.parseModelList(model);
   const effectiveModelList = modelList.length > 0 ? modelList : [model];
@@ -293,7 +293,7 @@ function createLLM({ apiKey, model = "gemini-3.8-flash", temperature = 0.7, maxT
  * to the consumer and retries with the next model in the CSV list.
  * On a fatal error or when all models are exhausted, calls controller.error().
  */
-function createStreamingLLM({ apiKey, model = "gemini-3.8-flash", temperature = 0.7, maxTokens = 65536, ...config }) {
+function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperature = 0.7, maxTokens = 65536, ...config }) {
   const client = new GoogleGenerativeAI(apiKey)
 
   return {

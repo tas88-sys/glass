@@ -73,9 +73,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 
 #### Changed
 
-- **Gemini LLM default `gemini-2.5-flash` → `gemini-3.8-flash`** (`gemini.js` `createLLM`/`createStreamingLLM`, `factory.js` preset). Since 2026-09-18 Google limits 2.5-model access to accounts that already used them; 3.8 Flash is the recommended replacement for new projects.
+- **Gemini LLM default `gemini-2.5-flash` → `gemini-3-flash-preview`** (`gemini.js` `createLLM`/`createStreamingLLM`, `factory.js` preset). Since 2026-09-18 Google limits 2.5-model access to accounts that already used them. Google recommends 3.8 Flash for new projects, but on a free-tier project every `gemini-3.5/3.6/3.7/3.8-flash` attempt over 7 days returned 503, while `gemini-3-flash-preview` answered. It is a preview (Google suggests migrating to `gemini-3.6-flash`), so revisit once the newer Flash models stop returning 503.
 - **Gemini STT default `gemini-live-2.5-flash-preview` → `gemini-3.8-live`** (`gemini.js` `createSTT` default + empty-CSV fallback, `factory.js` preset). The old preview was shut down 2025-12-09; `gemini-3.8-live` is Google's listed replacement.
-- **Settings help text** — failover example now `gemini-3.8-flash,gemini-3.5-flash,gemini-3.5-flash-lite` (was `gemini-3-pro,…`, an ID that never existed); LLM/STT placeholders now `gemini-3.8-flash` / `gemini-3.8-live`. `ARCHITECTURE.md`, `docs/AUDIO_AND_STT.md` and diagrams 10/11 updated to match.
+- **Settings help text** — failover example now `gemini-3-flash-preview,gemini-3.5-flash-lite,gemini-3.1-flash-lite`, the models that actually answered on the free tier (was `gemini-3-pro,…`, an ID that never existed); LLM/STT placeholders now `gemini-3-flash-preview` / `gemini-3.8-live`. `ARCHITECTURE.md`, `docs/AUDIO_AND_STT.md` and diagrams 10/11 updated to match.
 - Saved model selections are untouched: a previously stored ID like `gemini-2.5-flash` still resolves to Gemini and shows as `(custom)`.
 
 ### Gemini Failover (branch `feat/gemini-failover`)

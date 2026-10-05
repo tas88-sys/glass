@@ -72,7 +72,7 @@ to surface it in the UI.
 |---|---|---|---|
 | **OpenAI** | ✅ `gpt-4o-mini-transcribe` | ✅ `gpt-4.1` | Realtime STT; gets a 60 s keep-alive heartbeat (`sttService.js:504`) |
 | **OpenAI (Glass)** | ✅ | ✅ | Pickle-hosted key via Portkey; same OpenAI handler |
-| **Gemini** | ✅ `gemini-3.8-live` | ✅ `gemini-3.8-flash` | LLM supports CSV failover; STT does **not** (see §5) |
+| **Gemini** | ✅ `gemini-3.8-live` | ✅ `gemini-3-flash-preview` | LLM supports CSV failover; STT does **not** (see §5) |
 | **Anthropic** | ❌ | ✅ `claude-3-5-sonnet` | LLM only — `sttModels: []` |
 | **Deepgram** | ✅ `nova-3` | ❌ | STT only (see §4) |
 | **Whisper (local)** | ✅ tiny/base/small/medium | ❌ | Runs in main process only |

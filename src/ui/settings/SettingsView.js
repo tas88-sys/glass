@@ -1337,13 +1337,13 @@ export class SettingsView extends LitElement {
                             ${id === 'gemini' ? html`
                                 <label for="gemini-llm-model-input" style="margin-top: 8px;">Gemini LLM Model ID</label>
                                 <input type="text" id="gemini-llm-model-input"
-                                    placeholder="e.g. gemini-3.8-flash"
+                                    placeholder="e.g. gemini-3-flash-preview"
                                     .value=${geminiLlmValue}
                                 >
                                 <p style="font-size: 11px; opacity: 0.6; margin: 4px 0 8px 0; line-height: 1.4;">
                                     Comma-separated list for failover. Models are tried in priority order;
                                     transient errors (429/503) skip to the next.
-                                    Example: <code style="font-size: 10px;">gemini-3.8-flash,gemini-3.5-flash,gemini-3.5-flash-lite</code>
+                                    Example: <code style="font-size: 10px;">gemini-3-flash-preview,gemini-3.5-flash-lite,gemini-3.1-flash-lite</code>
                                 </p>
                                 <label for="gemini-stt-model-input">Gemini STT Model ID</label>
                                 <input type="text" id="gemini-stt-model-input"
