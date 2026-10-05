@@ -618,8 +618,14 @@ flowchart TB
 - Cooldown honors `Retry-After` / `retryDelay`, defaults to 60 s, clamped to `[5 s, 300 s]`
   (`parseRetryAfter`, `:149-192`; constants `:16-18`).
 - **Streaming** emits a `_reset` sentinel so the Ask consumer discards the partial answer before
-  the next model streams in, then a `_final_model` sentinel (`gemini.js:335-382`); the Ask SSE
+  the next model streams in, then a `_final_model` sentinel (`gemini.js:398-455`); the Ask SSE
   parser handles both (`askService.js:425-439`).
+- **Diagnostics:** every attempt logs one line to the main-process console (`logAttempt`,
+  `gemini.js:85-102`) with model, outcome (`ok` / `aborted` / `transient` / `fatal-*`), HTTP status,
+  time to first chunk, total time, token usage (`thoughts` = thinking tokens) and the server's
+  error reason; each request ends with a summary line (`logRequest`, `:107-110`) whose `total`
+  includes the time spent on failed attempts. Grep the `npm start` terminal for `[Gemini Provider]`:
+  `attempt 1/5 stream model=gemini-3.8-flash outcome=transient status=503 total=4210ms error="..."`.
 - **STT deliberately does NOT fail over** — `createSTT` takes only the first model in the list
   (`gemini.js:38-40`), because a persistent live STT session has no clean rotation semantics
   (locked decision #3 in the spec).

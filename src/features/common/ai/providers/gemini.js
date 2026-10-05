@@ -68,31 +68,85 @@ async function createSTT({ apiKey, language = "en-US", callbacks = {}, model = '
 }
 
 /**
+ * Per-attempt diagnostics. One line per model attempt so the cost of failover
+ * is visible: which model, how it ended, HTTP status, time to first chunk,
+ * total time, and token usage (thoughts = thinking tokens, a large share of
+ * latency on Gemini 3.x).
+ *
+ * @param {object} a
+ * @param {'stream'|'once'} a.mode
+ * @param {number} a.attempt   - 1-based attempt index within the request
+ * @param {number} a.of        - size of the model list for the request
+ * @param {string} a.modelId
+ * @param {string} a.outcome   - 'ok' | 'aborted' | classifyError() kind
+ * @param {object} a.stats     - { startedAt, firstChunkAt?, usage? }
+ * @param {unknown} [a.err]
+ */
+function logAttempt({ mode, attempt, of, modelId, outcome, stats, err }) {
+  const parts = [`[Gemini Provider] attempt ${attempt}/${of} ${mode} model=${modelId} outcome=${outcome}`];
+  const status = err?.status ?? err?.statusCode ?? err?.httpStatus;
+  if (status != null) parts.push(`status=${status}`);
+  if (stats.firstChunkAt != null) parts.push(`ttft=${stats.firstChunkAt - stats.startedAt}ms`);
+  parts.push(`total=${Date.now() - stats.startedAt}ms`);
+  const u = stats.usage;
+  if (u) parts.push(`tokens=in:${u.promptTokenCount ?? '-'},out:${u.candidatesTokenCount ?? '-'},thoughts:${u.thoughtsTokenCount ?? 0}`);
+  if (err) {
+    // Drop the SDK prefix and request URL; keep the server's reason ("The model is overloaded...").
+    const msg = String(err.message ?? err)
+      .replace(/^\[GoogleGenerativeAI Error\]:\s*/, '')
+      .replace(/Error fetching from \S+:\s*/, '')
+      .slice(0, 160);
+    parts.push(`error=${JSON.stringify(msg)}`);
+  }
+  (outcome === 'ok' ? console.log : console.warn)(parts.join(' '));
+}
+
+/**
+ * Per-request summary: end-to-end latency including every failed attempt.
+ */
+function logRequest({ mode, answeredBy, attempts, startedAt }) {
+  const line = `[Gemini Provider] request ${mode} answered_by=${answeredBy || 'none'} attempts=${attempts} total=${Date.now() - startedAt}ms`;
+  (answeredBy ? console.log : console.warn)(line);
+}
+
+/**
  * Failover helper for non-streaming LLM calls.
  * Tries each model in the list; on transient error, cools down the current
  * model and moves to the next. On fatal error, throws immediately.
  *
  * @param {string[]} modelList
- * @param {function(string): Promise<object>} doCall  - async fn that receives a modelId
+ * @param {function(string, object): Promise<object>} doCall  - async fn that receives a modelId
+ *   and a stats object it may fill with `usage` (usageMetadata) for logging
  * @returns {Promise<object>}  - result of doCall merged with { _modelUsed }
  */
 async function callWithFailover(modelList, doCall) {
   let remaining = [...modelList];
   let lastErr;
+  let attempts = 0;
+  const requestStartedAt = Date.now();
   while (remaining.length > 0) {
     const modelId = rotator.pickModel(remaining);
+    const stats = { startedAt: Date.now(), usage: null };
+    attempts++;
     try {
-      const result = await doCall(modelId);
+      const result = await doCall(modelId, stats);
+      logAttempt({ mode: 'once', attempt: attempts, of: modelList.length, modelId, outcome: 'ok', stats });
+      logRequest({ mode: 'once', answeredBy: modelId, attempts, startedAt: requestStartedAt });
       rotator.markSucceeded(modelId);
       return { ...result, _modelUsed: modelId };
     } catch (err) {
       lastErr = err;
       const kind = rotator.classifyError(err);
-      if (kind !== 'transient') throw err;
+      logAttempt({ mode: 'once', attempt: attempts, of: modelList.length, modelId, outcome: kind, stats, err });
+      if (kind !== 'transient') {
+        logRequest({ mode: 'once', answeredBy: null, attempts, startedAt: requestStartedAt });
+        throw err;
+      }
       rotator.markFailed(modelId, rotator.parseRetryAfter(err));
       remaining = remaining.filter(m => m !== modelId);
     }
   }
+  logRequest({ mode: 'once', answeredBy: null, attempts, startedAt: requestStartedAt });
   throw lastErr;
 }
 
@@ -106,7 +160,7 @@ function createLLM({ apiKey, model = "gemini-3.8-flash", temperature = 0.7, maxT
 
   return {
     generateContent: async (parts) => {
-      return callWithFailover(effectiveModelList, async (modelId) => {
+      return callWithFailover(effectiveModelList, async (modelId, stats) => {
         const geminiModel = client.getGenerativeModel({
           model: modelId,
           generationConfig: {
@@ -136,6 +190,7 @@ function createLLM({ apiKey, model = "gemini-3.8-flash", temperature = 0.7, maxT
 
         const result = await geminiModel.generateContent(userContent)
         const response = await result.response
+        stats.usage = response.usageMetadata || null
 
         // Return plain text, not wrapped in JSON structure
         return {
@@ -147,7 +202,7 @@ function createLLM({ apiKey, model = "gemini-3.8-flash", temperature = 0.7, maxT
     },
 
     chat: async (messages) => {
-      return callWithFailover(effectiveModelList, async (modelId) => {
+      return callWithFailover(effectiveModelList, async (modelId, stats) => {
         // Filter out any system prompts that might be causing JSON responses
         let systemInstruction = ""
         const history = []
@@ -219,6 +274,7 @@ function createLLM({ apiKey, model = "gemini-3.8-flash", temperature = 0.7, maxT
 
         const result = await chat.sendMessage(content)
         const response = await result.response
+        stats.usage = response.usageMetadata || null
 
         // Return plain text content
         return {
@@ -272,8 +328,9 @@ function createStreamingLLM({ apiKey, model = "gemini-3.8-flash", temperature = 
        * @param {string} opts.modelId
        * @param {Array} opts.messages - nonSystemMessages
        * @param {function(Uint8Array): boolean} opts.safeEnqueue
+       * @param {object} opts.stats - filled with firstChunkAt / usage / aborted for logging
        */
-      async function streamOneAttempt({ modelId, messages: msgs, safeEnqueue }) {
+      async function streamOneAttempt({ modelId, messages: msgs, safeEnqueue, stats }) {
         const geminiModel = client.getGenerativeModel({
           model: modelId,
           systemInstruction:
@@ -323,11 +380,17 @@ function createStreamingLLM({ apiKey, model = "gemini-3.8-flash", temperature = 
         })
 
         for await (const chunk of result.stream) {
+          if (stats.firstChunkAt == null) stats.firstChunkAt = Date.now()
+          // The last chunk carries the request's usageMetadata (incl. thoughtsTokenCount).
+          if (chunk.usageMetadata) stats.usage = chunk.usageMetadata
           const chunkText = chunk.text() || ""
           const data = JSON.stringify({
             choices: [{ delta: { content: chunkText } }],
           })
-          if (!safeEnqueue(new TextEncoder().encode(`data: ${data}\n\n`))) return;
+          if (!safeEnqueue(new TextEncoder().encode(`data: ${data}\n\n`))) {
+            stats.aborted = true
+            return;
+          }
         }
       }
 
@@ -346,21 +409,29 @@ function createStreamingLLM({ apiKey, model = "gemini-3.8-flash", temperature = 
 
           let remaining = rotator.parseModelList(modelCsv);
           if (remaining.length === 0) remaining = [modelCsv];
+          const listSize = remaining.length;
           let lastErr;
           let succeededModel = null;
+          let attempts = 0;
+          const requestStartedAt = Date.now();
 
           while (remaining.length > 0) {
             const modelId = rotator.pickModel(remaining);
+            const stats = { startedAt: Date.now(), firstChunkAt: null, usage: null, aborted: false };
+            attempts++;
             try {
-              await streamOneAttempt({ modelId, messages: nonSystemMessages, safeEnqueue });
+              await streamOneAttempt({ modelId, messages: nonSystemMessages, safeEnqueue, stats });
+              logAttempt({ mode: 'stream', attempt: attempts, of: listSize, modelId, outcome: stats.aborted ? 'aborted' : 'ok', stats });
               succeededModel = modelId;
               rotator.markSucceeded(modelId);
               break;
             } catch (err) {
               lastErr = err;
               const kind = rotator.classifyError(err);
+              logAttempt({ mode: 'stream', attempt: attempts, of: listSize, modelId, outcome: kind, stats, err });
               if (kind !== 'transient') {
                 console.error("[Gemini Provider] Fatal streaming error:", err)
+                logRequest({ mode: 'stream', answeredBy: null, attempts, startedAt: requestStartedAt });
                 try { controller.error(err); } catch {}
                 return;
               }
@@ -372,6 +443,7 @@ function createStreamingLLM({ apiKey, model = "gemini-3.8-flash", temperature = 
             }
           }
 
+          logRequest({ mode: 'stream', answeredBy: succeededModel, attempts, startedAt: requestStartedAt });
           if (!succeededModel) {
             console.error("[Gemini Provider] All models failed:", lastErr)
             try { controller.error(lastErr); } catch {}

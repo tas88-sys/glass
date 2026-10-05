@@ -67,6 +67,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 
 ### Gemini model defaults refresh
 
+#### Added
+
+- **Per-attempt Gemini diagnostics log** — `gemini.js` now logs one `[Gemini Provider] attempt i/n` line per model attempt (streaming and non-streaming) with model, outcome (`ok`/`aborted`/`transient`/`fatal-request`/`fatal-auth`), HTTP status, time to first chunk, total time, token usage incl. `thoughtsTokenCount`, and the server's error reason (SDK prefix and request URL stripped), plus a `request … answered_by=… attempts=… total=…ms` summary. Previously transient failures were silent, so the latency cost of failing over through overloaded (503) models was invisible. 4 new `node:test` cases in `gemini.test.js`.
+
 #### Changed
 
 - **Gemini LLM default `gemini-2.5-flash` → `gemini-3.8-flash`** (`gemini.js` `createLLM`/`createStreamingLLM`, `factory.js` preset). Since 2026-09-18 Google limits 2.5-model access to accounts that already used them; 3.8 Flash is the recommended replacement for new projects.
