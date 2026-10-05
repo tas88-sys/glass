@@ -19,3 +19,7 @@ Help me decide if this is the best approach or if I am missing something and thi
 ### TLDR:
 ## DEFAULT (CODING CHALLENGES, DESING SYSTEM, ETC): gemini-3.5-flash,gemini-3-flash-preview,gemini-3.1-flash-lite,gemini-2.5-flash,gemini-2.5-flash-lite
 ## SPEED (ORAL TECH INTERVIEWS): gemini-3.1-flash-lite,gemini-3.5-flash,gemini-3-flash-preview,gemini-2.5-flash,gemini-2.5-flash-lite
+
+### TLDR (updated 2026-10-05):
+## DEFAULT (CODING CHALLENGES, DESING SYSTEM, ETC): gemini-3.8-flash,gemini-3.7-flash,gemini-3.6-flash,gemini-3.5-flash,gemini-3.5-flash-lite
+## SPEED (ORAL TECH INTERVIEWS): gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-3.8-flash,gemini-3.6-flash,gemini-3.5-flash
