@@ -35,9 +35,9 @@ class GeminiProvider {
  * @param {object} [opts.callbacks] - Event callbacks
  * @returns {Promise<object>} STT session
  */
-async function createSTT({ apiKey, language = "en-US", callbacks = {}, model = 'gemini-live-2.5-flash-preview', ...config }) {
+async function createSTT({ apiKey, language = "en-US", callbacks = {}, model = 'gemini-3.8-live', ...config }) {
   // STT does NOT failover — use only the first model in the CSV list (locked decision #3).
-  const firstModel = rotator.parseModelList(model)[0] || 'gemini-live-2.5-flash-preview';
+  const firstModel = rotator.parseModelList(model)[0] || 'gemini-3.8-live';
   const liveClient = new GoogleGenAI({ vertexai: false, apiKey })
 
   // Language code BCP-47 conversion
@@ -99,7 +99,7 @@ async function callWithFailover(modelList, doCall) {
 /**
  * Creates a Gemini LLM instance with proper text response handling
  */
-function createLLM({ apiKey, model = "gemini-2.5-flash", temperature = 0.7, maxTokens = 65536, ...config }) {
+function createLLM({ apiKey, model = "gemini-3.8-flash", temperature = 0.7, maxTokens = 65536, ...config }) {
   const client = new GoogleGenerativeAI(apiKey)
   const modelList = rotator.parseModelList(model);
   const effectiveModelList = modelList.length > 0 ? modelList : [model];
@@ -237,7 +237,7 @@ function createLLM({ apiKey, model = "gemini-2.5-flash", temperature = 0.7, maxT
  * to the consumer and retries with the next model in the CSV list.
  * On a fatal error or when all models are exhausted, calls controller.error().
  */
-function createStreamingLLM({ apiKey, model = "gemini-2.5-flash", temperature = 0.7, maxTokens = 65536, ...config }) {
+function createStreamingLLM({ apiKey, model = "gemini-3.8-flash", temperature = 0.7, maxTokens = 65536, ...config }) {
   const client = new GoogleGenerativeAI(apiKey)
 
   return {
