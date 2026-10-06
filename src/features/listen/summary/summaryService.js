@@ -236,7 +236,7 @@ function shouldTriggerAnswer(speaker, text, lastAnsweredTail, inFlight) {
 // handling WITHOUT importing askService (FR-017 — CLOSED set).
 // Returns:
 //   { done: true }                — on "[DONE]"
-//   { reset: true }               — on _reset sentinel
+//   { reset: true, nextModel, reason } — on _reset sentinel (model being tried next)
 //   { finalModel: string }        — on _final_model sentinel
 //   { delta: string }             — on normal content token
 //   null                          — blank line or non-data line
@@ -253,7 +253,7 @@ function parseLiveAnswerSseLine(line) {
         return null;
     }
 
-    if (json._reset) return { reset: true };
+    if (json._reset) return { reset: true, nextModel: json.next_model || null, reason: json.reason || null };
     if (json._final_model) return { finalModel: json._final_model };
 
     const delta = json.choices?.[0]?.delta?.content || '';
@@ -368,6 +368,8 @@ class SummaryService {
         let fullResponse = '';
         let hadFallback = false;
         let finalModel = null;
+        // A "Trying <model>…" status was shown for this answer; cleared when it ends.
+        let sentRetrying = false;
 
         // Streaming-aware PASSIVE prefix-buffer (C2/FR-010)
         let prefixBuffer = '';
@@ -394,12 +396,21 @@ class SummaryService {
                         break;
                     }
                     if (parsed.reset) {
-                        // _reset sentinel: discard + mark fallback
+                        // _reset sentinel: discard + mark fallback, and tell the panel
+                        // which model is being tried (status only, never answer text)
                         fullResponse = '';
                         hadFallback = true;
                         prefixBuffer = '';
                         prefixDecided = false;
                         passiveSuppressed = false;
+                        this.sendToRenderer('live-answer-update', {
+                            id: answerId,
+                            question,
+                            status: 'retrying',
+                            model: parsed.nextModel,
+                            ts: Date.now(),
+                        });
+                        sentRetrying = true;
                         continue;
                     }
                     if (parsed.finalModel) {
@@ -447,6 +458,9 @@ class SummaryService {
             }
         } finally {
             reader.cancel().catch(() => {});
+            // Clear "Trying <model>…" whatever happened next (answer, PASSIVE,
+            // replaced by a newer question, or an error the caller reports).
+            if (sentRetrying) this.sendToRenderer('live-answer-update', { id: answerId, status: 'idle', ts: Date.now() });
         }
 
         // Stream ended before the prefix-buffer reached its decision threshold
@@ -465,6 +479,15 @@ class SummaryService {
         if (passiveSuppressed) return null;
         if (!fullResponse) {
             laDebug('[live-answer] stream ended with no answer content');
+            if (!(signal && signal.aborted)) {
+                this.sendToRenderer('live-answer-update', {
+                    id: answerId,
+                    question,
+                    status: 'error',
+                    error: 'The model returned an empty response.',
+                    ts: Date.now(),
+                });
+            }
             return null;
         }
 
@@ -530,9 +553,10 @@ class SummaryService {
 
             // New id per accepted answer — the renderer keys its history on this.
             const answerId = ++this.answerSeq;
+            const question = extractQuestion(text);
 
             try {
-                await this.makeLiveAnswer(this.conversationHistory, signal, { id: answerId, question: extractQuestion(text) });
+                await this.makeLiveAnswer(this.conversationHistory, signal, { id: answerId, question });
             } catch (err) {
                 if (signal.aborted) {
                     // Expected control flow on abort-and-replace — swallow (FR-009)
@@ -540,7 +564,15 @@ class SummaryService {
                 }
                 // Non-abort stream error: log trigger info (NEVER log answer text)
                 console.error('[live-answer] stream error (trigger retained):', err.message);
-                // Retain last rendered answer — no emit
+                // Retain last rendered answer; show why this question got none
+                // (Gemini errors carry a short userMessage, e.g. "All Gemini models failed …").
+                this.sendToRenderer('live-answer-update', {
+                    id: answerId,
+                    question,
+                    status: 'error',
+                    error: err.userMessage || err.message || 'Unknown error',
+                    ts: Date.now(),
+                });
             } finally {
                 this.inFlight = false;
                 this.inFlightController = null;

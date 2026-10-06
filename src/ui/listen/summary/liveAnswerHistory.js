@@ -59,4 +59,35 @@ function applyLiveAnswerUpdate(answers, data, max = MAX_ANSWERS) {
     return list;
 }
 
-module.exports = { applyLiveAnswerUpdate, MAX_ANSWERS };
+/**
+ * Fold one `live-answer-update` payload into the lane status line (shown under
+ * the "Live Answer" eyebrow, separate from the answer history):
+ *
+ *  - `status: 'retrying'` → "Trying <model>…" while the service fails over.
+ *  - `status: 'error'`    → why the latest question got no answer; it stays
+ *                           until an answer starts or another status replaces it.
+ *  - `status: 'idle'`     → clears a 'retrying' status of the SAME id only (an
+ *                           older answer finishing must not hide a newer status,
+ *                           and an error is kept).
+ *  - a payload with `answer` text (any id) → clears the status: an answer is
+ *    streaming again.
+ *  - anything else → the same reference (no re-render).
+ *
+ * @param {null|{kind:'retrying'|'error', id:string, model?:(string|null), message?:string}} status
+ * @param {{id?:(string|number), status?:string, model?:string, error?:string, answer?:string}} data
+ * @returns {null|{kind:'retrying'|'error', id:string, model?:(string|null), message?:string}}
+ */
+function applyLiveAnswerStatus(status, data) {
+    if (!data) return status;
+    const id = data.id != null ? String(data.id) : null;
+
+    if (data.status === 'retrying') return { kind: 'retrying', id, model: data.model || null };
+    if (data.status === 'error') return { kind: 'error', id, message: data.error || 'No answer.' };
+    if (data.status === 'idle') {
+        return status && status.kind === 'retrying' && status.id === id ? null : status;
+    }
+    if (data.answer) return status ? null : status;
+    return status;
+}
+
+module.exports = { applyLiveAnswerUpdate, applyLiveAnswerStatus, MAX_ANSWERS };

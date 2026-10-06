@@ -35,8 +35,15 @@ The app's per-attempt logs (`[Gemini Provider] attempt …`) recorded these fail
   - `gemini-3.1-flash-lite` and `gemini-3-flash-preview` returned 503 "high demand" within 3 s.
 
   The same models answered normally 2 minutes later.
+- **15:27–15:47 BRT, inside the most-reported window:** 16 Ask requests.
+  - **Outcome:** 9 answered on the first attempt and 3 after failover (19–75 s). 4 were cancelled by the user after 73–99 s.
+  - **`gemini-3.5-flash-lite`:** stalled to the 25 s timeout on 6 of 16 attempts, and never returned 503.
+  - **`gemini-3.1-flash-lite`:** returned 503 on 5 of 9 attempts.
+  - **`gemini-3-flash-preview`:** never answered.
+  - **Slow 503s:** they took 4–38 s to arrive, where in the morning they took about 2 s.
+  - **Stalls are per request:** right after a stall, a fresh request to the same Flash-Lite model answered in 9–14 s. This is why the app now sends a parallel request instead of waiting.
 
-These all happened in late morning BRT, outside the most-reported window. This supports the conclusion that no daytime window is reliably safe on the free tier. It is one day of data.
+The morning failures fell outside the most-reported window, and the afternoon was clearly worse. Both support the conclusion that no daytime window is reliably safe on the free tier. This is one day of data.
 
 The AI Studio usage dashboard only shows daily totals, and the Cloud Console metrics charts could not be read through browser automation. So this study has no per-hour data for the project.
 
@@ -44,7 +51,8 @@ The AI Studio usage dashboard only shows daily totals, and the Cloud Console met
 
 - **Expect more 503s and slowdowns between 13:00 and 19:00 BRT.** Keep the models that actually answer at the front of the failover list. See the recommended lists in [`specs/2026-05-26-gemini-failover-design/prompt.md`](../specs/2026-05-26-gemini-failover-design/prompt.md).
 - **Rely on the app's mitigations:**
-  - the first-chunk timeout (25 s for Flash-Lite, 60 s for other models);
+  - the first-chunk timeout (25 s for Flash-Lite, 60 s for other models), with a 10 s cooldown after a stall;
+  - a parallel request to the same Flash-Lite model when the first one has sent nothing after 10 s;
   - failover across the list;
   - the automatic second round for quick 5xx failures.
 

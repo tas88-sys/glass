@@ -20,13 +20,16 @@
  *           service (streaming deltas update the same entry; a new question
  *           pushes a new entry). Capped to MAX_ANSWERS. In-session only — NOT
  *           persisted (spec C8); resetAnswer() clears it on session reset.
+ *   Status: one line under the eyebrow (laneStatus, applyLiveAnswerStatus):
+ *           "Trying <model>…" during Gemini failover, or why the latest
+ *           question got no answer. Rendered as a Lit text binding.
  *   Safety: answer text NEVER logged to any capturable sink.
  *   FR-013: subscribes via window.api.summaryView.onLiveAnswerUpdate.
  *   FR-016: resetAnswer() clears the panel on explicit session reset ONLY.
  */
 
 import { html, css, LitElement } from '../../assets/lit-core-2.7.4.min.js';
-import { applyLiveAnswerUpdate } from './liveAnswerHistory.js';
+import { applyLiveAnswerUpdate, applyLiveAnswerStatus } from './liveAnswerHistory.js';
 
 export class LiveAnswerView extends LitElement {
     static styles = css`
@@ -177,6 +180,20 @@ export class LiveAnswerView extends LitElement {
         .answer-block.past .answer-body {
             opacity: 0.72;
         }
+
+        /* One-line lane status: model failover in progress, or why the latest
+           question got no answer. Text only (Lit binding, never innerHTML). */
+        .lane-status {
+            font-size: 11px;
+            line-height: 1.4;
+            color: rgba(255, 255, 255, 0.6);
+            margin: -4px 0 8px;
+            word-break: break-word;
+        }
+
+        .lane-status.error {
+            color: rgba(255, 196, 120, 0.95);
+        }
     `;
 
     static properties = {
@@ -184,12 +201,15 @@ export class LiveAnswerView extends LitElement {
         answers: { type: Array },
         /** Reactive: visibility, bound to viewMode === 'insights'. */
         isVisible: { type: Boolean },
+        /** Reactive: null | { kind: 'retrying'|'error', id, model?, message? } (applyLiveAnswerStatus). */
+        laneStatus: { type: Object },
     };
 
     constructor() {
         super();
         this.answers = [];
         this.isVisible = true;
+        this.laneStatus = null;
 
         // Markdown/sanitizer library handles (mirroring SummaryView pattern)
         this.marked = null;
@@ -206,8 +226,10 @@ export class LiveAnswerView extends LitElement {
         if (window.api) {
             window.api.summaryView.onLiveAnswerUpdate((event, data) => {
                 const next = applyLiveAnswerUpdate(this.answers, data);
-                if (next === this.answers) return; // no-op payload (no answer text)
+                const nextStatus = applyLiveAnswerStatus(this.laneStatus, data);
+                if (next === this.answers && nextStatus === this.laneStatus) return; // no-op payload
                 this.answers = next; // new ref → reactive
+                this.laneStatus = nextStatus;
                 this.requestUpdate();
             });
         }
@@ -226,6 +248,7 @@ export class LiveAnswerView extends LitElement {
      */
     resetAnswer() {
         this.answers = [];
+        this.laneStatus = null;
         this.requestUpdate();
     }
 
@@ -361,12 +384,22 @@ export class LiveAnswerView extends LitElement {
         this.dispatchEvent(new CustomEvent('live-answer-updated', { bubbles: true, composed: true }));
     }
 
+    renderLaneStatus() {
+        const status = this.laneStatus;
+        if (!status) return '';
+        if (status.kind === 'error') {
+            return html`<div class="lane-status error">No answer — ${status.message}</div>`;
+        }
+        return html`<div class="lane-status">${status.model ? `Trying ${status.model}…` : 'Trying another model…'}</div>`;
+    }
+
     render() {
-        if (!this.isVisible || this.answers.length === 0) return html``;
+        if (!this.isVisible || (this.answers.length === 0 && !this.laneStatus)) return html``;
 
         return html`
             <div class="live-answer-container">
                 <div class="lane-eyebrow">Live Answer</div>
+                ${this.renderLaneStatus()}
                 ${this.answers.map(
                     (a, i) => html`
                         <div class="answer-block ${i === 0 ? 'current' : 'past'}">

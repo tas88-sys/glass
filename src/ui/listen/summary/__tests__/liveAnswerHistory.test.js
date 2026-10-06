@@ -12,7 +12,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { applyLiveAnswerUpdate, MAX_ANSWERS } = require('../liveAnswerHistory');
+const { applyLiveAnswerUpdate, applyLiveAnswerStatus, MAX_ANSWERS } = require('../liveAnswerHistory');
 
 describe('applyLiveAnswerUpdate', () => {
     it('ignores a payload with no answer text (returns the same reference)', () => {
@@ -84,5 +84,54 @@ describe('applyLiveAnswerUpdate', () => {
     it('exposes a sane default cap', () => {
         assert.equal(typeof MAX_ANSWERS, 'number');
         assert.ok(MAX_ANSWERS > 0);
+    });
+});
+
+describe('applyLiveAnswerStatus', () => {
+    it('status payloads are ignored by the history (no answer text)', () => {
+        const answers = [{ id: '1', question: 'q', text: 'a', ts: 1 }];
+        assert.equal(applyLiveAnswerUpdate(answers, { id: 2, status: 'retrying', model: 'm' }), answers);
+        assert.equal(applyLiveAnswerUpdate(answers, { id: 2, status: 'error', error: 'x' }), answers);
+    });
+
+    it("'retrying' shows the model being tried", () => {
+        assert.deepEqual(
+            applyLiveAnswerStatus(null, { id: 3, status: 'retrying', model: 'gemini-3.1-flash-lite' }),
+            { kind: 'retrying', id: '3', model: 'gemini-3.1-flash-lite' },
+        );
+        assert.deepEqual(applyLiveAnswerStatus(null, { id: 3, status: 'retrying' }), { kind: 'retrying', id: '3', model: null });
+    });
+
+    it("'error' carries the message and replaces a 'retrying' status", () => {
+        const retrying = applyLiveAnswerStatus(null, { id: 3, status: 'retrying', model: 'm' });
+        assert.deepEqual(
+            applyLiveAnswerStatus(retrying, { id: 3, status: 'error', error: 'All Gemini models failed' }),
+            { kind: 'error', id: '3', message: 'All Gemini models failed' },
+        );
+    });
+
+    it("'idle' clears a 'retrying' status of the same id only", () => {
+        const retrying = applyLiveAnswerStatus(null, { id: 3, status: 'retrying', model: 'm' });
+        assert.equal(applyLiveAnswerStatus(retrying, { id: 3, status: 'idle' }), null);
+        assert.equal(applyLiveAnswerStatus(retrying, { id: 2, status: 'idle' }), retrying, 'an older answer must not clear a newer status');
+    });
+
+    it("'idle' keeps an error on screen", () => {
+        const error = applyLiveAnswerStatus(null, { id: 3, status: 'error', error: 'x' });
+        assert.equal(applyLiveAnswerStatus(error, { id: 3, status: 'idle' }), error);
+    });
+
+    it('an answer delta (any id) clears the status', () => {
+        const retrying = applyLiveAnswerStatus(null, { id: 3, status: 'retrying', model: 'm' });
+        assert.equal(applyLiveAnswerStatus(retrying, { id: 3, answer: 'It...' }), null);
+        const error = applyLiveAnswerStatus(null, { id: 3, status: 'error', error: 'x' });
+        assert.equal(applyLiveAnswerStatus(error, { id: 4, answer: 'Next answer' }), null);
+    });
+
+    it('unknown payloads return the same reference', () => {
+        const error = applyLiveAnswerStatus(null, { id: 3, status: 'error', error: 'x' });
+        assert.equal(applyLiveAnswerStatus(error, null), error);
+        assert.equal(applyLiveAnswerStatus(error, { id: 3 }), error);
+        assert.equal(applyLiveAnswerStatus(null, { id: 3, answer: 'a' }), null);
     });
 });
