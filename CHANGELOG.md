@@ -90,8 +90,8 @@ On 2026-10-06 between 15:27 and 15:47 BRT, 4 of 16 Ask requests were cancelled a
   - **Long answers:** once any chunk has arrived the deadline no longer applies, so a long answer is never cut.
   - **Configuration:** `GEMINI_REQUEST_DEADLINE_MS` overrides it (`0` disables). `createStreamingLLM({ requestDeadlineMs })` takes `null` to disable.
   - **Why:** with `…,gemini-3-flash-preview` last in the list, the first round alone could take 25 + 25 + 60 s.
-- 28 new `node:test` cases:
-  - 18 in `gemini.test.js`;
+- 31 new `node:test` cases:
+  - 21 in `gemini.test.js`;
   - 3 in `liveAnswer.test.js`, two of them on the real debounce callback with mock timers;
   - 7 in `liveAnswerHistory.test.js`.
 
@@ -99,6 +99,7 @@ On 2026-10-06 between 15:27 and 15:47 BRT, 4 of 16 Ask requests were cancelled a
 
 - **Cooldown after a first-chunk timeout:** 60 s → 10 s (`TIMEOUT_COOLDOWN_MS`). 503 and 429 keep `Retry-After` or 60 s.
 - **Cancelling a stream** aborts every in-flight request: both sides of a hedged attempt, and the wait between rounds.
+- **Lite detection** (`isLiteModel`) matches a `lite` segment anywhere in the ID, not only a `-flash-lite` ending. Suffixed IDs such as `gemini-2.5-flash-lite-preview-06-17` and `gemini-flash-lite-latest` now get the 25 s timeout and the parallel request.
 - **All-failed message** pluralizes `attempt` (`(1 attempt)`). The per-attempt timeout error is rounded (`no response after 12.35s`).
 - **`docs/diagrams/11-gemini-failover.mmd`** now shows the hedge, the timeout cooldown, the request deadline, and the second round from the previous branch.
 

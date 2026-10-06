@@ -115,6 +115,19 @@ function shortErrorMessage(err) {
     .slice(0, 160);
 }
 
+/**
+ * Lite family, whatever the version or suffix (gemini-3.1-flash-lite,
+ * gemini-2.5-flash-lite-preview-06-17, gemini-flash-lite-latest): "lite" as a
+ * whole dash-separated part of the ID, so it is never matched inside another word.
+ * Lite models think minimally (a long silence means a stall) and have a large
+ * free-tier quota.
+ * @param {string} modelId
+ * @returns {boolean}
+ */
+function isLiteModel(modelId) {
+  return /(^|-)lite(-|$)/i.test(String(modelId || ''));
+}
+
 // Time allowed until the first streamed chunk before an attempt is abandoned
 // and the next model is tried. Flash-Lite models think minimally and normally
 // answer in < 20 s; other models may think for a long time before the first token.
@@ -130,7 +143,7 @@ const FIRST_CHUNK_TIMEOUT_DEFAULT_MS = 60_000;
 function firstChunkTimeoutMs(modelId) {
   const fromEnv = Number(process.env.GEMINI_FIRST_CHUNK_TIMEOUT_MS);
   if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv;
-  return /-flash-lite$/.test(modelId) ? FIRST_CHUNK_TIMEOUT_LITE_MS : FIRST_CHUNK_TIMEOUT_DEFAULT_MS;
+  return isLiteModel(modelId) ? FIRST_CHUNK_TIMEOUT_LITE_MS : FIRST_CHUNK_TIMEOUT_DEFAULT_MS;
 }
 
 // A Flash-Lite request that has sent nothing after this long gets a second,
@@ -152,7 +165,7 @@ function hedgeDelayMs(modelId) {
     const fromEnv = Number(raw);
     if (Number.isFinite(fromEnv) && fromEnv >= 0) return fromEnv > 0 ? fromEnv : null;
   }
-  return /-flash-lite$/.test(modelId) ? HEDGE_DELAY_LITE_MS : null;
+  return isLiteModel(modelId) ? HEDGE_DELAY_LITE_MS : null;
 }
 
 // Cooldown after a first-chunk timeout. A stall is specific to one request, so
@@ -808,5 +821,6 @@ module.exports = {
     createStreamingLLM,
     firstChunkTimeoutMs,
     hedgeDelayMs,
-    requestDeadlineMs
+    requestDeadlineMs,
+    isLiteModel
 };

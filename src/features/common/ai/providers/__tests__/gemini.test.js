@@ -62,7 +62,7 @@ function clearCache() {
 clearCache();
 
 const rotator = require('../geminiModelRotator');
-const { createLLM, createStreamingLLM, firstChunkTimeoutMs, hedgeDelayMs, requestDeadlineMs } = require('../gemini');
+const { createLLM, createStreamingLLM, firstChunkTimeoutMs, hedgeDelayMs, requestDeadlineMs, isLiteModel } = require('../gemini');
 
 // ---------------------------------------------------------------------------
 // Reset state before each test
@@ -954,6 +954,40 @@ describe('requestDeadlineMs', () => {
     assert.equal(requestDeadlineMs(), null);
     process.env.GEMINI_REQUEST_DEADLINE_MS = 'abc';
     assert.equal(requestDeadlineMs(), 60_000);
+  });
+});
+
+describe('isLiteModel', () => {
+  it('matches the Lite family whatever the version or suffix', () => {
+    for (const id of [
+      'gemini-3.5-flash-lite',
+      'gemini-3.1-flash-lite',
+      'gemini-2.5-flash-lite-preview-06-17',
+      'gemini-2.0-flash-lite-001',
+      'gemini-flash-lite-latest',
+      'Gemini-3.1-Flash-Lite',
+    ]) {
+      assert.equal(isLiteModel(id), true, id);
+    }
+  });
+
+  it('does not match other models, or "lite" inside another word', () => {
+    for (const id of ['gemini-3-flash-preview', 'gemini-3.8-flash', 'gemini-3.8-live', 'gemini-satellite-1', 'gemini-litex', '', undefined]) {
+      assert.equal(isLiteModel(id), false, String(id));
+    }
+  });
+
+  it('both Lite rules use it: 25 s timeout and the parallel request', () => {
+    const saved = [process.env.GEMINI_FIRST_CHUNK_TIMEOUT_MS, process.env.GEMINI_HEDGE_DELAY_MS];
+    delete process.env.GEMINI_FIRST_CHUNK_TIMEOUT_MS;
+    delete process.env.GEMINI_HEDGE_DELAY_MS;
+    try {
+      assert.equal(firstChunkTimeoutMs('gemini-flash-lite-latest'), 25_000);
+      assert.equal(hedgeDelayMs('gemini-2.5-flash-lite-preview-06-17'), 10_000);
+    } finally {
+      if (saved[0] !== undefined) process.env.GEMINI_FIRST_CHUNK_TIMEOUT_MS = saved[0];
+      if (saved[1] !== undefined) process.env.GEMINI_HEDGE_DELAY_MS = saved[1];
+    }
   });
 });
 
