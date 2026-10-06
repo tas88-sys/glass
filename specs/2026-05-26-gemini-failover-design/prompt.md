@@ -35,3 +35,4 @@ Why:
 - SPEED: Flash-Lite first. Default thinking is minimal (lowest latency), and the free-tier limits are 15 RPM / 500 RPD vs 5 RPM / 20 RPD on Flash, which matters because Live Answer fires on every question. No failing Flash models in this list: a 503 mid-interview costs more than a slightly weaker answer.
 - Risk: gemini-3-flash-preview is a preview (Google suggests migrating to gemini-3.6-flash), and gemini-3.1-flash-lite shuts down 2027-05-07.
 - Revisit with the per-attempt logs (`[Gemini Provider] attempt ...` lines in the `npm start` terminal). If billing is enabled and gemini-3.8-flash stops returning 503, move it to the front of DEFAULT.
+- When 503s happen (time of day, free vs. paid tier): see [`docs/GEMINI_503_PEAK_HOURS.md`](../../docs/GEMINI_503_PEAK_HOURS.md).
