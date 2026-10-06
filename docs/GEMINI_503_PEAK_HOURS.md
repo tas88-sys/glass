@@ -54,7 +54,8 @@ The AI Studio usage dashboard only shows daily totals, and the Cloud Console met
   - the first-chunk timeout (25 s for Flash-Lite, 60 s for other models), with a 10 s cooldown after a stall;
   - a parallel request to the same Flash-Lite model when the first one has sent nothing after 10 s;
   - failover across the list;
-  - the automatic second round for quick 5xx failures.
+  - the automatic second round for quick 5xx failures;
+  - a 60 s limit on waiting for an answer to start, counted across all of the above.
 
   [`ARCHITECTURE.md` §10](../ARCHITECTURE.md#10-gemini-failover) describes them.
 - **For a critical session such as an interview, enable billing on the project.** Billed requests are not in the sheddable class. Changing the hour does not fix this, and on the free tier it does nothing for the newest Flash models.

@@ -622,7 +622,7 @@ flowchart TB
 - Cooldown honors `Retry-After` / `retryDelay`, defaults to 60 s, clamped to `[5 s, 300 s]`
   (`parseRetryAfter`, `:149-192`; constants `:16-18`).
 - **Streaming** emits a `_reset` sentinel so the Ask consumer discards the partial answer before
-  the next model streams in, then a `_final_model` sentinel (`gemini.js:623-742`); the Ask
+  the next model streams in, then a `_final_model` sentinel (`gemini.js:650-791`); the Ask
   consumer applies both through the pure reducer `applyAskSseEvent` (`askStreamState.js:42-70`),
   which also keeps `isLoading` ("Thinking...") on until the first token and exposes
   `retryingWith` (the `next_model` of the last `_reset`) so the Ask header can show
@@ -638,7 +638,7 @@ flowchart TB
   60 s default had pushed the next requests onto worse models.
 - **Hedged (parallel) request:** within an attempt, a request that has sent nothing after
   `hedgeDelayMs(modelId)` (`gemini.js:149-156`; 10 s for `*-flash-lite`, none for other models)
-  gets a second request to the **same** model (`raceFirstChunk`, `:510`). On 2026-10-06 a fresh
+  gets a second request to the **same** model (`raceFirstChunk`, `:537`). On 2026-10-06 a fresh
   request to a model that had just stalled usually answered in a few seconds. The first request
   to yield a chunk is streamed and the other is aborted, so the consumer never sees it. The
   attempt's deadline still counts from its start, so the worst case per model is unchanged. An
@@ -648,13 +648,22 @@ flowchart TB
   model (`0` disables, `1` forces a hedge for manual testing); `createStreamingLLM` takes
   `hedgeDelayMs` (`null` disables).
 - **End of the answer:** an attempt ends at the chunk that carries `candidates[0].finishReason`,
-  not when the HTTP response closes (`gemini.js:604-607`). The server was seen keeping the
+  not when the HTTP response closes (`gemini.js:631-634`). The server was seen keeping the
   connection open ~7 s after a complete answer; the attempt now counts as `ok` right away
   (`_final_model` + `[DONE]` are sent, Ask stops streaming and saves) and the leftover
   connection is aborted.
+- **Request deadline:** a streaming request gives up when no answer has started within
+  `REQUEST_DEADLINE_MS` (60 s, `gemini.js:165`), counted from the request start across every
+  attempt, hedge and the second round. Each attempt's timeout is shortened to what is left, the
+  second round is skipped when less time is left than its wait, and the error reads `No answer
+  within 60s (N attempts). Last: <model> — <reason>`. Once any chunk has arrived the deadline no
+  longer applies, so a long answer is never cut. Without it, a list like
+  `3.5-flash-lite,3.1-flash-lite,3-flash-preview` could wait 25 + 25 + 60 s before a second round.
+  `GEMINI_REQUEST_DEADLINE_MS` overrides it (`requestDeadlineMs()`, `:172-179`; `0` disables);
+  `createStreamingLLM` takes `requestDeadlineMs` (`null` disables).
 - **Second round:** when every model fails in the streaming path, the models whose failure was
   quick and transient get one more try after `RETRY_ROUND_DELAY_MS` (3 s; `MAX_ROUNDS = 2`,
-  `gemini.js:164-165`). `retryableNextRound` (`:175-179`) leaves out first-chunk timeouts (25-60 s
+  `gemini.js:187-188`). `retryableNextRound` (`:198-202`) leaves out first-chunk timeouts (25-60 s
   each) and 429s (quota; retrying seconds later only burns quota), so 500/502/503/504 and
   network errors qualify. The round is announced with `_reset` `{ reason: 'retry', next_model }`
   (the Ask header shows "Thinking... trying <model>" during the wait), logged as
@@ -684,7 +693,7 @@ flowchart TB
   time to first chunk (`ttft`), time of the last chunk (`last`; `total - last` is how
   long the connection stayed open after it), total time, chunk count, `finish` reason, token usage
   (`thoughts` = thinking tokens) and the server's error reason; each request ends with a summary
-  line (`logRequest`, `:198-201`, with `hedges=N` when any) whose
+  line (`logRequest`, `:221-224`, with `hedges=N` when any) whose
   `total` includes the time spent on failed attempts. Grep the `npm start` terminal for
   `[Gemini Provider]`:
   `attempt 1/5 stream model=gemini-3.8-flash outcome=transient status=503 total=4210ms error="..."`.

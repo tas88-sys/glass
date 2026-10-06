@@ -159,6 +159,29 @@ function hedgeDelayMs(modelId) {
 // the model is kept out only briefly, not for the 60 s default used for 503/429.
 const TIMEOUT_COOLDOWN_MS = 10_000;
 
+// Longest a streaming request may wait for an answer to start, across every
+// attempt, hedge and the second round. Once an answer is streaming it no longer
+// applies, so a long answer is never cut.
+const REQUEST_DEADLINE_MS = 60_000;
+
+/**
+ * Request deadline, or null for none. GEMINI_REQUEST_DEADLINE_MS (env)
+ * overrides it; 0 disables.
+ * @returns {number|null} milliseconds
+ */
+function requestDeadlineMs() {
+  const raw = process.env.GEMINI_REQUEST_DEADLINE_MS;
+  if (raw != null && raw.trim() !== '') {
+    const fromEnv = Number(raw);
+    if (Number.isFinite(fromEnv) && fromEnv >= 0) return fromEnv > 0 ? fromEnv : null;
+  }
+  return REQUEST_DEADLINE_MS;
+}
+
+/** "25s", "0.08s", "12.35s" */
+const seconds = (ms) => `${Math.round(ms / 10) / 100}s`;
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
 // When every model in the list fails, the streaming path waits and goes through
 // the models that failed fast once more (503 "high demand" spikes are usually brief).
 const MAX_ROUNDS = 2;
@@ -389,6 +412,9 @@ function createLLM({ apiKey, model = "gemini-3-flash-preview", temperature = 0.7
  * When every model fails, the ones that failed fast with a transient error
  * (retryableNextRound) get one more round after a short wait, announced with
  * a _reset whose reason is 'retry'.
+ * The whole request gives up when no answer has started within
+ * requestDeadlineMs() (60 s): attempts are shortened to what is left, and the
+ * second round is skipped when there is no time for it.
  * On a fatal error or when all models are exhausted, calls controller.error()
  * with an error carrying a short `userMessage` for display.
  * Cancelling the returned stream aborts the in-flight requests (or the wait
@@ -397,9 +423,10 @@ function createLLM({ apiKey, model = "gemini-3-flash-preview", temperature = 0.7
  * @param {object} opts
  * @param {number} [opts.firstChunkTimeoutMs] - overrides firstChunkTimeoutMs(modelId) for every model
  * @param {number|null} [opts.hedgeDelayMs] - overrides hedgeDelayMs(modelId) for every model; null disables
+ * @param {number|null} [opts.requestDeadlineMs] - overrides requestDeadlineMs(); null disables
  * @param {number} [opts.retryRoundDelayMs] - wait before the second round (default RETRY_ROUND_DELAY_MS)
  */
-function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperature = 0.7, maxTokens = 65536, firstChunkTimeoutMs: firstChunkTimeoutOverride, hedgeDelayMs: hedgeDelayOverride, retryRoundDelayMs = RETRY_ROUND_DELAY_MS, ...config }) {
+function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperature = 0.7, maxTokens = 65536, firstChunkTimeoutMs: firstChunkTimeoutOverride, hedgeDelayMs: hedgeDelayOverride, requestDeadlineMs: requestDeadlineOverride, retryRoundDelayMs = RETRY_ROUND_DELAY_MS, ...config }) {
   const client = new GoogleGenerativeAI(apiKey)
 
   return {
@@ -647,11 +674,21 @@ function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperat
           let retryable = []; // models of this round worth another try (retryableNextRound)
           const requestStartedAt = Date.now();
 
+          // Request deadline: applies until an answer starts streaming (any chunk).
+          const deadlineSetting = requestDeadlineOverride !== undefined ? requestDeadlineOverride : requestDeadlineMs();
+          const deadlineMs = deadlineSetting > 0 ? deadlineSetting : null;
+          let answerStarted = false;
+          let deadlineHit = false;
+          const timeLeft = () => (deadlineMs == null || answerStarted)
+            ? Infinity
+            : requestStartedAt + deadlineMs - Date.now();
+
           let lastModel = null;
 
           while (!cancelled) {
             if (remaining.length === 0) {
               if (round >= MAX_ROUNDS || retryable.length === 0) break;
+              if (timeLeft() <= retryRoundDelayMs) { deadlineHit = true; break; }
               round++;
               remaining = retryable;
               retryable = [];
@@ -665,8 +702,12 @@ function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperat
               continue;
             }
 
+            const left = timeLeft();
+            if (left <= 0) { deadlineHit = true; break; }
             const modelId = rotator.pickModel(remaining);
-            const timeoutMs = firstChunkTimeoutOverride ?? firstChunkTimeoutMs(modelId);
+            // The attempt's own budget, shortened to what is left of the request deadline.
+            const modelTimeoutMs = firstChunkTimeoutOverride ?? firstChunkTimeoutMs(modelId);
+            const timeoutMs = Math.min(modelTimeoutMs, left);
             const hedgeMs = hedgeDelayOverride !== undefined ? hedgeDelayOverride : hedgeDelayMs(modelId);
             const stats = {
               startedAt: Date.now(), firstChunkAt: null, lastChunkAt: null, chunks: 0, finishReason: null,
@@ -698,9 +739,11 @@ function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperat
                 return;
               }
               const err = stats.timedOut
-                ? Object.assign(new Error(`no response after ${timeoutMs / 1000}s`), { code: 'FIRST_CHUNK_TIMEOUT' })
+                ? Object.assign(new Error(`no response after ${seconds(timeoutMs)}`), { code: 'FIRST_CHUNK_TIMEOUT' })
                 : rawErr;
               lastErr = err;
+              if (stats.firstChunkAt != null) answerStarted = true;
+              if (stats.timedOut && timeoutMs < modelTimeoutMs) deadlineHit = true;
               const kind = stats.timedOut ? 'transient' : rotator.classifyError(err);
               logAttempt({ mode: 'stream', attempt: attempts, of: plannedAttempts, modelId, outcome: stats.timedOut ? 'timeout' : kind, stats, err });
               if (kind !== 'transient') {
@@ -727,10 +770,16 @@ function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperat
           }
           logRequest({ mode: 'stream', answeredBy: succeededModel, attempts, hedges, startedAt: requestStartedAt });
           if (!succeededModel) {
+            if (deadlineHit) {
+              console.warn(`[Gemini Provider] request deadline reached — no answer within ${deadlineMs}ms`)
+            }
             console.error("[Gemini Provider] All models failed:", lastErr)
             if (lastErr && typeof lastErr === 'object') {
-              const rounds = round > 1 ? `, ${round} rounds` : '';
-              lastErr.userMessage = `All Gemini models failed (${attempts} attempts${rounds}). Last: ${lastModel} — ${shortErrorMessage(lastErr)}`;
+              const tried = `${plural(attempts, 'attempt')}${round > 1 ? `, ${round} rounds` : ''}`;
+              const reason = `Last: ${lastModel} — ${shortErrorMessage(lastErr)}`;
+              lastErr.userMessage = deadlineHit
+                ? `No answer within ${seconds(deadlineMs)} (${tried}). ${reason}`
+                : `All Gemini models failed (${tried}). ${reason}`;
             }
             try { controller.error(lastErr); } catch {}
             return;
@@ -758,5 +807,6 @@ module.exports = {
     createLLM,
     createStreamingLLM,
     firstChunkTimeoutMs,
-    hedgeDelayMs
+    hedgeDelayMs,
+    requestDeadlineMs
 };

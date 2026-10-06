@@ -30,5 +30,8 @@ flowchart TB
     retry --> pick
     round -->|no| allfail["controller.error(lastErr) / throw lastErr<br/>(err.userMessage for display)"]
 
+    deadline["streaming: 60s request deadline until an answer starts<br/>(each attempt gets at most what is left;<br/>no second round without time for it)"]
+    pick -.-> deadline
+
     note["Health registry = in-memory singleton Map (resets on restart).<br/>STT path calls parseModelList(csv)[0] only — NO failover by design<br/>(live session has no clean rotation semantics)."]
     parse -.-> note
