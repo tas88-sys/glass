@@ -65,6 +65,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 - **README "How It Works" — corrected Windows audio capture.** The audio-sources table claimed system audio was *"macOS only"* and that *"on Windows/Linux only the user's mic is captured."* Windows in fact captures system audio via Electron native loopback (`src/index.js:175-182` + `listenCapture.js:515-566`); only **Linux** is mic-only. Table now lists all three platforms and notes AEC coverage.
 - **README "Currently Supporting" list** — added Anthropic Claude (LLM) and Deepgram (STT), which were already wired but undocumented; clarified which providers do LLM vs STT.
 
+### Gemini stream end + retry round (branch `fix/gemini-stream-end-and-retry`)
+
+From the 2026-10-06 log: one Ask answer arrived complete in 16 s but the connection stayed open ~7 s more, so the request was logged `answered_by=none … cancelled` when the window closed. Another request failed on all three models (one first-chunk timeout, two quick 503 "high demand") and had to be resent by hand.
+
+#### Added
+
+- **Second round when every model fails (streaming: Ask and Live Answer)** — the models whose failure was quick and transient (500/502/503/504, network) get one more try after 3 s (`RETRY_ROUND_DELAY_MS`, `MAX_ROUNDS = 2`; `createStreamingLLM({ retryRoundDelayMs })` overrides the wait). First-chunk timeouts (25-60 s each) and 429s (quota) are left out. The round is announced with `_reset` `{ reason: 'retry' }`, so the Ask header shows "Thinking... trying <model>" during the wait, and logged as `all models failed — retry round 2 in 3000ms: …`. Cancelling during the wait stops it. The non-streaming path keeps one round.
+- **Attempt log fields** — `last=` (time of the last chunk; `total - last` is how long the connection stayed open after it), `chunks=` and `finish=` (the `finishReason`).
+- 6 new `node:test` cases in `gemini.test.js`.
+
+#### Changed
+
+- **All-failed message** — `All Gemini models failed (N attempts[, 2 rounds]). Last: …` (was `(N tried)`).
+- **Cancelled after text arrived** — the request line now reads `answered_by=<model> … cancelled` (was `answered_by=none`), and the model is kept healthy.
+
+#### Fixed
+
+- **Complete answer stuck in "streaming" until the server closed the connection** — an attempt now ends at the chunk carrying `finishReason`: it is logged `ok` at once, `_final_model` + `[DONE]` are sent (Ask stops streaming and saves the answer), and the leftover connection is aborted.
+
 ### Ask stalled-response fixes (branch `fix/ask-stalled-responses`)
 
 Two Ask requests on 2026-10-06 showed nothing and had to be resent: the log shows `gemini-3.5-flash-lite` accepted them and sent its first chunk only after ~96 s (`outcome=aborted ttft=95741ms`), while the window showed an empty "AI Response". No 503 involved.
