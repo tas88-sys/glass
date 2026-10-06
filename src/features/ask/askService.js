@@ -23,6 +23,7 @@ const util = require('util');
 const execFile = util.promisify(require('child_process').execFile);
 const { desktopCapturer } = require('electron');
 const modelStateService = require('../common/services/modelStateService');
+const { initialAskStreamState, applyAskSseEvent } = require('./askStreamState');
 
 // Try to load sharp, but don't fail if it's not available
 let sharp;
@@ -133,6 +134,8 @@ class AskService {
             isStreaming: false,
             currentQuestion: '',
             currentResponse: '',
+            retryingWith: null,
+            errorMessage: '',
             showTextInput: true,
         };
         console.log('[AskService] Service instance created.');
@@ -155,7 +158,7 @@ class AskService {
             return;
         }
 
-        const hasContent = this.state.isLoading || this.state.isStreaming || (this.state.currentResponse && this.state.currentResponse.length > 0);
+        const hasContent = this.state.isLoading || this.state.isStreaming || (this.state.currentResponse && this.state.currentResponse.length > 0) || !!this.state.errorMessage;
 
         if (askWindow && askWindow.isVisible() && hasContent) {
             this.state.showTextInput = !this.state.showTextInput;
@@ -188,6 +191,8 @@ class AskService {
                 isStreaming    : false,
                 currentQuestion: '',
                 currentResponse: '',
+                retryingWith   : null,
+                errorMessage   : '',
                 showTextInput  : true,
             };
             this._broadcastState();
@@ -226,6 +231,8 @@ class AskService {
             currentResponse: '',
             responseModel: null,
             responseHadFallback: false,
+            retryingWith: null,
+            errorMessage: '',
             showTextInput: false,
         };
         this._broadcastState();
@@ -375,6 +382,8 @@ class AskService {
                 ...this.state,
                 isLoading: false,
                 isStreaming: false,
+                retryingWith: null,
+                errorMessage: error.userMessage || error.message || 'Unknown error occurred',
                 showTextInput: true,
             };
             this._broadcastState();
@@ -400,12 +409,15 @@ class AskService {
      */
     async _processStream(reader, askWin, sessionId, signal) {
         const decoder = new TextDecoder();
-        let fullResponse = '';
+        // isLoading stays true until the first token (see askStreamState.js), so the
+        // window keeps showing "Thinking..." while models fail over or think.
+        let stream = initialAskStreamState();
+        let failed = false;
+        // A newer request (or closing the window) replaces this.abortController;
+        // from then on this stream must not touch the shared state.
+        const ownsState = () => this.abortController?.signal === signal;
 
         try {
-            this.state.isLoading = false;
-            this.state.isStreaming = true;
-            this._broadcastState();
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
@@ -417,35 +429,25 @@ class AskService {
                     if (line.startsWith('data: ')) {
                         const data = line.substring(6);
                         if (data === '[DONE]') {
-                            return; 
+                            return;
                         }
+                        let json;
                         try {
-                            const json = JSON.parse(data);
-
-                            // Handle _reset sentinel: discard accumulated output and start fresh with next model
-                            if (json._reset) {
-                                fullResponse = '';
-                                this.state.currentResponse = '';
-                                this.state.responseHadFallback = true;
-                                this._broadcastState();
-                                continue;
-                            }
-
-                            // Handle _final_model sentinel: record which model satisfied this request
-                            if (json._final_model) {
-                                this.state.responseModel = json._final_model;
-                                this._broadcastState();
-                                continue;
-                            }
-
-                            const token = json.choices?.[0]?.delta?.content || '';
-                            if (token) {
-                                fullResponse += token;
-                                this.state.currentResponse = fullResponse;
-                                this._broadcastState();
-                            }
-                        } catch (error) {
+                            json = JSON.parse(data);
+                        } catch {
+                            continue;
                         }
+                        const next = applyAskSseEvent(stream, json);
+                        if (next === stream) continue;
+                        stream = next;
+                        if (!ownsState()) continue;
+                        this.state.currentResponse = stream.fullResponse;
+                        this.state.isLoading = stream.isLoading;
+                        this.state.isStreaming = stream.isStreaming;
+                        this.state.responseModel = stream.responseModel;
+                        this.state.responseHadFallback = stream.responseHadFallback;
+                        this.state.retryingWith = stream.retryingWith;
+                        this._broadcastState();
                     }
                 }
             }
@@ -453,15 +455,27 @@ class AskService {
             if (signal.aborted) {
                 console.log(`[AskService] Stream reading was intentionally cancelled. Reason: ${signal.reason}`);
             } else {
+                failed = true;
                 console.error('[AskService] Error while processing stream:', streamError);
+                if (ownsState()) {
+                    this.state.errorMessage = streamError.userMessage || streamError.message || 'Unknown error occurred';
+                }
                 if (askWin && !askWin.isDestroyed()) {
                     askWin.webContents.send('ask-response-stream-error', { error: streamError.message });
                 }
             }
         } finally {
-            this.state.isStreaming = false;
-            this.state.currentResponse = fullResponse;
-            this._broadcastState();
+            const fullResponse = stream.fullResponse;
+            if (ownsState()) {
+                this.state.isLoading = false;
+                this.state.isStreaming = false;
+                this.state.retryingWith = null;
+                this.state.currentResponse = fullResponse;
+                if (!fullResponse && !failed && !signal.aborted) {
+                    this.state.errorMessage = 'The model returned an empty response.';
+                }
+                this._broadcastState();
+            }
             if (fullResponse) {
                  try {
                     await askRepository.addAiMessage({ sessionId, role: 'assistant', content: fullResponse });

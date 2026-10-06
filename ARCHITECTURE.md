@@ -600,7 +600,7 @@ flowchart TB
     classify --> kind{"kind?"}
     kind -->|fatal-auth 401/403| fatal["surface immediately"]
     kind -->|fatal-request 400| fatal
-    kind -->|transient 408/429/5xx, network| cool["markFailed(model, parseRetryAfter) cooldown 5s..300s"]
+    kind -->|transient 408/429/5xx, network, first-chunk timeout| cool["markFailed(model, parseRetryAfter) cooldown 5s..300s"]
     cool --> reset["streaming: emit {_reset, next_model} -> consumer wipes partial"]
     reset --> more{"models left?"}
     more -->|yes| pick
@@ -618,13 +618,32 @@ flowchart TB
 - Cooldown honors `Retry-After` / `retryDelay`, defaults to 60 s, clamped to `[5 s, 300 s]`
   (`parseRetryAfter`, `:149-192`; constants `:16-18`).
 - **Streaming** emits a `_reset` sentinel so the Ask consumer discards the partial answer before
-  the next model streams in, then a `_final_model` sentinel (`gemini.js:398-455`); the Ask SSE
-  parser handles both (`askService.js:425-439`).
+  the next model streams in, then a `_final_model` sentinel (`gemini.js:451-546`); the Ask
+  consumer applies both through the pure reducer `applyAskSseEvent` (`askStreamState.js:42-70`),
+  which also keeps `isLoading` ("Thinking...") on until the first token and exposes
+  `retryingWith` (the `next_model` of the last `_reset`) so the Ask header can show
+  "Thinking... trying <model>".
+- **First-chunk timeout:** a request can be accepted and then stall (~96 s observed) before the
+  first chunk. Each attempt gets an `AbortController` passed to `generateContentStream` as
+  `{ signal }`; if no chunk arrives in time the attempt is aborted, logged as `outcome=timeout`,
+  cooled down like a transient error, and a `_reset` with `reason: 'timeout'` moves on to the next
+  model. Budget per model (`firstChunkTimeoutMs`, `gemini.js:122-126`): 25 s for `*-flash-lite`,
+  60 s for models that think before answering; `GEMINI_FIRST_CHUNK_TIMEOUT_MS` overrides it for
+  every model. Only the first chunk is timed — a slow stream after that is never cut off.
+- **Cancellation:** the stream's `cancel()` aborts the in-flight attempt and stops failover
+  (logged `outcome=aborted` + `request ... cancelled`). Ask cancels when the window closes or a new
+  request replaces the current one; Live Answer cancels when a newer question supersedes it.
+- **Errors for display:** when every model fails, or on a fatal error, the error passed to
+  `controller.error()` carries a short `userMessage` (e.g. `All Gemini models failed (3 tried).
+  Last: gemini-3.1-flash-lite — no response after 25s`). `askService` puts it in
+  `state.errorMessage` (also `The model returned an empty response.` when a stream ends with no
+  text) and the Ask window renders it instead of an empty "...".
 - **Diagnostics:** every attempt logs one line to the main-process console (`logAttempt`,
-  `gemini.js:85-102`) with model, outcome (`ok` / `aborted` / `transient` / `fatal-*`), HTTP status,
-  time to first chunk, total time, token usage (`thoughts` = thinking tokens) and the server's
-  error reason; each request ends with a summary line (`logRequest`, `:107-110`) whose `total`
-  includes the time spent on failed attempts. Grep the `npm start` terminal for `[Gemini Provider]`:
+  `gemini.js:85-95`) with model, outcome (`ok` / `aborted` / `timeout` / `transient` / `fatal-*`),
+  HTTP status, time to first chunk, total time, token usage (`thoughts` = thinking tokens) and the
+  server's error reason; each request ends with a summary line (`logRequest`, `:131-134`) whose
+  `total` includes the time spent on failed attempts. Grep the `npm start` terminal for
+  `[Gemini Provider]`:
   `attempt 1/5 stream model=gemini-3.8-flash outcome=transient status=503 total=4210ms error="..."`.
 - **STT deliberately does NOT fail over** — `createSTT` takes only the first model in the list
   (`gemini.js:38-40`), because a persistent live STT session has no clean rotation semantics

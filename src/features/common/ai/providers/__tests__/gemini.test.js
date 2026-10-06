@@ -62,7 +62,7 @@ function clearCache() {
 clearCache();
 
 const rotator = require('../geminiModelRotator');
-const { createLLM, createStreamingLLM } = require('../gemini');
+const { createLLM, createStreamingLLM, firstChunkTimeoutMs } = require('../gemini');
 
 // ---------------------------------------------------------------------------
 // Reset state before each test
@@ -388,5 +388,167 @@ describe('attempt logging', () => {
     assert.ok(ok);
     assert.match(ok, /tokens=in:3,out:2,thoughts:0/);
     assert.ok(find(/request once answered_by=modelB attempts=2/));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// First-chunk timeout, cancellation and userMessage
+// ---------------------------------------------------------------------------
+
+/**
+ * A stream whose first chunk never arrives; rejects with AbortError once the
+ * request's signal is aborted (what the real SDK does on fetch abort).
+ */
+function makeHangingStream(signal) {
+  return {
+    stream: (async function*() {
+      await new Promise((_, reject) => {
+        const fail = () => {
+          const e = new Error('Request aborted when reading from the stream');
+          e.name = 'AbortError';
+          reject(e);
+        };
+        if (signal?.aborted) return fail();
+        signal?.addEventListener('abort', fail, { once: true });
+      });
+    })(),
+  };
+}
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+describe('first-chunk timeout, cancellation and userMessage', () => {
+  let lines;
+  beforeEach(() => {
+    lines = [];
+    const capture = (...args) => { lines.push(args.map(String).join(' ')); };
+    mock.method(console, 'log', capture);
+    mock.method(console, 'warn', capture);
+    mock.method(console, 'error', capture);
+  });
+  afterEach(() => mock.restoreAll());
+
+  const find = (re) => lines.find(l => re.test(l));
+
+  it('first model sends nothing before the timeout — aborts it, emits _reset(reason=timeout), next model answers', async () => {
+    let signalA;
+    mockGenerateContentStream = async (modelId, request, opts) => {
+      if (modelId === 'modelA') { signalA = opts.signal; return makeHangingStream(opts.signal); }
+      return makeStream(chunk('fast answer'));
+    };
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'modelA,modelB', firstChunkTimeoutMs: 30 });
+    const events = parseSseEvents(await collectStream(await llm.streamChat([{ role: 'user', content: 'hi' }])));
+
+    assert.equal(signalA.aborted, true, 'the stalled request must be aborted');
+    const reset = events.find(e => e._reset);
+    assert.ok(reset, '_reset must be emitted');
+    assert.equal(reset.reason, 'timeout');
+    assert.equal(reset.next_model, 'modelB');
+    assert.equal(events.find(e => e._final_model)._final_model, 'modelB');
+    assert.match(find(/model=modelA outcome=timeout/) || '', /error="no response after 0\.03s"/);
+  });
+
+  it('timer only covers the first chunk — a slow stream after the first chunk is not cut off', async () => {
+    mockGenerateContentStream = async () => ({
+      stream: (async function*() {
+        yield chunk('first ');
+        await sleep(60);
+        yield chunk('second');
+      })(),
+    });
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'modelA,modelB', firstChunkTimeoutMs: 20 });
+    const events = parseSseEvents(await collectStream(await llm.streamChat([{ role: 'user', content: 'hi' }])));
+
+    assert.ok(!events.some(e => e._reset), 'no failover once the first chunk arrived');
+    assert.equal(events.find(e => e._final_model)._final_model, 'modelA');
+  });
+
+  it('timeout on the last model — stream errors with a userMessage naming the timeout', async () => {
+    mockGenerateContentStream = async (modelId, request, opts) => makeHangingStream(opts.signal);
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'modelA,modelB', firstChunkTimeoutMs: 20 });
+    const reader = (await llm.streamChat([{ role: 'user', content: 'hi' }])).body.getReader();
+    let caught;
+    try { while (!(await reader.read()).done); } catch (e) { caught = e; }
+
+    assert.ok(caught, 'stream must error');
+    assert.equal(caught.code, 'FIRST_CHUNK_TIMEOUT');
+    assert.equal(caught.userMessage, 'All Gemini models failed (2 tried). Last: modelB — no response after 0.02s');
+  });
+
+  it('consumer cancels while waiting — in-flight request aborted, no failover, no stream error', async () => {
+    let calls = 0;
+    let seenSignal;
+    mockGenerateContentStream = async (modelId, request, opts) => {
+      calls++;
+      seenSignal = opts.signal;
+      return makeHangingStream(opts.signal);
+    };
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'modelA,modelB', firstChunkTimeoutMs: 10_000 });
+    const reader = (await llm.streamChat([{ role: 'user', content: 'hi' }])).body.getReader();
+    const pendingRead = reader.read();
+    await sleep(10);
+    await reader.cancel('Window closed by user');
+    assert.deepEqual(await pendingRead, { done: true, value: undefined });
+    await sleep(10);
+
+    assert.equal(seenSignal.aborted, true, 'the HTTP request must be aborted');
+    assert.equal(calls, 1, 'no failover after the consumer cancelled');
+    assert.ok(find(/attempt 1\/2 stream model=modelA outcome=aborted/));
+    assert.ok(find(/request stream answered_by=none attempts=1 total=\d+ms cancelled/));
+    assert.ok(!find(/All models failed/));
+  });
+
+  it('all models 503 — userMessage keeps the server reason, without SDK prefix or URL', async () => {
+    mockGenerateContentStream = async () => makeStreamWithError([], makeError(503,
+      '[GoogleGenerativeAI Error]: Error fetching from https://generativelanguage.googleapis.com/v1beta/models/m:streamGenerateContent?alt=sse: [503 Service Unavailable] The model is overloaded.'));
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'modelA,modelB' });
+    const reader = (await llm.streamChat([{ role: 'user', content: 'hi' }])).body.getReader();
+    let caught;
+    try { while (!(await reader.read()).done); } catch (e) { caught = e; }
+
+    assert.equal(caught.userMessage, 'All Gemini models failed (2 tried). Last: modelB — [503 Service Unavailable] The model is overloaded.');
+  });
+
+  it('fatal error — userMessage names the model and the reason', async () => {
+    mockGenerateContentStream = async () => makeStreamWithError([], makeError(400, 'bad request'));
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'modelA,modelB' });
+    const reader = (await llm.streamChat([{ role: 'user', content: 'hi' }])).body.getReader();
+    let caught;
+    try { while (!(await reader.read()).done); } catch (e) { caught = e; }
+
+    assert.equal(caught.userMessage, 'modelA — bad request');
+  });
+});
+
+describe('firstChunkTimeoutMs', () => {
+  let saved;
+  beforeEach(() => { saved = process.env.GEMINI_FIRST_CHUNK_TIMEOUT_MS; delete process.env.GEMINI_FIRST_CHUNK_TIMEOUT_MS; });
+  afterEach(() => {
+    if (saved === undefined) delete process.env.GEMINI_FIRST_CHUNK_TIMEOUT_MS;
+    else process.env.GEMINI_FIRST_CHUNK_TIMEOUT_MS = saved;
+  });
+
+  it('25 s for Flash-Lite models', () => {
+    assert.equal(firstChunkTimeoutMs('gemini-3.5-flash-lite'), 25_000);
+    assert.equal(firstChunkTimeoutMs('gemini-3.1-flash-lite'), 25_000);
+  });
+
+  it('60 s for models that think before answering', () => {
+    assert.equal(firstChunkTimeoutMs('gemini-3-flash-preview'), 60_000);
+    assert.equal(firstChunkTimeoutMs('gemini-3.8-flash'), 60_000);
+  });
+
+  it('GEMINI_FIRST_CHUNK_TIMEOUT_MS overrides every model; invalid values are ignored', () => {
+    process.env.GEMINI_FIRST_CHUNK_TIMEOUT_MS = '1500';
+    assert.equal(firstChunkTimeoutMs('gemini-3.5-flash-lite'), 1500);
+    assert.equal(firstChunkTimeoutMs('gemini-3-flash-preview'), 1500);
+    process.env.GEMINI_FIRST_CHUNK_TIMEOUT_MS = 'abc';
+    assert.equal(firstChunkTimeoutMs('gemini-3-flash-preview'), 60_000);
   });
 });
