@@ -7,7 +7,10 @@ flowchart TB
     start(["createStreamingLLM / createLLM with model CSV"]) --> parse["parseModelList(csv)<br/>trim, drop empties -> remaining[]"]
     parse --> pick["pickModel(remaining)<br/>first healthy in order;<br/>if all cooling, soonest-to-recover"]
     pick --> call["attempt model: streamOneAttempt() / doCall()"]
-    call --> ok{"success?"}
+    call --> hedge{"streaming, Flash-Lite,<br/>no chunk after 10s?"}
+    hedge -->|yes| race["parallel request to the SAME model<br/>first chunk wins, the other is aborted<br/>(deadline still from attempt start)"]
+    race --> ok
+    hedge -->|no| ok{"success?"}
 
     ok -->|yes| done["markSucceeded (clear cooldown)<br/>emit _final_model -> footer 'answered by: X'<br/>(append '(fallback)' if any _reset fired)"]
     done --> finish(["[DONE] / return"])
@@ -17,12 +20,18 @@ flowchart TB
 
     kind -->|"fatal-auth (401/403, API_KEY_INVALID)"| fatal["controller.error() / throw<br/>surface immediately"]
     kind -->|"fatal-request (400, INVALID_ARGUMENT)"| fatal
-    kind -->|"transient (408/429/5xx, network,<br/>RESOURCE_EXHAUSTED, UNAVAILABLE,<br/>first-chunk timeout 25s lite / 60s)"| cool["markFailed(model, parseRetryAfter(err))<br/>cooldown = Retry-After / retryDelay,<br/>default 60s, clamped [5s, 300s]"]
+    kind -->|"transient (408/429/5xx, network,<br/>RESOURCE_EXHAUSTED, UNAVAILABLE,<br/>first-chunk timeout 25s lite / 60s)"| cool["markFailed(model, cooldown)<br/>first-chunk timeout: 10s<br/>else Retry-After / retryDelay,<br/>default 60s, clamped [5s, 300s]"]
 
     cool --> reset["streaming: emit {_reset, next_model}<br/>-> consumer wipes partial output"]
     reset --> more{"remaining models left?"}
     more -->|yes| pick
-    more -->|no| allfail["controller.error(lastErr) / throw lastErr"]
+    more -->|no| round{"streaming, round 1, and some models<br/>failed fast (not 429 / timeout)?"}
+    round -->|yes| retry["emit {_reset, reason: retry}<br/>wait 3s, retry those models once"]
+    retry --> pick
+    round -->|no| allfail["controller.error(lastErr) / throw lastErr<br/>(err.userMessage for display)"]
+
+    deadline["streaming: 60s request deadline until an answer starts<br/>(each attempt gets at most what is left;<br/>no second round without time for it)"]
+    pick -.-> deadline
 
     note["Health registry = in-memory singleton Map (resets on restart).<br/>STT path calls parseModelList(csv)[0] only — NO failover by design<br/>(live session has no clean rotation semantics)."]
     parse -.-> note

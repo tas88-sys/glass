@@ -197,9 +197,23 @@ then calls `parseAnswerOrPassive(prefix)`:
 
 ### 4.3 IPC channel: `live-answer-update`
 
-`summaryService.sendToRenderer('live-answer-update', { answer, ts })` is emitted on every
-non-suppressed delta. The payload accumulates the full markdown string up to that point; the
+`summaryService.sendToRenderer('live-answer-update', { id, question, answer, ts })` is emitted on
+every non-suppressed delta. The payload accumulates the full markdown string up to that point; the
 renderer replaces its `innerHTML` on each event (single swap per frame — C5/FR-015).
+
+The same channel also carries **status payloads** (no `answer` text), so the panel can say what is
+happening when there is no answer to show:
+
+| Payload | Sent when | Panel |
+|---|---|---|
+| `{ id, question, status: 'retrying', model }` | each Gemini `_reset` (failover, timeout, retry round); `model` is its `next_model` | "Trying <model>…" |
+| `{ id, status: 'idle' }` | that answer's stream ends after a `retrying` | clears its "Trying …" (same `id` only) |
+| `{ id, question, status: 'error', error }` | the stream fails (`error` = the provider's `userMessage`, e.g. `All Gemini models failed …`) or ends with no text | "No answer — <error>" until an answer starts |
+
+Aborted answers (a newer question, session reset) send no error. `liveAnswerHistory.js` keeps
+the two concerns apart: `applyLiveAnswerUpdate` ignores payloads without `answer`, and
+`applyLiveAnswerStatus` folds the status payloads into one line under the "Live Answer" eyebrow,
+rendered as a Lit text binding (never `innerHTML`).
 
 The channel is wired in `preload.js` via two new methods on the existing `summaryView` namespace
 (FR-013):

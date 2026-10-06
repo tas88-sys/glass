@@ -201,6 +201,12 @@ describe('parseLiveAnswerSseLine', () => {
     assert.equal(result.reset, true);
   });
 
+  it('_reset carries the model tried next and the reason (for the "Trying <model>…" status)', () => {
+    const result = parseLiveAnswerSseLine('data: {"_reset":true,"next_model":"gemini-3.1-flash-lite","reason":"timeout"}');
+    assert.deepEqual(result, { reset: true, nextModel: 'gemini-3.1-flash-lite', reason: 'timeout' });
+    assert.deepEqual(parseLiveAnswerSseLine('data: {"_reset":true}'), { reset: true, nextModel: null, reason: null });
+  });
+
   it('data: {"_final_model":"gemini"} -> finalModel="gemini"', () => {
     const result = parseLiveAnswerSseLine('data: {"_final_model":"gemini"}');
     assert.equal(result.finalModel, 'gemini');
@@ -457,6 +463,72 @@ describe('integration: debounce coalescing (AS-4)', () => {
     // Exactly ONE makeLiveAnswer call
     assert.equal(makeCalls, 1);
     assert.equal(emitted.filter(e => e.channel === 'live-answer-update').length, 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Error status on the Live Answer panel
+// Uses the REAL triggerAnswerIfNeeded debounce callback (buildTestService
+// mirrors it), with node:test mock timers for the 800 ms debounce.
+// ---------------------------------------------------------------------------
+describe('integration: error status when a question gets no answer', () => {
+  const { mock } = require('node:test');
+  afterEach(() => mock.timers.reset());
+
+  function realService(makeLiveAnswer) {
+    const SummaryService = require('../summaryService');
+    const service = new SummaryService();
+    const emitted = [];
+    service.sendToRenderer = (channel, data) => emitted.push({ channel, data });
+    service.makeLiveAnswer = makeLiveAnswer;
+    return { service, emitted };
+  }
+  const flush = () => new Promise(r => setImmediate(r));
+
+  it('a stream error emits status=error with the userMessage; no answer text', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const { service, emitted } = realService(async () => {
+      throw Object.assign(new Error('[503 Service Unavailable] overloaded'), {
+        userMessage: 'All Gemini models failed (3 attempts). Last: gemini-3.1-flash-lite — [503 Service Unavailable] overloaded',
+      });
+    });
+    const question = 'how would you design a rate limiter?';
+    service.conversationHistory = [`them: ${question}`];
+
+    const originalError = console.error;
+    console.error = () => {};
+    try {
+      service.triggerAnswerIfNeeded('Them', question);
+      mock.timers.tick(800);
+      await flush();
+    } finally {
+      console.error = originalError;
+    }
+
+    const updates = emitted.filter(e => e.channel === 'live-answer-update');
+    assert.equal(updates.length, 1);
+    assert.equal(updates[0].data.status, 'error');
+    assert.equal(updates[0].data.error, 'All Gemini models failed (3 attempts). Last: gemini-3.1-flash-lite — [503 Service Unavailable] overloaded');
+    assert.equal(updates[0].data.question, question);
+    assert.equal(updates[0].data.answer, undefined, 'no answer text is emitted');
+    assert.equal(service.inFlight, false);
+  });
+
+  it('an abort (newer question / session reset) emits no error status', async () => {
+    mock.timers.enable({ apis: ['setTimeout'] });
+    const { service, emitted } = realService(async (texts, signal) => new Promise((resolve, reject) => {
+      signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+    }));
+    service.conversationHistory = ['them: how does GC work?'];
+
+    service.triggerAnswerIfNeeded('Them', 'how does GC work?');
+    mock.timers.tick(800);
+    await flush();
+    assert.equal(service.inFlight, true, 'stream should be in-flight');
+    service.inFlightController.abort();
+    await flush();
+
+    assert.equal(emitted.length, 0, 'no status for an aborted question');
   });
 });
 

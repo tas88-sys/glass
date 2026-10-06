@@ -62,7 +62,7 @@ function clearCache() {
 clearCache();
 
 const rotator = require('../geminiModelRotator');
-const { createLLM, createStreamingLLM, firstChunkTimeoutMs } = require('../gemini');
+const { createLLM, createStreamingLLM, firstChunkTimeoutMs, hedgeDelayMs, requestDeadlineMs, isLiteModel } = require('../gemini');
 
 // ---------------------------------------------------------------------------
 // Reset state before each test
@@ -676,6 +676,348 @@ describe('stream end (finishReason) and retry round', () => {
     assert.equal(calls, 2, 'the second round must not start');
     assert.ok(find(/request stream answered_by=none attempts=2 total=\d+ms cancelled/));
     assert.ok(!find(/All models failed/));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Hedged requests and the cooldown after a timeout
+// ---------------------------------------------------------------------------
+
+describe('hedged requests', () => {
+  let lines;
+  beforeEach(() => {
+    lines = [];
+    const capture = (...args) => { lines.push(args.map(String).join(' ')); };
+    mock.method(console, 'log', capture);
+    mock.method(console, 'warn', capture);
+    mock.method(console, 'error', capture);
+  });
+  afterEach(() => mock.restoreAll());
+
+  const find = (re) => lines.find(l => re.test(l));
+  const msgs = [{ role: 'user', content: 'hi' }];
+
+  it('first request stalls — a parallel request to the same model answers and the first is aborted', async () => {
+    const calls = [];
+    mockGenerateContentStream = async (modelId, request, opts) => {
+      calls.push({ modelId, signal: opts.signal });
+      if (calls.length === 1) return makeHangingStream(opts.signal);
+      return makeStream(chunk('hedged answer'));
+    };
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'a-flash-lite,b-flash-lite', firstChunkTimeoutMs: 1000, hedgeDelayMs: 20 });
+    const events = parseSseEvents(await collectStream(await llm.streamChat(msgs)));
+
+    assert.deepEqual(calls.map(c => c.modelId), ['a-flash-lite', 'a-flash-lite']);
+    assert.equal(calls[0].signal.aborted, true, 'the stalled request must be aborted');
+    assert.ok(!events.some(e => e._reset), 'hedging is invisible to the consumer');
+    assert.equal(events[0].choices[0].delta.content, 'hedged answer');
+    assert.equal(events.find(e => e._final_model)._final_model, 'a-flash-lite');
+    assert.match(find(/attempt 1\/2 stream model=a-flash-lite outcome=ok/) || '', /hedge=\d+ms winner=hedge/);
+    assert.ok(find(/request stream answered_by=a-flash-lite attempts=1 hedges=1 total=/));
+  });
+
+  it('first request answers after the hedge started — the parallel request is aborted', async () => {
+    const signals = [];
+    mockGenerateContentStream = async (modelId, request, opts) => {
+      signals.push(opts.signal);
+      if (signals.length === 1) {
+        return { stream: (async function*() { await sleep(60); yield chunk('first answer'); })() };
+      }
+      return makeHangingStream(opts.signal);
+    };
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'a-flash-lite', firstChunkTimeoutMs: 1000, hedgeDelayMs: 20 });
+    const events = parseSseEvents(await collectStream(await llm.streamChat(msgs)));
+
+    assert.equal(signals.length, 2);
+    assert.equal(signals[1].aborted, true, 'the losing parallel request must be aborted');
+    assert.equal(events[0].choices[0].delta.content, 'first answer');
+    assert.match(find(/model=a-flash-lite outcome=ok/) || '', /winner=first/);
+  });
+
+  it('no parallel request when the first chunk arrives before the delay', async () => {
+    let calls = 0;
+    mockGenerateContentStream = async () => { calls++; return makeStream(chunk('quick')); };
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'a-flash-lite', hedgeDelayMs: 50 });
+    await collectStream(await llm.streamChat(msgs));
+    await sleep(70);
+
+    assert.equal(calls, 1);
+    assert.ok(!find(/hedge/));
+  });
+
+  it('a 503 before the delay fails the attempt at once — no parallel request, next model', async () => {
+    const calls = [];
+    mockGenerateContentStream = async (modelId) => {
+      calls.push(modelId);
+      if (modelId === 'a-flash-lite') return makeStreamWithError([], makeError(503, 'overloaded'));
+      return makeStream(chunk('b answer'));
+    };
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'a-flash-lite,b-flash-lite', hedgeDelayMs: 50 });
+    const events = parseSseEvents(await collectStream(await llm.streamChat(msgs)));
+    await sleep(70);
+
+    assert.deepEqual(calls, ['a-flash-lite', 'b-flash-lite']);
+    assert.equal(events.find(e => e._final_model)._final_model, 'b-flash-lite');
+  });
+
+  it('a 503 on the first request after the hedge started — keeps waiting for the parallel one', async () => {
+    let calls = 0;
+    mockGenerateContentStream = async () => {
+      calls++;
+      if (calls === 1) {
+        return { stream: (async function*() { await sleep(40); throw makeError(503, 'overloaded'); })() };
+      }
+      return { stream: (async function*() { await sleep(60); yield chunk('hedge answer'); })() };
+    };
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'a-flash-lite,b-flash-lite', firstChunkTimeoutMs: 1000, hedgeDelayMs: 20 });
+    const events = parseSseEvents(await collectStream(await llm.streamChat(msgs)));
+
+    assert.equal(calls, 2, 'no failover to b-flash-lite');
+    assert.ok(!events.some(e => e._reset));
+    assert.equal(events[0].choices[0].delta.content, 'hedge answer');
+    assert.match(find(/model=a-flash-lite outcome=ok/) || '', /winner=hedge/);
+  });
+
+  it('both requests stall — timeout counted from the attempt start, both aborted, 10 s cooldown', async () => {
+    const calls = [];
+    mockGenerateContentStream = async (modelId, request, opts) => {
+      calls.push({ modelId, signal: opts.signal });
+      if (modelId === 'a-flash-lite') return makeHangingStream(opts.signal);
+      return makeStream(chunk('b answer'));
+    };
+    const failed = [];
+    mock.method(rotator, 'markFailed', (id, ms) => { failed.push([id, ms]); });
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'a-flash-lite,b-flash-lite', firstChunkTimeoutMs: 80, hedgeDelayMs: 20 });
+    const events = parseSseEvents(await collectStream(await llm.streamChat(msgs)));
+
+    const onA = calls.filter(c => c.modelId === 'a-flash-lite');
+    assert.equal(onA.length, 2);
+    assert.ok(onA.every(c => c.signal.aborted), 'both stalled requests must be aborted');
+    assert.equal(events.find(e => e._reset).reason, 'timeout');
+    assert.equal(events.find(e => e._final_model)._final_model, 'b-flash-lite');
+    assert.match(find(/model=a-flash-lite outcome=timeout/) || '', /hedge=\d+ms .*error="no response after 0\.08s"/);
+    assert.deepEqual(failed, [['a-flash-lite', 10_000]]);
+  });
+
+  it('a 503 keeps the default cooldown (60 s)', async () => {
+    mockGenerateContentStream = async (modelId) => modelId === 'a-flash-lite'
+      ? makeStreamWithError([], makeError(503, 'overloaded'))
+      : makeStream(chunk('b answer'));
+    const failed = [];
+    mock.method(rotator, 'markFailed', (id, ms) => { failed.push([id, ms]); });
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'a-flash-lite,b-flash-lite' });
+    await collectStream(await llm.streamChat(msgs));
+
+    assert.deepEqual(failed, [['a-flash-lite', 60_000]]);
+  });
+
+  it('consumer cancels during the race — both requests aborted, no failover, no stream error', async () => {
+    const calls = [];
+    mockGenerateContentStream = async (modelId, request, opts) => {
+      calls.push({ modelId, signal: opts.signal });
+      return makeHangingStream(opts.signal);
+    };
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'a-flash-lite,b-flash-lite', firstChunkTimeoutMs: 10_000, hedgeDelayMs: 10 });
+    const reader = (await llm.streamChat(msgs)).body.getReader();
+    const pendingRead = reader.read();
+    await sleep(40);
+    await reader.cancel('Window closed by user');
+    assert.deepEqual(await pendingRead, { done: true, value: undefined });
+    await sleep(10);
+
+    assert.deepEqual(calls.map(c => c.modelId), ['a-flash-lite', 'a-flash-lite']);
+    assert.ok(calls.every(c => c.signal.aborted), 'both requests must be aborted');
+    assert.ok(find(/request stream answered_by=none attempts=1 hedges=1 total=\d+ms cancelled/));
+    assert.ok(!find(/All models failed/));
+  });
+});
+
+describe('request deadline', () => {
+  let lines;
+  beforeEach(() => {
+    lines = [];
+    const capture = (...args) => { lines.push(args.map(String).join(' ')); };
+    mock.method(console, 'log', capture);
+    mock.method(console, 'warn', capture);
+    mock.method(console, 'error', capture);
+  });
+  afterEach(() => mock.restoreAll());
+
+  const find = (re) => lines.find(l => re.test(l));
+  const msgs = [{ role: 'user', content: 'hi' }];
+
+  it('shortens the attempt to the deadline and gives up without trying the next model', async () => {
+    const calls = [];
+    mockGenerateContentStream = async (modelId, request, opts) => {
+      calls.push(modelId);
+      return makeHangingStream(opts.signal);
+    };
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'modelA,modelB', firstChunkTimeoutMs: 1000, requestDeadlineMs: 150 });
+    const started = Date.now();
+    const caught = await readUntilError((await llm.streamChat(msgs)).body.getReader());
+    const took = Date.now() - started;
+
+    assert.deepEqual(calls, ['modelA']);
+    assert.ok(took < 600, `gave up at the deadline, not the 1 s attempt timeout (took ${took}ms)`);
+    assert.equal(caught.userMessage, 'No answer within 0.15s (1 attempt). Last: modelA — no response after 0.15s');
+    assert.ok(find(/request deadline reached — no answer within 150ms/));
+  });
+
+  it('the next model only gets what is left of the deadline', async () => {
+    const calls = [];
+    mockGenerateContentStream = async (modelId, request, opts) => {
+      calls.push(modelId);
+      return makeHangingStream(opts.signal);
+    };
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'modelA,modelB,modelC', firstChunkTimeoutMs: 100, requestDeadlineMs: 150 });
+    const started = Date.now();
+    const caught = await readUntilError((await llm.streamChat(msgs)).body.getReader());
+    const took = Date.now() - started;
+
+    assert.deepEqual(calls, ['modelA', 'modelB'], 'modelC is never tried');
+    assert.ok(took < 400, `took ${took}ms`);
+    assert.match(caught.userMessage, /^No answer within 0\.15s \(2 attempts\)\. Last: modelB — no response after 0\.\d+s$/);
+  });
+
+  it('skips the second round when less time is left than its wait', async () => {
+    const calls = [];
+    mockGenerateContentStream = async (modelId) => {
+      calls.push(modelId);
+      return makeStreamWithError([], makeError(503, 'overloaded'));
+    };
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'modelA,modelB', retryRoundDelayMs: 200, requestDeadlineMs: 100 });
+    const caught = await readUntilError((await llm.streamChat(msgs)).body.getReader());
+
+    assert.deepEqual(calls, ['modelA', 'modelB']);
+    assert.ok(!find(/retry round/));
+    assert.equal(caught.userMessage, 'No answer within 0.1s (2 attempts). Last: modelB — overloaded');
+  });
+
+  it('never cuts an answer that is already streaming', async () => {
+    mockGenerateContentStream = async () => ({
+      stream: (async function*() {
+        yield chunk('first ');
+        await sleep(120);
+        yield chunk('second');
+      })(),
+    });
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'modelA', requestDeadlineMs: 50 });
+    const events = parseSseEvents(await collectStream(await llm.streamChat(msgs)));
+
+    assert.equal(events.filter(e => e.choices).map(e => e.choices[0].delta.content).join(''), 'first second');
+    assert.equal(events.find(e => e._final_model)._final_model, 'modelA');
+  });
+
+  it('null disables the deadline', async () => {
+    const calls = [];
+    mockGenerateContentStream = async (modelId, request, opts) => {
+      calls.push(modelId);
+      return makeHangingStream(opts.signal);
+    };
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'modelA,modelB', firstChunkTimeoutMs: 30, requestDeadlineMs: null });
+    const caught = await readUntilError((await llm.streamChat(msgs)).body.getReader());
+
+    assert.deepEqual(calls, ['modelA', 'modelB']);
+    assert.equal(caught.userMessage, 'All Gemini models failed (2 attempts). Last: modelB — no response after 0.03s');
+  });
+});
+
+describe('requestDeadlineMs', () => {
+  let saved;
+  beforeEach(() => { saved = process.env.GEMINI_REQUEST_DEADLINE_MS; delete process.env.GEMINI_REQUEST_DEADLINE_MS; });
+  afterEach(() => {
+    if (saved === undefined) delete process.env.GEMINI_REQUEST_DEADLINE_MS;
+    else process.env.GEMINI_REQUEST_DEADLINE_MS = saved;
+  });
+
+  it('60 s by default', () => {
+    assert.equal(requestDeadlineMs(), 60_000);
+  });
+
+  it('GEMINI_REQUEST_DEADLINE_MS overrides it; 0 disables; invalid values are ignored', () => {
+    process.env.GEMINI_REQUEST_DEADLINE_MS = '45000';
+    assert.equal(requestDeadlineMs(), 45_000);
+    process.env.GEMINI_REQUEST_DEADLINE_MS = '0';
+    assert.equal(requestDeadlineMs(), null);
+    process.env.GEMINI_REQUEST_DEADLINE_MS = 'abc';
+    assert.equal(requestDeadlineMs(), 60_000);
+  });
+});
+
+describe('isLiteModel', () => {
+  it('matches the Lite family whatever the version or suffix', () => {
+    for (const id of [
+      'gemini-3.5-flash-lite',
+      'gemini-3.1-flash-lite',
+      'gemini-2.5-flash-lite-preview-06-17',
+      'gemini-2.0-flash-lite-001',
+      'gemini-flash-lite-latest',
+      'Gemini-3.1-Flash-Lite',
+    ]) {
+      assert.equal(isLiteModel(id), true, id);
+    }
+  });
+
+  it('does not match other models, or "lite" inside another word', () => {
+    for (const id of ['gemini-3-flash-preview', 'gemini-3.8-flash', 'gemini-3.8-live', 'gemini-satellite-1', 'gemini-litex', '', undefined]) {
+      assert.equal(isLiteModel(id), false, String(id));
+    }
+  });
+
+  it('both Lite rules use it: 25 s timeout and the parallel request', () => {
+    const saved = [process.env.GEMINI_FIRST_CHUNK_TIMEOUT_MS, process.env.GEMINI_HEDGE_DELAY_MS];
+    delete process.env.GEMINI_FIRST_CHUNK_TIMEOUT_MS;
+    delete process.env.GEMINI_HEDGE_DELAY_MS;
+    try {
+      assert.equal(firstChunkTimeoutMs('gemini-flash-lite-latest'), 25_000);
+      assert.equal(hedgeDelayMs('gemini-2.5-flash-lite-preview-06-17'), 10_000);
+    } finally {
+      if (saved[0] !== undefined) process.env.GEMINI_FIRST_CHUNK_TIMEOUT_MS = saved[0];
+      if (saved[1] !== undefined) process.env.GEMINI_HEDGE_DELAY_MS = saved[1];
+    }
+  });
+});
+
+describe('hedgeDelayMs', () => {
+  let saved;
+  beforeEach(() => { saved = process.env.GEMINI_HEDGE_DELAY_MS; delete process.env.GEMINI_HEDGE_DELAY_MS; });
+  afterEach(() => {
+    if (saved === undefined) delete process.env.GEMINI_HEDGE_DELAY_MS;
+    else process.env.GEMINI_HEDGE_DELAY_MS = saved;
+  });
+
+  it('10 s for Flash-Lite models', () => {
+    assert.equal(hedgeDelayMs('gemini-3.5-flash-lite'), 10_000);
+    assert.equal(hedgeDelayMs('gemini-3.1-flash-lite'), 10_000);
+  });
+
+  it('no parallel request (null) for other models', () => {
+    assert.equal(hedgeDelayMs('gemini-3-flash-preview'), null);
+    assert.equal(hedgeDelayMs('gemini-3.8-flash'), null);
+  });
+
+  it('GEMINI_HEDGE_DELAY_MS overrides every model; 0 disables; invalid values are ignored', () => {
+    process.env.GEMINI_HEDGE_DELAY_MS = '1500';
+    assert.equal(hedgeDelayMs('gemini-3.5-flash-lite'), 1500);
+    assert.equal(hedgeDelayMs('gemini-3-flash-preview'), 1500);
+    process.env.GEMINI_HEDGE_DELAY_MS = '0';
+    assert.equal(hedgeDelayMs('gemini-3.5-flash-lite'), null);
+    process.env.GEMINI_HEDGE_DELAY_MS = 'abc';
+    assert.equal(hedgeDelayMs('gemini-3.5-flash-lite'), 10_000);
+    assert.equal(hedgeDelayMs('gemini-3-flash-preview'), null);
   });
 });
 

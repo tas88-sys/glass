@@ -65,6 +65,44 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 - **README "How It Works" — corrected Windows audio capture.** The audio-sources table claimed system audio was *"macOS only"* and that *"on Windows/Linux only the user's mic is captured."* Windows in fact captures system audio via Electron native loopback (`src/index.js:175-182` + `listenCapture.js:515-566`); only **Linux** is mic-only. Table now lists all three platforms and notes AEC coverage.
 - **README "Currently Supporting" list** — added Anthropic Claude (LLM) and Deepgram (STT), which were already wired but undocumented; clarified which providers do LLM vs STT.
 
+### Gemini hedged requests, request deadline + Live Answer status (branch `feat/gemini-hedged-requests`)
+
+On 2026-10-06 between 15:27 and 15:47 BRT, 4 of 16 Ask requests were cancelled after 73–99 s. `gemini-3.5-flash-lite` stalled to the 25 s timeout on 6 of 16 attempts, and 503s took 4–38 s to arrive. The 60 s cooldown after each stall pushed later requests onto worse models. A fresh request to the same model, right after a stall, usually answered in 9–14 s.
+
+#### Added
+
+- **Hedged (parallel) request** in the streaming path (Ask, all modes, and Live Answer):
+  - **When:** a Flash-Lite request that has sent nothing after 10 s (`hedgeDelayMs`) gets a second request to the same model.
+  - **Who wins:** the first request to send a chunk is streamed, and the other is aborted. The consumer never sees the race.
+  - **Deadline:** the attempt's timeout still counts from its start, so the worst case per model is unchanged.
+  - **Errors:** an error before the hedge starts fails the attempt at once, as before.
+  - **Scope:** Flash-Lite only, because Flash's free tier allows 20 requests a day and thinking models are silent for long stretches by design.
+  - **Configuration:** `GEMINI_HEDGE_DELAY_MS` overrides the delay (`0` disables). `createStreamingLLM({ hedgeDelayMs })` takes `null` to disable.
+  - **Log:** attempt lines gain `hedge=<ms>` and `winner=first|hedge`, and the request line gains `hedges=N`.
+- **Live Answer status line:** the panel shows "Trying <model>…" while the provider fails over, and "No answer — <reason>" when a question gets no answer (all models failed, or an empty response). Previously the panel silently kept the previous answer.
+  - `summaryService` sends `status` payloads (`retrying` / `idle` / `error`) on `live-answer-update`.
+  - The new pure reducer `applyLiveAnswerStatus` (`liveAnswerHistory.js`) turns them into the line.
+  - `parseLiveAnswerSseLine` now returns the `_reset`'s `nextModel` and `reason`.
+- **60 s request deadline (streaming):**
+  - **Rule:** a request gives up when no answer has started within 60 s, counted across every attempt, hedge and the second round (`REQUEST_DEADLINE_MS`).
+  - **How:** each attempt's timeout is shortened to what is left, and the second round is skipped when less time is left than its wait.
+  - **Message:** `No answer within 60s (N attempts). Last: <model> — <reason>`.
+  - **Long answers:** once any chunk has arrived the deadline no longer applies, so a long answer is never cut.
+  - **Configuration:** `GEMINI_REQUEST_DEADLINE_MS` overrides it (`0` disables). `createStreamingLLM({ requestDeadlineMs })` takes `null` to disable.
+  - **Why:** with `…,gemini-3-flash-preview` last in the list, the first round alone could take 25 + 25 + 60 s.
+- 31 new `node:test` cases:
+  - 21 in `gemini.test.js`;
+  - 3 in `liveAnswer.test.js`, two of them on the real debounce callback with mock timers;
+  - 7 in `liveAnswerHistory.test.js`.
+
+#### Changed
+
+- **Cooldown after a first-chunk timeout:** 60 s → 10 s (`TIMEOUT_COOLDOWN_MS`). 503 and 429 keep `Retry-After` or 60 s.
+- **Cancelling a stream** aborts every in-flight request: both sides of a hedged attempt, and the wait between rounds.
+- **Lite detection** (`isLiteModel`) matches a `lite` segment anywhere in the ID, not only a `-flash-lite` ending. Suffixed IDs such as `gemini-2.5-flash-lite-preview-06-17` and `gemini-flash-lite-latest` now get the 25 s timeout and the parallel request.
+- **All-failed message** pluralizes `attempt` (`(1 attempt)`). The per-attempt timeout error is rounded (`no response after 12.35s`).
+- **`docs/diagrams/11-gemini-failover.mmd`** now shows the hedge, the timeout cooldown, the request deadline, and the second round from the previous branch.
+
 ### Gemini stream end + retry round (branch `fix/gemini-stream-end-and-retry`)
 
 From the 2026-10-06 log: one Ask answer arrived complete in 16 s but the connection stayed open ~7 s more, so the request was logged `answered_by=none … cancelled` when the window closed. Another request failed on all three models (one first-chunk timeout, two quick 503 "high demand") and had to be resent by hand.
