@@ -248,7 +248,7 @@ describe('createStreamingLLM failover (streaming)', () => {
       return makeStreamWithError([chunk('partial')], makeError(503, 'all fail'));
     };
 
-    const llm = createStreamingLLM({ apiKey: 'test', model: 'modelA,modelB' });
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'modelA,modelB', retryRoundDelayMs: 0 });
     const response = await llm.streamChat([{ role: 'user', content: 'hi' }]);
 
     // When controller.error() is called, reading from the stream should throw
@@ -475,7 +475,7 @@ describe('first-chunk timeout, cancellation and userMessage', () => {
 
     assert.ok(caught, 'stream must error');
     assert.equal(caught.code, 'FIRST_CHUNK_TIMEOUT');
-    assert.equal(caught.userMessage, 'All Gemini models failed (2 tried). Last: modelB — no response after 0.02s');
+    assert.equal(caught.userMessage, 'All Gemini models failed (2 attempts). Last: modelB — no response after 0.02s');
   });
 
   it('consumer cancels while waiting — in-flight request aborted, no failover, no stream error', async () => {
@@ -506,12 +506,12 @@ describe('first-chunk timeout, cancellation and userMessage', () => {
     mockGenerateContentStream = async () => makeStreamWithError([], makeError(503,
       '[GoogleGenerativeAI Error]: Error fetching from https://generativelanguage.googleapis.com/v1beta/models/m:streamGenerateContent?alt=sse: [503 Service Unavailable] The model is overloaded.'));
 
-    const llm = createStreamingLLM({ apiKey: 'test', model: 'modelA,modelB' });
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'modelA,modelB', retryRoundDelayMs: 0 });
     const reader = (await llm.streamChat([{ role: 'user', content: 'hi' }])).body.getReader();
     let caught;
     try { while (!(await reader.read()).done); } catch (e) { caught = e; }
 
-    assert.equal(caught.userMessage, 'All Gemini models failed (2 tried). Last: modelB — [503 Service Unavailable] The model is overloaded.');
+    assert.equal(caught.userMessage, 'All Gemini models failed (4 attempts, 2 rounds). Last: modelB — [503 Service Unavailable] The model is overloaded.');
   });
 
   it('fatal error — userMessage names the model and the reason', async () => {
@@ -523,6 +523,159 @@ describe('first-chunk timeout, cancellation and userMessage', () => {
     try { while (!(await reader.read()).done); } catch (e) { caught = e; }
 
     assert.equal(caught.userMessage, 'modelA — bad request');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// End of the answer (finishReason) and the automatic second round
+// ---------------------------------------------------------------------------
+
+/**
+ * Last chunk of an answer, as the API sends it: carries the finishReason.
+ */
+function finalChunk(text) {
+  return {
+    text: () => text,
+    candidates: [{ finishReason: 'STOP' }],
+    usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 3, thoughtsTokenCount: 0 },
+  };
+}
+
+/**
+ * Yields `chunks`, then keeps the connection open until the request's signal aborts.
+ */
+function makeLingeringStream(chunks, signal) {
+  const hang = makeHangingStream(signal).stream;
+  return {
+    stream: (async function*() {
+      for (const c of chunks) yield c;
+      yield* hang;
+    })(),
+  };
+}
+
+async function readUntilError(reader) {
+  try { while (!(await reader.read()).done); } catch (e) { return e; }
+  return undefined;
+}
+
+describe('stream end (finishReason) and retry round', () => {
+  let lines;
+  beforeEach(() => {
+    lines = [];
+    const capture = (...args) => { lines.push(args.map(String).join(' ')); };
+    mock.method(console, 'log', capture);
+    mock.method(console, 'warn', capture);
+    mock.method(console, 'error', capture);
+  });
+  afterEach(() => mock.restoreAll());
+
+  const find = (re) => lines.find(l => re.test(l));
+
+  it('finishReason ends the attempt at once — the lingering connection is closed', { timeout: 2000 }, async () => {
+    let seenSignal;
+    mockGenerateContentStream = async (modelId, request, opts) => {
+      seenSignal = opts.signal;
+      return makeLingeringStream([finalChunk('Bom dia!')], opts.signal);
+    };
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'modelA,modelB', firstChunkTimeoutMs: 10_000 });
+    const events = parseSseEvents(await collectStream(await llm.streamChat([{ role: 'user', content: 'hi' }])));
+
+    assert.equal(seenSignal.aborted, true, 'the connection left open must be closed');
+    assert.equal(events[0].choices[0].delta.content, 'Bom dia!');
+    assert.equal(events.find(e => e._final_model)._final_model, 'modelA');
+    assert.ok(events[events.length - 1]._done, '[DONE] must be the last event');
+    assert.match(find(/attempt 1\/2 stream model=modelA outcome=ok/) || '', /last=\d+ms total=\d+ms chunks=1 finish=STOP/);
+    assert.ok(find(/request stream answered_by=modelA attempts=1/));
+  });
+
+  it('consumer cancels after text arrived — reported as answered_by the model, cancelled', async () => {
+    mockGenerateContentStream = async (modelId, request, opts) => makeLingeringStream([chunk('Bom dia')], opts.signal);
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'modelA,modelB', firstChunkTimeoutMs: 10_000 });
+    const reader = (await llm.streamChat([{ role: 'user', content: 'hi' }])).body.getReader();
+    await reader.read(); // the first token
+    await reader.cancel('Window closed by user');
+    await sleep(10);
+
+    assert.match(find(/attempt 1\/2 stream model=modelA outcome=aborted/) || '', /chunks=1/);
+    assert.ok(find(/request stream answered_by=modelA attempts=1 total=\d+ms cancelled/));
+  });
+
+  it('every model fails with 503 — waits, emits _reset(reason=retry), and the second round answers', async () => {
+    const calls = [];
+    mockGenerateContentStream = async (modelId) => {
+      calls.push(modelId);
+      if (calls.length <= 2) return makeStreamWithError([], makeError(503, 'overloaded'));
+      return makeStream(chunk('second round answer'));
+    };
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'modelA,modelB', retryRoundDelayMs: 20 });
+    const events = parseSseEvents(await collectStream(await llm.streamChat([{ role: 'user', content: 'hi' }])));
+
+    assert.deepEqual(calls, ['modelA', 'modelB', 'modelA']);
+    const retry = events.find(e => e._reset && e.reason === 'retry');
+    assert.ok(retry, '_reset with reason=retry must announce the second round');
+    assert.equal(retry.next_model, 'modelA');
+    assert.equal(events.find(e => e._final_model)._final_model, 'modelA');
+    assert.ok(find(/all models failed — retry round 2 in 20ms: modelA,modelB/));
+    assert.ok(find(/attempt 3\/4 stream model=modelA outcome=ok/));
+    assert.ok(find(/request stream answered_by=modelA attempts=3/));
+  });
+
+  it('second round only repeats models that failed fast — not 429 or timeouts', async () => {
+    const calls = [];
+    mockGenerateContentStream = async (modelId, request, opts) => {
+      calls.push(modelId);
+      if (modelId === 'modelA') return makeStreamWithError([], makeError(429, 'quota'));
+      if (modelId === 'modelB') return makeHangingStream(opts.signal);
+      return makeStreamWithError([], makeError(503, 'overloaded'));
+    };
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'modelA,modelB,modelC', firstChunkTimeoutMs: 20, retryRoundDelayMs: 0 });
+    const caught = await readUntilError((await llm.streamChat([{ role: 'user', content: 'hi' }])).body.getReader());
+
+    assert.deepEqual(calls, ['modelA', 'modelB', 'modelC', 'modelC']);
+    assert.equal(caught.userMessage, 'All Gemini models failed (4 attempts, 2 rounds). Last: modelC — overloaded');
+  });
+
+  it('no second round when every model hit a quota limit (429)', async () => {
+    const calls = [];
+    mockGenerateContentStream = async (modelId) => {
+      calls.push(modelId);
+      return makeStreamWithError([], makeError(429, 'quota'));
+    };
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'modelA,modelB', retryRoundDelayMs: 0 });
+    const caught = await readUntilError((await llm.streamChat([{ role: 'user', content: 'hi' }])).body.getReader());
+
+    assert.deepEqual(calls, ['modelA', 'modelB']);
+    assert.equal(caught.userMessage, 'All Gemini models failed (2 attempts). Last: modelB — quota');
+    assert.ok(!find(/retry round/));
+  });
+
+  it('consumer cancels during the wait between rounds — no new attempt, no stream error', async () => {
+    let calls = 0;
+    mockGenerateContentStream = async () => {
+      calls++;
+      return makeStreamWithError([], makeError(503, 'overloaded'));
+    };
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'modelA,modelB', retryRoundDelayMs: 10_000 });
+    const reader = (await llm.streamChat([{ role: 'user', content: 'hi' }])).body.getReader();
+    const decoder = new TextDecoder();
+    for (;;) {
+      const { value, done } = await reader.read();
+      assert.ok(!done, 'the stream must still be open while waiting');
+      if (decoder.decode(value).includes('"reason":"retry"')) break;
+    }
+    await reader.cancel('Window closed by user');
+    await sleep(20);
+
+    assert.equal(calls, 2, 'the second round must not start');
+    assert.ok(find(/request stream answered_by=none attempts=2 total=\d+ms cancelled/));
+    assert.ok(!find(/All models failed/));
   });
 });
 

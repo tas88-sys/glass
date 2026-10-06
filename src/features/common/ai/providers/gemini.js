@@ -76,10 +76,10 @@ async function createSTT({ apiKey, language = "en-US", callbacks = {}, model = '
  * @param {object} a
  * @param {'stream'|'once'} a.mode
  * @param {number} a.attempt   - 1-based attempt index within the request
- * @param {number} a.of        - size of the model list for the request
+ * @param {number} a.of        - planned attempts: size of the model list (+ the second round's models)
  * @param {string} a.modelId
  * @param {string} a.outcome   - 'ok' | 'aborted' | 'timeout' | classifyError() kind
- * @param {object} a.stats     - { startedAt, firstChunkAt?, usage? }
+ * @param {object} a.stats     - { startedAt, firstChunkAt?, lastChunkAt?, chunks?, finishReason?, usage? }
  * @param {unknown} [a.err]
  */
 function logAttempt({ mode, attempt, of, modelId, outcome, stats, err }) {
@@ -87,7 +87,11 @@ function logAttempt({ mode, attempt, of, modelId, outcome, stats, err }) {
   const status = err?.status ?? err?.statusCode ?? err?.httpStatus;
   if (status != null) parts.push(`status=${status}`);
   if (stats.firstChunkAt != null) parts.push(`ttft=${stats.firstChunkAt - stats.startedAt}ms`);
+  // last vs total: how long the connection stayed open after the last chunk.
+  if (stats.lastChunkAt != null) parts.push(`last=${stats.lastChunkAt - stats.startedAt}ms`);
   parts.push(`total=${Date.now() - stats.startedAt}ms`);
+  if (stats.chunks) parts.push(`chunks=${stats.chunks}`);
+  if (stats.finishReason) parts.push(`finish=${stats.finishReason}`);
   const u = stats.usage;
   if (u) parts.push(`tokens=in:${u.promptTokenCount ?? '-'},out:${u.candidatesTokenCount ?? '-'},thoughts:${u.thoughtsTokenCount ?? 0}`);
   if (err) parts.push(`error=${JSON.stringify(shortErrorMessage(err))}`);
@@ -123,6 +127,39 @@ function firstChunkTimeoutMs(modelId) {
   const fromEnv = Number(process.env.GEMINI_FIRST_CHUNK_TIMEOUT_MS);
   if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv;
   return /-flash-lite$/.test(modelId) ? FIRST_CHUNK_TIMEOUT_LITE_MS : FIRST_CHUNK_TIMEOUT_DEFAULT_MS;
+}
+
+// When every model in the list fails, the streaming path waits and goes through
+// the models that failed fast once more (503 "high demand" spikes are usually brief).
+const MAX_ROUNDS = 2;
+const RETRY_ROUND_DELAY_MS = 3_000;
+
+/**
+ * Whether a failed attempt is worth repeating in the next round: transient,
+ * fast to fail, and not a quota limit. Timeouts cost 25-60 s each and 429s
+ * would only burn quota again a few seconds later.
+ * @param {unknown} err
+ * @param {object} stats - the attempt's stats (timedOut)
+ * @returns {boolean}
+ */
+function retryableNextRound(err, stats) {
+  if (stats.timedOut) return false;
+  const status = err?.status ?? err?.statusCode ?? err?.httpStatus;
+  return status !== 429;
+}
+
+/**
+ * Resolve after `ms`, or as soon as `signal` aborts.
+ * @param {number} ms
+ * @param {AbortSignal} signal
+ * @returns {Promise<void>}
+ */
+function waitOrAbort(ms, signal) {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve();
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
+  });
 }
 
 /**
@@ -316,14 +353,19 @@ function createLLM({ apiKey, model = "gemini-3-flash-preview", temperature = 0.7
  * On a transient error (429/503/etc.) during streaming, or when no chunk arrives
  * within the first-chunk timeout, emits a _reset sentinel to the consumer and
  * retries with the next model in the CSV list.
+ * When every model fails, the ones that failed fast with a transient error
+ * (retryableNextRound) get one more round after a short wait, announced with
+ * a _reset whose reason is 'retry'.
  * On a fatal error or when all models are exhausted, calls controller.error()
  * with an error carrying a short `userMessage` for display.
- * Cancelling the returned stream aborts the in-flight request and stops failover.
+ * Cancelling the returned stream aborts the in-flight request (or the wait
+ * between rounds) and stops failover.
  *
  * @param {object} opts
  * @param {number} [opts.firstChunkTimeoutMs] - overrides firstChunkTimeoutMs(modelId) for every model
+ * @param {number} [opts.retryRoundDelayMs] - wait before the second round (default RETRY_ROUND_DELAY_MS)
  */
-function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperature = 0.7, maxTokens = 65536, firstChunkTimeoutMs: firstChunkTimeoutOverride, ...config }) {
+function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperature = 0.7, maxTokens = 65536, firstChunkTimeoutMs: firstChunkTimeoutOverride, retryRoundDelayMs = RETRY_ROUND_DELAY_MS, ...config }) {
   const client = new GoogleGenerativeAI(apiKey)
 
   return {
@@ -358,7 +400,8 @@ function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperat
        * @param {string} opts.modelId
        * @param {Array} opts.messages - nonSystemMessages
        * @param {function(Uint8Array): boolean} opts.safeEnqueue
-       * @param {object} opts.stats - filled with firstChunkAt / usage / aborted / timedOut for logging
+       * @param {object} opts.stats - filled with firstChunkAt / lastChunkAt / chunks / finishReason /
+       *   usage / aborted / timedOut for logging
        * @param {AbortController} opts.abortController - aborts this attempt's HTTP request
        */
       async function streamOneAttempt({ modelId, messages: msgs, safeEnqueue, stats, abortController }) {
@@ -423,12 +466,16 @@ function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperat
           result.response?.catch?.(() => {})
 
           for await (const chunk of result.stream) {
+            stats.lastChunkAt = Date.now()
+            stats.chunks++
             if (stats.firstChunkAt == null) {
-              stats.firstChunkAt = Date.now()
+              stats.firstChunkAt = stats.lastChunkAt
               clearTimeout(timer)
             }
             // The last chunk carries the request's usageMetadata (incl. thoughtsTokenCount).
             if (chunk.usageMetadata) stats.usage = chunk.usageMetadata
+            const finishReason = chunk.candidates?.[0]?.finishReason
+            if (finishReason) stats.finishReason = finishReason
             const chunkText = chunk.text() || ""
             const data = JSON.stringify({
               choices: [{ delta: { content: chunkText } }],
@@ -436,6 +483,12 @@ function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperat
             if (!safeEnqueue(new TextEncoder().encode(`data: ${data}\n\n`))) {
               stats.aborted = true
               return;
+            }
+            // The answer is complete. The server can keep the connection open for
+            // seconds after this chunk; stop reading and close it instead of waiting.
+            if (finishReason) {
+              abortController.abort()
+              break
             }
           }
         } finally {
@@ -466,18 +519,36 @@ function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperat
 
           let remaining = rotator.parseModelList(modelCsv);
           if (remaining.length === 0) remaining = [modelCsv];
-          const listSize = remaining.length;
+          // Planned attempts for the "attempt i/n" log; grows when a second round starts.
+          let plannedAttempts = remaining.length;
           let lastErr;
           let succeededModel = null;
           let attempts = 0;
+          let round = 1;
+          let retryable = []; // models of this round worth another try (retryableNextRound)
           const requestStartedAt = Date.now();
 
           let lastModel = null;
 
-          while (remaining.length > 0 && !cancelled) {
+          while (!cancelled) {
+            if (remaining.length === 0) {
+              if (round >= MAX_ROUNDS || retryable.length === 0) break;
+              round++;
+              remaining = retryable;
+              retryable = [];
+              plannedAttempts += remaining.length;
+              console.warn(`[Gemini Provider] all models failed — retry round ${round} in ${retryRoundDelayMs}ms: ${remaining.join(',')}`);
+              safeEnqueue(encode({ _reset: true, next_model: remaining[0], reason: 'retry' }));
+              const waitAbort = new AbortController();
+              currentAbort = waitAbort;
+              await waitOrAbort(retryRoundDelayMs, waitAbort.signal);
+              currentAbort = null;
+              continue;
+            }
+
             const modelId = rotator.pickModel(remaining);
             const timeoutMs = firstChunkTimeoutOverride ?? firstChunkTimeoutMs(modelId);
-            const stats = { startedAt: Date.now(), firstChunkAt: null, usage: null, aborted: false, timedOut: false, timeoutMs };
+            const stats = { startedAt: Date.now(), firstChunkAt: null, lastChunkAt: null, chunks: 0, finishReason: null, usage: null, aborted: false, timedOut: false, timeoutMs };
             const abortController = new AbortController();
             currentAbort = abortController;
             lastModel = modelId;
@@ -485,13 +556,14 @@ function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperat
             try {
               await streamOneAttempt({ modelId, messages: nonSystemMessages, safeEnqueue, stats, abortController });
               if (stats.aborted || cancelled) {
-                // The consumer stopped reading: the model was responsive, but nobody got the answer.
-                logAttempt({ mode: 'stream', attempt: attempts, of: listSize, modelId, outcome: 'aborted', stats });
+                // The consumer stopped reading. If text had arrived the model was answering,
+                // so it is reported as answered_by (with "cancelled") and kept healthy.
+                logAttempt({ mode: 'stream', attempt: attempts, of: plannedAttempts, modelId, outcome: 'aborted', stats });
                 if (stats.firstChunkAt != null) rotator.markSucceeded(modelId);
-                logRequest({ mode: 'stream', answeredBy: null, attempts, startedAt: requestStartedAt, cancelled: true });
+                logRequest({ mode: 'stream', answeredBy: stats.firstChunkAt != null ? modelId : null, attempts, startedAt: requestStartedAt, cancelled: true });
                 return;
               }
-              logAttempt({ mode: 'stream', attempt: attempts, of: listSize, modelId, outcome: 'ok', stats });
+              logAttempt({ mode: 'stream', attempt: attempts, of: plannedAttempts, modelId, outcome: 'ok', stats });
               succeededModel = modelId;
               rotator.markSucceeded(modelId);
               break;
@@ -499,8 +571,9 @@ function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperat
               if (cancelled) {
                 // AbortError from our own cancel(): classifyError would call it transient
                 // and fail over, but the consumer is gone.
-                logAttempt({ mode: 'stream', attempt: attempts, of: listSize, modelId, outcome: 'aborted', stats });
-                logRequest({ mode: 'stream', answeredBy: null, attempts, startedAt: requestStartedAt, cancelled: true });
+                logAttempt({ mode: 'stream', attempt: attempts, of: plannedAttempts, modelId, outcome: 'aborted', stats });
+                if (stats.firstChunkAt != null) rotator.markSucceeded(modelId);
+                logRequest({ mode: 'stream', answeredBy: stats.firstChunkAt != null ? modelId : null, attempts, startedAt: requestStartedAt, cancelled: true });
                 return;
               }
               const err = stats.timedOut
@@ -508,7 +581,7 @@ function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperat
                 : rawErr;
               lastErr = err;
               const kind = stats.timedOut ? 'transient' : rotator.classifyError(err);
-              logAttempt({ mode: 'stream', attempt: attempts, of: listSize, modelId, outcome: stats.timedOut ? 'timeout' : kind, stats, err });
+              logAttempt({ mode: 'stream', attempt: attempts, of: plannedAttempts, modelId, outcome: stats.timedOut ? 'timeout' : kind, stats, err });
               if (kind !== 'transient') {
                 console.error("[Gemini Provider] Fatal streaming error:", err)
                 logRequest({ mode: 'stream', answeredBy: null, attempts, startedAt: requestStartedAt });
@@ -517,6 +590,7 @@ function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperat
                 return;
               }
               rotator.markFailed(modelId, rotator.parseRetryAfter(err));
+              if (retryableNextRound(err, stats)) retryable.push(modelId);
               remaining = remaining.filter(m => m !== modelId);
               if (remaining.length > 0) {
                 safeEnqueue(encode({ _reset: true, next_model: remaining[0], reason: stats.timedOut ? 'timeout' : 'transient' }));
@@ -534,7 +608,8 @@ function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperat
           if (!succeededModel) {
             console.error("[Gemini Provider] All models failed:", lastErr)
             if (lastErr && typeof lastErr === 'object') {
-              lastErr.userMessage = `All Gemini models failed (${attempts} tried). Last: ${lastModel} — ${shortErrorMessage(lastErr)}`;
+              const rounds = round > 1 ? `, ${round} rounds` : '';
+              lastErr.userMessage = `All Gemini models failed (${attempts} attempts${rounds}). Last: ${lastModel} — ${shortErrorMessage(lastErr)}`;
             }
             try { controller.error(lastErr); } catch {}
             return;
