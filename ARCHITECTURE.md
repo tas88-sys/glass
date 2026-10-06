@@ -572,7 +572,7 @@ flowchart TB
 |---|---|---|---|
 | OpenAI | ✅ `gpt-4.1` | ✅ `gpt-4o-mini-transcribe` | Realtime STT; 60 s keep-alive |
 | OpenAI (Glass) | ✅ | ✅ | Pickle-hosted key via Portkey |
-| Gemini | ✅ `gemini-2.5-flash` | ✅ `gemini-live-2.5-flash-preview` | LLM supports CSV failover; STT does not |
+| Gemini | ✅ `gemini-3-flash-preview` | ✅ `gemini-3.8-live` | LLM supports CSV failover; STT does not |
 | Anthropic | ✅ `claude-3-5-sonnet` | ❌ | LLM only |
 | Deepgram | ❌ | ✅ `nova-3` | STT only (pinned to nova-3) |
 | Whisper (local) | ❌ | ✅ tiny/base/small/medium | Main process only |
@@ -585,7 +585,7 @@ flowchart TB
 A headline feature of this fork (full design in
 [`specs/2026-05-26-gemini-failover-design/`](specs/2026-05-26-gemini-failover-design/)). The
 Gemini LLM model field accepts a **comma-separated priority list** (e.g.
-`gemini-3-pro,gemini-2.5-flash,gemini-2.5-flash-lite`). On a *transient* error the current model
+`gemini-3-flash-preview,gemini-3.5-flash-lite,gemini-3.1-flash-lite`). On a *transient* error the current model
 is cooled down and the next is tried; the model that actually answered is shown in a per-response
 footer (`answered by: <model>`, with `(fallback)` if a retry occurred).
 
@@ -618,8 +618,14 @@ flowchart TB
 - Cooldown honors `Retry-After` / `retryDelay`, defaults to 60 s, clamped to `[5 s, 300 s]`
   (`parseRetryAfter`, `:149-192`; constants `:16-18`).
 - **Streaming** emits a `_reset` sentinel so the Ask consumer discards the partial answer before
-  the next model streams in, then a `_final_model` sentinel (`gemini.js:335-382`); the Ask SSE
+  the next model streams in, then a `_final_model` sentinel (`gemini.js:398-455`); the Ask SSE
   parser handles both (`askService.js:425-439`).
+- **Diagnostics:** every attempt logs one line to the main-process console (`logAttempt`,
+  `gemini.js:85-102`) with model, outcome (`ok` / `aborted` / `transient` / `fatal-*`), HTTP status,
+  time to first chunk, total time, token usage (`thoughts` = thinking tokens) and the server's
+  error reason; each request ends with a summary line (`logRequest`, `:107-110`) whose `total`
+  includes the time spent on failed attempts. Grep the `npm start` terminal for `[Gemini Provider]`:
+  `attempt 1/5 stream model=gemini-3.8-flash outcome=transient status=503 total=4210ms error="..."`.
 - **STT deliberately does NOT fail over** — `createSTT` takes only the first model in the list
   (`gemini.js:38-40`), because a persistent live STT session has no clean rotation semantics
   (locked decision #3 in the spec).

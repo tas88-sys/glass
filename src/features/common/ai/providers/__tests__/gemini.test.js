@@ -303,3 +303,90 @@ describe('createStreamingLLM failover (streaming)', () => {
     assert.equal(callCount, 1, 'Second model must not be called on fatal-request error');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Per-attempt diagnostics logging
+// ---------------------------------------------------------------------------
+describe('attempt logging', () => {
+  let lines;
+  beforeEach(() => {
+    lines = [];
+    const capture = (...args) => { lines.push(args.map(String).join(' ')); };
+    mock.method(console, 'log', capture);
+    mock.method(console, 'warn', capture);
+    mock.method(console, 'error', capture);
+  });
+  afterEach(() => mock.restoreAll());
+
+  const find = (re) => lines.find(l => re.test(l));
+
+  it('streaming: logs the failed attempt, the answering attempt with ttft/tokens, and a request summary', async () => {
+    mockGenerateContentStream = async (modelId) => {
+      if (modelId === 'modelA') return makeStreamWithError([], makeError(503, 'service unavailable'));
+      const last = chunk('done');
+      last.usageMetadata = { promptTokenCount: 10, candidatesTokenCount: 5, thoughtsTokenCount: 7 };
+      return makeStream(chunk('partial '), last);
+    };
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'modelA,modelB' });
+    await collectStream(await llm.streamChat([{ role: 'user', content: 'hi' }]));
+
+    const failed = find(/attempt 1\/2 stream model=modelA outcome=transient/);
+    assert.ok(failed, `missing failed-attempt line in:\n${lines.join('\n')}`);
+    assert.match(failed, /status=503/);
+    assert.match(failed, /total=\d+ms/);
+    assert.match(failed, /error="service unavailable"/);
+
+    const ok = find(/attempt 2\/2 stream model=modelB outcome=ok/);
+    assert.ok(ok, `missing ok-attempt line in:\n${lines.join('\n')}`);
+    assert.match(ok, /ttft=\d+ms/);
+    assert.match(ok, /tokens=in:10,out:5,thoughts:7/);
+
+    assert.ok(find(/request stream answered_by=modelB attempts=2 total=\d+ms/));
+  });
+
+  it('streaming: strips the SDK prefix and request URL from the error message', async () => {
+    mockGenerateContentStream = async (modelId) => {
+      if (modelId === 'modelA') {
+        return makeStreamWithError([], makeError(503,
+          '[GoogleGenerativeAI Error]: Error fetching from https://generativelanguage.googleapis.com/v1beta/models/modelA:streamGenerateContent?alt=sse: [503 Service Unavailable] The model is overloaded.'));
+      }
+      return makeStream(chunk('ok'));
+    };
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'modelA,modelB' });
+    await collectStream(await llm.streamChat([{ role: 'user', content: 'hi' }]));
+
+    const failed = find(/model=modelA outcome=transient/);
+    assert.ok(failed);
+    assert.match(failed, /error="\[503 Service Unavailable\] The model is overloaded\."/);
+    assert.doesNotMatch(failed, /googleapis\.com/);
+  });
+
+  it('streaming: fatal error logs outcome=fatal-request and answered_by=none', async () => {
+    mockGenerateContentStream = async () => makeStreamWithError([], makeError(400, 'bad request'));
+
+    const llm = createStreamingLLM({ apiKey: 'test', model: 'modelA,modelB' });
+    const reader = (await llm.streamChat([{ role: 'user', content: 'hi' }])).body.getReader();
+    try { while (!(await reader.read()).done); } catch {}
+
+    assert.ok(find(/attempt 1\/2 stream model=modelA outcome=fatal-request status=400/));
+    assert.ok(find(/request stream answered_by=none attempts=1/));
+  });
+
+  it('non-streaming: logs each attempt and the request summary', async () => {
+    mockGenerateContent = async (modelId) => {
+      if (modelId === 'modelA') throw makeError(429, 'rate limited');
+      return { response: { text: () => 'ok', usageMetadata: { promptTokenCount: 3, candidatesTokenCount: 2 } } };
+    };
+
+    const llm = createLLM({ apiKey: 'test', model: 'modelA,modelB' });
+    await llm.generateContent(['hi']);
+
+    assert.ok(find(/attempt 1\/2 once model=modelA outcome=transient status=429/));
+    const ok = find(/attempt 2\/2 once model=modelB outcome=ok/);
+    assert.ok(ok);
+    assert.match(ok, /tokens=in:3,out:2,thoughts:0/);
+    assert.ok(find(/request once answered_by=modelB attempts=2/));
+  });
+});

@@ -65,6 +65,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 - **README "How It Works" — corrected Windows audio capture.** The audio-sources table claimed system audio was *"macOS only"* and that *"on Windows/Linux only the user's mic is captured."* Windows in fact captures system audio via Electron native loopback (`src/index.js:175-182` + `listenCapture.js:515-566`); only **Linux** is mic-only. Table now lists all three platforms and notes AEC coverage.
 - **README "Currently Supporting" list** — added Anthropic Claude (LLM) and Deepgram (STT), which were already wired but undocumented; clarified which providers do LLM vs STT.
 
+### Gemini model defaults refresh
+
+#### Added
+
+- **Per-attempt Gemini diagnostics log** — `gemini.js` now logs one `[Gemini Provider] attempt i/n` line per model attempt (streaming and non-streaming) with model, outcome (`ok`/`aborted`/`transient`/`fatal-request`/`fatal-auth`), HTTP status, time to first chunk, total time, token usage incl. `thoughtsTokenCount`, and the server's error reason (SDK prefix and request URL stripped), plus a `request … answered_by=… attempts=… total=…ms` summary. Previously transient failures were silent, so the latency cost of failing over through overloaded (503) models was invisible. 4 new `node:test` cases in `gemini.test.js`.
+
+#### Changed
+
+- **Gemini LLM default `gemini-2.5-flash` → `gemini-3-flash-preview`** (`gemini.js` `createLLM`/`createStreamingLLM`, `factory.js` preset). Since 2026-09-18 Google limits 2.5-model access to accounts that already used them. Google recommends 3.8 Flash for new projects, but on a free-tier project every `gemini-3.5/3.6/3.7/3.8-flash` attempt over 7 days returned 503, while `gemini-3-flash-preview` answered. It is a preview (Google suggests migrating to `gemini-3.6-flash`), so revisit once the newer Flash models stop returning 503.
+- **Gemini STT default `gemini-live-2.5-flash-preview` → `gemini-3.8-live`** (`gemini.js` `createSTT` default + empty-CSV fallback, `factory.js` preset). The old preview was shut down 2025-12-09; `gemini-3.8-live` is Google's listed replacement.
+- **Settings help text** — failover example now `gemini-3-flash-preview,gemini-3.5-flash-lite,gemini-3.1-flash-lite`, the models that actually answered on the free tier (was `gemini-3-pro,…`, an ID that never existed); LLM/STT placeholders now `gemini-3-flash-preview` / `gemini-3.8-live`. `ARCHITECTURE.md`, `docs/AUDIO_AND_STT.md` and diagrams 10/11 updated to match.
+- Saved model selections are untouched: a previously stored ID like `gemini-2.5-flash` still resolves to Gemini and shows as `(custom)`.
+
 ### Gemini Failover (branch `feat/gemini-failover`)
 
 #### Added
