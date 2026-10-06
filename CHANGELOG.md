@@ -65,6 +65,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 - **README "How It Works" — corrected Windows audio capture.** The audio-sources table claimed system audio was *"macOS only"* and that *"on Windows/Linux only the user's mic is captured."* Windows in fact captures system audio via Electron native loopback (`src/index.js:175-182` + `listenCapture.js:515-566`); only **Linux** is mic-only. Table now lists all three platforms and notes AEC coverage.
 - **README "Currently Supporting" list** — added Anthropic Claude (LLM) and Deepgram (STT), which were already wired but undocumented; clarified which providers do LLM vs STT.
 
+### Ask stalled-response fixes (branch `fix/ask-stalled-responses`)
+
+Two Ask requests on 2026-10-06 showed nothing and had to be resent: the log shows `gemini-3.5-flash-lite` accepted them and sent its first chunk only after ~96 s (`outcome=aborted ttft=95741ms`), while the window showed an empty "AI Response". No 503 involved.
+
+#### Added
+
+- **First-chunk timeout per Gemini attempt** — `gemini.js` aborts an attempt that sends nothing within `firstChunkTimeoutMs(modelId)` (25 s for `*-flash-lite`, 60 s for models that think first; `GEMINI_FIRST_CHUNK_TIMEOUT_MS` overrides) and fails over to the next model (`_reset` with `reason: 'timeout'`, log `outcome=timeout`). The request's `AbortSignal` is passed to `generateContentStream`. Only the first chunk is timed.
+- **`askStreamState.js`** — pure reducer `applyAskSseEvent` for the Ask SSE stream (no Electron), now used by `askService._processStream`; `askService-sse.test.js` tests it directly instead of a mirrored copy of the loop.
+- **"Thinking... trying <model>"** — the Ask header shows which model is being tried after a failover (`state.retryingWith`).
+- 14 new `node:test` cases (9 in `gemini.test.js`, 5 in `askService-sse.test.js`).
+
+#### Fixed
+
+- **Ask showed an empty "AI Response" while waiting** — `isLoading` was cleared as soon as the stream object was created; it now stays on (loading dots + "Thinking...") until the first token, and again after a `_reset`.
+- **Closing the Ask window or resending did not stop the Gemini request** — the provider stream now has a `cancel()` that aborts the in-flight HTTP request and stops failover; previously the abandoned request kept running (and consuming quota) in the background. Live Answer now cancels its reader as soon as a newer question aborts it, instead of waiting for the next chunk.
+- **Errors were never shown** — `ask-response-stream-error` had no listener. `askService` now sets `state.errorMessage` (Gemini errors carry a short `userMessage`, e.g. `All Gemini models failed (3 tried). Last: … — [503 Service Unavailable] The model is overloaded.`), plus `The model returned an empty response.` when a stream ends with no text; the Ask window renders it (as text, not HTML).
+- **A replaced request could overwrite the new request's state** — `_processStream` of an aborted request ran its `finally` after the new request had started and reset `isLoading`/`currentResponse`; it now only updates state while its `AbortController` is still the current one.
+- Unhandled rejection of the SDK's aggregated `response` promise when a stream errors.
+
 ### Gemini model defaults refresh
 
 #### Added

@@ -16,6 +16,8 @@ export class AskView extends LitElement {
         isStreaming: { type: Boolean },
         responseModel: { type: String },
         responseHadFallback: { type: Boolean },
+        retryingWith: { type: String },
+        errorMessage: { type: String },
     };
 
     static styles = css`
@@ -623,6 +625,14 @@ export class AskView extends LitElement {
             font-size: 14px;
         }
 
+        .error-state {
+            padding: 12px 4px;
+            color: rgba(255, 180, 170, 0.9);
+            font-size: 13px;
+            line-height: 1.5;
+            word-break: break-word;
+        }
+
         .btn-gap {
             display: flex;
             align-items: center;
@@ -747,6 +757,8 @@ export class AskView extends LitElement {
         this.isStreaming = false;
         this.responseModel = '';
         this.responseHadFallback = false;
+        this.retryingWith = '';
+        this.errorMessage = '';
 
         this.marked = null;
         this.hljs = null;
@@ -819,6 +831,8 @@ export class AskView extends LitElement {
                 this.isStreaming     = newState.isStreaming;
                 this.responseModel   = newState.responseModel || '';
                 this.responseHadFallback = newState.responseHadFallback || false;
+                this.retryingWith    = newState.retryingWith || '';
+                this.errorMessage    = newState.errorMessage || '';
 
                 const wasHidden = !this.showTextInput;
                 this.showTextInput = newState.showTextInput;
@@ -946,6 +960,8 @@ export class AskView extends LitElement {
         this.currentQuestion = '';
         this.isLoading = false;
         this.isStreaming = false;
+        this.retryingWith = '';
+        this.errorMessage = '';
         this.headerText = 'AI Response';
         this.showTextInput = true;
         this.lastProcessedLength = 0;
@@ -1034,6 +1050,18 @@ export class AskView extends LitElement {
             return;
         }
         
+        // No answer and the request failed (all models failed, fatal error, empty
+        // response): say so instead of leaving an empty "...". textContent, not
+        // innerHTML: the message comes from the server.
+        if (!this.currentResponse && this.errorMessage) {
+            const errorEl = document.createElement('div');
+            errorEl.className = 'error-state';
+            errorEl.textContent = `${this.errorMessage} Send again to retry.`;
+            responseContainer.replaceChildren(errorEl);
+            this.resetStreamingParser();
+            return;
+        }
+
         // If there is no response, show empty state
         if (!this.currentResponse) {
             responseContainer.innerHTML = `<div class="empty-state">...</div>`;
@@ -1330,11 +1358,11 @@ export class AskView extends LitElement {
         super.updated(changedProperties);
     
         // ✨ isLoading 또는 currentResponse가 변경될 때마다 뷰를 다시 그립니다.
-        if (changedProperties.has('isLoading') || changedProperties.has('currentResponse')) {
+        if (changedProperties.has('isLoading') || changedProperties.has('currentResponse') || changedProperties.has('errorMessage')) {
             this.renderContent();
         }
-    
-        if (changedProperties.has('showTextInput') || changedProperties.has('isLoading') || changedProperties.has('currentResponse')) {
+
+        if (changedProperties.has('showTextInput') || changedProperties.has('isLoading') || changedProperties.has('currentResponse') || changedProperties.has('errorMessage')) {
             this.adjustWindowHeightThrottled();
         }
     
@@ -1357,8 +1385,10 @@ export class AskView extends LitElement {
 
 
     render() {
-        const hasResponse = this.isLoading || this.currentResponse || this.isStreaming;
-        const headerText = this.isLoading ? 'Thinking...' : 'AI Response';
+        const hasResponse = this.isLoading || this.currentResponse || this.isStreaming || this.errorMessage;
+        const headerText = this.isLoading
+            ? (this.retryingWith ? `Thinking... trying ${this.retryingWith}` : 'Thinking...')
+            : (this.errorMessage && !this.currentResponse ? 'No response' : 'AI Response');
 
         return html`
             <div class="ask-container">

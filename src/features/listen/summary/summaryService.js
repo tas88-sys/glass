@@ -360,6 +360,9 @@ class SummaryService {
 
         const response = await llm.streamChat(messages);
         const reader = response.body.getReader();
+        // Cancel right away on abort (a newer question replaced this one) instead of
+        // waiting for the next chunk; for Gemini this also aborts the HTTP request.
+        signal?.addEventListener('abort', () => reader.cancel().catch(() => {}), { once: true });
         const decoder = new TextDecoder();
 
         let fullResponse = '';

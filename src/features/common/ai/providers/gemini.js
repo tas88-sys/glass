@@ -78,7 +78,7 @@ async function createSTT({ apiKey, language = "en-US", callbacks = {}, model = '
  * @param {number} a.attempt   - 1-based attempt index within the request
  * @param {number} a.of        - size of the model list for the request
  * @param {string} a.modelId
- * @param {string} a.outcome   - 'ok' | 'aborted' | classifyError() kind
+ * @param {string} a.outcome   - 'ok' | 'aborted' | 'timeout' | classifyError() kind
  * @param {object} a.stats     - { startedAt, firstChunkAt?, usage? }
  * @param {unknown} [a.err]
  */
@@ -90,23 +90,47 @@ function logAttempt({ mode, attempt, of, modelId, outcome, stats, err }) {
   parts.push(`total=${Date.now() - stats.startedAt}ms`);
   const u = stats.usage;
   if (u) parts.push(`tokens=in:${u.promptTokenCount ?? '-'},out:${u.candidatesTokenCount ?? '-'},thoughts:${u.thoughtsTokenCount ?? 0}`);
-  if (err) {
-    // Drop the SDK prefix and request URL; keep the server's reason ("The model is overloaded...").
-    const msg = String(err.message ?? err)
-      .replace(/^\[GoogleGenerativeAI Error\]:\s*/, '')
-      .replace(/Error fetching from \S+:\s*/, '')
-      .slice(0, 160);
-    parts.push(`error=${JSON.stringify(msg)}`);
-  }
+  if (err) parts.push(`error=${JSON.stringify(shortErrorMessage(err))}`);
   (outcome === 'ok' ? console.log : console.warn)(parts.join(' '));
+}
+
+/**
+ * Drop the SDK prefix and request URL from an error message; keep the
+ * server's reason ("[503 Service Unavailable] The model is overloaded...").
+ * @param {unknown} err
+ * @returns {string}
+ */
+function shortErrorMessage(err) {
+  return String(err?.message ?? err)
+    .replace(/^\[GoogleGenerativeAI Error\]:\s*/, '')
+    .replace(/Error fetching from \S+:\s*/, '')
+    .slice(0, 160);
+}
+
+// Time allowed until the first streamed chunk before an attempt is abandoned
+// and the next model is tried. Flash-Lite models think minimally and normally
+// answer in < 20 s; other models may think for a long time before the first token.
+const FIRST_CHUNK_TIMEOUT_LITE_MS = 25_000;
+const FIRST_CHUNK_TIMEOUT_DEFAULT_MS = 60_000;
+
+/**
+ * Per-model first-chunk timeout. GEMINI_FIRST_CHUNK_TIMEOUT_MS (env) overrides
+ * it for every model, for tuning and manual testing.
+ * @param {string} modelId
+ * @returns {number} milliseconds
+ */
+function firstChunkTimeoutMs(modelId) {
+  const fromEnv = Number(process.env.GEMINI_FIRST_CHUNK_TIMEOUT_MS);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv;
+  return /-flash-lite$/.test(modelId) ? FIRST_CHUNK_TIMEOUT_LITE_MS : FIRST_CHUNK_TIMEOUT_DEFAULT_MS;
 }
 
 /**
  * Per-request summary: end-to-end latency including every failed attempt.
  */
-function logRequest({ mode, answeredBy, attempts, startedAt }) {
-  const line = `[Gemini Provider] request ${mode} answered_by=${answeredBy || 'none'} attempts=${attempts} total=${Date.now() - startedAt}ms`;
-  (answeredBy ? console.log : console.warn)(line);
+function logRequest({ mode, answeredBy, attempts, startedAt, cancelled = false }) {
+  const line = `[Gemini Provider] request ${mode} answered_by=${answeredBy || 'none'} attempts=${attempts} total=${Date.now() - startedAt}ms${cancelled ? ' cancelled' : ''}`;
+  (answeredBy || cancelled ? console.log : console.warn)(line);
 }
 
 /**
@@ -289,11 +313,17 @@ function createLLM({ apiKey, model = "gemini-3-flash-preview", temperature = 0.7
 /**
  * Creates a Gemini streaming LLM instance with failover support.
  *
- * On a transient error (429/503/etc.) during streaming, emits a _reset sentinel
- * to the consumer and retries with the next model in the CSV list.
- * On a fatal error or when all models are exhausted, calls controller.error().
+ * On a transient error (429/503/etc.) during streaming, or when no chunk arrives
+ * within the first-chunk timeout, emits a _reset sentinel to the consumer and
+ * retries with the next model in the CSV list.
+ * On a fatal error or when all models are exhausted, calls controller.error()
+ * with an error carrying a short `userMessage` for display.
+ * Cancelling the returned stream aborts the in-flight request and stops failover.
+ *
+ * @param {object} opts
+ * @param {number} [opts.firstChunkTimeoutMs] - overrides firstChunkTimeoutMs(modelId) for every model
  */
-function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperature = 0.7, maxTokens = 65536, ...config }) {
+function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperature = 0.7, maxTokens = 65536, firstChunkTimeoutMs: firstChunkTimeoutOverride, ...config }) {
   const client = new GoogleGenerativeAI(apiKey)
 
   return {
@@ -328,9 +358,10 @@ function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperat
        * @param {string} opts.modelId
        * @param {Array} opts.messages - nonSystemMessages
        * @param {function(Uint8Array): boolean} opts.safeEnqueue
-       * @param {object} opts.stats - filled with firstChunkAt / usage / aborted for logging
+       * @param {object} opts.stats - filled with firstChunkAt / usage / aborted / timedOut for logging
+       * @param {AbortController} opts.abortController - aborts this attempt's HTTP request
        */
-      async function streamOneAttempt({ modelId, messages: msgs, safeEnqueue, stats }) {
+      async function streamOneAttempt({ modelId, messages: msgs, safeEnqueue, stats, abortController }) {
         const geminiModel = client.getGenerativeModel({
           model: modelId,
           systemInstruction:
@@ -375,27 +406,53 @@ function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperat
           return part
         })
 
-        const result = await geminiModel.generateContentStream({
-          contents: [{ role: "user", parts: contentParts }],
-        })
+        // A request can be accepted and then stall for ~90 s before the first chunk;
+        // abandon it after the timeout so the loop can fail over.
+        const timer = setTimeout(() => {
+          stats.timedOut = true
+          abortController.abort()
+        }, stats.timeoutMs)
 
-        for await (const chunk of result.stream) {
-          if (stats.firstChunkAt == null) stats.firstChunkAt = Date.now()
-          // The last chunk carries the request's usageMetadata (incl. thoughtsTokenCount).
-          if (chunk.usageMetadata) stats.usage = chunk.usageMetadata
-          const chunkText = chunk.text() || ""
-          const data = JSON.stringify({
-            choices: [{ delta: { content: chunkText } }],
-          })
-          if (!safeEnqueue(new TextEncoder().encode(`data: ${data}\n\n`))) {
-            stats.aborted = true
-            return;
+        try {
+          const result = await geminiModel.generateContentStream(
+            { contents: [{ role: "user", parts: contentParts }] },
+            { signal: abortController.signal },
+          )
+          // The SDK also exposes an aggregated `response` promise we never read;
+          // without a handler it becomes an unhandled rejection when the stream errors.
+          result.response?.catch?.(() => {})
+
+          for await (const chunk of result.stream) {
+            if (stats.firstChunkAt == null) {
+              stats.firstChunkAt = Date.now()
+              clearTimeout(timer)
+            }
+            // The last chunk carries the request's usageMetadata (incl. thoughtsTokenCount).
+            if (chunk.usageMetadata) stats.usage = chunk.usageMetadata
+            const chunkText = chunk.text() || ""
+            const data = JSON.stringify({
+              choices: [{ delta: { content: chunkText } }],
+            })
+            if (!safeEnqueue(new TextEncoder().encode(`data: ${data}\n\n`))) {
+              stats.aborted = true
+              return;
+            }
           }
+        } finally {
+          clearTimeout(timer)
         }
       }
 
       const modelCsv = model;
+      // Shared with cancel(): the consumer (Ask window closed / new request,
+      // Live Answer replaced) gave up, so abort the in-flight attempt and stop.
+      let cancelled = false;
+      let currentAbort = null;
       const stream = new ReadableStream({
+        cancel(reason) {
+          cancelled = true;
+          currentAbort?.abort(reason);
+        },
         async start(controller) {
           // Guard against enqueue-after-close: when a consumer cancels the stream
           // (e.g. AskService aborts on a new request), `controller.desiredSize`
@@ -415,37 +472,70 @@ function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperat
           let attempts = 0;
           const requestStartedAt = Date.now();
 
-          while (remaining.length > 0) {
+          let lastModel = null;
+
+          while (remaining.length > 0 && !cancelled) {
             const modelId = rotator.pickModel(remaining);
-            const stats = { startedAt: Date.now(), firstChunkAt: null, usage: null, aborted: false };
+            const timeoutMs = firstChunkTimeoutOverride ?? firstChunkTimeoutMs(modelId);
+            const stats = { startedAt: Date.now(), firstChunkAt: null, usage: null, aborted: false, timedOut: false, timeoutMs };
+            const abortController = new AbortController();
+            currentAbort = abortController;
+            lastModel = modelId;
             attempts++;
             try {
-              await streamOneAttempt({ modelId, messages: nonSystemMessages, safeEnqueue, stats });
-              logAttempt({ mode: 'stream', attempt: attempts, of: listSize, modelId, outcome: stats.aborted ? 'aborted' : 'ok', stats });
+              await streamOneAttempt({ modelId, messages: nonSystemMessages, safeEnqueue, stats, abortController });
+              if (stats.aborted || cancelled) {
+                // The consumer stopped reading: the model was responsive, but nobody got the answer.
+                logAttempt({ mode: 'stream', attempt: attempts, of: listSize, modelId, outcome: 'aborted', stats });
+                if (stats.firstChunkAt != null) rotator.markSucceeded(modelId);
+                logRequest({ mode: 'stream', answeredBy: null, attempts, startedAt: requestStartedAt, cancelled: true });
+                return;
+              }
+              logAttempt({ mode: 'stream', attempt: attempts, of: listSize, modelId, outcome: 'ok', stats });
               succeededModel = modelId;
               rotator.markSucceeded(modelId);
               break;
-            } catch (err) {
+            } catch (rawErr) {
+              if (cancelled) {
+                // AbortError from our own cancel(): classifyError would call it transient
+                // and fail over, but the consumer is gone.
+                logAttempt({ mode: 'stream', attempt: attempts, of: listSize, modelId, outcome: 'aborted', stats });
+                logRequest({ mode: 'stream', answeredBy: null, attempts, startedAt: requestStartedAt, cancelled: true });
+                return;
+              }
+              const err = stats.timedOut
+                ? Object.assign(new Error(`no response after ${timeoutMs / 1000}s`), { code: 'FIRST_CHUNK_TIMEOUT' })
+                : rawErr;
               lastErr = err;
-              const kind = rotator.classifyError(err);
-              logAttempt({ mode: 'stream', attempt: attempts, of: listSize, modelId, outcome: kind, stats, err });
+              const kind = stats.timedOut ? 'transient' : rotator.classifyError(err);
+              logAttempt({ mode: 'stream', attempt: attempts, of: listSize, modelId, outcome: stats.timedOut ? 'timeout' : kind, stats, err });
               if (kind !== 'transient') {
                 console.error("[Gemini Provider] Fatal streaming error:", err)
                 logRequest({ mode: 'stream', answeredBy: null, attempts, startedAt: requestStartedAt });
+                if (err && typeof err === 'object') err.userMessage = `${modelId} — ${shortErrorMessage(err)}`;
                 try { controller.error(err); } catch {}
                 return;
               }
               rotator.markFailed(modelId, rotator.parseRetryAfter(err));
               remaining = remaining.filter(m => m !== modelId);
               if (remaining.length > 0) {
-                safeEnqueue(encode({ _reset: true, next_model: remaining[0], reason: 'transient' }));
+                safeEnqueue(encode({ _reset: true, next_model: remaining[0], reason: stats.timedOut ? 'timeout' : 'transient' }));
               }
+            } finally {
+              currentAbort = null;
             }
           }
 
+          if (cancelled) {
+            logRequest({ mode: 'stream', answeredBy: null, attempts, startedAt: requestStartedAt, cancelled: true });
+            return;
+          }
           logRequest({ mode: 'stream', answeredBy: succeededModel, attempts, startedAt: requestStartedAt });
           if (!succeededModel) {
             console.error("[Gemini Provider] All models failed:", lastErr)
+            if (lastErr && typeof lastErr === 'object') {
+              lastErr.userMessage = `All Gemini models failed (${attempts} tried). Last: ${lastModel} — ${shortErrorMessage(lastErr)}`;
+            }
             try { controller.error(lastErr); } catch {}
             return;
           }
@@ -470,5 +560,6 @@ module.exports = {
     GeminiProvider,
     createSTT,
     createLLM,
-    createStreamingLLM
+    createStreamingLLM,
+    firstChunkTimeoutMs
 };
