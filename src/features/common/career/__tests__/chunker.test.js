@@ -1,5 +1,5 @@
 /**
- * chunker.test.js — T010 (FR-002, FR-003, FR-004, FR-005; E4, E6–E10, E29, E30)
+ * chunker.test.js — T010, T030 (FR-002, FR-003, FR-004, FR-005; E4, E6–E10, E29, E30)
  *
  * Run: node --test src/features/common/career/__tests__/chunker.test.js
  *
@@ -13,7 +13,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 
-const { chunkMarkdown, MAX_CHARS } = require('../chunker');
+const { chunkMarkdown, MAX_CHARS, MIN_CHARS } = require('../chunker');
 const { globToRegExp, sanitizePatterns, compilePathFilter } = require('../globMatch');
 
 const sha1 = s => crypto.createHash('sha1').update(s).digest('hex');
@@ -24,6 +24,8 @@ const para = n =>
     `Paragraph ${n} talks about the lighthouse keeper who logged every storm in a notebook, ` +
     `counted the gulls on the pier, repainted the railing each spring and wrote long letters ` +
     `to the harbor office about the broken foghorn that nobody fixed for years.`;
+// Two paragraphs: long enough to stand alone above a subsection.
+const intro = `${para(1)}\n\n${para(2)}`;
 
 describe('chunkMarkdown: headings and breadcrumbs (FR-003)', () => {
     it('builds "file › H2 › H3" titles and skips the document H1', () => {
@@ -32,7 +34,7 @@ describe('chunkMarkdown: headings and breadcrumbs (FR-003)', () => {
             '',
             '## Storms',
             '',
-            'The keeper logged every storm.',
+            intro,
             '',
             '### Winter',
             '',
@@ -43,7 +45,7 @@ describe('chunkMarkdown: headings and breadcrumbs (FR-003)', () => {
             'lighthouse › Storms',
             'lighthouse › Storms › Winter',
         ]);
-        assert.equal(chunks[0].body, 'The keeper logged every storm.');
+        assert.equal(chunks[0].body, intro);
         assert.equal(chunks[1].body, 'Winter storms were the worst.');
         assert.ok(chunks.every(c => c.kind === 'section'));
         assert.ok(chunks.every(c => c.path === 'notes/lighthouse.md'));
@@ -55,7 +57,7 @@ describe('chunkMarkdown: headings and breadcrumbs (FR-003)', () => {
     });
 
     it('a sibling H2 resets the H3 level', () => {
-        const md = '## A\n\nalpha text\n\n### A1\n\nnested text\n\n## B\n\nbeta text';
+        const md = `## A\n\n${intro}\n\n### A1\n\nnested text\n\n## B\n\nbeta text`;
         const titles = chunkMarkdown('x.md', md, opts()).map(c => c.title);
         assert.deepEqual(titles, ['x › A', 'x › A › A1', 'x › B']);
     });
@@ -95,7 +97,7 @@ describe('chunkMarkdown: Q-blocks (FR-003)', () => {
         const md = [
             '## Practice bank',
             '',
-            'Intro paragraph before the questions.',
+            intro,
             '',
             '**Q: How do you keep a flaky test from blocking a release?**',
             'Quarantine it behind a tag and open a ticket.',
@@ -140,6 +142,66 @@ describe('chunkMarkdown: Q-blocks (FR-003)', () => {
         const chunks = chunkMarkdown('n.md', md, opts());
         assert.equal(chunks.length, 1);
         assert.equal(chunks[0].kind, 'section');
+    });
+});
+
+describe('chunkMarkdown: short intros (FR-003)', () => {
+    it('moves a short body into the subsection right under it', () => {
+        const md = [
+            '## Q7. Tell me about a storm night.',
+            '',
+            '**Timing:** 30s read, 3 min talk',
+            '',
+            '### Beats',
+            '',
+            'Situation, task, action, result.',
+            '',
+            '### Full answer',
+            '',
+            'The foghorn failed at midnight.',
+        ].join('\n');
+        const chunks = chunkMarkdown('bank.md', md, opts());
+        assert.deepEqual(chunks.map(c => c.title), [
+            'bank › Q7. Tell me about a storm night. › Beats',
+            'bank › Q7. Tell me about a storm night. › Full answer',
+        ]);
+        assert.equal(chunks[0].body, '**Timing:** 30s read, 3 min talk\n\nSituation, task, action, result.');
+        assert.equal(chunks[1].body, 'The foghorn failed at midnight.');
+    });
+
+    it('carries down more than one level', () => {
+        const md = '## A\n\none\n\n### B\n\ntwo\n\n#### C\n\nthree';
+        assert.deepEqual(chunkMarkdown('x.md', md, opts()).map(c => [c.title, c.body]), [
+            ['x › A › B › C', 'one\n\ntwo\n\nthree'],
+        ]);
+    });
+
+    it('moves a short section intro into its first Q-block', () => {
+        const md = '## Bank\n\nShort intro.\n\n**Q: First?**\nAnswer one.\n\n**Q: Second?**\nAnswer two.';
+        assert.deepEqual(chunkMarkdown('b.md', md, opts()).map(c => [c.kind, c.title, c.body]), [
+            ['qa', 'b › Bank › First?', 'Short intro.\n\nAnswer one.'],
+            ['qa', 'b › Bank › Second?', 'Answer two.'],
+        ]);
+    });
+
+    it('moves a short preamble into the first section', () => {
+        const md = '> Date: spring.\n\n## A\n\nText.';
+        assert.deepEqual(chunkMarkdown('x.md', md, opts()).map(c => [c.title, c.body]), [
+            ['x › A', '> Date: spring.\n\nText.'],
+        ]);
+    });
+
+    it('keeps a short section that has no subsection under it', () => {
+        const md = '## A\n\nShort answer.\n\n## B\n\nAnother short answer.';
+        assert.deepEqual(chunkMarkdown('x.md', md, opts()).map(c => [c.title, c.body]), [
+            ['x › A', 'Short answer.'],
+            ['x › B', 'Another short answer.'],
+        ]);
+    });
+
+    it('keeps an intro of MIN_CHARS or more on its own', () => {
+        const md = `## A\n\n${'word '.repeat(MIN_CHARS / 5).trim()}.\n\n### A1\n\nNested.`;
+        assert.deepEqual(chunkMarkdown('x.md', md, opts()).map(c => c.title), ['x › A', 'x › A › A1']);
     });
 });
 
@@ -215,6 +277,40 @@ describe('chunkMarkdown: size bounds (FR-003; E9, E10)', () => {
             assert.ok(c.body.length <= MAX_CHARS);
             assert.match(c.body, /^word\d+/);
         }
+    });
+});
+
+describe('chunkMarkdown: tables (FR-003)', () => {
+    const header = '| Tool | Notes |\n|---|:-:|';
+    const rows = Array.from({ length: 60 }, (_, i) => `| tool ${i} | used for the tide tables in season ${i} |`);
+
+    it('repeats the header row in every piece of a split table', () => {
+        const chunks = chunkMarkdown('t.md', `## Tools\n\n${header}\n${rows.join('\n')}`, opts());
+        assert.ok(chunks.length >= 2, `expected several pieces, got ${chunks.length}`);
+        for (const c of chunks) {
+            assert.ok(c.body.startsWith(`${header}\n| tool `), 'piece starts with the header');
+            assert.ok(c.body.length <= MAX_CHARS, `piece too long: ${c.body.length}`);
+        }
+        assert.deepEqual(chunks.flatMap(c => c.body.split('\n').slice(2)), rows, 'every row once, in order');
+    });
+
+    it('repeats a caption line right above the table', () => {
+        const chunks = chunkMarkdown('t.md', `## Tools\n\n**Inventory**\n${header}\n${rows.join('\n')}`, opts());
+        assert.ok(chunks.length >= 2);
+        for (const c of chunks) assert.ok(c.body.startsWith(`**Inventory**\n${header}\n`));
+    });
+
+    it('keeps the text around a split table', () => {
+        const md = `## Tools\n\n${para(1)}\n\n${header}\n${rows.join('\n')}\n\n${para(2)}`;
+        const chunks = chunkMarkdown('t.md', md, opts());
+        const all = chunks.map(c => c.body).join('\n\n');
+        assert.ok(all.includes(para(1)) && all.includes(para(2)));
+        assert.ok(chunks.filter(c => c.body.includes('| tool ')).every(c => c.body.includes(header)));
+    });
+
+    it('leaves a table that fits untouched', () => {
+        const small = `${header}\n${rows.slice(0, 3).join('\n')}`;
+        assert.equal(chunkMarkdown('t.md', `## Tools\n\n${small}`, opts())[0].body, small);
     });
 });
 

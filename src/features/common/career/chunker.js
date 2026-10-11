@@ -7,8 +7,12 @@
 //   file label stands in for it).
 // - Each "**Q: …**" line (also "**Q1. …**", "**Q:** …") starts a Q-block that
 //   runs to the next Q line or heading; its question joins the title.
+// - A body shorter than MIN_CHARS that is followed by its own subsection (a
+//   heading's one-line intro, a timing note above the answer) moves into that
+//   subsection instead of standing alone.
 // - Bodies longer than MAX_CHARS are split on paragraphs, then sentences, then
-//   words; every piece repeats the title.
+//   words; every piece repeats the title. A split table repeats its header row
+//   in each piece.
 // - A title or Q line carrying an unfinished marker drops the chunk; a marker
 //   line inside a body is removed.
 
@@ -21,6 +25,8 @@ const HEADING_RE = /^(#{1,6})\s+(.*?)\s*#*\s*$/;
 const Q_LINE_RE = /^\*\*Q(?:\d+[a-z]?)?(?:\s*\([^)]*\))?\s*[.:]\s*(?:\*\*\s*)?(.*?)\s*$/;
 const FENCE_RE = /^\s*(?:```|~~~)/;
 const RULE_RE = /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/;
+const TABLE_ROW_RE = /^\s*\|/;
+const TABLE_SEP_RE = /^\s*\|?(?:\s*:?-+:?\s*\|)+\s*(?::?-+:?\s*)?$/;
 const SEP = ' › ';
 
 const sha1 = s => crypto.createHash('sha1').update(s).digest('hex');
@@ -114,6 +120,24 @@ function splitWords(text, max) {
     return out;
 }
 
+/**
+ * A paragraph that is a table (optional caption lines, header row, separator,
+ * rows) split into row groups that each start with the caption and header.
+ * Null when the paragraph is not a table or the header leaves too little room.
+ */
+function splitTable(text, max) {
+    const lines = text.split('\n');
+    const at = lines.findIndex((l, i) => TABLE_ROW_RE.test(l) && TABLE_SEP_RE.test(lines[i + 1] || ''));
+    if (at < 0) return null;
+    const rows = lines.slice(at + 2);
+    if (!rows.length || !rows.every(l => TABLE_ROW_RE.test(l))) return null;
+    const head = lines.slice(0, at + 2).join('\n');
+    const room = max - head.length - 1;
+    if (room < MIN_CHARS) return null;
+    const units = rows.flatMap(r => (r.length > room ? splitWords(r, room) : [r]));
+    return pack(units, '\n', room).map(g => `${head}\n${g}`);
+}
+
 // Split levels, coarsest first: paragraphs, lines, sentences; words last.
 const LEVELS = [
     { re: /\n{2,}/, sep: '\n\n', trim: true },
@@ -124,6 +148,10 @@ const LEVELS = [
 function splitText(text, max = MAX_CHARS, level = 0) {
     if (text.length <= max) return [text];
     if (level >= LEVELS.length) return splitWords(text, max);
+    if (level === 1) {
+        const table = splitTable(text, max);
+        if (table) return table;
+    }
     const { re, sep, trim } = LEVELS[level];
     const parts = text.split(re).map(p => (trim ? p.trim() : p.trimEnd())).filter(p => p.trim());
     if (parts.length <= 1) return splitText(text, max, level + 1);
@@ -191,13 +219,27 @@ function chunkMarkdown(path, markdown, opts = {}) {
     }
     blocks.push(cur);
 
-    // 2. Chunks
-    const chunks = [];
-    const ordinals = new Map();
+    // 2. Sections. A short body followed by its own subsection moves into it.
+    const sections = [];
     for (const b of blocks) {
         const title = [label, ...b.crumbs, ...(b.question ? [b.question] : [])].join(SEP);
         if (MARKER_RE.test(title)) continue;
         const body = cleanBody(b.lines);
+        if (body) sections.push({ title, body, kind: b.question ? 'qa' : 'section' });
+    }
+    for (let i = 0; i < sections.length - 1; i++) {
+        const s = sections[i];
+        const next = sections[i + 1];
+        if (s.body.length < MIN_CHARS && next.title.startsWith(s.title + SEP)) {
+            next.body = `${s.body}\n\n${next.body}`;
+            s.body = '';
+        }
+    }
+
+    // 3. Chunks
+    const chunks = [];
+    const ordinals = new Map();
+    for (const { title, body, kind } of sections) {
         if (!body) continue;
         for (const piece of splitText(body)) {
             const ordinal = ordinals.get(title) || 0;
@@ -209,7 +251,7 @@ function chunkMarkdown(path, markdown, opts = {}) {
                 body: piece,
                 companies: companies.slice(),
                 date,
-                kind: b.question ? 'qa' : 'section',
+                kind,
                 hash: sha1(`${title}\n${piece}`),
             });
         }

@@ -31,7 +31,7 @@ Validation: if the JSON is invalid, it is ignored with a debug log and the defau
 | `id` | string | First 12 hex characters of sha1(`path` + `title` + ordinal). Stable across runs while the text is stable |
 | `path` | string | Relative to the KB root |
 | `title` | string | Breadcrumb `file › H2 › H3`; for Q-blocks, the breadcrumb plus the Q line |
-| `body` | string | 300–1,200 characters, markers removed (FR-004) |
+| `body` | string | Up to 1,200 characters, markers removed (FR-004). Under 300 only for a short section with no subsection under it, or the last piece of a split section |
 | `companies` | string[] | Folder under `companies.root`: its aliases narrowed by file name (else all of them), or the folder name when it has none. Empty for skipped folders and files outside the root (FR-005) |
 | `date` | number (epoch ms) | `YYYY-MM(-DD)` in the filename, else file mtime |
 | `kind` | `'qa' \| 'section'` | `qa` for `**Q:` blocks |

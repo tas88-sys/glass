@@ -12,7 +12,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 
 - **Personal answers from your notes.** When the interviewer asks about the candidate's own background (behavioral stories, past projects, "why us"), Live Answer answers in first person from a local folder of career notes (`CAREER_KB_PATH`). It shows a muted "from: …" line naming the notes it used. Off by default; with the variable unset, the LLM messages are byte-identical to before.
 - **`src/features/common/career/`**, a provider-agnostic module:
-  - markdown chunker;
+  - markdown chunker (a short intro joins the subsection under it; a split table repeats its header row);
   - deterministic intent router (personal / company / ambiguous / general, English and Portuguese, follow-ups);
   - BM25 index;
   - multilingual embeddings (transformers.js 4.2.0 + `snowflake-arctic-embed-m-v2.0` in an Electron `utilityProcess`) of each chunk's text and of its section title, fused with BM25 by reciprocal rank fusion, one section per note file;

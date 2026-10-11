@@ -213,7 +213,7 @@ Reworded or translated variants written by Claude may be added later as a separa
 - Start the query embedding when a gated `them` turn arrives (`prefetch`), so it completes inside the 800 ms window.
 - At debounce-fire, BM25 (≤ 5 ms) runs synchronously and the prefetched vector is awaited for at most 150 ms.
 - Expected added time on the answer path is ≤ 20 ms at p95.
-- The extra prompt (≤ 6,000 characters, about 1.5–2k tokens) has negligible effect on time to first token for Flash-class models.
+- The extra prompt (≤ 9,000 characters, about 2.5–3k tokens) has negligible effect on time to first token for Flash-class models.
 
 ---
 
@@ -222,6 +222,37 @@ Reworded or translated variants written by Claude may be added later as a separa
 - **Node version:** Electron 30 runs Node 20.16 (`ELECTRON_RUN_AS_NODE=1 electron -e "process.versions.node"` prints `20.16.0`). `fs.glob` (Node 22) is unavailable, so a small glob-to-regex helper covers `*`, `**` and `?`.
 - **Env loading:** `src/index.js:8` loads `.env` via dotenv, so `CAREER_KB_PATH` and `CAREER_KB_COMPANY` work like the existing `LIVE_ANSWER_DEBUG` and `GEMINI_*` variables.
 - **Hooks:** the app-start hook is `app.whenReady()` (`src/index.js:172`); the session-start hook is `listenService.initializeSession` (`src/features/listen/listenService.js:157`).
+
+---
+
+## R12: Chunking
+
+**Question** (T030): are the chunk rules right for this corpus? One chunk per heading section or `**Q:` block, 300–1,200 characters, long sections split on paragraphs.
+
+**Evidence** (after T029, hybrid, full eval set):
+- Of the 303 non-card chunks injected for the 53 personal items, 11 were near-empty (under 100 characters), 14 were tables and 8 came from heading-less files.
+- **Near-empty chunks** were mostly a heading's one-line intro above its subsections, such as a timing note above a prepared answer. They matched through the title and carried no story. The corpus had 46 chunks under 100 characters.
+- **Tables:** 5 of the 14 were gold, all from a skills inventory with one small table per section. The other 9 came from 8 different prep and research tables. A split table lost its header row after the first piece.
+- **Heading-less files:** none of the 8 was gold, and 6 were one file: an interview platform's written feedback, which lists the topics those questions ask about. Excluding that file changed no result.
+- **One section filling several slots** was already fixed by one section per file (T029).
+
+| Variant (Arctic, top 6, 9,000 chars) | Injected recall | recall@3 |
+|---|---|---|
+| As shipped in T029 | 73.6% | 62.3% |
+| Short intros moved into their subsection, table headers repeated | 75.5% | 60.4% |
+| Same, 800-character cap | 71.7% | 64.2% |
+| Same, 1,600-character cap (embedding input raised to 2,000) | 69.8% | 58.5% |
+| Same as the second row, plus the feedback file excluded | 75.5% | 60.4% |
+
+Re-indexing for a new cap took 7–11 minutes: section-title vectors are reused, chunk-text vectors are not.
+
+**Decision**:
+- A body under 300 characters that is followed by its own subsection moves into that subsection. A short section with no subsection under it stays, since many are real short answers. Chunks under 100 characters: 46 → 22.
+- A split table repeats its header row, and any caption line right above it, in each piece.
+- The 1,200-character cap stays. Both other caps lost injected recall.
+- Heading-less files and notes that only list interview topics are a content matter: a heading or a manifest `exclude` entry fixes them, and the chunker does not guess.
+
+**Caveat**: every difference here is within two items (±3.8 points), under the noise level in R5. The two rule changes are kept because they remove chunks that cannot help an answer and keep split tables readable, not because of the score.
 
 ---
 
@@ -240,3 +271,4 @@ Reworded or translated variants written by Claude may be added later as a separa
 | R9 | Eval from real interviewer questions, stored in the KB repo | High |
 | R10 | Prefetch during debounce; 150 ms cap | Medium (measured in T027) |
 | R11 | Node 20 constraints; dotenv; app and session hooks | High |
+| R12 | Keep 1,200-character chunks; merge short intros into their subsection; repeat table headers | Medium (eval within noise) |

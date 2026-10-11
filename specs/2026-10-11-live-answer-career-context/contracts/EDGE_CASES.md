@@ -14,6 +14,8 @@
 | E8 | Heading-less file | One breadcrumb (`file`); split on paragraphs by size | FR-003 |
 | E9 | Section over 1,200 chars | Split on paragraph boundaries; title repeated | FR-003 |
 | E10 | A single paragraph over 1,200 chars | Split on sentence boundaries | FR-003 |
+| E35 | A heading's body is under 300 chars and a subsection follows (a timing line above the answer) | The body moves into that subsection; it never stands alone | FR-003 |
+| E36 | A table over 1,200 chars | Split by rows; each piece repeats the header row and any caption line right above it | FR-003 |
 | E11 | Turn in Portuguese, best note in English | Retrieved through the vector side; answer in Portuguese | FR-009, FR-014 |
 | E12 | Turn names a tool or vendor exactly | BM25 rank carries it into the fused top k | FR-008, FR-010 |
 | E13 | "why us" with active company A; notes of B rank higher | B's chunks dropped; A's and untagged chunks kept | FR-011 |

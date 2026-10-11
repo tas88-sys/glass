@@ -46,3 +46,17 @@ The embedding model, the fusion and the block size changed. Docs that named the 
 | `spike-embeddings.md` | Note that the shipped model changed; the spike numbers stay as recorded |
 
 Checks: the leak scan over the changed files found 0 hits, and no doc still names e5-small as the shipped model (it remains a model profile in `embedder.js`).
+
+## Update for T030 (chunking)
+
+Two chunker rules were added; the size cap did not change.
+
+| Document | Change |
+|----------|--------|
+| `CHANGELOG.md` | `[Unreleased]` Added: the chunker line names both rules |
+| `spec.md` | FR-003: short intros move into their subsection; split tables repeat their header row |
+| `data-model.md` | Chunk `body`: when a body can be under 300 characters |
+| `contracts/EDGE_CASES.md` | E35 (short intro above a subsection), E36 (table over the cap) |
+| `research.md` | R12: slot audit, cap comparison, decision; R10 excerpt figure brought to 9,000 characters |
+
+`docs/LIVE_INSIGHTS_AND_ASK.md` does not describe chunk rules, so it is unchanged.
