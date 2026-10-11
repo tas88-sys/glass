@@ -27,6 +27,7 @@ const PREFETCH_TIMEOUT_MS = 150;   // C3
 // Provisional until the eval set labels which ambiguous questions should inject.
 const DEFAULT_MIN_COSINE = 0.35;
 const MAX_QUERY_TERMS = 40;
+const MAX_ANCHOR_CHARS = 600;      // the end of the previous question, joined to a follow-up's vector query
 
 // FR-011 company-context phrases, as [before, after] around the company name,
 // in normalizeForMatch space. Data: extend through the eval.
@@ -49,6 +50,15 @@ const COMPANY_CONTEXT = [
 ];
 
 const ms = x => Math.round(x * 10) / 10;
+
+// A follow-up ("and what was the outcome?") has few words of its own: its keyword
+// query carries the previous question's terms, and its vector query carries the
+// previous question's text (FR-006, E41). prev.anchorText is that question, kept
+// across a chain of follow-ups; its end is kept, where the question usually is.
+function vectorQueryText(turnText, decision, prev) {
+    const anchor = decision.cue === 'follow-up' && prev && typeof prev.anchorText === 'string' ? prev.anchorText.trim() : '';
+    return anchor ? `${anchor.slice(-MAX_ANCHOR_CHARS)}\n${turnText}` : turnText;
+}
 
 function compileCompanyDetector(names) {
     const entries = [];
@@ -199,11 +209,22 @@ function createCareerModule(options = {}) {
         return warming;
     }
 
-    function prefetch(turnText) {
+    /**
+     * Start the query embedding for a gated turn (FR-009). With the session, a
+     * follow-up prefetches the same text its vector query will use.
+     * @param {string} turnText
+     * @param {{ prev?: object|null }} [session]
+     */
+    function prefetch(turnText, session) {
         try {
             if (!isReady() || typeof turnText !== 'string' || !turnText.trim()) return;
             const emb = getEmbedder();
-            if (emb) emb.prefetch(turnText);
+            if (!emb) return;
+            const prev = (session && session.prev) || null;
+            const decision = prev
+                ? classifyCareerIntent(turnText, { prev, entities: snap.entities, companies: snap.companyNames, now: Date.now() })
+                : null;
+            emb.prefetch(decision ? vectorQueryText(turnText, decision, prev) : turnText);
         } catch {
             /* total: a failed prefetch only means BM25 for that answer */
         }
@@ -257,6 +278,7 @@ function createCareerModule(options = {}) {
             sources: [],
             chunkIds: [],
             queryTerms: [],
+            anchorText: '',
             timings,
         };
         const done = (hits, vectorNote, extra) => {
@@ -279,6 +301,8 @@ function createCareerModule(options = {}) {
         const companyTerms = decision.route === 'company' && activeCompany ? tokenize(activeCompany) : [];
         const terms = own.concat(boost, carried, companyTerms);
         result.queryTerms = [...new Set(terms)].slice(0, MAX_QUERY_TERMS);
+        const vectorText = vectorQueryText(turnText, decision, prev);
+        result.anchorText = vectorText === turnText ? turnText : prev.anchorText;
 
         const excluded = new Set(Array.isArray(opts.excludePaths) ? opts.excludePaths : []);
         const keep = h => excluded.size === 0 || !excluded.has(s.chunks[h.idx] && s.chunks[h.idx].path);
@@ -297,7 +321,7 @@ function createCareerModule(options = {}) {
                 vectorNote = 'unavailable';
             } else {
                 const tv = performance.now();
-                const query = await emb.query(turnText, prefetchTimeoutMs);
+                const query = await emb.query(vectorText, prefetchTimeoutMs);
                 timings.vectorMs = ms(performance.now() - tv);
                 if (query) {
                     semantic = vindex.search(query, CANDIDATES).filter(keep);
@@ -362,7 +386,7 @@ function createCareerModule(options = {}) {
 
     /**
      * @param {string} turnText
-     * @param {{ prev?: object|null, activeCompany?: string|null, question?: string }} [session]
+     * @param {{ prev?: { route: string, ts: number, queryTerms?: string[], anchorText?: string }|null, activeCompany?: string|null, question?: string }} [session]
      * @param {{ excludePaths?: string[], bm25Only?: boolean, trace?: { k?: number } }} [opts]  eval and ask scripts only
      */
     async function getCareerContext(turnText, session, opts) {

@@ -1,7 +1,7 @@
 {
   "spec_id": "2026-10-11-live-answer-career-context",
   "spec_name": "live-answer-career-context",
-  "updated": "2026-10-11T22:09:19Z",
+  "updated": "2026-10-11T22:16:50Z",
   "anthropic_patterns": [
     "Ralph looping",
     "JSON task state"
@@ -673,7 +673,30 @@
       "target_file": "src/features/common/career/intentRouter.js",
       "verify": "Router table tests (new personal and general cases); eval routing unchanged or better, 0 general routed personal",
       "completed_at": "2026-10-11T22:09:19Z",
-      "evidence": "New cue background:what-was-your (\"what/which was/were your\", \"what has/have been your\"); \"project(s)\" added to background:your-trait. Present \"what is your\" left to the ambiguous opinion cue. intentRouter.test.js +9 cases (6 personal, 3 general); npm test 546/546. Eval: personal routed personal 96.6%, general routed personal 0%, injected recall 75.5% (all unchanged). Follow-up vector query found by the same check is left open (E41), pending the candidate"
+      "evidence": "New cue background:what-was-your (\"what/which was/were your\", \"what has/have been your\"); \"project(s)\" added to background:your-trait. Present \"what is your\" left to the ambiguous opinion cue. intentRouter.test.js +9 cases (6 personal, 3 general); npm test 546/546. Eval: personal routed personal 96.6%, general routed personal 0%, injected recall 75.5% (all unchanged). The follow-up vector query found by the same check is T035"
+    },
+    {
+      "id": "T035",
+      "phase": "3.6",
+      "description": "A follow-up's vector query, and its prefetch, carries the question it follows (FR-009, E41, E42), found with the ask script (R13).",
+      "status": "completed",
+      "parallel": false,
+      "gate": null,
+      "gate_check": null,
+      "auto_agent": null,
+      "gate_type": null,
+      "scope": null,
+      "block_on": null,
+      "evidence_type": "execution",
+      "auto_skill": null,
+      "auto_skill_timing": null,
+      "pre_check": null,
+      "reconciled": false,
+      "reconciled_reason": null,
+      "target_file": "src/features/common/career/index.js",
+      "verify": "Module tests with a recording fake embedder; summaryService passes careerPrev to prefetch and keeps anchorText; before/after check on real follow-up pairs; eval unchanged",
+      "completed_at": "2026-10-11T22:16:50Z",
+      "evidence": "index.js: vectorQueryText (previous question, last 600 chars, then the follow-up), anchorText on the context, prefetch(turnText, session). summaryService passes { prev: careerPrev } to prefetch and stores anchorText. Tests: kbService.test.js +6, liveAnswerCareer.test.js +1 and two assertions; npm test 553/553. Real notes, 8 follow-up pairs: first answer's sections still sent 15% -> 77% on average, its top section 4/8 -> 7/8. Query embedding with a 600-char anchor ~190 ms p50 (17 ms alone), inside the 800 ms debounce. Eval unchanged (no follow-ups): injected recall 75.5%, answer path p95 10.4 ms"
     },
     {
       "id": "T-VERIFY-MANUAL",

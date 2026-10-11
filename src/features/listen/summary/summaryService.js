@@ -579,7 +579,7 @@ class SummaryService {
         // Career FR-009: start the query embedding now so it is ready when the
         // debounce fires (a no-op while the module is disabled or BM25-only).
         try {
-            this.career.prefetch(text);
+            this.career.prefetch(text, { prev: this.careerPrev });
         } catch {
             /* the career module is optional */
         }
@@ -631,7 +631,7 @@ class SummaryService {
                 if (signal.aborted) return;
                 // Follow-ups stick only to the last answered personal/company question (career FR-006, E17).
                 this.careerPrev = career && (career.route === 'personal' || career.route === 'company')
-                    ? { route: career.route, queryTerms: career.queryTerms || [], ts: Date.now() }
+                    ? { route: career.route, queryTerms: career.queryTerms || [], anchorText: career.anchorText || '', ts: Date.now() }
                     : null;
                 await this.makeLiveAnswer(this.conversationHistory, signal, { id: answerId, question, career });
             } catch (err) {

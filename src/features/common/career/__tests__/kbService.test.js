@@ -449,6 +449,91 @@ describe('career module: ready (FR-008, FR-011, FR-012, FR-013, FR-014, FR-017)'
     });
 });
 
+describe('career module: follow-up vector query (FR-006, FR-009; E41)', () => {
+    const prefetched = [];
+    const queried = [];
+    // Records the texts the module embeds; no vectors, so ranking stays BM25.
+    const fakeEmbedder = {
+        minCosine: 0.35,
+        sync: async () => {},
+        isReadyFor: () => true,
+        vectorCount: () => 1,
+        indexFor: () => ({ size: 1, search: () => [], searchTitles: () => [] }),
+        prefetch: text => { prefetched.push(text); },
+        query: async text => { queried.push(text); return null; },
+    };
+    const clear = () => { prefetched.length = 0; queried.length = 0; };
+    const Q1 = 'Tell me about a time you disagreed with a teammate.';
+    const FOLLOW = 'And what was the outcome?';
+    const prevOf = ctx => ({ route: ctx.route, queryTerms: ctx.queryTerms, anchorText: ctx.anchorText, ts: Date.now() });
+    let mod;
+    before(async () => {
+        ({ mod } = career({ CAREER_KB_PATH: await kb() }, { embedder: fakeEmbedder }));
+        await mod.warm();
+    });
+
+    it('a question that is not a follow-up searches with its own text and becomes the anchor', async () => {
+        clear();
+        const ctx = await mod.getCareerContext(Q1, { prev: null });
+        assert.deepEqual(queried, [Q1]);
+        assert.equal(ctx.anchorText, Q1);
+    });
+
+    it('a follow-up prefetches and searches with the question it follows, through a chain of follow-ups', async () => {
+        const prev = prevOf(await mod.getCareerContext(Q1, { prev: null }));
+        clear();
+        mod.prefetch(FOLLOW, { prev });
+        const ctx = await mod.getCareerContext(FOLLOW, { prev });
+        assert.equal(ctx.cue, 'follow-up');
+        assert.deepEqual(prefetched, [`${Q1}\n${FOLLOW}`]);
+        assert.deepEqual(queried, [`${Q1}\n${FOLLOW}`], 'the query reuses the prefetched text');
+        assert.equal(ctx.anchorText, Q1);
+        clear();
+        const again = await mod.getCareerContext('What did you learn?', { prev: prevOf(ctx) });
+        assert.equal(again.cue, 'follow-up');
+        assert.deepEqual(queried, [`${Q1}\nWhat did you learn?`]);
+        assert.equal(again.anchorText, Q1);
+    });
+
+    it('a new question after a personal one searches with its own text', async () => {
+        const prev = prevOf(await mod.getCareerContext(Q1, { prev: null }));
+        clear();
+        const q = 'Have you worked with message queues?';
+        mod.prefetch(q, { prev });
+        const ctx = await mod.getCareerContext(q, { prev });
+        assert.notEqual(ctx.cue, 'follow-up');
+        assert.deepEqual(prefetched, [q]);
+        assert.deepEqual(queried, [q]);
+        assert.equal(ctx.anchorText, q);
+    });
+
+    it('a follow-up with no anchor (session state from before) searches with its own text', async () => {
+        clear();
+        const ctx = await mod.getCareerContext(FOLLOW, { prev: { route: 'personal', queryTerms: ['disagre'], ts: Date.now() } });
+        assert.equal(ctx.cue, 'follow-up');
+        assert.deepEqual(queried, [FOLLOW]);
+    });
+
+    it('keeps only the end of a long anchor', async () => {
+        clear();
+        const anchor = `${'filler words '.repeat(100)}${Q1}`;
+        await mod.getCareerContext(FOLLOW, { prev: { route: 'personal', queryTerms: [], anchorText: anchor, ts: Date.now() } });
+        assert.equal(queried.length, 1);
+        assert.ok(queried[0].endsWith(`${Q1}\n${FOLLOW}`));
+        assert.ok(queried[0].length <= 600 + 1 + FOLLOW.length);
+    });
+
+    it('general turns and a prefetch without a session behave as before', async () => {
+        clear();
+        mod.prefetch('What is a goroutine?');
+        const ctx = await mod.getCareerContext('What is a goroutine?', { prev: null });
+        assert.equal(ctx.route, 'general');
+        assert.equal(ctx.anchorText, '');
+        assert.deepEqual(prefetched, ['What is a goroutine?']);
+        assert.deepEqual(queried, []);
+    });
+});
+
 describe('career module: load isolation (C4)', () => {
     it('requiring index.js under plain Node loads neither Electron nor the model runtime', () => {
         const entry = path.resolve(__dirname, '..', 'index.js');

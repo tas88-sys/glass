@@ -85,9 +85,10 @@ const PERSONAL = {
     sources: ['stories › Disagreement', 'canonical facts'],
     chunkIds: ['aaaaaaaaaaaa'],
     queryTerms: ['disagre', 'teammat'],
+    anchorText: 'Tell me about a time you disagreed?',
     timings: { routeMs: 0, bm25Ms: 0, vectorMs: 0, vectorUsed: false, totalMs: 0 },
 };
-const GENERAL = { ...PERSONAL, route: 'general', cue: null, block: '', addendum: '', sources: [], chunkIds: [], queryTerms: [] };
+const GENERAL = { ...PERSONAL, route: 'general', cue: null, block: '', addendum: '', sources: [], chunkIds: [], queryTerms: [], anchorText: '' };
 
 function service() {
     const s = new SummaryService();
@@ -97,12 +98,12 @@ function service() {
 }
 
 function stubCareer(overrides = {}) {
-    const calls = { prefetch: [], getCareerContext: [], detectCompany: [] };
+    const calls = { prefetch: [], prefetchSessions: [], getCareerContext: [], detectCompany: [] };
     const stub = {
         calls,
         hasCareerCue: () => false,
         detectCompany: text => { calls.detectCompany.push(text); return null; },
-        prefetch: text => calls.prefetch.push(text),
+        prefetch: (text, session) => { calls.prefetch.push(text); calls.prefetchSessions.push(session); },
         getCareerContext: async (text, session) => { calls.getCareerContext.push({ text, session }); return null; },
         ...overrides,
     };
@@ -290,6 +291,7 @@ describe('triggerAnswerIfNeeded and the debounce callback', () => {
         s.triggerAnswerIfNeeded('Them', 'just a statement');
         s.triggerAnswerIfNeeded('Them', q);
         assert.deepEqual(stub.calls.prefetch, [q]);
+        assert.deepEqual(stub.calls.prefetchSessions, [{ prev: null }]);
         mock.timers.tick(800);
         for (let i = 0; i < 5; i++) await flush();
         assert.equal(stub.calls.getCareerContext.length, 1);
@@ -322,7 +324,21 @@ describe('triggerAnswerIfNeeded and the debounce callback', () => {
         assert.equal(meta.career, PERSONAL);
         assert.equal(s.careerPrev.route, 'personal');
         assert.deepEqual(s.careerPrev.queryTerms, PERSONAL.queryTerms);
+        assert.equal(s.careerPrev.anchorText, PERSONAL.anchorText);
         assert.equal(typeof s.careerPrev.ts, 'number');
+    });
+
+    it('prefetches a follow-up with the follow-up state (E41)', () => {
+        mock.timers.enable({ apis: ['setTimeout'] });   // the debounce never fires here
+        const { s } = service();
+        const stub = stubCareer();
+        s.career = stub;
+        const prev = { route: 'personal', queryTerms: ['disagre'], anchorText: PERSONAL.anchorText, ts: Date.now() };
+        s.careerPrev = prev;
+        s.conversationHistory = ['them: And what was the outcome?'];
+        s.triggerAnswerIfNeeded('Them', 'And what was the outcome?');
+        assert.deepEqual(stub.calls.prefetch, ['And what was the outcome?']);
+        assert.equal(stub.calls.prefetchSessions[0].prev, prev);
     });
 
     it('a general answer clears the follow-up state (E17)', async () => {

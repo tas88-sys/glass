@@ -83,6 +83,7 @@ function report(ctx, trace, args) {
     }
     const vectors = args.bm25Only ? 'off' : ctx.timings.vectorUsed ? 'used' : 'not used (keywords only)';
     out.push(`route: ${ctx.route}${ctx.cue ? ` (${ctx.cue})` : ''} · vectors: ${vectors} · company: ${trace.activeCompany || '-'}`);
+    if (ctx.cue === 'follow-up') out.push('Follow-up: the search also uses the question it follows.');
 
     const hits = (trace.hits || []).slice(0, args.top);
     const sent = new Set(ctx.chunkIds);
@@ -130,7 +131,9 @@ async function main() {
     const snap = await createKbService({ root: kb }).refresh();
     if (!snap) throw new Error('notes folder missing or unreadable');
     const embedder = args.bm25Only ? null : createEmbedder({ cacheDir: () => args.cacheDir });
-    const mod = createCareerModule({ env, embedder, debug: false });
+    // The app waits at most 150 ms for a query embedding started 800 ms earlier;
+    // here nothing starts early, so give the prefetch the time it needs.
+    const mod = createCareerModule({ env, embedder, debug: false, prefetchTimeoutMs: 10_000 });
     await mod.warm();
     process.stderr.write(`[ask] ${snap.files} files, ${snap.chunks.length} sections\n`);
     if (embedder) {
@@ -144,15 +147,12 @@ async function main() {
     const session = { prev: null, activeCompany: null };
     async function ask(text) {
         if (!session.activeCompany) session.activeCompany = mod.detectCompany(text) || null;
-        if (embedder) {
-            mod.prefetch(text);
-            await embedder.query(text, 10_000);     // the app's 800 ms debounce absorbs this
-        }
+        if (embedder) mod.prefetch(text, { prev: session.prev });
         const trace = { k: args.top };
         const ctx = await mod.getCareerContext(text, { prev: session.prev, activeCompany: session.activeCompany }, { trace, bm25Only: args.bm25Only });
         // Follow-ups stick only to the last personal/company question, as in summaryService.
         session.prev = ctx && (ctx.route === 'personal' || ctx.route === 'company')
-            ? { route: ctx.route, queryTerms: ctx.queryTerms || [], ts: Date.now() }
+            ? { route: ctx.route, queryTerms: ctx.queryTerms || [], anchorText: ctx.anchorText || '', ts: Date.now() }
             : null;
         process.stdout.write(`${report(ctx, trace, args).join('\n')}\n`);
     }

@@ -96,3 +96,13 @@ Two chunker rules were added; the size cap did not change.
 | `research.md` | R13 findings |
 
 `docs/LIVE_INSIGHTS_AND_ASK.md` does not list cue rules, so it is unchanged.
+
+## Update for T035 (follow-up vector query)
+
+| Document | Change |
+|----------|--------|
+| `spec.md` | FR-009: a follow-up's vector query and prefetch carry the previous question |
+| `data-model.md`, `contracts/career-context.contracts.d.ts` | `anchorText` on the context and in `careerPrev`; `prefetch` takes the session |
+| `docs/LIVE_INSIGHTS_AND_ASK.md` | §4.7 Retrieve: the follow-up embedding query |
+| `contracts/EDGE_CASES.md` | E41 now fixed; E42 (a chain of follow-ups) |
+| `research.md` | R13: the follow-up finding, fixed, with the before and after check |

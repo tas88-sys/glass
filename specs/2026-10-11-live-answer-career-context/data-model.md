@@ -72,6 +72,7 @@ Lifecycle: the chunks of a file are replaced whenever its mtime changes (FR-016)
 | `sources` | string[] | Chunk titles, then `canonical facts` last when the card was injected |
 | `chunkIds` | string[] | For debug logs |
 | `queryTerms` | string[] | The query terms used (distinct, at most 40). The caller keeps them for follow-ups |
+| `anchorText` | string | The question a follow-up's vector query carries: this turn, or on a follow-up the question it follows. Empty on the general route. The caller keeps it for follow-ups |
 | `timings` | `{ routeMs, bm25Ms, vectorMs, vectorUsed, totalMs }` | For debug logs and the eval |
 
 `null` means the feature is disabled or erred, and the caller behaves as today.
@@ -80,10 +81,10 @@ Lifecycle: the chunks of a file are replaced whenever its mtime changes (FR-016)
 
 | Field | Purpose |
 |-------|---------|
-| `careerPrev` | `{ route, queryTerms, ts }` of the last answered personal or company question, used for follow-ups (FR-006). Any other route, or no context, clears it |
+| `careerPrev` | `{ route, queryTerms, anchorText, ts }` of the last answered personal or company question, used for follow-ups (FR-006). Any other route, or no context, clears it |
 | `activeCompany` | First company named in a `them` turn of the session (FR-011). `CAREER_KB_COMPANY`, when set, wins inside the module |
 
-Both are passed to `getCareerContext` with the extracted question: `{ prev: careerPrev, activeCompany, question }`. The query-embedding prefetch is owned by the career module (latest turn only, keyed by normalized text), not by `SummaryService`.
+Both are passed to `getCareerContext` with the extracted question: `{ prev: careerPrev, activeCompany, question }`. The query-embedding prefetch is owned by the career module (latest turn only, keyed by normalized text), not by `SummaryService`, which passes `{ prev: careerPrev }` so a follow-up prefetches the text its query will use.
 
 ### `live-answer-update` payload (extended)
 

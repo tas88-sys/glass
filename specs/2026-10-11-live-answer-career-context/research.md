@@ -288,14 +288,24 @@ Nothing showed it before:
   Present "what is your …" stays out, because it is often an opinion ("your approach"), which
   the ambiguous route handles. The eval is unchanged: 0 general items routed personal, personal
   routing 96.6%.
-- **Follow-up retrieval, open.** After a disagreement question, "And what was the outcome?" keeps
-  the personal route (cue `follow-up`):
-  - the keyword query carries the previous question's terms;
-  - the vector query is the follow-up text alone, so unrelated "what happened" sections ranked
-    first;
-  - the block did not carry the first answer's story.
+- **Follow-up retrieval, fixed in T035.** After a disagreement question, "And what was the
+  outcome?" kept the personal route (cue `follow-up`), but only its keyword query carried the
+  previous question. Its vector query was the follow-up alone, so unrelated "what happened"
+  sections ranked first and the block lost the first answer's story.
+  - **Fix:** the vector query, and its prefetch, is the previous question (its last 600
+    characters) then the follow-up. The original question stays the anchor through a chain of
+    follow-ups. Detection is unchanged: the 5-minute window, at most 10 words, a marker phrase.
+  - **Checked on 8 question and follow-up pairs** (English and Portuguese) against the real
+    notes:
 
-  A fix would embed the previous question with the follow-up. Pending the candidate's decision (E41).
+    | Measure | Before | After |
+    |---|---|---|
+    | The first answer's sections still sent, on average | 15% | 77% |
+    | Its top section still sent | 4 of 8 | 7 of 8 |
+
+  - **Cost:** a 600-character anchor takes about 190 ms to embed (17 ms for the follow-up
+    alone), well inside the 800 ms debounce the prefetch runs in.
+  - The eval has no follow-ups, so its results are unchanged.
 
 ---
 

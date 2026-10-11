@@ -319,7 +319,8 @@ never injected.
    A short follow-up ("and what was the outcome?") within 5 minutes stays on the previous route.
 2. **Retrieve.** The query is the turn minus framing phrases, with the extracted question boosted,
    the previous question's terms merged on follow-ups, and the company name added on the company
-   route. Retrieval merges three rankings by reciprocal rank fusion: BM25 over chunk titles
+   route. A follow-up's embedding query is the previous question followed by the follow-up, so
+   "and what was the outcome?" still finds the story. Retrieval merges three rankings by reciprocal rank fusion: BM25 over chunk titles
    (weight 3) and bodies, and multilingual embeddings (Arctic Embed v2.0, worker process) of the
    question against each chunk's text and against its section title. At most one section per
    note file is kept.

@@ -44,7 +44,7 @@ export interface RouteDecision {
 }
 
 export interface RouterContext {
-    prev?: { route: Route; ts: number; queryTerms?: string[] } | null;   // last answered personal or company question (FR-006, FR-008)
+    prev?: { route: Route; ts: number; queryTerms?: string[]; anchorText?: string } | null;   // last answered personal or company question (FR-006, FR-008)
     entities?: string[];          // manifest `entities`: employer/project names from the CV (FR-006)
     companies?: string[];         // interviewing company names (aliases, or folder names): "conhece a X" routes company
     now?: number;
@@ -83,6 +83,7 @@ export interface CareerContext {
     sources: string[];            // titles only (FR-015)
     chunkIds: string[];
     queryTerms: string[];         // the caller stores them as prev.queryTerms for follow-ups (FR-006)
+    anchorText: string;           // the caller stores it as prev.anchorText; a follow-up's vector query carries it (FR-009)
     timings: Timings;
 }
 
@@ -97,9 +98,11 @@ export interface CareerModule {
     /**
      * Start the query embedding for a gated `them` turn so it is ready when the
      * debounce fires (FR-009). The module keeps only the latest prefetch, keyed by
-     * normalized text. Never throws; a no-op when vectors are unavailable.
+     * normalized text. With the session, a follow-up prefetches the previous
+     * question plus the follow-up, the text its vector query will use.
+     * Never throws; a no-op when vectors are unavailable.
      */
-    prefetch(turnText: string): void;
+    prefetch(turnText: string, session?: { prev?: RouterContext['prev'] }): void;
 
     /**
      * Resolve career context for the turn that fired the debounce.
