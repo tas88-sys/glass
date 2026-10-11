@@ -369,7 +369,10 @@ function createCareerModule(options = {}) {
             opts.trace.activeCompany = activeCompany;
         }
 
-        if (decision.route === 'ambiguous' && !passesAmbiguousThreshold(hits[0], { vectorUsed: timings.vectorUsed, minCosine: minCosineFor(emb) })) {
+        // FR-012: any section about to be sent may clear the gate. The first one can reach the
+        // top on its keyword and title ranks alone, and then it has no cosine (E43).
+        const gate = { vectorUsed: timings.vectorUsed, minCosine: minCosineFor(emb) };
+        if (decision.route === 'ambiguous' && !hits.some(h => passesAmbiguousThreshold(h, gate))) {
             return done(hits, vectorNote, 'inject=no(below-threshold)');
         }
 

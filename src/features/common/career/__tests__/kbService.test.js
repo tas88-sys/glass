@@ -449,6 +449,51 @@ describe('career module: ready (FR-008, FR-011, FR-012, FR-013, FR-014, FR-017)'
     });
 });
 
+describe('career module: ambiguous gate with vectors (FR-012; E43)', () => {
+    const Q = 'How would you handle the migration of the tide service queue consumer?';
+    // The tide note tops the fusion on its keyword and title ranks and has no
+    // cosine; the conflict note comes only from the text-vector ranking.
+    const embedderWith = cosine => ({
+        minCosine: 0.35,
+        sync: async () => {},
+        isReadyFor: () => true,
+        vectorCount: () => 1,
+        indexFor: chunks => ({
+            size: chunks.length,
+            search: () => [{ idx: chunks.findIndex(c => /Disagreement/.test(c.title)), score: cosine }],
+            searchTitles: () => [{ idx: chunks.findIndex(c => /tide service/.test(c.title)), score: 0.9 }],
+        }),
+        prefetch: () => {},
+        query: async () => [1],
+    });
+    const ask = async cosine => {
+        const { mod } = career({ CAREER_KB_PATH: await kb() }, { embedder: embedderWith(cosine) });
+        await mod.warm();
+        const trace = {};
+        const ctx = await mod.getCareerContext(Q, { prev: null }, { trace });
+        return { ctx, trace };
+    };
+
+    it('injects when a later section clears the cosine gate and the first has no cosine', async () => {
+        const { ctx, trace } = await ask(0.6);
+        assert.equal(ctx.route, 'ambiguous');
+        assert.equal(ctx.timings.vectorUsed, true);
+        assert.match(trace.hits[0].title, /tide service/);
+        assert.equal(trace.hits[0].cosine, null);
+        assert.match(ctx.block, /\[migration-2024-05 › Migration of the tide service\]/);
+        assert.match(ctx.block, /\[conflict › Disagreement with a teammate\]/);
+        assert.ok(ctx.addendum);
+    });
+
+    it('injects nothing when no section clears the gate (E18)', async () => {
+        const { ctx } = await ask(0.2);
+        assert.equal(ctx.route, 'ambiguous');
+        assert.equal(ctx.timings.vectorUsed, true);
+        assert.equal(ctx.block, '');
+        assert.equal(ctx.addendum, '');
+    });
+});
+
 describe('career module: follow-up vector query (FR-006, FR-009; E41)', () => {
     const prefetched = [];
     const queried = [];

@@ -1,7 +1,7 @@
 {
   "spec_id": "2026-10-11-live-answer-career-context",
   "spec_name": "live-answer-career-context",
-  "updated": "2026-10-11T22:29:11Z",
+  "updated": "2026-10-11T23:18:29Z",
   "anthropic_patterns": [
     "Ralph looping",
     "JSON task state"
@@ -720,6 +720,29 @@
       "verify": "Diagram rendered with mermaid-cli; every example in the table run through classifyCareerIntent",
       "completed_at": "2026-10-11T22:29:11Z",
       "evidence": "docs/diagrams/14-career-intent-router.mmd, shown inline in docs/LIVE_INSIGHTS_AND_ASK.md §4.7 with the rules and a table of 12 examples (route and cue each checked against intentRouter.js). Indexed in docs/diagrams/README.md; ARCHITECTURE.md §13 points to it. Router timing ~6 µs per turn. No code change"
+    },
+    {
+      "id": "T037",
+      "phase": "3.6",
+      "description": "The ambiguous gate passes when any section about to be sent clears it, not only the first (FR-012, E43, R14), found reviewing the eval misses.",
+      "status": "completed",
+      "parallel": false,
+      "gate": null,
+      "gate_check": null,
+      "auto_agent": null,
+      "gate_type": null,
+      "scope": null,
+      "block_on": null,
+      "evidence_type": "execution",
+      "auto_skill": null,
+      "auto_skill_timing": null,
+      "pre_check": null,
+      "reconciled": false,
+      "reconciled_reason": null,
+      "target_file": "src/features/common/career/index.js",
+      "verify": "Module tests with a fake embedder (fail on the old code, pass on the new); npm test; full eval before and after",
+      "completed_at": "2026-10-11T23:18:29Z",
+      "evidence": "index.js: hits.some(h => passesAmbiguousThreshold(h, gate)) in place of hits[0]. kbService.test.js +2 (E43, E18 with vectors); npm test 555/555. Eval hybrid: injected recall 75.5% -> 77.4%, ambiguous-routed turns with notes 11/13 -> 13/13, routing and latency unchanged; BM25-only 45.3% unchanged. Overfit check now flags (tuning +1 item, holdout 4/6 unchanged, gap 9.9 -> 12 pts; one holdout item = 16.7 pts)"
     },
     {
       "id": "T-VERIFY-MANUAL",

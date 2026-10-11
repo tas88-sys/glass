@@ -97,7 +97,8 @@ function fuseAndFilter({ chunks, bm25, vector, title = null, route, activeCompan
 }
 
 /**
- * FR-012: does the top hit justify injecting context on the ambiguous route?
+ * FR-012: does this hit justify injecting context on the ambiguous route? The
+ * caller injects when any hit it would send passes.
  * Vectors used → cosine >= minCosine. BM25-only → coverage >= 0.5 and >= 2 terms.
  */
 function passesAmbiguousThreshold(hit, { vectorUsed, minCosine }) {

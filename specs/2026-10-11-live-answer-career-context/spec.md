@@ -94,7 +94,7 @@ During a live interview, the interviewer asks "Tell me about a time you disagree
 
 ### Edge Cases
 - A short follow-up ("and what was the outcome?") after a personal question stays on the personal route and reuses the previous question's terms.
-- An ambiguous question ("how would you approach X?") retrieves, but injects only when the top hit clears the threshold.
+- An ambiguous question ("how would you approach X?") retrieves, but injects only when one of the sections it would send clears the threshold.
 - The embedding for a turn is not ready within 150 ms → that answer uses BM25 only; nothing waits.
 - A note line still holds an unfinished marker (`[PREENCHER`, `⚠️ CONFIRMAR`) → it is never injected.
 - The KB changes between calls → the next Listen session start picks up changed files (mtime) without a restart.
@@ -129,8 +129,8 @@ During a live interview, the interviewer asks "Tell me about a time you disagree
     - The reason: many company names are ordinary words (for example a company called "Bridge" or "Anchor"), and a bare match would switch the active company on small talk.
   - If no active company is known, only untagged chunks are used on that route.
   - Other routes ignore company tags.
-- **FR-012**: On the `ambiguous` route, context MUST be injected only when the top hit clears a threshold calibrated by the eval (FR-019).
-  - The metric is the top hit's vector cosine similarity when vectors were used. In BM25-only mode, it is the top hit's coverage: at least half of the query terms and at least 2 of them matched.
+- **FR-012**: On the `ambiguous` route, context MUST be injected only when one of the sections it would send clears a threshold calibrated by the eval (FR-019).
+  - The metric is a section's vector cosine similarity when vectors were used. In BM25-only mode, it is a section's coverage: at least half of the query terms and at least 2 of them matched.
   - When it clears, the injection is the same as on the `personal` route: card, chunks and addendum.
 
 **Prompt and UI**

@@ -387,9 +387,9 @@ flowchart TB
 - **Manifest names.** An `entities` name (employer, project) anywhere in the turn makes it
   personal. A `companies` name makes it company only after a phrase such as "heard of", "know
   about", "join", "conhece" or "trabalhar na".
-- **Close enough** (ambiguous route): the best section's cosine is at least the model's threshold
-  (0.35 for Arctic Embed); when the answer is keyword-only, at least half the query terms, and
-  two or more, appear in it.
+- **Close enough** (ambiguous route): at least one of the sections it would send has a cosine of
+  at least the model's threshold (0.35 for Arctic Embed); when the answer is keyword-only, at
+  least half the query terms, and two or more, appear in one of them.
 - **The answer gate.** Live Answer answers turns that look like questions. While the notes are
   loaded, a turn the router calls personal or company on its own (without the previous question)
   is answered too, so a statement such as "Your biggest weakness." gets an answer.

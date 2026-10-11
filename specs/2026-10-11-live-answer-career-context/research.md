@@ -309,6 +309,39 @@ Nothing showed it before:
 
 ---
 
+## R14: The ambiguous gate checked only the first section
+
+**Question** (T037, from a review of the eval's misses): why did an ambiguous turn send nothing
+when a close note was among the sections it would send?
+
+**Finding.** The FR-012 gate looked only at the first fused section, which failed in two ways:
+- The first section reached the top on its keyword and title ranks alone. With no text-vector
+  rank it had no cosine, so the gate refused.
+- The first section's cosine was under the threshold while a later one's was above it. In one
+  eval item the candidate's prepared answer to that exact question ranked second at 0.447,
+  behind a section at 0.304.
+
+**Decision.** The gate passes when any section about to be sent clears it (cosine with vectors,
+coverage in BM25-only mode). Which sections are sent does not change, only whether they are.
+
+**Result** (full eval):
+
+| Measure | Before | After |
+|---|---|---|
+| Hybrid injected recall (53 personal items) | 75.5% | 77.4% |
+| BM25-only injected recall | 45.3% | 45.3% |
+| Eval turns routed ambiguous that get notes | 11 of 13 | 13 of 13 |
+
+- Routing, recall@3 and latency are unchanged.
+- The overfit check now flags. The item gained is in the tuning split; the holdout's 6 personal
+  items are unchanged (4 of 6), so the gap went from 9.9 to 12 points. One holdout item is worth
+  16.7 points, so this is noise: the change fixes a rule and is not fitted to an item.
+- At 0.35 the gate now blocks none of the eval's ambiguous turns, since the study banks hold a
+  close section for most technical questions. Calibrating it with turns labeled "should inject"
+  or "should not" stays open (T027).
+
+---
+
 ## Summary of Decisions
 
 | ID | Decision | Confidence |
@@ -326,3 +359,4 @@ Nothing showed it before:
 | R11 | Node 20 constraints; dotenv; app and session hooks | High |
 | R12 | Keep 1,200-character chunks; merge short intros into their subsection; repeat table headers | Medium (eval within noise) |
 | R13 | A local ask script to check retrieval by hand; shares the app's vector cache | High |
+| R14 | The ambiguous gate passes when any section about to be sent clears it | High (eval) |

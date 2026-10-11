@@ -115,3 +115,13 @@ Two chunker rules were added; the size cap did not change.
 | `docs/LIVE_INSIGHTS_AND_ASK.md` | §4.7: the diagram inline, then the rules (cues, order, follow-ups, manifest names, the ambiguous threshold, the answer gate), a table of examples with route and cue, and how to change a cue |
 | `docs/diagrams/README.md` | Index row 14; the folder also serves `LIVE_INSIGHTS_AND_ASK.md` |
 | `ARCHITECTURE.md` | §13 points to the diagram |
+
+## Update for T037 (ambiguous gate)
+
+| Document | Change |
+|----------|--------|
+| `spec.md` | FR-012 and the edge-case line: the gate applies to any section that would be sent, not the top one |
+| `contracts/career-context.contracts.d.ts` | `passesAmbiguousThreshold` is applied to each hit that would be sent |
+| `contracts/EDGE_CASES.md` | E43 |
+| `research.md` | R14: the finding, the decision and the eval before and after |
+| `docs/LIVE_INSIGHTS_AND_ASK.md` | §4.7 "Close enough": any section that would be sent |
