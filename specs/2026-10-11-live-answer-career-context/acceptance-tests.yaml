@@ -1,0 +1,268 @@
+# Acceptance Tests Manifest (v2)
+# Feature: Live Answer Career Context.
+# Hand-authored in the /tasks format (SpecKit not installed on this machine).
+# Deterministic checks cover structure, scope guards and the test suite;
+# real-corpus quality (SC-001..SC-004) runs through the eval script, which
+# needs CAREER_KB_PATH and is therefore tagged environment local-kb.
+
+# --- Root Fields ---
+_version: 2
+spec_id: "2026-10-11-live-answer-career-context"
+spec_name: "live-answer-career-context"
+
+# --- Staleness Detection (v2 required) ---
+generation_context:
+  generated_at: "2026-10-11T00:00:00Z"
+  spec_hash: "ddd524f92a9da4044b82c237b2e53438fcc85d091b1af042c539fbd69279af5b"
+  plan_hash: "b500e1e932f61584a178c1db9d916ada0161ae8a240d2281dce2c235234bb3fe"
+  tasks_hash: "7f08096776816f0fada6f285b5a66f66b9634ee83dfe15585d29c0532d9f25f8"
+
+# --- Drift Detection (v2 required) ---
+_references:
+  tables: []
+  routes: []
+  files:
+    - "src/features/common/career/index.js"
+    - "src/features/common/career/intentRouter.js"
+    - "src/features/common/career/chunker.js"
+    - "src/features/common/career/textNormalize.js"
+    - "src/features/common/career/bm25.js"
+    - "src/features/common/career/vectorIndex.js"
+    - "src/features/common/career/retriever.js"
+    - "src/features/common/career/contextBuilder.js"
+    - "src/features/common/career/globMatch.js"
+    - "src/features/common/career/kbService.js"
+    - "src/features/listen/summary/summaryService.js"
+    - "src/features/listen/listenService.js"
+    - "src/index.js"
+    - "src/ui/listen/summary/liveAnswerHistory.js"
+    - "src/ui/listen/summary/LiveAnswerView.js"
+    - "scripts/eval-career-kb.js"
+  ecs_tasks: []
+
+# --- Supported Environments ---
+# local: repo only. local-kb: repo + CAREER_KB_PATH pointing at the notes with glass-eval/questions.jsonl.
+environments: [local, local-kb]
+
+# =============================================================================
+# CLI TESTS (deterministic)
+# =============================================================================
+cli_tests:
+  - id: "AT-CLI-001"
+    requirement: "FR-006, FR-008, FR-013"
+    environments: [local]
+    command: "node -e \"const fs=require('fs');const d='src/features/common/career/';const need=['index','intentRouter','chunker','textNormalize','bm25','vectorIndex','retriever','contextBuilder','globMatch','kbService'];const miss=need.filter(n=>!fs.existsSync(d+n+'.js'));if(miss.length){console.error('missing: '+miss.join(','));process.exit(1)}\""
+    expected_exit_code: 0
+    description: "Every core module of the career package exists (contracts surface)."
+    severity: critical
+
+  - id: "AT-CLI-002"
+    requirement: "SC-005, FR-014"
+    environments: [local]
+    command: "node --test src/features/listen/summary/__tests__/liveAnswerCareer.test.js"
+    expected_exit_code: 0
+    description: "Wiring tests pass, including the byte-identical-messages test when the feature is disabled and on the general route."
+    severity: critical
+
+  - id: "AT-CLI-003"
+    requirement: "FR-014"
+    environments: [local]
+    command: "node -e \"const s=require('fs').readFileSync('src/features/listen/summary/summaryService.js','utf8');process.exit(/getSystemPrompt\\('pickle_glass_analysis',\\s*[^,]*career[^,]*\\|\\|\\s*''\\s*,\\s*false\\)/.test(s)?0:1)\""
+    expected_exit_code: 0
+    description: "makeLiveAnswer passes the career block (falling back to '') as customPrompt."
+    severity: critical
+
+  - id: "AT-CLI-004"
+    requirement: "Contracts"
+    environments: [local]
+    command: "npx --yes -p typescript@5.4.5 tsc -p specs/2026-10-11-live-answer-career-context/contracts/tsconfig.json"
+    expected_exit_code: 0
+    description: "Contract declarations type-check."
+    severity: warning
+
+  - id: "AT-CLI-005"
+    requirement: "FR-015"
+    environments: [local]
+    command: "node --test src/ui/listen/summary/__tests__/liveAnswerHistory.test.js"
+    expected_exit_code: 0
+    description: "History keeps sources on create and preserves them on streaming updates."
+    severity: critical
+
+  - id: "AT-CLI-006"
+    requirement: "FR-019, SC-001, SC-002, SC-003, SC-004"
+    environments: [local-kb]
+    command: "node scripts/eval-career-kb.js --json --split holdout"
+    expected_exit_code: 0
+    expected_output_contains: ["\"pass\": true"]
+    description: "On the holdout split: personal recall ≥ 0.95, general→personal ≤ 0.10, hybrid recall@3 ≥ 0.85, company leaks = 0, answer-path p95 ≤ 20 ms. The script exits non-zero when any target is missed."
+    severity: critical
+
+  - id: "AT-CLI-007"
+    requirement: "D7 (only if spike T024 = GO)"
+    environments: [local]
+    command: "node -e \"const s=require('fs').readFileSync('electron-builder.yml','utf8');process.exit(/asarUnpack:[\\s\\S]*onnxruntime/.test(s)?0:1)\""
+    expected_exit_code: 0
+    description: "The embedding runtime's native binaries are unpacked from asar (same treatment as sharp). Skip when the spike is NO-GO."
+    severity: warning
+
+# =============================================================================
+# TEST GATES
+# =============================================================================
+test_gates:
+  - id: "AT-GATE-001"
+    requirement: "All FRs"
+    environments: [local]
+    command: "npm test"
+    expected_exit_code: 0
+    description: "Full node:test suite green, including the pre-existing liveAnswer and gemini tests."
+    severity: critical
+
+  - id: "AT-GATE-002"
+    requirement: "Code quality"
+    environments: [local]
+    command: "npm run lint"
+    expected_exit_code: 0
+    description: "ESLint passes on the changed files."
+    severity: warning
+
+# =============================================================================
+# NEGATIVE ASSERTIONS (scope and invariant guards)
+# =============================================================================
+negative_assertions:
+  - id: "AT-NEG-001"
+    requirement: "C2, FR-018"
+    environments: [local]
+    check_type: "cli"
+    command: "node -e \"const fs=require('fs');const d='src/features/common/career/';let n=0;for(const f of fs.readdirSync(d).filter(f=>f.endsWith('.js'))){for(const l of fs.readFileSync(d+f,'utf8').split(/\\r?\\n/)){if(/(console\\.(log|warn|error|info)|laDebug|careerDebug)\\(/.test(l)&&/\\.(body|block|text)\\b/.test(l))n++}}process.stdout.write(String(n))\""
+    expected_result: "0"
+    description: "No log statement in the career package references note body, block or turn text."
+    severity: critical
+
+  - id: "AT-NEG-002"
+    requirement: "C5"
+    environments: [local]
+    check_type: "cli"
+    command: "node -e \"const {execSync}=require('child_process');const out=execSync('git ls-files',{encoding:'utf8'});const bad=out.split(/\\r?\\n/).filter(f=>/(^|\\/)(glass-kb\\.json|questions\\.jsonl|canonical-facts\\.md)$/.test(f));process.stdout.write(String(bad.length))\""
+    expected_result: "0"
+    description: "No KB artifacts (manifest, eval set, canonical card) are tracked in this public repo."
+    severity: critical
+
+  - id: "AT-NEG-003"
+    requirement: "C7"
+    environments: [local]
+    check_type: "cli"
+    command: "node -e \"const {execSync}=require('child_process');const out=execSync('git diff --name-only origin/main...HEAD',{encoding:'utf8'});process.stdout.write(String(out.split(/\\r?\\n/).filter(f=>f==='src/features/ask/askService.js'||f==='src/features/common/prompts/promptTemplates.js'||f==='src/features/common/prompts/promptBuilder.js').length))\""
+    expected_result: "0"
+    description: "Ask, the prompt templates and the prompt builder are not modified."
+    severity: critical
+
+  - id: "AT-NEG-004"
+    requirement: "C7"
+    environments: [local]
+    check_type: "cli"
+    command: "node -e \"const s=require('fs').readFileSync('src/features/listen/summary/summaryService.js','utf8');process.stdout.write(String((s.match(/getSystemPrompt\\('pickle_glass_analysis', '', false\\)/g)||[]).length))\""
+    expected_result: "1"
+    description: "The Live Insights lane (makeOutlineAndRequests) still builds its prompt with an empty customPrompt; only makeLiveAnswer changed."
+    severity: critical
+
+  - id: "AT-NEG-005"
+    requirement: "C4, research R2"
+    environments: [local]
+    check_type: "cli"
+    command: "node -e \"const fs=require('fs');const d='src/features/common/career/';process.stdout.write(String(fs.readdirSync(d).filter(f=>f.endsWith('.js')).filter(f=>/require\\(['\\\"]better-sqlite3|sqliteClient/.test(fs.readFileSync(d+f,'utf8'))).length))\""
+    expected_result: "0"
+    description: "The retrieval core does not depend on better-sqlite3 (keeps it testable under npm test)."
+    severity: critical
+
+  - id: "AT-NEG-006"
+    requirement: "R6"
+    environments: [local]
+    check_type: "cli"
+    command: "node -e \"const fs=require('fs');const d='src/features/common/career/';process.stdout.write(String(fs.readdirSync(d).filter(f=>f.endsWith('.js')).filter(f=>/require\\(['\\\"][./]*.*ai\\/factory/.test(fs.readFileSync(d+f,'utf8'))).length))\""
+    expected_result: "0"
+    description: "Routing and retrieval make no LLM calls (no import of the AI factory in the career package)."
+    severity: critical
+
+# =============================================================================
+# MANUAL VERIFICATION (quickstart.md §3)
+# =============================================================================
+manual_tests:
+  - id: "AT-MANUAL-001"
+    requirement: "FR-006, FR-014, FR-015"
+    environments: [local-kb]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Behavioral question → first-person story from the notes with a 'from:' line (quickstart #1)."
+    severity: critical
+
+  - id: "AT-MANUAL-002"
+    requirement: "SC-005"
+    environments: [local-kb]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "General technical question → today's behavior, no 'from:' line, log route=general (quickstart #2)."
+    severity: critical
+
+  - id: "AT-MANUAL-003"
+    requirement: "FR-009"
+    environments: [local-kb]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Same behavioral question in Portuguese → same story, answer in Portuguese (quickstart #3)."
+    severity: critical
+
+  - id: "AT-MANUAL-004"
+    requirement: "FR-011"
+    environments: [local-kb]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "'Why do you want to join us?' with CAREER_KB_COMPANY set → only that company's notes; no other company named (quickstart #4)."
+    severity: critical
+
+  - id: "AT-MANUAL-005"
+    requirement: "FR-006"
+    environments: [local-kb]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Follow-up right after a personal answer stays personal (quickstart #5)."
+    severity: warning
+
+  - id: "AT-MANUAL-006"
+    requirement: "FR-007"
+    environments: [local-kb]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Statement-form 'your biggest weakness' triggers an answer (quickstart #6)."
+    severity: warning
+
+  - id: "AT-MANUAL-007"
+    requirement: "D6"
+    environments: [local-kb]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "A question touching a canonical-card fact uses the card's value (quickstart #7)."
+    severity: critical
+
+  - id: "AT-MANUAL-008"
+    requirement: "C1"
+    environments: [local]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "CAREER_KB_PATH unset → today's behavior, feature reported disabled in the debug log (quickstart #8)."
+    severity: critical
+
+  - id: "AT-MANUAL-009"
+    requirement: "FR-009, FR-017"
+    environments: [local-kb]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Model cache removed and offline → answers still work, vector=unavailable (quickstart #9)."
+    severity: warning
+
+  - id: "AT-MANUAL-010"
+    requirement: "C2"
+    environments: [local-kb]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "No note text in any [career] log line during checks 1–9 (quickstart #10)."
+    severity: critical
