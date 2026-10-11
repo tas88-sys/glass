@@ -1,7 +1,7 @@
 {
   "spec_id": "2026-10-11-live-answer-career-context",
   "spec_name": "live-answer-career-context",
-  "updated": "2026-10-11T15:16:38Z",
+  "updated": "2026-10-11T15:36:29Z",
   "anthropic_patterns": [
     "Ralph looping",
     "JSON task state"
@@ -506,7 +506,7 @@
       "scope": null,
       "block_on": null,
       "completed_at": null,
-      "evidence": "scripts/eval-career-kb.js done (leave-source-out, full set + holdout, BM25 vs hybrid, --json, exit code). 2026-10-11, after the user approved reading the 6 holdout routing misses (q015 q020 q025 q040 q050 q055, moved to the tuning split in the KB repo; 14 holdout items remain unseen) and adding general Portuguese rules (implied subject, 'used to' tense, 'você é de', 'está + -ndo', 'algum exemplo ... que precisou'). Hybrid: personal routed personal 96.6% (unseen holdout 100%), general routed personal 0%, ambiguous 12/12, company 10/10, company leaks 0, answer path p95 11.7-17.1 ms over 3 runs (vector search rewritten without per-row allocation), query embedding p95 24-36 ms. Injected recall 32% (recall@3 30%) fails SC-002, and the overfit check flags injected recall (holdout has only 6 items with a gold note, 1 hit). Remaining misses by design: q020 (routed ambiguous, which still injects when a close note exists) and q040 (needs the previous question to make sense). Blocked on the user: gold labels name 1-2 notes per question while the KB answers many questions in several places; add alternative gold notes judged without looking at system output, or change the target",
+      "evidence": "Eval set (KB repo, uncommitted): the 6 holdout items read on 2026-10-11 moved to tuning (14 holdout left); gold for personal items expanded with the other notes that also answer each question (174 entries, 50 items), chosen by searching and reading the notes, without running retrieval. Hybrid, full set: personal routed personal 96.6% (holdout 100%), general routed personal 0%, ambiguous 12/12, company 10/10, company leaks 0, injected recall 47.2% (BM25-only 39.6%), no overfit flag (holdout 50.0% vs tuning 46.8%). Ranking depth: first gold note within top 1/3/6/10/20/40 for 28.3/47.2/56.6/56.6/66.0/71.7% of items, so a larger context budget adds little; the limit is ranking quality. Answer path p95: 11.7-17.1 ms on a lightly loaded machine, 14.9-26.1 ms at ~77% CPU load (p50 ~3 ms). SC-002 (85%) not met; blocked on the user choosing between accepting the current quality for real use, a ranking improvement attempt (stronger embedding model, reranker or query rewriting, each measured by this eval), or a different target",
       "evidence_type": "execution",
       "auto_skill": null,
       "auto_skill_timing": null,
