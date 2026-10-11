@@ -59,6 +59,12 @@ table('personal (English)', 'personal', [
     'What kind of projects do you usually take?',
     'Any experience with stream processing?',
     'Current salary?',
+    'What was your biggest project?',
+    "What's your biggest project so far?",
+    'your biggest project',
+    'What were your main tasks there?',
+    'Which was your favorite project?',
+    'What has been your hardest bug to fix?',
 ]);
 
 table('personal (Portuguese, implied subject and habits)', 'personal', [
@@ -178,6 +184,9 @@ table('general (no second-person background cue)', 'general', [
     'Qual foi o bug que causou o incidente?',
     'Usou-se cache nessa arquitetura?',
     'O servidor de testes foi liberado?',
+    'What was the root cause of the outage?',
+    'What was the biggest project in the history of the language?',
+    'Which was the first version with generics?',
     '',
 ]);
 

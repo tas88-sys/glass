@@ -85,3 +85,14 @@ Two chunker rules were added; the size cap did not change.
 | `spec.md` | FR-022 and its test-strategy row |
 | `contracts/career-context.contracts.d.ts` | `trace.k` and the per-ranking fields of `trace.hits` |
 | `quickstart.md` | §2: the ask script; both scripts read `.env` and the app's cache |
+| `research.md` | R13: why the script was created, what was rejected, what its first use found |
+| `README.md` | Career paragraph: how to see which notes a question would use |
+
+## Update for T034 (router: past-tense "what was your")
+
+| Document | Change |
+|----------|--------|
+| `contracts/EDGE_CASES.md` | E40 (past-tense question, fixed), E41 (follow-up vector query, open) |
+| `research.md` | R13 findings |
+
+`docs/LIVE_INSIGHTS_AND_ASK.md` does not list cue rules, so it is unchanged.

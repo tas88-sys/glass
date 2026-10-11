@@ -19,6 +19,8 @@
 | E37 | An answer uses an ordinary word that is also a known company name ("we can bridge that gap") | Not flagged: names are matched with the manifest's casing in the answer | FR-021 |
 | E38 | An answer has list numbers or numbers inside names ("1.", "EC2", "OAuth2") | Not flagged | FR-021 |
 | E39 | An answer states a number worked out from the notes (years of experience from a start date) | Flagged: the line asks the candidate to check it before saying it | FR-021 |
+| E40 | A past-tense question about the candidate with no other cue ("What was your biggest project?") | Personal (`background:what-was-your`); present "What is your approach…?" stays ambiguous | FR-006 |
+| E41 | A follow-up ("And what was the outcome?") | Route kept (`follow-up`); the keyword query carries the previous question's terms, the vector query is the follow-up alone, so the notes can differ from the first answer's. Open (R13) | FR-006, FR-008 |
 | E11 | Turn in Portuguese, best note in English | Retrieved through the vector side; answer in Portuguese | FR-009, FR-014 |
 | E12 | Turn names a tool or vendor exactly | BM25 rank carries it into the fused top k | FR-008, FR-010 |
 | E13 | "why us" with active company A; notes of B rank higher | B's chunks dropped; A's and untagged chunks kept | FR-011 |

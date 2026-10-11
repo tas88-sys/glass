@@ -256,6 +256,49 @@ Re-indexing for a new cap took 7–11 minutes: section-title vectors are reused,
 
 ---
 
+## R13: Checking retrieval by hand
+
+**Question** (T033): how can the candidate see which notes Live Answer would use for a given question?
+Nothing showed it before:
+- the eval prints ids and counts only, because its output goes into PRs of this public repo (C5);
+- the debug log carries chunk ids, never note text (FR-018);
+- the "from:" line shows the notes only in the running app, one interview question at a time.
+
+**Decision**: `scripts/ask-career-kb.js`, created on 2026-10-11 at the candidate's request.
+- It runs a question through the same module calls as the app: route, BM25, text and title
+  vectors, one section per file, the block.
+- It prints the route, the ranked sections with their place in each ranking, and what is sent;
+  `--block` prints the exact text.
+- Questions typed or piped one per line keep the follow-up state the way `summaryService` does.
+- Its output contains note titles and text, so it stays in the local terminal.
+- It and the eval read `.env` and default to the app's vector cache (`userData/career-kb`), so
+  neither embeds the notes again.
+- The module's eval trace takes an optional `k` to list more of the ranking; the block does not change.
+
+**Rejected**:
+- Titles in the eval output: that output is shared in PRs (C5).
+- Titles in the debug log: FR-018 keeps note text out of the console.
+
+**Findings from its first use**:
+- **Routing gap, fixed in T034.** "What was your biggest project?" routed `general`, so no notes,
+  while "What was the biggest project you worked on?" routed `personal`. Two cue changes fix it:
+  - a past-tense cue, `background:what-was-your` ("what was/were your", "what has been your");
+  - "project(s)" added to `background:your-trait` ("your biggest project").
+
+  Present "what is your …" stays out, because it is often an opinion ("your approach"), which
+  the ambiguous route handles. The eval is unchanged: 0 general items routed personal, personal
+  routing 96.6%.
+- **Follow-up retrieval, open.** After a disagreement question, "And what was the outcome?" keeps
+  the personal route (cue `follow-up`):
+  - the keyword query carries the previous question's terms;
+  - the vector query is the follow-up text alone, so unrelated "what happened" sections ranked
+    first;
+  - the block did not carry the first answer's story.
+
+  A fix would embed the previous question with the follow-up. Pending the candidate's decision (E41).
+
+---
+
 ## Summary of Decisions
 
 | ID | Decision | Confidence |
@@ -272,3 +315,4 @@ Re-indexing for a new cap took 7–11 minutes: section-title vectors are reused,
 | R10 | Prefetch during debounce; 150 ms cap | Medium (measured in T027) |
 | R11 | Node 20 constraints; dotenv; app and session hooks | High |
 | R12 | Keep 1,200-character chunks; merge short intros into their subsection; repeat table headers | Medium (eval within noise) |
+| R13 | A local ask script to check retrieval by hand; shares the app's vector cache | High |

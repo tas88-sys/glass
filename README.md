@@ -175,6 +175,7 @@ On **Linux**, system-audio loopback is disabled (`getDisplayMedia({audio:false})
 - Set `CAREER_KB_PATH` in `.env` to that folder. **Glass does not need it:** without it, or with a missing folder, the feature is off and Live Answer works exactly as before.
 - Your notes stay on your machine, except the excerpt (up to 9,000 characters) sent with each personal question to your LLM provider. An embedding model (~310 MB) is downloaded once.
 - Numbers and known names in an answer that your notes don't contain are marked "⚠ not in your notes" under it.
+- To see which notes a question would use, run `node scripts/ask-career-kb.js "your question"`. Its output shows your notes, so keep it on your machine.
 - Setup, the optional `glass-kb.json` manifest and the quality check: [`docs/LIVE_INSIGHTS_AND_ASK.md`](docs/LIVE_INSIGHTS_AND_ASK.md) §4.7.
 
 **Session lifecycle:**

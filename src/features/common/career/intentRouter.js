@@ -48,10 +48,13 @@ const PERSONAL_CUES = [
     ['background:fragment', /^(?:and |so )?(?:any|some|much|prior|previous|professional|hands on) (?:experience|exposure|background) (?:with|in|on|using)\b|^(?:and |so )?(?:current|expected|desired) (?:salary|compensation|role|company|employer|stack|location)\b/],
     ['background:your-career', /\byour (?:background|career|resume|cv|experience|journey|trajectory|track record|professional|story|path)\b/],
     ['background:your-role', /\byour (?:\w+ )?(?:current|previous|last|past|former|first|main|day to day|daily) (?:role|job|position|company|employer|team|project|manager|work|responsibilities|duties)\b|\byour (?:\w+ )?(?:responsibilities|duties|tech stack)\b/],
-    ['background:your-trait', /\byour (?:biggest|greatest|main|key|top|best|worst|proudest|major) (?:weakness|weaknesses|strength|strengths|achievement|achievements|accomplishment|challenge|failure|mistake|win|contribution|lesson|regret|impact)\b/],
+    ['background:your-trait', /\byour (?:biggest|greatest|main|key|top|best|worst|proudest|major) (?:weakness|weaknesses|strength|strengths|achievement|achievements|accomplishment|challenge|failure|mistake|win|contribution|lesson|regret|impact|project|projects)\b/],
     ['background:your-strengths', /\byour (?:strengths|weaknesses|strong points|weak points|achievements|accomplishments)\b/],
     ['background:proud', /\bproud (?:of|about)\b|\bproudest\b/],
     ['background:what-was-your-role', /\bwhat (?:was|is|were) your (?:role|part|contribution|responsibility|title|impact)\b/],
+    // Past tense asks about what the candidate did ("What was your biggest project?").
+    // Present "what is your ..." stays out: it is often an opinion ("your approach"), an ambiguous cue.
+    ['background:what-was-your', /\b(?:what|which) (?:was|were) your\b|\bwhat (?:has|have) been your\b/],
     ['background:in-your-last', /\bin your (?:last|current|previous|past|former) \w+/],
     ['background:good-at', /\b(?:are you|you are|you would be|would you be) (?:\w+ )?(?:good|strong|great|best) (?:at|in)\b/],
     ['background:why-leaving', /\bwhy (?:are you|did you|do you want to|would you) (?:\w+ )?(?:leav|look|chang|switch|mov|quit)\w*/],
