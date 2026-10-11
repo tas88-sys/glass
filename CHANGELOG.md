@@ -6,6 +6,40 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 
 ## [Unreleased]
 
+### Live Answer career context (branch `2026-10-11-live-answer-career-context`)
+
+#### Added
+
+- **Personal answers from your notes.** When the interviewer asks about the candidate's own background (behavioral stories, past projects, "why us"), Live Answer answers in first person from a local folder of career notes (`CAREER_KB_PATH`). It shows a muted "from: …" line naming the notes it used. Off by default; with the variable unset, the LLM messages are byte-identical to before.
+- **`src/features/common/career/`**, a provider-agnostic module:
+  - markdown chunker;
+  - deterministic intent router (personal / company / ambiguous / general, English and Portuguese, follow-ups);
+  - BM25 index;
+  - multilingual embeddings (transformers.js 4.2.0 + `multilingual-e5-small` in an Electron `utilityProcess`) fused by reciprocal rank fusion;
+  - company scoping;
+  - a 6,000-character context block led by a canonical-facts card.
+- **Optional `glass-kb.json` manifest** at the notes root: include/exclude globs, the canonical card, employer names, and per-company prep folders with aliases.
+- **`CAREER_KB_COMPANY`** pins the interviewing company. **`CAREER_KB_VECTORS=off`** keeps retrieval keyword-only and never starts the embedding model (~0.5 GB RAM).
+- **`scripts/eval-career-kb.js`** reports router accuracy, recall (leave-source-out), company leaks and per-stage latency against `<KB>/glass-eval/questions.jsonl`.
+- **Tests:** about 290 new `node:test` cases with synthetic fixtures (the real notes never enter the repo).
+
+#### Changed
+
+- **The question gate also accepts statement-form career prompts** ("your biggest weakness") while the career module is ready. With it off, the gate is unchanged.
+- **`live-answer-update` answer payloads carry `sources`** (note titles) when career context was injected. Status payloads are unchanged.
+- **Packaging:** `onnxruntime-node` is `asarUnpack`'d, and only the target platform's binaries ship. `onnxruntime-web` is excluded.
+
+#### Fixed
+
+- **A replaced answer no longer clears the newer answer's in-flight state.** The debounce callback's `finally` now clears `inFlight`/`inFlightController` only when they still belong to it. Before, a third question could fail to abort the second.
+
+#### Docs
+
+- `docs/LIVE_INSIGHTS_AND_ASK.md`:
+  - new §4.7 (career context) and §4.6 (Gemini failover, hedge, 60 s deadline, `LIVE_ANSWER_DEBUG`);
+  - §4.1 now describes the current question gate;
+  - stale `summaryService.js` line references fixed (also in `ARCHITECTURE.md`).
+
 ### Interview Live Answer Lane (branch `feat/stt-interview-question-wiring`)
 
 #### Added

@@ -1,0 +1,33 @@
+# Documentation Update Report
+
+**Spec**: `2026-10-11-live-answer-career-context`
+**Date**: 2026-10-11
+**Method**: manual. The `documentation-reconciliation` agent is not installed on this machine.
+
+**Status: PASS**
+
+## Scope
+
+Every Markdown file outside `specs/` that mentions Live Answer, its prompt slot, its environment variables or the packaging the feature changed:
+
+```
+grep -rl "LIVE_ANSWER_DEBUG|Live Answer|customPrompt|GEMINI_HEDGE" --include=*.md
+```
+
+Older specs were left alone (historical records); `live-answer-improvements/` is the user's own notes.
+
+## Changes
+
+| Document | Change |
+|----------|--------|
+| `docs/LIVE_INSIGHTS_AND_ASK.md` | New §4.7 Career context: env vars (`CAREER_KB_PATH`, `CAREER_KB_COMPANY`, `CAREER_KB_VECTORS`), manifest, routes, retrieval, injection, `sources`, lifecycle, debug line, eval, rollback (FR-020). New §4.6: Gemini failover, hedge, 60 s deadline, `LIVE_ANSWER_DEBUG`. §4.1 describes the current question gate. §4.3 adds `sources`. §4.5 covers career session state. File map updated. Twelve stale `summaryService.js` line references fixed. These are the drifts listed in `live-answer-improvements/live-answer.md` |
+| `ARCHITECTURE.md` | §8 line references fixed. §13 notes that Live Answer fills `customPrompt` with career context. §14 covers `onnxruntime-node` unpacking and per-platform binaries. §17 file map row |
+| `CHANGELOG.md` | `[Unreleased]` entry: Added / Changed / Fixed / Docs |
+| `docs/future-work.md` | "Personalized answers (v2)" marked shipped, with the spec's remaining out-of-scope items |
+| `README.md`, `CONTRIBUTING.md` | No Live Answer content; no change needed |
+
+## Checks
+
+- No personal content (spec C5). The leak scan over all changed files (company names, employers, city, personal names) found 0 hits.
+- Every `summaryService.js:` line reference in the two docs points at the code it names (checked against the current file).
+- Environment variables in the docs match the code (`index.js`: `CAREER_KB_PATH`, `CAREER_KB_COMPANY`, `CAREER_KB_VECTORS`; `LIVE_ANSWER_DEBUG` gates `[career]` lines).
