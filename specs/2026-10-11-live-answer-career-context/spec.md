@@ -29,7 +29,7 @@ summary:
     - {id: D3, decision: "Inject through the existing customPrompt slot of getSystemPrompt; append a first-person addendum to the user message only when notes are injected", rationale: "promptBuilder already wraps customPrompt as 'User-provided context' and the profile already prefers it; Live Answer passes '' today (summaryService.js:326). Planned as 'v2 Personalized answers' in specs/2026-05-30-interview-live-answer/spec.md"}
     - {id: D4, decision: "KB root from CAREER_KB_PATH; optional glass-kb.json manifest at that root filters for relevance, not privacy", rationale: "User decision 2026-10-11: sensitive files are not a concern; the manifest keeps noise (raw AI chats, unrelated guides, code) out and keeps the folder layout out of Glass"}
     - {id: D5, decision: "Per-company prep folders are indexed and tagged with their company; questions about the company itself use only the active company's notes", rationale: "User decision 2026-10-11: most company prep answers are generic and reusable; only 'why us' style answers are company-bound (research R7)"}
-    - {id: D6, decision: "A generated canonical-facts card in the KB repo is injected on personal/company routes and overrides the other notes", rationale: "The notes state the same facts with different values across files; retrieval would surface them inconsistently (research R8)"}
+    - {id: D6, decision: "A generated canonical-facts card in the KB repo is injected whenever context is injected (personal, company, and ambiguous above threshold) and overrides the other notes", rationale: "The notes state the same facts with different values across files; retrieval would surface them inconsistently (research R8)"}
     - {id: D7, decision: "Embedding runtime = transformers.js running a small multilingual model in a worker; adoption gated by a spike (go/no-go)", rationale: "Ollama is not installed on the target machine and would be a separate service; transformers.js runs in-process. Packaging of its native runtime is the main risk, so a spike measures it first (research R5)"}
     - {id: D8, decision: "BM25 path ships end to end first; the vector layer is added after the spike", rationale: "Value lands early, and BM25 is both the fallback and the baseline the eval compares against"}
     - {id: D9, decision: "The eval set is built from questions real interviewers asked (recalled lists, debriefs, transcripts, screening forms), not from the prepared Q-lines", rationale: "Prepared Q-lines match their own chunk titles word for word and would inflate recall (research R9)"}
@@ -107,32 +107,36 @@ During a live interview, the interviewer asks "Tell me about a time you disagree
 
 **Knowledge base**
 - **FR-001**: The system MUST read the KB root from `CAREER_KB_PATH` (env or `.env`). If unset or missing, the feature is disabled and Live Answer behaves as today.
-- **FR-002**: The system MUST honor an optional `glass-kb.json` at the KB root with `include`/`exclude` globs (exclude wins), `core` files, and `companies` settings (`root`, `skip`, `aliases`). Without it, it indexes every `.md` and `.txt` except `.git/` and `node_modules/`.
+- **FR-002**: The system MUST honor an optional `glass-kb.json` at the KB root with `include`/`exclude` globs (exclude wins), `core` files, and `companies` settings (`root`, `skip`, `aliases`). Without it, it indexes every `.md` and `.txt` except `.git/` and `node_modules/`. `core` files are never chunked into the index, even when `include` matches them; they are only injected whole.
 - **FR-003**: The chunker MUST split markdown on headings with a breadcrumb title (`file › H2 › H3`), make each `**Q:` block one chunk with the Q line in the title, keep chunks within ~300–1,200 characters (splitting long sections on paragraphs and repeating the title), and give each chunk a stable id (hash of path, title, ordinal).
 - **FR-004**: Chunks whose title or Q line contains an unfinished marker (`[PREENCHER`, `⚠️ CONFIRMAR`) MUST be dropped. Marker lines inside a body, and in core files, MUST be removed. This way a draft canonical card never injects an unconfirmed fact.
 - **FR-005**: Each chunk MUST carry `companies`, `date` (from a `YYYY-MM(-DD)` in the filename, else file mtime) and `kind`.
-  - `companies` is a set of company names. For a folder with no aliases, it is the folder name. For a folder with aliases, it is the alias names, narrowed to the ones whose slug appears in the file name; if none appears, all alias names are kept. A slug is the name lowercased with non-alphanumerics removed, compared against the file name normalized the same way.
+  - `companies` is a set of company names. For a folder with no aliases, it is the folder name. For a folder with aliases, it is the alias names, narrowed to the ones whose slug appears in the file name; if none appears, all alias names are kept. A slug is the name with accents folded, lowercased and non-alphanumerics removed (`Café Labs` → `cafelabs`, `A&B` → `ab`), compared against the file name normalized the same way.
   - It is empty for folders in `companies.skip` and for files outside `companies.root`.
   - Several folders may list the same name, so that one company's prep spread across folders shares one tag.
 
 **Routing**
-- **FR-006**: `intentRouter` MUST classify a turn as `personal`, `company`, `ambiguous` or `general`, return the cue that fired, cover English and Portuguese cues, treat employer/project names from the CV as personal cues, and keep a short follow-up on the previous personal route.
-- **FR-007**: `shouldTriggerAnswer` MUST also accept a `them` turn that carries a personal or company cue even without a question signal. All existing `liveAnswer.test.js` cases MUST still pass.
+- **FR-006**: `intentRouter` MUST classify a turn as `personal`, `company`, `ambiguous` or `general`, return the cue that fired, cover English and Portuguese cues, treat employer/project names from the CV as personal cues, and keep a follow-up on the previous personal route. A follow-up is a turn of at most 10 words that carries a follow-up marker ("what was the outcome", "how did that go", "and then", "e aí", "qual foi o resultado") and arrives within 5 minutes of the previous personal answer.
+- **FR-007**: When the feature is enabled, `shouldTriggerAnswer` MUST also accept a `them` turn that carries a personal or company cue even without a question signal. When it is disabled, the gate MUST behave exactly as today (C1). All existing `liveAnswer.test.js` cases MUST still pass.
 
 **Retrieval**
 - **FR-008**: The lexical index MUST be BM25 over chunk title (weight 3) and body (weight 1), with accent folding, EN+PT stopwords and light stemming; query = turn minus router cue phrases, extracted-question terms boosted, previous personal question merged on follow-ups.
 - **FR-009**: The semantic index MUST embed chunks with a multilingual model in a worker, cache vectors keyed by content hash and model id, start the query embedding as soon as a gated `them` turn arrives (inside the 800 ms debounce), and fall back to BM25-only when the embedding is not ready within 150 ms.
 - **FR-010**: Results MUST be fused by RRF (k = 60) over the BM25 top 20 and the vector top 20, ties broken toward newer `date`, returning the top 3–4 chunks.
 - **FR-011**: On the `company` route, a chunk whose `companies` set is non-empty and does not contain the active company MUST NOT be used. Untagged chunks (empty set) MAY be used.
-  - The active company comes from `CAREER_KB_COMPANY`, the reliable path. Otherwise it is the first company name spoken in a `them` turn of the session, matched against folder names and aliases with the longest match first, so a two-word name wins over its first word.
-    - Detection only accepts a name inside a company-context phrase: "here at X", "at X we", "join X", "welcome to X", "aqui na/no X", "na/no X a gente", "entrar na/no X".
+  - The active company comes from `CAREER_KB_COMPANY`, the reliable path. Otherwise it is the first company name spoken in a `them` turn of the session, matched against folder names and aliases case- and accent-insensitively, with the longest match first, so a two-word name wins over its first word.
+    - Detection only accepts a name inside a company-context phrase. Starting list, kept as data and extended through the eval: "here at X", "at X we", "join X", "joining X", "welcome to X", "heard of X", "aqui na/no X", "na/no X a gente", "entrar na/no X", "conhece a/o X".
     - The reason: many company names are ordinary words (for example a company called "Bridge" or "Anchor"), and a bare match would switch the active company on small talk.
   - If no active company is known, only untagged chunks are used on that route.
   - Other routes ignore company tags.
-- **FR-012**: On the `ambiguous` route, context MUST be injected only when the top fused hit clears a threshold calibrated by the eval (FR-019).
+- **FR-012**: On the `ambiguous` route, context MUST be injected only when the top hit clears a threshold calibrated by the eval (FR-019).
+  - The metric is the top hit's vector cosine similarity when vectors were used. In BM25-only mode, it is the top hit's coverage: at least half of the query terms and at least 2 of them matched.
+  - When it clears, the injection is the same as on the `personal` route: card, chunks and addendum.
 
 **Prompt and UI**
-- **FR-013**: The context block MUST put the canonical card first, then chunks under their breadcrumb titles, deduplicated, capped at 6,000 characters (the card alone is about 3,000) and cut at paragraph boundaries.
+- **FR-013**: The context block MUST put the canonical card first, then chunks under their breadcrumb titles (format in contracts), deduplicated, capped at 6,000 characters and cut at paragraph boundaries.
+  - The card is never cut: chunks fill the budget left after it, lowest-ranked dropped first.
+  - If the card alone exceeds the cap, it is injected whole without chunks and a debug warning is logged.
 - **FR-014**: `makeLiveAnswer` MUST pass the block as `customPrompt` and append the first-person addendum (contracts) to the user message only when a block is injected. On the `general` route, or when disabled, the messages MUST be byte-identical to today's.
 - **FR-015**: `live-answer-update` payloads MUST carry `sources: string[]` (titles only) when context was injected; `applyLiveAnswerUpdate` MUST keep them on the entry; `LiveAnswerView` MUST render them as a muted "from: …" line under the question, and nothing when absent.
 
@@ -142,23 +146,26 @@ During a live interview, the interviewer asks "Tell me about a time you disagree
 - **FR-018**: Under `LIVE_ANSWER_DEBUG`, the module MUST log route, cue, chunk ids, scores and per-stage timings, and MUST NOT log note text.
 - **FR-019**: `scripts/eval-career-kb.js` MUST read the KB and its eval file and print the router confusion matrix, recall@3 for BM25-only and hybrid, a company-leak check and p50/p95 retrieval latency.
   - It MUST evaluate each item with the chunks of its `source` file removed (leave-source-out). Every real question is also stored in the note it was recorded in, so it must never be matched against itself.
-  - A gold entry pointing at a core file counts as a hit when the route injects the card.
+  - A gold entry pointing at a core file counts as a hit when the route injects the card. Items whose gold is only the card are scored by routing, not by retrieval.
+  - **Recall** is computed over personal items with at least one non-core gold note. It is reported two ways: `recall@3` on the fused ranking, and `injected recall` on the chunks that actually fit in the block after the budget. The second is the target.
+  - **Latency:** the answer path is routing, BM25, fusion and packing, with the query embedding already prefetched. The query embedding is reported separately, and must finish inside the debounce window (p95 ≤ 800 ms; the spike targets ≤ 50 ms).
+  - **Holdout:** success criteria are judged on the full set. The holdout items (excluded from tuning cues and thresholds) are reported separately; if their personal-route recall or injected recall is more than 10 points below the tuning split, the run is flagged as overfit. The holdout is too small to pass or fail on by itself.
 - **FR-020**: Docs MUST cover `CAREER_KB_PATH`, `CAREER_KB_COMPANY`, the manifest format and the debug output.
 
 ### Success Criteria
-- **SC-001**: Router: personal-route recall ≥ 95%; general questions routed as personal ≤ 10% (eval set).
-- **SC-002**: Hybrid recall@3 ≥ 85% on personal questions with a gold chunk; BM25-only reported alongside.
+- **SC-001**: Router: ≥ 95% of personal items routed `personal`; general items routed `personal` ≤ 10% (full eval set, no overfit flag).
+- **SC-002**: Hybrid injected recall ≥ 85% (FR-019); recall@3 and the BM25-only numbers reported alongside.
 - **SC-003**: Zero company-route answers drawing on another company's notes (eval set).
-- **SC-004**: Added time on the answer path ≤ 20 ms at p95 with prefetch; BM25 ≤ 5 ms; general route adds nothing measurable.
+- **SC-004**: Answer path (FR-019 definition) ≤ 20 ms at p95; BM25 ≤ 5 ms; query embedding p95 ≤ 800 ms; general route adds nothing measurable.
 - **SC-005**: With the KB disabled, the LLM messages are byte-identical to today's (automated test).
 
 ### Key Entities *(include if feature involves data)*
-- **Chunk**: one retrievable unit of a note (id, path, title, body, company, date, kind).
+- **Chunk**: one retrievable unit of a note (id, path, title, body, companies, date, kind, hash).
 - **Manifest**: the optional `glass-kb.json` (include, exclude, core, companies).
-- **Canonical card**: the `core` file(s), injected whole on personal and company routes.
+- **Canonical card**: the `core` file(s), injected whole whenever context is injected; never chunked.
 - **Route decision**: router output (route, cue).
 - **Career context**: what the debounce callback hands to `makeLiveAnswer` (block, sources, route, timings).
-- **Eval question**: one labeled line of the eval file (text, language, route, gold chunk titles, company).
+- **Eval question**: one labeled line of the eval file (text, language, route, gold notes, company, source, fidelity, holdout).
 
 See `data-model.md`.
 
@@ -166,7 +173,7 @@ See `data-model.md`.
 
 | Dependency | Type | Risk Level | Quota/Limits | Fallback Behavior |
 |------------|------|------------|--------------|-------------------|
-| Configured LLM provider (unchanged) | SDK/HTTP streaming | MED | ≤ ~1.2k extra prompt tokens per personal question | Existing Gemini failover; career context is optional input |
+| Configured LLM provider (unchanged) | SDK/HTTP streaming | MED | ≤ 6,000 extra characters (about 1.5–2k tokens) per injected question | Existing Gemini failover; career context is optional input |
 | transformers.js + multilingual embedding model (subject to spike T024) | Local library + model file (~120 MB, one download) | MED | CPU only; no network after first download | BM25-only retrieval |
 | `onnxruntime-node` (transitive, native) | Native module in the packaged app | MED | Installer size; must be unpacked from asar like `sharp` (`electron-builder.yml` `asarUnpack`) | Spike is go/no-go; no-go ships BM25-only |
 | Career notes folder | Local filesystem, read-only | LOW | Hundreds of files | Feature disabled |
@@ -256,7 +263,8 @@ src/features/common/career/            new, provider-agnostic
   textNormalize.js   pure        bm25.js          pure
   vectorIndex.js     pure        retriever.js     pure (RRF, scope, recency)
   contextBuilder.js  pure        kbService.js     fs (manifest, walk, refresh)
-  embedder.js        worker host (transformers.js)
+  embedder.js        worker host (lazy-loads transformers.js)
+  embedWorker.js     worker body
   globMatch.js       pure (C6)
 
 summaryService.js    triggerAnswerIfNeeded: prefetch on gated turn; debounce callback

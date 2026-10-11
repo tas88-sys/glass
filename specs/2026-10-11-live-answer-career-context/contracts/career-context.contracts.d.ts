@@ -43,7 +43,7 @@ export interface RouteDecision {
 }
 
 export interface RouterContext {
-    prev?: { route: Route; ts: number } | null;   // last answered personal question
+    prev?: { route: Route; ts: number; queryTerms?: string[] } | null;   // last answered personal question (FR-006, FR-008)
     entities?: string[];          // employer/project names from the CV (FR-006)
     now?: number;
 }
@@ -53,6 +53,9 @@ export interface ScoredChunk {
     score: number;                // fused RRF score
     bm25Rank: number | null;
     vectorRank: number | null;
+    cosine: number | null;        // vector similarity, null in BM25-only mode (FR-012)
+    coverage: number | null;      // distinct query terms matched ÷ query terms, null when not in BM25 results
+    matchedTerms: number;         // distinct query terms matched (0 when not in BM25 results)
 }
 
 export interface Timings {
@@ -83,7 +86,8 @@ export interface CareerModule {
 
     /**
      * Start the query embedding for a gated `them` turn so it is ready when the
-     * debounce fires (FR-009). Never throws; a no-op when vectors are unavailable.
+     * debounce fires (FR-009). The module keeps only the latest prefetch, keyed by
+     * normalized text. Never throws; a no-op when vectors are unavailable.
      */
     prefetch(turnText: string): void;
 
@@ -98,7 +102,7 @@ export interface CareerModule {
         session: { prev: RouterContext['prev']; activeCompany: string | null },
     ): Promise<CareerContext | null>;
 
-    /** True when a career cue is present: feeds shouldTriggerAnswer (FR-007). Pure, sync. */
+    /** True when a personal or company cue is present: feeds shouldTriggerAnswer (FR-007). Always false while the module is disabled (C1). Sync. */
     hasCareerCue(turnText: string): boolean;
 
     /** Company name (folder name or alias, longest match first) said in the turn, if any (FR-011). Pure, sync. */
@@ -128,36 +132,68 @@ export declare function chunkMarkdown(
 export declare function tokenize(text: string): string[];   // fold accents, lowercase, stopwords, stem
 
 /** bm25.js */
+export interface Bm25Hit {
+    idx: number;
+    score: number;
+    matchedTerms: number;         // distinct query terms found in the chunk
+    queryTerms: number;           // distinct query terms searched
+}
 export interface Bm25Index {
-    search(queryTerms: string[], k: number): Array<{ idx: number; score: number }>;
+    search(queryTerms: string[], k: number): Bm25Hit[];
 }
 export declare function buildBm25(chunks: Chunk[]): Bm25Index;
 
 /** vectorIndex.js */
+export interface VectorHit {
+    idx: number;
+    score: number;                // cosine similarity (rows and query are L2-normalized)
+}
 export interface VectorIndex {
-    search(query: Float32Array, k: number): Array<{ idx: number; score: number }>;
+    search(query: Float32Array, k: number): VectorHit[];
 }
 export declare function buildVectorIndex(rows: Float32Array, dims: number): VectorIndex;
 
 /** retriever.js */
 export declare function fuseAndFilter(input: {
     chunks: Chunk[];
-    bm25: Array<{ idx: number; score: number }>;
-    vector: Array<{ idx: number; score: number }> | null;    // null → BM25-only
+    bm25: Bm25Hit[];
+    vector: VectorHit[] | null;   // null → BM25-only
     route: Route;
     activeCompany: string | null;
     k: number;                    // 3–4
     rrfK?: number;                // default 60
 }): ScoredChunk[];
 
+/**
+ * FR-012 gate for the ambiguous route, applied to the top fused hit.
+ * Vectors used → hit.cosine >= minCosine. BM25-only → hit.coverage >= 0.5 and
+ * hit.matchedTerms >= 2. minCosine is calibrated by the eval (T027).
+ */
+export declare function passesAmbiguousThreshold(
+    hit: ScoredChunk | undefined,
+    opts: { vectorUsed: boolean; minCosine: number },
+): boolean;
+
 /** contextBuilder.js */
 export declare function buildContextBlock(input: {
     core: string;                 // canonical card text ('' if none)
     hits: ScoredChunk[];
-    maxChars?: number;            // default 6000
+    maxChars?: number;            // default 6000; the core card is never cut (FR-013)
 }): { block: string; sources: string[]; chunkIds: string[] };
 
 export declare function buildAddendum(activeCompany: string | null): string;
+
+/**
+ * Block format (FR-013). The card is labeled so the addendum can refer to it:
+ *
+ *   [canonical facts]
+ *   <core file text, marker lines removed>
+ *
+ *   [<chunk title>]
+ *   <chunk body>
+ *   ...
+ */
+export declare const BLOCK_CARD_LABEL: '[canonical facts]';
 
 /** globMatch.js (C6) */
 export declare function globToRegExp(glob: string): RegExp;

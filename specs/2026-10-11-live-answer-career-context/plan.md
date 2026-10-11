@@ -201,7 +201,7 @@ Single local user; no roles, no API surface. N/A.
 | Native module packaging | `electron-builder.yml` `asarUnpack: "**/node_modules/sharp/**/*"` | Same for `onnxruntime-node` (after spike) |
 | Answer meta to renderer | `makeLiveAnswer(..., meta)` carries `id`, `question` on every `live-answer-update` (`:316-322`) | Add `sources` the same way |
 | History fold | `applyLiveAnswerUpdate` (`liveAnswerHistory.js:35`) creates and updates entries by id | Keep `sources` on create, preserve on update |
-| Reset | `resetLiveAnswer()` (`:604`) is called by `resetConversationHistory` at session start and stop | Also clears `careerPrev`, `activeCompany`, `careerPrefetch` |
+| Reset | `resetLiveAnswer()` (`:604`) is called by `resetConversationHistory` at session start and stop | Also clears `careerPrev` and `activeCompany` (the prefetch lives in the career module) |
 
 ### Code Interconnectedness Gate
 
@@ -248,7 +248,10 @@ See spec § Error Handling. Rule: **every career-module public function is total
 | Integration | Embedding pass competes with STT for CPU during a call | Full pass at app start; during sessions only changed chunks; worker at low priority | Y (T026) |
 | Integration | onnxruntime-node fails inside asar | Spike T024 verifies the packaged build before any dependency lands on the branch | Y (T024) |
 | Polish | `sources` from an aborted answer attached to the next | `sources` rides only on that answer's own `id` payloads | Y (T022/T023) |
-| Polish | Eval set overfits the cues | Keep 20% of the eval items held out from cue tuning; report both splits | Y (T027) |
+| Polish | Eval set overfits the cues | Keep 20% of the eval items held out from cue tuning; judge on the full set and flag a holdout gap over 10 points | Y (T027) |
+| Integration | A question is aborted while its context is being resolved | Create the AbortController before awaiting getCareerContext; bail if aborted after the await | Y (T020/T021) |
+| Foundations | `npm test` loads the native ONNX runtime or Electron's `app` through the career module | Lazy-require `@huggingface/transformers` inside the worker host and resolve the `userData` path at warm time; no top-level Electron or model imports | Y (T019/T026) |
+| Verify | `npm run lint` cannot run (eslint is not installed in this repo) | Gate on `node --check` for main-process files and `npm run build:renderer` for the renderer instead | Y (T-FINAL) |
 
 ## Prior Lessons Applied
 

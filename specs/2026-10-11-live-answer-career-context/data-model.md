@@ -16,7 +16,7 @@ There are no database changes. Everything lives in memory in the main process, e
 | `version` | `1` | `1` | Unknown versions are treated like a missing manifest |
 | `include` | glob[] | `["**/*.md", "**/*.txt"]` | Relative to the KB root, forward slashes |
 | `exclude` | glob[] | `[]` | Always also excludes `.git/**` and `node_modules/**`; exclude wins over include |
-| `core` | path[] | `[]` | Canonical card file(s), injected whole on personal and company routes; never chunked |
+| `core` | path[] | `[]` | Canonical card file(s), injected whole whenever context is injected; never chunked, even when `include` matches them |
 | `companies.root` | path | none | A folder whose direct subfolders are companies |
 | `companies.skip` | string[] | `[]` | Subfolders under `root` that are not companies (shared material) |
 | `companies.aliases` | `{folder: string[]}` | `{}` | The company names a folder holds, as interviewers say them. Used for tagging (FR-005) and detection (FR-011). Several folders may list the same name |
@@ -77,9 +77,10 @@ Lifecycle: the chunks of a file are replaced whenever its mtime changes (FR-016)
 
 | Field | Purpose |
 |-------|---------|
-| `careerPrev` | `{ route, queryTerms, ts }` of the last answered personal question, used for follow-ups |
+| `careerPrev` | `{ route, queryTerms, ts }` of the last answered personal question, used for follow-ups (FR-006) |
+
+The query-embedding prefetch is owned by the career module (latest turn only, keyed by normalized text), not by `SummaryService`.
 | `activeCompany` | Detected company name (FR-011) when `CAREER_KB_COMPANY` is not set |
-| `careerPrefetch` | `{ tail, promise }` for the query embedding started on the gated turn |
 
 ### `live-answer-update` payload (extended)
 
@@ -98,7 +99,7 @@ Lifecycle: the chunks of a file are replaced whenever its mtime changes (FR-016)
 | `route` | Route | Expected route |
 | `id` | string | `q001`… |
 | `gold` | `{ path, anchor }[]` | Notes that answer it (personal and company items). A chunk matches when its `path` equals `path` and its title contains `anchor` (a heading or Q-line excerpt); an empty `anchor` matches any chunk of the file. Robust to breadcrumb format changes. A core-file entry is a hit when the route injects the card |
-| `holdout` | boolean | Excluded from cue and threshold tuning; SC-001..SC-004 are judged on it |
+| `holdout` | boolean | Excluded from cue and threshold tuning. Reported separately to detect overfitting; success criteria are judged on the full set (FR-019) |
 | `company` | string \| null | Active company to simulate (company items) |
 | `source` | string \| null | Note it was taken from. Its chunks are excluded while this item is evaluated (leave-source-out). `null` for generic phrasings |
 | `fidelity` | `'transcript' \| 'recalled' \| 'debrief' \| 'written-form' \| 'reported' \| 'generic'` | How close `text` is to what was actually said. `generic` items only test company scoping |

@@ -124,7 +124,7 @@ The library version is pinned at that point.
 
 ## R8: Inconsistent facts across notes
 
-**Decision**: A generated canonical-facts card, injected on personal and company routes, that overrides the other notes.
+**Decision**: A generated canonical-facts card, injected whenever context is injected (personal, company, and ambiguous above threshold), that overrides the other notes.
 
 **Evidence**:
 - The candidate's years of experience appear with **three different values** across at least five files, written months apart.
@@ -157,6 +157,8 @@ After dedupe that is about 100–150 distinct questions, from which 60–100 are
 - they may be used to test the **router**, which never reads the notes, so it gets no copy advantage from them.
 
 Reworded or translated variants written by Claude may be added later as a separate, clearly labeled synthetic split.
+
+**Judging:** success criteria use the full set. The 20% holdout (12 personal, 2 company items) is far too small to pass or fail on, so it only flags overfitting (FR-019).
 
 **Labels per item**:
 - `route`;
