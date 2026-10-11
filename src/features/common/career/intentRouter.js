@@ -18,6 +18,8 @@ const FOLLOW_UP_WINDOW_MS = 5 * 60 * 1000;
 const FOLLOW_UP_MAX_WORDS = 10;
 
 const YOU = '(?:voce|vc)';
+// Activities a person is doing ("está participando", "anda buscando").
+const DOING = '(?:participando|buscando|procurando|trabalhando|atuando|estudando|aplicando|conversando|considerando|liderando|usando|utilizando|desenvolvendo|fazendo|olhando|avaliando|entrevistando)';
 
 const COMPANY_CUES = [
     ['company:why-us', /\bwhy (?:us|our company|this company|our team|join us)\b/],
@@ -75,6 +77,7 @@ const PERSONAL_CUES = [
     ['background:pt-mudar', /\b(?:por ?que|qual (?:e )?o motivo|o que (?:e que )?(?:te )?(?:faria|faz|levaria))\b.*\b(?:mudar|sair|saindo|deixar|trocar|mudanca)\b/],
     ['background:pt-comecar', /\bquanto tempo (?:\w+ )?precisaria\b|\bquando (?:voce |vc )?(?:pode|poderia) comecar\b|\breceber (?:uma|a) oferta\b/],
     ['background:pt-onde-mora', new RegExp(`\\bonde (?:${YOU} )?(?:mora|vive)\\b`)],
+    ['background:pt-voce-e-de', new RegExp(`\\b${YOU} e (?:de|da|do|dos|das|daqui|natural de)\\b`)],
     ['background:pt-orgulho', /\borgulh\w*/],
     ['background:pt-manda-bem', new RegExp(`\\b${YOU} (?:\\w+ )?(?:mandaria|manda|se sairia|seria|e|iria) (?:bem|forte|bom|boa)\\b`)],
     ['background:pt-ainda', /\bainda (?:trabalha|esta|atua)\b/],
@@ -82,12 +85,22 @@ const PERSONAL_CUES = [
     ['experience:pt-tem-experiencia', /\b(?:tem|teve|possui|possuiu) (?:\w+ )?experiencia\b/],
     ['experience:pt-voce-past', new RegExp(`\\b${YOU} (?:ja |se |nao |tambem |ainda |chegou a )?\\w{2,}(?:ou|eu|iu)\\b`)],
     ['experience:pt-voce-irregular', new RegExp(`\\b${YOU} (?:ja )?(?:trouxe|fez|disse|teve|esteve|foi|quis|veio|pos|soube)\\b`)],
-    ['experience:pt-voce-presente', new RegExp(`\\b${YOU} (?:mora|vive|trabalha|atua|esta trabalhando|esta atuando|esta buscando|esta procurando|esta considerando)\\b`)],
+    ['experience:pt-voce-presente', new RegExp(`\\b${YOU} (?:mora|vive|trabalha|atua|(?:esta|estava|anda) ${DOING})\\b`)],
+    // "Used to" tense: any -ar verb in -ava ("tomava", "liderava"), plus common -er/-ir
+    // verbs listed by name: a bare -ia would also catch present tense ("gerencia",
+    // "negocia") and conditionals ("faria"), which are not about past experience.
+    ['experience:pt-voce-imperfeito', new RegExp(`\\b${YOU} (?:ja |tambem |ainda |nao |sempre )?(?:\\w+ava|era|tinha|vinha|fazia|dizia|podia|escrevia|resolvia|atendia|mantinha|decidia|definia|conduzia|construia|desenvolvia|dividia|seguia|recebia|escolhia|corrigia|entendia|aprendia|respondia|percebia|produzia|mexia)\\b`)],
     ['experience:pt-voces', /\bvoces (?:\w+ )?(?:\w+am|\w+em)\b/],
     ['experience:pt-ja-past', /\bja \w{2,}(?:ou|eu|iu)\b/],
     // Implied subject: Portuguese drops "você" ("Trabalha remoto hoje?", "Conhece Kafka?").
     // "Usa-se X" is impersonal, not about the candidate.
     ['experience:pt-implied-subject', /^(?:e |entao |mas )?(?:hoje |atualmente |ainda |ja |tambem )?(?:trabalha|atua|mora|usa|utiliza|conhece|possui|programa|desenvolve|lidera|gerencia|codifica|estuda|faz parte)\b(?! se\b)/],
+    // "Está participando de outros processos?" Only activities a person does, so
+    // "está funcionando?" (a thing) stays general.
+    ['experience:pt-implied-doing', new RegExp(`^(?:e |entao |mas )?(?:hoje |atualmente |ainda |ja |tambem )?(?:esta|estava|anda) ${DOING}\\b`)],
+    ['experience:pt-implied-past', /^(?:e |entao |mas )?(?:ja )?(?:precisou|teve que|teve de|chegou a|participou|atuou|liderou|trabalhou|usou|utilizou|lidou|enfrentou)\b(?! se\b)/],
+    // "Tem algum exemplo de adaptação que precisou fazer?": an example the candidate lived.
+    ['behavioral:pt-exemplo-que', new RegExp(`\\b(?:algum|alguma|um|uma) (?:exemplo|caso|situacao|momento|vez|historia|experiencia)\\b(?: \\w+){0,4} que (?:${YOU} )?(?:ja )?(?:precisou|teve que|teve de|conseguiu|lidou|enfrentou|fez|liderou|tomou|participou|passou|chegou a)\\b`)],
     // "Como você gerencia X?" asks for an approach (ambiguous), not a fact.
     ['experience:pt-voce-habito', new RegExp(`(?<!\\bcomo (?:que )?)\\b${YOU} (?:hoje |atualmente |ainda |tambem )?(?:faz|fazia|trabalhava|atuava|cuida|cuidava|usa|usava|utiliza|utilizava|lidera|liderava|gerencia|programa|desenvolve|conhece|gosta)\\b`)],
     ['background:pt-o-que-faz', new RegExp(`\\b(?:o que|no que|com o que) (?:${YOU} )?(?:faz|trabalha|atua|esta fazendo|esta trabalhando)\\b|\\b(?:seu|teu) dia a dia\\b`)],

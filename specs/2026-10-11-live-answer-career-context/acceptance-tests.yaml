@@ -15,7 +15,7 @@ generation_context:
   generated_at: "2026-10-11T00:00:00Z"
   spec_hash: "784e2c1a7a191e1c64387662cb29a1a4ca1d436438dbd1c3a577d8dd7f75fc1e"
   plan_hash: "05d7a8115a2b1f0cf9160e047be9a5cd24f1576aaaafa3ad9e655098ec627f1d"
-  tasks_hash: "4c6a1e82804760df3b6a0ebfc93702ac5b110e3efaae8fe62576b1f09c48a6a1"
+  tasks_hash: "fb5b4acbe9a3640afe60c21814ee492472aba09ada50c570c8ed9901197152be"
 
 # --- Drift Detection (v2 required) ---
 _references:

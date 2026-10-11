@@ -70,6 +70,18 @@ table('personal (Portuguese, implied subject and habits)', 'personal', [
     'No que você trabalha atualmente?',
     'Como é o seu dia a dia?',
     'Você usa testes automatizados?',
+    'Você é de Curitiba?',
+    'Legal. Você é da área de dados?',
+    'Na empresa anterior, você liderava o time?',
+    'Como engenheiro, você tomava as decisões de arquitetura?',
+    'Você fazia plantão?',
+    'Você era o único backend?',
+    'Está participando de outros processos?',
+    'Atualmente está buscando vagas remotas?',
+    'Você está conversando com outras empresas?',
+    'Precisou lidar com um cliente difícil?',
+    'Teve que migrar algum sistema legado?',
+    'Tem algum exemplo de mudança de escopo que precisou fazer num projeto?',
 ]);
 
 table('personal (Portuguese)', 'personal', [
@@ -136,6 +148,8 @@ table('ambiguous (hypothetical, habitual, opinion)', 'ambiguous', [
     'Como você explica ideias técnicas para um público não técnico?',
     'Dois membros do time estão em conflito. Como você resolve?',
     'A base herdada é grande e sem testes. Como você gerencia isso?',
+    'Como você faria se tivesse o dobro do time?',
+    'O que você faria com um prazo menor?',
     'Explique como você implementaria concorrência com filas e workers.',
 ]);
 
@@ -157,6 +171,12 @@ table('general (no second-person background cue)', 'general', [
     'Tell me about the CAP theorem.',
     'What are the trade-offs of microservices?',
     'Current state of the art in caching?',
+    'Está funcionando o áudio?',
+    'Está me ouvindo bem?',
+    'Você sabia que a linguagem tem generics?',
+    'Tem algum exemplo de uso de channel?',
+    'Qual foi o bug que causou o incidente?',
+    'Usou-se cache nessa arquitetura?',
     'O servidor de testes foi liberado?',
     '',
 ]);
