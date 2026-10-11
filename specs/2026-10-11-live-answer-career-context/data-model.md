@@ -17,6 +17,7 @@ There are no database changes. Everything lives in memory in the main process, e
 | `include` | glob[] | `["**/*.md", "**/*.txt"]` | Relative to the KB root, forward slashes |
 | `exclude` | glob[] | `[]` | Always also excludes `.git/**` and `node_modules/**`; exclude wins over include |
 | `core` | path[] | `[]` | Canonical card file(s), injected whole whenever context is injected; never chunked, even when `include` matches them |
+| `entities` | string[] | `[]` | Employer and project names from the CV. The router treats them as personal cues (FR-006), case- and accent-insensitively, with or without spaces |
 | `companies.root` | path | none | A folder whose direct subfolders are companies |
 | `companies.skip` | string[] | `[]` | Subfolders under `root` that are not companies (shared material) |
 | `companies.aliases` | `{folder: string[]}` | `{}` | The company names a folder holds, as interviewers say them. Used for tagging (FR-005) and detection (FR-011). Several folders may list the same name |
@@ -67,8 +68,9 @@ Lifecycle: the chunks of a file are replaced whenever its mtime changes (FR-016)
 | `cue` | string \| null | |
 | `block` | string | Empty string when nothing is injected |
 | `addendum` | string | Empty string when nothing is injected |
-| `sources` | string[] | Chunk titles, plus `canonical facts` when the card was injected |
+| `sources` | string[] | Chunk titles, then `canonical facts` last when the card was injected |
 | `chunkIds` | string[] | For debug logs |
+| `queryTerms` | string[] | The query terms used (distinct, at most 40). The caller keeps them for follow-ups |
 | `timings` | `{ routeMs, bm25Ms, vectorMs, vectorUsed, totalMs }` | For debug logs and the eval |
 
 `null` means the feature is disabled or erred, and the caller behaves as today.
@@ -77,10 +79,10 @@ Lifecycle: the chunks of a file are replaced whenever its mtime changes (FR-016)
 
 | Field | Purpose |
 |-------|---------|
-| `careerPrev` | `{ route, queryTerms, ts }` of the last answered personal question, used for follow-ups (FR-006) |
+| `careerPrev` | `{ route, queryTerms, ts }` of the last answered personal or company question, used for follow-ups (FR-006). Any other route, or no context, clears it |
+| `activeCompany` | First company named in a `them` turn of the session (FR-011). `CAREER_KB_COMPANY`, when set, wins inside the module |
 
-The query-embedding prefetch is owned by the career module (latest turn only, keyed by normalized text), not by `SummaryService`.
-| `activeCompany` | Detected company name (FR-011) when `CAREER_KB_COMPANY` is not set |
+Both are passed to `getCareerContext` with the extracted question: `{ prev: careerPrev, activeCompany, question }`. The query-embedding prefetch is owned by the career module (latest turn only, keyed by normalized text), not by `SummaryService`.
 
 ### `live-answer-update` payload (extended)
 

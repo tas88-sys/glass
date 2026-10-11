@@ -24,13 +24,16 @@ const MAX_ANSWERS = 20;
  *  - A payload with no `id` is always treated as a new entry (defensive: the
  *    service always sends an id, but we never coalesce blindly on undefined).
  *  - A payload with no `answer` text returns the input unchanged.
+ *  - `sources` (note titles the answer drew on, career context FR-015) is
+ *    stored when the entry is created and kept on later deltas; an entry
+ *    without sources has no `sources` key.
  *
  * Returns a NEW array (never mutates the input) so it can drive reactive state.
  *
- * @param {Array<{id:string,question:string,text:string,ts:number}>} answers
- * @param {{id?:(string|number), question?:string, answer?:string, ts?:number}} data
+ * @param {Array<{id:string,question:string,text:string,ts:number,sources?:string[]}>} answers
+ * @param {{id?:(string|number), question?:string, answer?:string, ts?:number, sources?:string[]}} data
  * @param {number} [max=MAX_ANSWERS]
- * @returns {Array<{id:string,question:string,text:string,ts:number}>}
+ * @returns {Array<{id:string,question:string,text:string,ts:number,sources?:string[]}>}
  */
 function applyLiveAnswerUpdate(answers, data, max = MAX_ANSWERS) {
     if (!data || !data.answer) return answers;
@@ -49,12 +52,14 @@ function applyLiveAnswerUpdate(answers, data, max = MAX_ANSWERS) {
     }
 
     // New question's answer — newest on top, drop the oldest past the cap.
-    list.unshift({
+    const entry = {
         id,
         question: data.question || '',
         text: data.answer,
         ts: data.ts || Date.now(),
-    });
+    };
+    if (Array.isArray(data.sources) && data.sources.length) entry.sources = data.sources.slice();
+    list.unshift(entry);
     if (list.length > max) list.length = max;
     return list;
 }

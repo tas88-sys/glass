@@ -9,7 +9,8 @@ In `.env` at the repo root (`src/index.js:8` loads it):
 
 ```
 CAREER_KB_PATH=D:\path\to\career-notes
-# optional: pin the interviewing company (folder name under companies.root)
+# optional: pin the interviewing company, as named in the manifest aliases
+# (or the folder name under companies.root when it has no aliases)
 CAREER_KB_COMPANY=
 # optional: see routing and retrieval decisions
 LIVE_ANSWER_DEBUG=1
@@ -21,6 +22,7 @@ Optional `glass-kb.json` at the notes root (see `data-model.md`):
 {
   "version": 1,
   "core": ["about-me/canonical-facts.md"],
+  "entities": ["Example Corp", "Example Project"],
   "include": ["**/*.md", "**/*.txt"],
   "exclude": ["chats/**", "code/**"],
   "companies": { "root": "interviews", "skip": ["shared"], "aliases": {} }

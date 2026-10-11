@@ -19,6 +19,7 @@ export interface Manifest {
     include: string[];            // globs, relative, forward slashes
     exclude: string[];            // exclude wins; .git/** and node_modules/** always excluded
     core: string[];               // canonical card file(s), never chunked
+    entities?: string[];          // employer/project names from the CV: personal cues for the router (FR-006)
     companies?: {
         root: string;
         skip?: string[];
@@ -43,9 +44,17 @@ export interface RouteDecision {
 }
 
 export interface RouterContext {
-    prev?: { route: Route; ts: number; queryTerms?: string[] } | null;   // last answered personal question (FR-006, FR-008)
-    entities?: string[];          // employer/project names from the CV (FR-006)
+    prev?: { route: Route; ts: number; queryTerms?: string[] } | null;   // last answered personal or company question (FR-006, FR-008)
+    entities?: string[];          // manifest `entities`: employer/project names from the CV (FR-006)
+    companies?: string[];         // interviewing company names (aliases, or folder names): "conhece a X" routes company
     now?: number;
+}
+
+/** Session state the caller keeps and passes on every call (data-model "Session state"). */
+export interface CareerSession {
+    prev: RouterContext['prev'];
+    activeCompany: string | null; // detected in the conversation; CAREER_KB_COMPANY wins inside the module
+    question?: string;            // extractQuestion(turn): its terms are boosted in the query (FR-008)
 }
 
 export interface ScoredChunk {
@@ -73,6 +82,7 @@ export interface CareerContext {
     addendum: string;             // '' when nothing injected
     sources: string[];            // titles only (FR-015)
     chunkIds: string[];
+    queryTerms: string[];         // the caller stores them as prev.queryTerms for follow-ups (FR-006)
     timings: Timings;
 }
 
@@ -95,11 +105,13 @@ export interface CareerModule {
      * Resolve career context for the turn that fired the debounce.
      * Returns null when the feature is disabled or anything fails (FR-017, C1).
      * Awaits a pending prefetch for at most 150 ms (C3).
+     * `opts` is for the eval script only (FR-019): leave-source-out, BM25-only
+     * runs, and a trace of the fused ranking.
      */
     getCareerContext(
         turnText: string,
-        history: string[],
-        session: { prev: RouterContext['prev']; activeCompany: string | null },
+        session: CareerSession,
+        opts?: { excludePaths?: string[]; bm25Only?: boolean; trace?: { hits?: Array<{ id: string; path: string; title: string }>; activeCompany?: string | null } },
     ): Promise<CareerContext | null>;
 
     /** True when a personal or company cue is present: feeds shouldTriggerAnswer (FR-007). Always false while the module is disabled (C1). Sync. */
@@ -118,14 +130,16 @@ export interface CareerModule {
 
 /** intentRouter.js */
 export declare function classifyCareerIntent(text: string, ctx?: RouterContext): RouteDecision;
-/** Cue phrases removed from the retrieval query (exported for retriever). */
+/** Framing phrases removed from the retrieval query; returns normalized text. */
 export declare function stripCuePhrases(text: string): string;
+/** FR-007 cue check on the turn alone (no follow-up context); index.js gates it on readiness. */
+export declare function hasCareerCue(text: string, entities?: string[], companies?: string[]): boolean;
 
 /** chunker.js */
 export declare function chunkMarkdown(
     path: string,
     markdown: string,
-    opts: { mtime: number; companyOf: (path: string) => string | null },
+    opts: { mtime: number; companiesOf: (path: string) => string[] },   // FR-005 company set
 ): Chunk[];
 
 /** textNormalize.js */
@@ -156,10 +170,10 @@ export declare function buildVectorIndex(rows: Float32Array, dims: number): Vect
 /** retriever.js */
 export declare function fuseAndFilter(input: {
     chunks: Chunk[];
-    bm25: Bm25Hit[];
+    bm25: Bm25Hit[];              // a candidate pool; each list is cut to its top 20 after company scope
     vector: VectorHit[] | null;   // null → BM25-only
     route: Route;
-    activeCompany: string | null;
+    activeCompany: string | null; // compared with chunk tags by slug
     k: number;                    // 3–4
     rrfK?: number;                // default 60
 }): ScoredChunk[];
@@ -179,7 +193,7 @@ export declare function buildContextBlock(input: {
     core: string;                 // canonical card text ('' if none)
     hits: ScoredChunk[];
     maxChars?: number;            // default 6000; the core card is never cut (FR-013)
-}): { block: string; sources: string[]; chunkIds: string[] };
+}): { block: string; sources: string[]; chunkIds: string[]; cardOverCap: boolean };   // cardOverCap → caller logs E33
 
 export declare function buildAddendum(activeCompany: string | null): string;
 

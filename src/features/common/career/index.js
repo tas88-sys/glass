@@ -1,0 +1,368 @@
+'use strict';
+
+// Career context: the only module used from outside common/career
+// (summaryService, listenService, app start, the eval script).
+//
+// Every public function is total (plan Phase 0.6): errors are caught here and
+// the caller gets "no context", so Live Answer behaves as today (FR-017, C1).
+// Nothing heavy loads at require time: no Electron, no model runtime (C4).
+// Debug lines go through careerDebug under LIVE_ANSWER_DEBUG and carry route,
+// cue, chunk ids, scores and timings only, never note or turn text (C2).
+
+const nodePath = require('node:path');
+const { performance } = require('node:perf_hooks');
+
+const { createKbService } = require('./kbService');
+const { classifyCareerIntent, stripCuePhrases, hasCareerCue: routerHasCareerCue } = require('./intentRouter');
+const { tokenize, normalizeForMatch, slugify } = require('./textNormalize');
+const { fuseAndFilter, passesAmbiguousThreshold } = require('./retriever');
+const { buildContextBlock, buildAddendum } = require('./contextBuilder');
+
+const TOP_K = 4;                   // chunks fused into the block (FR-010: 3–4)
+const CANDIDATES = 60;             // per ranking, before company scope and leave-source-out
+const PREFETCH_TIMEOUT_MS = 150;   // C3
+const DEFAULT_MIN_COSINE = 0.82;   // provisional; set by the spike (T024), calibrated by the eval (T027)
+const MAX_QUERY_TERMS = 40;
+
+// FR-011 company-context phrases, as [before, after] around the company name,
+// in normalizeForMatch space. Data: extend through the eval.
+const COMPANY_CONTEXT = [
+    ['here at', ''],
+    ['at', 'we'],
+    ['join', ''],
+    ['joining', ''],
+    ['welcome to', ''],
+    ['heard of', ''],
+    ['heard about', ''],
+    ['aqui na', ''],
+    ['aqui no', ''],
+    ['na', 'a gente'],
+    ['no', 'a gente'],
+    ['entrar na', ''],
+    ['entrar no', ''],
+    ['conhece a', ''],
+    ['conhece o', ''],
+];
+
+const ms = x => Math.round(x * 10) / 10;
+
+function compileCompanyDetector(names) {
+    const entries = [];
+    for (const name of names || []) {
+        const words = normalizeForMatch(name).split(' ').filter(Boolean);
+        if (!words.length) continue;
+        const pat = words.join(' ?');                  // "orbitpay" matches "Orbit Pay"
+        const res = COMPANY_CONTEXT.map(([before, after]) => new RegExp(`\\b${before} ${pat}${after ? ` ${after}` : ''}\\b`));
+        entries.push({ name, len: words.join('').length, res });
+    }
+    entries.sort((a, b) => b.len - a.len);             // longest first (E31)
+    return text => {
+        const s = normalizeForMatch(text);
+        if (!s) return null;
+        for (const e of entries) if (e.res.some(re => re.test(s))) return e.name;
+        return null;
+    };
+}
+
+/**
+ * @param {{
+ *   env?: Record<string, string|undefined>,
+ *   log?: (line: string) => void,
+ *   debug?: boolean,
+ *   embedder?: object|null|'auto',
+ *   minCosine?: number,
+ *   prefetchTimeoutMs?: number,
+ * }} [options]
+ */
+function createCareerModule(options = {}) {
+    const env = options.env || process.env;
+    const sink = options.log || (line => console.log(line));
+    const minCosine = Number.isFinite(options.minCosine) ? options.minCosine : DEFAULT_MIN_COSINE;
+    const prefetchTimeoutMs = Number.isFinite(options.prefetchTimeoutMs) ? options.prefetchTimeoutMs : PREFETCH_TIMEOUT_MS;
+
+    const debugOn = () =>
+        options.debug !== undefined ? !!options.debug : env.LIVE_ANSWER_DEBUG === '1' || env.LIVE_ANSWER_DEBUG === 'true';
+    function careerDebug(line) {
+        if (debugOn()) sink(line);
+    }
+
+    let state = 'disabled';
+    let kb = null;
+    let snap = null;
+    let detector = { key: null, detect: () => null };
+    let warming = null;
+    let disabledReason = null;
+    let embedder = null;
+    let embedderResolved = false;
+
+    // The real embedder is created on first use and only when asked for
+    // ('auto'): tests and the plain-Node load path never touch the model runtime.
+    function getEmbedder() {
+        if (!embedderResolved) {
+            embedderResolved = true;
+            if (options.embedder === 'auto') {
+                try {
+                    const { createEmbedder } = require('./embedder');
+                    embedder = createEmbedder({ env, log: careerDebug });
+                } catch (err) {
+                    careerDebug(`[career] vectors unavailable (${(err && err.code) || (err && err.name) || 'error'})`);
+                    embedder = null;
+                }
+            } else {
+                embedder = options.embedder || null;
+            }
+        }
+        return embedder;
+    }
+
+    const isReady = () => (state === 'ready-bm25' || state === 'ready-hybrid') && !!snap;
+
+    function disable(reason) {
+        snap = null;
+        kb = null;
+        state = 'disabled';
+        if (disabledReason !== reason) {
+            disabledReason = reason;
+            careerDebug(`[career] disabled: ${reason}`);
+        }
+    }
+
+    function vectorState() {
+        const emb = getEmbedder();
+        if (!emb || !snap) return { ready: false, vectors: 0 };
+        try {
+            return { ready: !!emb.isReadyFor(snap.chunks), vectors: emb.vectorCount() };
+        } catch {
+            return { ready: false, vectors: 0 };
+        }
+    }
+
+    async function doWarm() {
+        const raw = typeof env.CAREER_KB_PATH === 'string' ? env.CAREER_KB_PATH.trim() : '';
+        if (!raw) return disable('CAREER_KB_PATH not set');
+        const root = nodePath.resolve(raw);
+        if (!kb || kb.root !== root) {
+            kb = createKbService({ root, log: careerDebug });
+            snap = null;
+        }
+        if (state === 'disabled') state = 'warming';
+        const t0 = performance.now();
+        const next = await kb.refresh();
+        if (!next) return disable('KB folder missing or unreadable');
+        snap = next;
+        disabledReason = null;
+        const key = snap.companyNames.join('\n');
+        if (detector.key !== key) detector = { key, detect: compileCompanyDetector(snap.companyNames) };
+        state = vectorState().ready ? 'ready-hybrid' : 'ready-bm25';
+        careerDebug(`[career] ${state} files=${snap.files} chunks=${snap.chunks.length} card=${snap.core ? 'yes' : 'no'} refresh=${ms(performance.now() - t0)}ms`);
+
+        // FR-016: the embedding pass runs in the background, never on the answer path.
+        const emb = getEmbedder();
+        if (emb) {
+            const forSnap = snap;
+            Promise.resolve()
+                .then(() => emb.sync(forSnap.chunks))
+                .then(() => {
+                    if (snap === forSnap && isReady() && vectorState().ready) {
+                        state = 'ready-hybrid';
+                        careerDebug(`[career] ready-hybrid vectors=${emb.vectorCount()}`);
+                    }
+                })
+                .catch(err => careerDebug(`[career] embedding pass failed (${(err && err.name) || 'error'}); BM25 only`));
+        }
+    }
+
+    function warm() {
+        if (!warming) {
+            warming = doWarm()
+                .catch(err => careerDebug(`[career] warm failed (${(err && err.name) || 'error'})`))
+                .finally(() => {
+                    warming = null;
+                });
+        }
+        return warming;
+    }
+
+    function prefetch(turnText) {
+        try {
+            if (!isReady() || typeof turnText !== 'string' || !turnText.trim()) return;
+            const emb = getEmbedder();
+            if (emb) emb.prefetch(turnText);
+        } catch {
+            /* total: a failed prefetch only means BM25 for that answer */
+        }
+    }
+
+    function configuredCompany(s) {
+        const raw = typeof env.CAREER_KB_COMPANY === 'string' ? env.CAREER_KB_COMPANY.trim() : '';
+        if (!raw) return null;
+        const slug = slugify(raw);
+        return s.companyNames.find(n => slugify(n) === slug) || raw;
+    }
+
+    function logDecision(result, hits, vectorNote, extra) {
+        if (!debugOn()) return;
+        const t = result.timings;
+        if (result.route === 'general') {
+            careerDebug(`[career] route=general total=${t.totalMs}ms`);
+            return;
+        }
+        const top = hits[0];
+        const parts = [
+            `[career] route=${result.route}`,
+            `cue=${result.cue || '-'}`,
+            `chunks=${result.chunkIds.length ? result.chunkIds.join(',') : '-'}`,
+            `scores=${hits.length ? hits.map(h => h.score.toFixed(4)).join(',') : '-'}`,
+            `top=${top ? `cos:${top.cosine == null ? '-' : top.cosine.toFixed(3)}/cov:${top.coverage == null ? '-' : top.coverage.toFixed(2)}` : '-'}`,
+            `bm25=${t.bm25Ms}ms`,
+            `vector=${vectorNote}`,
+            `total=${t.totalMs}ms`,
+        ];
+        if (extra) parts.push(extra);
+        careerDebug(parts.join(' '));
+    }
+
+    async function resolve(s, turnText, session, opts) {
+        const t0 = performance.now();
+        const prev = session.prev || null;
+        const activeCompany = configuredCompany(s) || session.activeCompany || null;
+        const decision = classifyCareerIntent(turnText, {
+            prev,
+            entities: s.entities,
+            companies: s.companyNames,
+            now: Date.now(),
+        });
+        const timings = { routeMs: ms(performance.now() - t0), bm25Ms: 0, vectorMs: 0, vectorUsed: false, totalMs: 0 };
+        const result = {
+            route: decision.route,
+            cue: decision.cue,
+            block: '',
+            addendum: '',
+            sources: [],
+            chunkIds: [],
+            queryTerms: [],
+            timings,
+        };
+        const done = (hits, vectorNote, extra) => {
+            timings.totalMs = ms(performance.now() - t0);
+            logDecision(result, hits, vectorNote, extra);
+            return result;
+        };
+        if (decision.route === 'general') return done([], 'off');
+
+        // FR-008 query: the turn minus framing, the extracted question boosted,
+        // the previous question's terms carried on a follow-up. On the company
+        // route the active company's name joins the query (FR-011): "why do you
+        // want to join us" has no content words of its own.
+        const own = tokenize(stripCuePhrases(turnText));
+        const question = typeof session.question === 'string' ? session.question.trim() : '';
+        const boost = question && question !== turnText.trim() ? tokenize(stripCuePhrases(question)) : [];
+        const carried = decision.cue === 'follow-up' && prev && Array.isArray(prev.queryTerms)
+            ? prev.queryTerms.filter(x => typeof x === 'string')
+            : [];
+        const companyTerms = decision.route === 'company' && activeCompany ? tokenize(activeCompany) : [];
+        const terms = own.concat(boost, carried, companyTerms);
+        result.queryTerms = [...new Set(terms)].slice(0, MAX_QUERY_TERMS);
+
+        const excluded = new Set(Array.isArray(opts.excludePaths) ? opts.excludePaths : []);
+        const keep = h => excluded.size === 0 || !excluded.has(s.chunks[h.idx] && s.chunks[h.idx].path);
+
+        const tb = performance.now();
+        const lexical = s.bm25.search(terms, CANDIDATES).filter(keep);
+        timings.bm25Ms = ms(performance.now() - tb);
+
+        let semantic = null;
+        let vectorNote = 'off';
+        const emb = opts.bm25Only ? null : getEmbedder();
+        if (emb) {
+            const vindex = emb.indexFor(s.chunks);
+            if (!vindex) {
+                vectorNote = 'unavailable';
+            } else {
+                const tv = performance.now();
+                const query = await emb.query(turnText, prefetchTimeoutMs);
+                timings.vectorMs = ms(performance.now() - tv);
+                if (query) {
+                    semantic = vindex.search(query, CANDIDATES).filter(keep);
+                    timings.vectorUsed = true;
+                    vectorNote = `used(${timings.vectorMs}ms wait)`;
+                } else {
+                    vectorNote = 'timeout';
+                }
+            }
+        }
+
+        const hits = fuseAndFilter({
+            chunks: s.chunks,
+            bm25: lexical,
+            vector: semantic,
+            route: decision.route,
+            activeCompany,
+            k: TOP_K,
+        });
+        if (opts.trace && typeof opts.trace === 'object') {
+            opts.trace.hits = hits.map(h => ({ id: h.chunk.id, path: h.chunk.path, title: h.chunk.title }));
+            opts.trace.activeCompany = activeCompany;
+        }
+
+        if (decision.route === 'ambiguous' && !passesAmbiguousThreshold(hits[0], { vectorUsed: timings.vectorUsed, minCosine })) {
+            return done(hits, vectorNote, 'inject=no(below-threshold)');
+        }
+
+        const built = buildContextBlock({ core: s.core, hits });
+        if (built.cardOverCap) careerDebug('[career] warning: canonical card exceeds the block cap; injected without notes');
+        if (!built.block) return done(hits, vectorNote, 'inject=no(empty)');
+
+        result.block = built.block;
+        result.addendum = buildAddendum(activeCompany);
+        result.sources = built.sources;
+        result.chunkIds = built.chunkIds;
+        return done(hits, vectorNote);
+    }
+
+    /**
+     * @param {string} turnText
+     * @param {{ prev?: object|null, activeCompany?: string|null, question?: string }} [session]
+     * @param {{ excludePaths?: string[], bm25Only?: boolean, trace?: object }} [opts]  eval only
+     */
+    async function getCareerContext(turnText, session, opts) {
+        if (!isReady() || typeof turnText !== 'string' || !turnText.trim()) return null;
+        try {
+            return await resolve(snap, turnText, session || {}, opts || {});
+        } catch (err) {
+            careerDebug(`[career] context failed (${(err && err.name) || 'error'})`);
+            return null;
+        }
+    }
+
+    function hasCareerCue(turnText) {
+        try {
+            return isReady() && routerHasCareerCue(turnText, snap.entities, snap.companyNames);
+        } catch {
+            return false;
+        }
+    }
+
+    function detectCompany(turnText) {
+        try {
+            return isReady() && typeof turnText === 'string' ? detector.detect(turnText) : null;
+        } catch {
+            return null;
+        }
+    }
+
+    function status() {
+        return {
+            state,
+            chunks: snap ? snap.chunks.length : 0,
+            vectors: snap ? vectorState().vectors : 0,
+        };
+    }
+
+    return { warm, prefetch, getCareerContext, hasCareerCue, detectCompany, status };
+}
+
+const career = createCareerModule({ embedder: 'auto' });
+
+module.exports = career;
+module.exports.createCareerModule = createCareerModule;

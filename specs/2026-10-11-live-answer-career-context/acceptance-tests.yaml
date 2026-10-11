@@ -13,9 +13,9 @@ spec_name: "live-answer-career-context"
 # --- Staleness Detection (v2 required) ---
 generation_context:
   generated_at: "2026-10-11T00:00:00Z"
-  spec_hash: "94170de9a8508df1effa809a7e755b46ab4c9c8883bd32cf3b1edf7817df40af"
+  spec_hash: "8fa3a2203a1c9f41dccac8a2f1be72ea6cb1f38c82d1a42784161069418fe2c0"
   plan_hash: "52b373518e0c33bb2d43dabe9ba30e768819869d9e1c22132f5b7dd3ac22c0f0"
-  tasks_hash: "6c01564a44932bd67907b8bdbd2097eadd518e1a1eb76b6c772f771a0021a767"
+  tasks_hash: "ce8ace89c13a6ac522f14c015cf932d4475e7f171e15cd64e3203b6d0d6d66b1"
 
 # --- Drift Detection (v2 required) ---
 _references:
@@ -169,7 +169,7 @@ negative_assertions:
     requirement: "C4, research R2"
     environments: [local]
     check_type: "cli"
-    command: "node -e \"const fs=require('fs');const d='src/features/common/career/';process.stdout.write(String(fs.readdirSync(d).filter(f=>f.endsWith('.js')).filter(f=>/require\\(['\\\"]better-sqlite3|sqliteClient/.test(fs.readFileSync(d+f,'utf8'))).length))\""
+    command: "node -e \"const fs=require('fs');const d='src/features/common/career/';process.stdout.write(String(fs.readdirSync(d).filter(f=>f.endsWith('.js')).filter(f=>/require\\(.(better-sqlite3|[^)]*sqliteClient)/.test(fs.readFileSync(d+f,'utf8'))).length))\""
     expected_result: "0"
     description: "The retrieval core does not depend on better-sqlite3 (keeps it testable under npm test)."
     severity: critical
@@ -178,7 +178,7 @@ negative_assertions:
     requirement: "R6"
     environments: [local]
     check_type: "cli"
-    command: "node -e \"const fs=require('fs');const d='src/features/common/career/';process.stdout.write(String(fs.readdirSync(d).filter(f=>f.endsWith('.js')).filter(f=>/require\\(['\\\"][./]*.*ai\\/factory/.test(fs.readFileSync(d+f,'utf8'))).length))\""
+    command: "node -e \"const fs=require('fs');const d='src/features/common/career/';process.stdout.write(String(fs.readdirSync(d).filter(f=>f.endsWith('.js')).filter(f=>/require\\(.[./]*.*ai\\/factory/.test(fs.readFileSync(d+f,'utf8'))).length))\""
     expected_result: "0"
     description: "Routing and retrieval make no LLM calls (no import of the AI factory in the career package)."
     severity: critical
