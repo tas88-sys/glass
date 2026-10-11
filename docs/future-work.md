@@ -173,3 +173,40 @@ These are recorded in `specs/2026-05-30-interview-live-answer/spec.md` (§ Out o
   can point your proctoring system at?
 
 ✻ Cogitated for 37s
+
+---
+
+## 4. Live Answer career context — answer-quality test
+
+**Status:** Pending. Agreed on 2026-10-11, not started.
+**Spec:** `specs/2026-10-11-live-answer-career-context/` (task T032)
+
+### Summary
+
+The eval (`scripts/eval-career-kb.js`) checks whether the right note reaches the prompt, not whether the answer built from it is good. The live check (FR-021) flags numbers and known names the notes lack while the app runs. Nothing measures the rest: claims the notes do not support, answers that miss the question, the wrong language or format.
+
+### Proposed
+
+- For each personal item in `<KB>/glass-eval/questions.jsonl`, build the messages `makeLiveAnswer` sends (same route, block, addendum and user message) and get the answer from the configured model.
+- Score each answer:
+
+| Check | How | Target |
+|-------|-----|--------|
+| Invented numbers and known names | `findUnsupported` (FR-021), no model | 0 |
+| Claims backed by the notes | A judge model lists each claim and marks it supported or not | ≥ 95% of claims |
+| Answers the question | Judge score, 1 to 5 | Average ≥ 4 |
+| Form | Code: first person, the question's language, a headline then bullets | 100% |
+
+- Calibrate the judge: the candidate rates about 20 answers, and the judge is kept only if it agrees with those ratings most of the time.
+- Answers contain personal data: store them in the KB repo next to the eval set, and report counts only in this repo (spec C5).
+- Run it before changing the prompt, the model, retrieval or the block size.
+
+### Open decision
+
+Which key and model to use. One run is about 120 model calls (an answer and a judgment per item), above Gemini Flash's free tier (20 requests a day): a paid key, or a different judge model.
+
+### Acceptance
+
+- [ ] A script (or an `--answers` mode of the eval) prints the four checks for the full set and the holdout.
+- [ ] Judge agreement with the candidate's ratings is reported.
+- [ ] The targets are recorded in the spec as success criteria.

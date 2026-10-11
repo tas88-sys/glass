@@ -11,6 +11,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 #### Added
 
 - **Personal answers from your notes.** When the interviewer asks about the candidate's own background (behavioral stories, past projects, "why us"), Live Answer answers in first person from a local folder of career notes (`CAREER_KB_PATH`). It shows a muted "from: …" line naming the notes it used. Off by default; with the variable unset, the LLM messages are byte-identical to before.
+- **Live check of career answers.** When an answer that used the notes finishes, any number, or employer, project or company name from the manifest, that the notes and the conversation don't contain is listed under it: "⚠ not in your notes: …" (`answerCheck.js`).
 - **`src/features/common/career/`**, a provider-agnostic module:
   - markdown chunker (a short intro joins the subsection under it; a split table repeats its header row);
   - deterministic intent router (personal / company / ambiguous / general, English and Portuguese, follow-ups);

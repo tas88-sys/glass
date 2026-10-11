@@ -60,3 +60,17 @@ Two chunker rules were added; the size cap did not change.
 | `research.md` | R12: slot audit, cap comparison, decision; R10 excerpt figure brought to 9,000 characters |
 
 `docs/LIVE_INSIGHTS_AND_ASK.md` does not describe chunk rules, so it is unchanged.
+
+## Update for T031 (live answer check) and T032 (pending answer-quality test)
+
+| Document | Change |
+|----------|--------|
+| `README.md` | Listen feature: an optional career-context paragraph; Glass runs without a notes folder |
+| `docs/LIVE_INSIGHTS_AND_ASK.md` | §4.7 step 5 (Check) and the `check unverified=N` debug line |
+| `ARCHITECTURE.md` | Prompt section: answers that used notes are checked |
+| `CHANGELOG.md` | `[Unreleased]` Added: live check of career answers |
+| `docs/future-work.md` | §4: the answer-quality test (T032), pending |
+| `spec.md` | FR-021 and its test-strategy row |
+| `data-model.md`, `contracts/career-context.contracts.d.ts` | `unverified` payload field; `checkAnswer` on the module |
+| `contracts/EDGE_CASES.md` | E37–E39 |
+| `quickstart.md` | Manual check 11 |

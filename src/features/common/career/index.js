@@ -17,6 +17,7 @@ const { classifyCareerIntent, stripCuePhrases, hasCareerCue: routerHasCareerCue 
 const { tokenize, normalizeForMatch, slugify } = require('./textNormalize');
 const { fuseAndFilter, passesAmbiguousThreshold } = require('./retriever');
 const { buildContextBlock, buildAddendum } = require('./contextBuilder');
+const { findUnsupported } = require('./answerCheck');
 
 const TOP_K = 6;                   // sections fused into the block, one per file (FR-010)
 const CANDIDATES = 60;             // per ranking, before company scope and leave-source-out
@@ -369,6 +370,27 @@ function createCareerModule(options = {}) {
         }
     }
 
+    /**
+     * FR-021: the numbers and known names in a finished answer that appear
+     * nowhere in what the model was given. Never throws; [] when the answer had
+     * no career block.
+     * @param {string} answer
+     * @param {{ block?: string, addendum?: string }|null} context  from getCareerContext
+     * @param {string} [conversation]  the question and transcript the model saw
+     */
+    function checkAnswer(answer, context, conversation) {
+        try {
+            if (!snap || !context || !context.block) return [];
+            const given = [context.block, context.addendum, conversation].filter(x => typeof x === 'string').join('\n');
+            const found = findUnsupported(answer, given, snap.entities.concat(snap.companyNames));
+            careerDebug(`[career] check unverified=${found.length}`);
+            return found;
+        } catch (err) {
+            careerDebug(`[career] check failed (${(err && err.name) || 'error'})`);
+            return [];
+        }
+    }
+
     function status() {
         const v = snap ? vectorState() : { ready: false, vectors: 0 };
         // Hybrid only while vectors can actually be used (a crashed worker drops back, E21).
@@ -376,7 +398,7 @@ function createCareerModule(options = {}) {
         return { state: live, chunks: snap ? snap.chunks.length : 0, vectors: v.vectors };
     }
 
-    return { warm, prefetch, getCareerContext, hasCareerCue, detectCompany, status };
+    return { warm, prefetch, getCareerContext, hasCareerCue, detectCompany, checkAnswer, status };
 }
 
 const career = createCareerModule({ embedder: 'auto' });

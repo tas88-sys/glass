@@ -222,6 +222,7 @@ describe('career module: disabled (FR-001; E1, E2, E34, C1)', () => {
         assert.equal(mod.hasCareerCue('your biggest weakness'), false);
         assert.equal(mod.detectCompany('here at Bridge we ship'), null);
         assert.doesNotThrow(() => mod.prefetch('anything'));
+        assert.deepEqual(mod.checkAnswer('We grew 40%.', { block: 'x' }, ''), []);
     });
 
     it('folder missing → disabled, logged once (E2)', async () => {
@@ -387,6 +388,21 @@ describe('career module: ready (FR-008, FR-011, FR-012, FR-013, FR-014, FR-017)'
         assert.equal(mod.detectCompany(undefined), null);
     });
 
+    it('checkAnswer flags numbers and known names that neither the block nor the conversation has (FR-021)', async () => {
+        const ctx = await mod.getCareerContext('Tell me about a time you disagreed with a teammate.', session());
+        const answer = 'At Quillsoft we ran the spike for 2 weeks and cut review time by 40%.';
+        assert.deepEqual(mod.checkAnswer(answer, ctx, 'them: Tell me about a time you disagreed with a teammate.'), ['Quillsoft', '2', '40%']);
+        assert.deepEqual(mod.checkAnswer(answer, ctx, 'them: At Quillsoft, with 2 teams, did review time drop 40%?'), []);
+        assert.deepEqual(mod.checkAnswer('Company aliases count too: Lumen Works.', ctx, ''), ['Lumen Works']);
+    });
+
+    it('checkAnswer returns [] without a block and never throws', async () => {
+        const general = await mod.getCareerContext("What's the difference between a mutex and a channel?", session());
+        assert.deepEqual(mod.checkAnswer('It takes 40% less memory.', general, ''), []);
+        assert.deepEqual(mod.checkAnswer('It takes 40% less memory.', null, ''), []);
+        assert.deepEqual(mod.checkAnswer(null, { block: 'x' }, ''), []);
+    });
+
     it('debug output names routes, cues, ids and timings but never note or turn text (E26, C2)', async () => {
         lines.length = 0;
         const turns = [
@@ -396,8 +412,12 @@ describe('career module: ready (FR-008, FR-011, FR-012, FR-013, FR-014, FR-017)'
             "What's the difference between a mutex and a channel?",
         ];
         for (const t of turns) await mod.getCareerContext(t, session({ activeCompany: 'Bridge' }));
+        const personal = await mod.getCareerContext(turns[0], session());
+        mod.checkAnswer('At Quillsoft we cut review time by 40%.', personal, '');
         await mod.warm();
         const out = lines.join('\n');
+        assert.match(out, /\[career\] check unverified=2/);
+        assert.ok(!out.includes('40%') && !out.includes('review time'), 'check log is a count only');
         assert.match(out, /\[career\] route=personal cue=behavioral:tell-me-about-a-time chunks=[0-9a-f]{12}/);
         assert.match(out, /route=general/);
         assert.match(out, /bm25=\d+(?:\.\d+)?ms/);

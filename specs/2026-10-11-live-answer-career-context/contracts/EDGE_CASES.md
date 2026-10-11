@@ -16,6 +16,9 @@
 | E10 | A single paragraph over 1,200 chars | Split on sentence boundaries | FR-003 |
 | E35 | A heading's body is under 300 chars and a subsection follows (a timing line above the answer) | The body moves into that subsection; it never stands alone | FR-003 |
 | E36 | A table over 1,200 chars | Split by rows; each piece repeats the header row and any caption line right above it | FR-003 |
+| E37 | An answer uses an ordinary word that is also a known company name ("we can bridge that gap") | Not flagged: names are matched with the manifest's casing in the answer | FR-021 |
+| E38 | An answer has list numbers or numbers inside names ("1.", "EC2", "OAuth2") | Not flagged | FR-021 |
+| E39 | An answer states a number worked out from the notes (years of experience from a start date) | Flagged: the line asks the candidate to check it before saying it | FR-021 |
 | E11 | Turn in Portuguese, best note in English | Retrieved through the vector side; answer in Portuguese | FR-009, FR-014 |
 | E12 | Turn names a tool or vendor exactly | BM25 rank carries it into the fused top k | FR-008, FR-010 |
 | E13 | "why us" with active company A; notes of B rank higher | B's chunks dropped; A's and untagged chunks kept | FR-011 |

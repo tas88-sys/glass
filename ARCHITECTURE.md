@@ -783,7 +783,8 @@ behaves predictably on noisy meeting transcripts (`promptTemplates.js:238-403`).
 
 Live Answer passes career context through the same profile's `customPrompt` slot ("User-provided
 context") when the interviewer asks about the candidate and `CAREER_KB_PATH` is set. Otherwise
-the slot stays empty, as for Live Insights. See
+the slot stays empty, as for Live Insights. When such an answer finishes, numbers and known names it
+states that the notes lack are flagged under it. See
 [`docs/LIVE_INSIGHTS_AND_ASK.md`](docs/LIVE_INSIGHTS_AND_ASK.md) §4.7.
 
 > Note: `ask:sendQuestionFromSummary` (the Listen "suggested action" buttons) only works in

@@ -526,6 +526,21 @@ class SummaryService {
         laDebug(`[live-answer] answer stream complete — ${streamedChars} chars emitted to renderer`);
         this.hadFallback = hadFallback;
         const ts = Date.now();
+
+        // Live check (career FR-021): numbers and known names the answer states
+        // but nothing the model was given contains ride on one last payload as
+        // `unverified`, and the panel marks them.
+        if (career && !(signal && signal.aborted) && this.career && typeof this.career.checkAnswer === 'function') {
+            let unverified = [];
+            try {
+                unverified = this.career.checkAnswer(fullResponse, career, `${question}\n${recent}`) || [];
+            } catch {
+                /* the check never blocks an answer */
+            }
+            if (unverified.length) {
+                this.sendToRenderer('live-answer-update', { id: answerId, question, answer: fullResponse, ts, ...extra, unverified });
+            }
+        }
         return { answer: fullResponse, ts };
     }
 

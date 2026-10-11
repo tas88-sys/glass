@@ -120,6 +120,9 @@ export interface CareerModule {
     /** Company name (folder name or alias, longest match first) said in the turn, if any (FR-011). Pure, sync. */
     detectCompany(turnText: string): string | null;
 
+    /** Numbers and known names (manifest entities, company aliases) in a finished answer that appear nowhere in the block, the addendum or the conversation (FR-021). [] when the context has no block. Never throws. Sync. */
+    checkAnswer(answer: string, context: CareerContext | null, conversation?: string): string[];
+
     /** Debug-safe status for logs: never includes note text. */
     status(): { state: 'disabled' | 'warming' | 'ready-bm25' | 'ready-hybrid'; chunks: number; vectors: number };
 }
@@ -220,7 +223,7 @@ export declare function globToRegExp(glob: string): RegExp;
 export declare const ADDENDUM_TEMPLATE: `The interviewer is asking about the candidate's own background. Answer in first person as the candidate, using only facts from the User-provided context; the canonical facts override the other notes when they disagree. Do not invent employers, dates, metrics or projects. For "tell me about a time" questions, pick one story and give situation, action and result in a few bullets. The notes were prepared for different companies: never present a company named in them as the interviewer's company.{COMPANY_CLAUSE} Answer in the language the interviewer used.`;
 
 // ---------------------------------------------------------------------------
-// IPC payload extension (FR-015)
+// IPC payload extension (FR-015, FR-021)
 // ---------------------------------------------------------------------------
 export interface LiveAnswerUpdate {
     id: number | string;
@@ -228,6 +231,7 @@ export interface LiveAnswerUpdate {
     answer?: string;
     ts: number;
     sources?: string[];           // NEW — only when context was injected
+    unverified?: string[];        // NEW — last payload only, when the check found something (FR-021)
     status?: 'retrying' | 'idle' | 'error';
     model?: string | null;
     error?: string;

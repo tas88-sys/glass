@@ -1,5 +1,5 @@
 /**
- * liveAnswerCareer.test.js — T020 (FR-007, FR-014, FR-015, SC-005; E22, E27, E28, E34; C1)
+ * liveAnswerCareer.test.js — T020, T031 (FR-007, FR-014, FR-015, FR-021, SC-005; E22, E27, E28, E34; C1)
  *
  * Run: node --test src/features/listen/summary/__tests__/liveAnswerCareer.test.js
  *
@@ -193,6 +193,52 @@ describe('FR-015: sources ride on the answer payloads of that id only (E22)', ()
         const { s, emitted } = service();
         await s.makeLiveAnswer(HISTORY, undefined, { id: 3, question: 'q', career: GENERAL });
         for (const e of emitted) assert.ok(!('sources' in e.data));
+    });
+});
+
+describe('FR-021: unverified numbers and names ride on one last payload', () => {
+    const answersOf = (emitted, id) => emitted.filter(e => e.channel === 'live-answer-update' && e.data.id === id && e.data.answer).map(e => e.data);
+
+    it('the last payload of an injected answer carries what the check found', async () => {
+        const { s, emitted } = service();
+        const calls = [];
+        s.career = stubCareer({ checkAnswer: (...args) => { calls.push(args); return ['40%']; } });
+        await s.makeLiveAnswer(HISTORY, undefined, { id: 4, question: 'q', career: PERSONAL });
+        const updates = answersOf(emitted, 4);
+        const last = updates[updates.length - 1];
+        assert.deepEqual(last.unverified, ['40%']);
+        assert.equal(last.answer, 'Headline answer here.\n- point one\n');
+        assert.deepEqual(last.sources, PERSONAL.sources);
+        for (const u of updates.slice(0, -1)) assert.ok(!('unverified' in u), 'streaming payloads unchanged');
+        assert.equal(calls.length, 1);
+        const [answer, ctx, conversation] = calls[0];
+        assert.equal(answer, last.answer);
+        assert.equal(ctx, PERSONAL);
+        assert.ok(conversation.includes('q') && conversation.includes(HISTORY[1]), 'question and transcript count as given');
+    });
+
+    it('nothing found → no extra payload', async () => {
+        const { s, emitted } = service();
+        s.career = stubCareer({ checkAnswer: () => [] });
+        await s.makeLiveAnswer(HISTORY, undefined, { id: 5, question: 'q', career: PERSONAL });
+        for (const u of answersOf(emitted, 5)) assert.ok(!('unverified' in u));
+    });
+
+    it('a general-route answer is not checked', async () => {
+        const { s, emitted } = service();
+        let called = false;
+        s.career = stubCareer({ checkAnswer: () => { called = true; return ['40%']; } });
+        await s.makeLiveAnswer(HISTORY, undefined, { id: 6, question: 'q', career: GENERAL });
+        assert.equal(called, false);
+        for (const e of emitted) assert.ok(!('unverified' in e.data));
+    });
+
+    it('a throwing check never blocks the answer', async () => {
+        const { s, emitted } = service();
+        s.career = stubCareer({ checkAnswer: () => { throw new Error('boom'); } });
+        const out = await s.makeLiveAnswer(HISTORY, undefined, { id: 9, question: 'q', career: PERSONAL });
+        assert.equal(out.answer, 'Headline answer here.\n- point one\n');
+        for (const u of answersOf(emitted, 9)) assert.ok(!('unverified' in u));
     });
 });
 

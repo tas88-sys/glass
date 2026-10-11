@@ -61,6 +61,7 @@ The eval reads `CAREER_KB_PATH` and `<KB>/glass-eval/questions.jsonl`. Pass crit
 | 8 | C1 | Unset `CAREER_KB_PATH`, restart, repeat #1 | Today's behavior: no "from:", log shows the feature disabled |
 | 9 | FR-009 | Rename the model cache folder, start offline | Answers still work; log shows `vector=unavailable` |
 | 10 | FR-018 | Inspect the console during 1–9 | No note text in any `[career]` line |
+| 11 | FR-021 | "How much did you cut costs in your last project?" when the notes give no figure | Either no number in the answer, or a "⚠ not in your notes: …" line naming it; log shows `[career] check unverified=N` |
 
 ## 4. Rollback
 

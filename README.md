@@ -169,6 +169,14 @@ On **Linux**, system-audio loopback is disabled (`getDisplayMedia({audio:false})
 - Output is parsed into TLDR, bullet points, action items, and suggested follow-up questions
 - Persisted with UPSERT to the `summaries` table (one row per session)
 
+**Career context for Live Answer (optional)** (`src/features/common/career/`):
+
+- When the interviewer asks about your own background, Live Answer can answer in first person from a local folder of your career notes (markdown or text).
+- Set `CAREER_KB_PATH` in `.env` to that folder. **Glass does not need it:** without it, or with a missing folder, the feature is off and Live Answer works exactly as before.
+- Your notes stay on your machine, except the excerpt (up to 9,000 characters) sent with each personal question to your LLM provider. An embedding model (~310 MB) is downloaded once.
+- Numbers and known names in an answer that your notes don't contain are marked "⚠ not in your notes" under it.
+- Setup, the optional `glass-kb.json` manifest and the quality check: [`docs/LIVE_INSIGHTS_AND_ASK.md`](docs/LIVE_INSIGHTS_AND_ASK.md) §4.7.
+
 **Session lifecycle:**
 
 - **Stop** → STT sessions closed, `SystemAudioDump` process killed, `sessions.ended_at` timestamped, in-memory state cleared

@@ -331,6 +331,12 @@ never injected.
    the prompt is byte-identical to the pre-feature one.
 4. **Show.** The note titles ride on that answer's `live-answer-update` payloads as `sources`.
    `LiveAnswerView` shows them as a muted "from: …" line under the question.
+5. **Check.** When the answer finishes, every number in it (compared by value, so `1,000`, `1.000`
+   and `1k` match) and every employer, project or company name from the manifest that appears
+   nowhere in what the model was given (the notes, the question, the transcript) is listed under
+   the answer: "⚠ not in your notes: …". It asks you to check before saying it; it is not proof of
+   an error, since a number worked out from the notes (years since a start date) is flagged too.
+   Numbers written as words and names outside the manifest are not checked.
 
 **Lifecycle.** The index warms at app start and refreshes changed files (mtime) at every Listen
 session start, never on the answer path. The query embedding is prefetched when a gated turn
@@ -351,6 +357,8 @@ Any failure degrades to BM25 or to today's behavior (no context):
 ```
 [career] route=personal cue=behavioral:tell-me-about-a-time chunks=a1b2c3d4e5f6,… scores=0.0325,… top=cos:0.871/cov:0.67 bm25=0.4ms vector=used(0.1ms wait) total=3.2ms
 ```
+
+After an answer that used notes, `[career] check unverified=N` gives the count of flagged items (never the items).
 
 **Quality check.** `node scripts/eval-career-kb.js [--bm25-only] [--json]` reads
 `<KB>/glass-eval/questions.jsonl` and reports:

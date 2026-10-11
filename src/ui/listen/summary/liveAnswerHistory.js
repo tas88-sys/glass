@@ -27,13 +27,16 @@ const MAX_ANSWERS = 20;
  *  - `sources` (note titles the answer drew on, career context FR-015) is
  *    stored when the entry is created and kept on later deltas; an entry
  *    without sources has no `sources` key.
+ *  - `unverified` (numbers and names the answer states that nothing the model
+ *    was given contains, career context FR-021) arrives on the answer's last
+ *    payload and is stored on its entry; an entry without it has no key.
  *
  * Returns a NEW array (never mutates the input) so it can drive reactive state.
  *
- * @param {Array<{id:string,question:string,text:string,ts:number,sources?:string[]}>} answers
- * @param {{id?:(string|number), question?:string, answer?:string, ts?:number, sources?:string[]}} data
+ * @param {Array<{id:string,question:string,text:string,ts:number,sources?:string[],unverified?:string[]}>} answers
+ * @param {{id?:(string|number), question?:string, answer?:string, ts?:number, sources?:string[], unverified?:string[]}} data
  * @param {number} [max=MAX_ANSWERS]
- * @returns {Array<{id:string,question:string,text:string,ts:number,sources?:string[]}>}
+ * @returns {Array<{id:string,question:string,text:string,ts:number,sources?:string[],unverified?:string[]}>}
  */
 function applyLiveAnswerUpdate(answers, data, max = MAX_ANSWERS) {
     if (!data || !data.answer) return answers;
@@ -44,10 +47,12 @@ function applyLiveAnswerUpdate(answers, data, max = MAX_ANSWERS) {
         : `t${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const list = answers.slice();
 
+    const unverified = Array.isArray(data.unverified) && data.unverified.length ? data.unverified.slice() : null;
     const idx = hasId ? list.findIndex(a => a.id === id) : -1;
     if (idx >= 0) {
         // Streaming delta for an answer we already track — update in place.
         list[idx] = { ...list[idx], text: data.answer, ts: data.ts || list[idx].ts };
+        if (unverified) list[idx].unverified = unverified;
         return list;
     }
 
@@ -59,6 +64,7 @@ function applyLiveAnswerUpdate(answers, data, max = MAX_ANSWERS) {
         ts: data.ts || Date.now(),
     };
     if (Array.isArray(data.sources) && data.sources.length) entry.sources = data.sources.slice();
+    if (unverified) entry.unverified = unverified;
     list.unshift(entry);
     if (list.length > max) list.length = max;
     return list;

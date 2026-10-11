@@ -90,8 +90,9 @@ Both are passed to `getCareerContext` with the extracted question: `{ prev: care
 | Field | Change |
 |-------|--------|
 | `sources?: string[]` | **New.** Present only on answers with injected context, carried on every delta of that answer |
+| `unverified?: string[]` | **New.** Numbers and known names the answer states that nothing the model was given contains (FR-021). Only on the last payload of an answer with injected context, and only when the check found something |
 
-`applyLiveAnswerUpdate` stores `sources` on the entry when it creates it and keeps it on updates. Status payloads (`retrying`, `idle`, `error`) are unchanged.
+`applyLiveAnswerUpdate` stores `sources` on the entry when it creates it and keeps it on updates. It stores `unverified` whenever a payload carries it. Status payloads (`retrying`, `idle`, `error`) are unchanged.
 
 ### Eval question (KB repo, `glass-eval/questions.jsonl`, one JSON object per line)
 
