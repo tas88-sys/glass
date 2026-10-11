@@ -109,9 +109,9 @@ During a live interview, the interviewer asks "Tell me about a time you disagree
 - **FR-001**: The system MUST read the KB root from `CAREER_KB_PATH` (env or `.env`). If unset or missing, the feature is disabled and Live Answer behaves as today.
 - **FR-002**: The system MUST honor an optional `glass-kb.json` at the KB root with `include`/`exclude` globs (exclude wins), `core` files, and `companies` settings (`root`, `skip`, `aliases`). Without it, it indexes every `.md` and `.txt` except `.git/` and `node_modules/`.
 - **FR-003**: The chunker MUST split markdown on headings with a breadcrumb title (`file › H2 › H3`), make each `**Q:` block one chunk with the Q line in the title, keep chunks within ~300–1,200 characters (splitting long sections on paragraphs and repeating the title), and give each chunk a stable id (hash of path, title, ordinal).
-- **FR-004**: Chunks whose title or Q line contains an unfinished marker (`[PREENCHER`, `⚠️ CONFIRMAR`) MUST be dropped; marker lines inside a body MUST be removed.
+- **FR-004**: Chunks whose title or Q line contains an unfinished marker (`[PREENCHER`, `⚠️ CONFIRMAR`) MUST be dropped. Marker lines inside a body, and in core files, MUST be removed. This way a draft canonical card never injects an unconfirmed fact.
 - **FR-005**: Each chunk MUST carry `companies`, `date` (from a `YYYY-MM(-DD)` in the filename, else file mtime) and `kind`.
-  - `companies` is a set of company names. For a folder with no aliases, it is the folder name. For a folder with aliases, it is the alias names, narrowed to the ones whose slug appears in the file name; if none appears, all alias names are kept.
+  - `companies` is a set of company names. For a folder with no aliases, it is the folder name. For a folder with aliases, it is the alias names, narrowed to the ones whose slug appears in the file name; if none appears, all alias names are kept. A slug is the name lowercased with non-alphanumerics removed, compared against the file name normalized the same way.
   - It is empty for folders in `companies.skip` and for files outside `companies.root`.
   - Several folders may list the same name, so that one company's prep spread across folders shares one tag.
 
@@ -124,13 +124,15 @@ During a live interview, the interviewer asks "Tell me about a time you disagree
 - **FR-009**: The semantic index MUST embed chunks with a multilingual model in a worker, cache vectors keyed by content hash and model id, start the query embedding as soon as a gated `them` turn arrives (inside the 800 ms debounce), and fall back to BM25-only when the embedding is not ready within 150 ms.
 - **FR-010**: Results MUST be fused by RRF (k = 60) over the BM25 top 20 and the vector top 20, ties broken toward newer `date`, returning the top 3–4 chunks.
 - **FR-011**: On the `company` route, a chunk whose `companies` set is non-empty and does not contain the active company MUST NOT be used. Untagged chunks (empty set) MAY be used.
-  - The active company comes from `CAREER_KB_COMPANY`. Otherwise it is the first company name spoken in a `them` turn of the session, matched against folder names and aliases with the longest match first, so a two-word name wins over its first word.
+  - The active company comes from `CAREER_KB_COMPANY`, the reliable path. Otherwise it is the first company name spoken in a `them` turn of the session, matched against folder names and aliases with the longest match first, so a two-word name wins over its first word.
+    - Detection only accepts a name inside a company-context phrase: "here at X", "at X we", "join X", "welcome to X", "aqui na/no X", "na/no X a gente", "entrar na/no X".
+    - The reason: many company names are ordinary words (for example a company called "Bridge" or "Anchor"), and a bare match would switch the active company on small talk.
   - If no active company is known, only untagged chunks are used on that route.
   - Other routes ignore company tags.
 - **FR-012**: On the `ambiguous` route, context MUST be injected only when the top fused hit clears a threshold calibrated by the eval (FR-019).
 
 **Prompt and UI**
-- **FR-013**: The context block MUST put the canonical card first, then chunks under their breadcrumb titles, deduplicated, capped at 3,500 characters and cut at paragraph boundaries.
+- **FR-013**: The context block MUST put the canonical card first, then chunks under their breadcrumb titles, deduplicated, capped at 6,000 characters (the card alone is about 3,000) and cut at paragraph boundaries.
 - **FR-014**: `makeLiveAnswer` MUST pass the block as `customPrompt` and append the first-person addendum (contracts) to the user message only when a block is injected. On the `general` route, or when disabled, the messages MUST be byte-identical to today's.
 - **FR-015**: `live-answer-update` payloads MUST carry `sources: string[]` (titles only) when context was injected; `applyLiveAnswerUpdate` MUST keep them on the entry; `LiveAnswerView` MUST render them as a muted "from: …" line under the question, and nothing when absent.
 
@@ -139,6 +141,8 @@ During a live interview, the interviewer asks "Tell me about a time you disagree
 - **FR-017**: Any error in the career module MUST be caught inside it; the caller receives "no context" and Live Answer continues unchanged.
 - **FR-018**: Under `LIVE_ANSWER_DEBUG`, the module MUST log route, cue, chunk ids, scores and per-stage timings, and MUST NOT log note text.
 - **FR-019**: `scripts/eval-career-kb.js` MUST read the KB and its eval file and print the router confusion matrix, recall@3 for BM25-only and hybrid, a company-leak check and p50/p95 retrieval latency.
+  - It MUST evaluate each item with the chunks of its `source` file removed (leave-source-out). Every real question is also stored in the note it was recorded in, so it must never be matched against itself.
+  - A gold entry pointing at a core file counts as a hit when the route injects the card.
 - **FR-020**: Docs MUST cover `CAREER_KB_PATH`, `CAREER_KB_COMPANY`, the manifest format and the debug output.
 
 ### Success Criteria

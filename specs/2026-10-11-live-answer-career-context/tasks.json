@@ -241,7 +241,7 @@
     {
       "id": "T016",
       "phase": "3.1",
-      "description": "Tests for retriever.js + contextBuilder.js + vectorIndex.js (pure parts): RRF k=60 over two rankings, BM25-only when vector=null, recency tie-break, company route drops chunks tagged with another company and keeps untagged ones (E13), only untagged when the company is unknown (E14), ambiguous threshold, cosine search over given Float32Array rows; block has core first, breadcrumb headers, dedupe by path+title (E24), 3,500-char cap dropping lowest-ranked first then paragraph cut (E23), sources = titles (+ \"canonical facts\"); buildAddendum with and without company clause equals ADDENDUM_TEMPLATE. Fixtures are invented text only (spec C5): no real names, employers, companies or numbers from the KB.",
+      "description": "Tests for retriever.js + contextBuilder.js + vectorIndex.js (pure parts): RRF k=60 over two rankings, BM25-only when vector=null, recency tie-break, company route drops chunks tagged with another company and keeps untagged ones (E13), only untagged when the company is unknown (E14), ambiguous threshold, cosine search over given Float32Array rows; block has core first, breadcrumb headers, dedupe by path+title (E24), 6,000-char cap dropping lowest-ranked first then paragraph cut (E23), sources = titles (+ \"canonical facts\"); buildAddendum with and without company clause equals ADDENDUM_TEMPLATE. Fixtures are invented text only (spec C5): no real names, employers, companies or numbers from the KB.",
       "status": "pending",
       "parallel": true,
       "target_file": "src/features/common/career/__tests__/retriever.test.js",
@@ -287,7 +287,7 @@
     {
       "id": "T018",
       "phase": "3.2",
-      "description": "Integration tests for kbService.js + index.js with a temp-dir fixture KB: disabled when CAREER_KB_PATH unset/missing (E1, E2), invalid manifest ignored (E3), unreadable file skipped (E5), warm() builds BM25 and reaches ready-bm25, mtime change refreshes only that file, deleted file dropped, getCareerContext returns null on internal throw (FR-017), detectCompany via folder names and aliases, longest match first (E31), status() exposes counts only, debug output contains no fixture body text (E26). Embedder absent → vectorUsed=false. Fixtures are invented text only (spec C5): no real names, employers, companies or numbers from the KB.",
+      "description": "Integration tests for kbService.js + index.js with a temp-dir fixture KB: disabled when CAREER_KB_PATH unset/missing (E1, E2), invalid manifest ignored (E3), unreadable file skipped (E5), warm() builds BM25 and reaches ready-bm25, mtime change refreshes only that file, deleted file dropped, getCareerContext returns null on internal throw (FR-017), detectCompany via folder names and aliases, longest match first (E31), only inside company-context phrases (E32), status() exposes counts only, debug output contains no fixture body text (E26). Embedder absent → vectorUsed=false. Fixtures are invented text only (spec C5): no real names, employers, companies or numbers from the KB.",
       "status": "pending",
       "parallel": false,
       "target_file": "src/features/common/career/__tests__/kbService.test.js",
@@ -494,7 +494,7 @@
     {
       "id": "T027",
       "phase": "3.6",
-      "description": "scripts/eval-career-kb.js: load the KB via the career module, read <KB>/glass-eval/questions.jsonl, print router confusion matrix (all + holdout), recall@3 BM25-only vs hybrid, company-leak count, p50/p95 per stage. Flags: --bm25-only, --json. Tune cue tables and the ambiguous threshold on the non-holdout split only.",
+      "description": "scripts/eval-career-kb.js: load the KB via the career module, read <KB>/glass-eval/questions.jsonl, evaluate each item with its source file excluded (leave-source-out, FR-019), print router confusion matrix (all + holdout), recall@3 BM25-only vs hybrid, company-leak count, p50/p95 per stage. Flags: --bm25-only, --json. Tune cue tables and the ambiguous threshold on the non-holdout split only.",
       "status": "pending",
       "parallel": false,
       "target_file": "scripts/eval-career-kb.js",

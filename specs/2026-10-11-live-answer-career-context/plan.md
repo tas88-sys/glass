@@ -95,7 +95,7 @@ Question embeddings are prefetched during the existing 800 ms debounce, so the a
 | Grounding | The addendum restricts first-person facts to the injected notes, and the canonical card wins conflicts. |
 | Evaluation | Labeled eval set from real interviewer questions (research R9), with BM25 vs hybrid reported. |
 | Failure posture | Every failure degrades to today's behavior (C1). |
-| Data | Notes stay local except the ≤ 3.5k-character excerpt sent with the transcript to the configured LLM. No note text in logs (C2). |
+| Data | Notes stay local except the ≤ 6,000-character excerpt sent with the transcript to the configured LLM. No note text in logs (C2). |
 
 ## Project Structure
 

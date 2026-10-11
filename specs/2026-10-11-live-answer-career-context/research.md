@@ -176,7 +176,7 @@ Reworded or translated variants written by Claude may be added later as a separa
 - Start the query embedding when a gated `them` turn arrives (`prefetch`), so it completes inside the 800 ms window.
 - At debounce-fire, BM25 (≤ 5 ms) runs synchronously and the prefetched vector is awaited for at most 150 ms.
 - Expected added time on the answer path is ≤ 20 ms at p95.
-- The ~1k extra prompt tokens have negligible effect on time to first token for Flash-class models.
+- The extra prompt (≤ 6,000 characters, about 1.5–2k tokens) has negligible effect on time to first token for Flash-class models.
 
 ---
 

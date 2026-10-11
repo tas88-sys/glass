@@ -96,10 +96,13 @@ Lifecycle: the chunks of a file are replaced whenever its mtime changes (FR-016)
 | `text` | string | As the interviewer asked it |
 | `lang` | `'en' \| 'pt'` | |
 | `route` | Route | Expected route |
-| `gold` | `{ path, anchor }[]` | Notes that answer it (personal and company items). A chunk matches when its `path` equals `path` and its title contains `anchor` (a heading or Q-line excerpt). Robust to breadcrumb format changes |
+| `id` | string | `q001`… |
+| `gold` | `{ path, anchor }[]` | Notes that answer it (personal and company items). A chunk matches when its `path` equals `path` and its title contains `anchor` (a heading or Q-line excerpt); an empty `anchor` matches any chunk of the file. Robust to breadcrumb format changes. A core-file entry is a hit when the route injects the card |
 | `holdout` | boolean | Excluded from cue and threshold tuning; SC-001..SC-004 are judged on it |
 | `company` | string \| null | Active company to simulate (company items) |
-| `source` | string | Note it was taken from |
+| `source` | string \| null | Note it was taken from. Its chunks are excluded while this item is evaluated (leave-source-out). `null` for generic phrasings |
+| `fidelity` | `'transcript' \| 'recalled' \| 'debrief' \| 'written-form' \| 'reported' \| 'generic'` | How close `text` is to what was actually said. `generic` items only test company scoping |
+| `note` | string? | Free-form remark |
 
 ## State transitions
 

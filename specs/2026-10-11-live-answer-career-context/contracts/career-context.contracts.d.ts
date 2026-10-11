@@ -154,7 +154,7 @@ export declare function fuseAndFilter(input: {
 export declare function buildContextBlock(input: {
     core: string;                 // canonical card text ('' if none)
     hits: ScoredChunk[];
-    maxChars?: number;            // default 3500
+    maxChars?: number;            // default 6000
 }): { block: string; sources: string[]; chunkIds: string[] };
 
 export declare function buildAddendum(activeCompany: string | null): string;
