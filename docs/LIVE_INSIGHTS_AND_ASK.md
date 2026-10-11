@@ -344,7 +344,8 @@ arrives, so at debounce-fire it waits at most 150 ms; otherwise that answer is B
 embedding model is downloaded once (~310 MB) into `userData/career-kb/models`. Text and title
 vectors are cached in `userData/career-kb/vectors-*.bin`, keyed by content hash and model id. The
 first full pass is CPU work in the background (about 25 minutes for a few thousand chunks);
-answers use BM25 until it finishes.
+answers use BM25 until it finishes. Later launches load the cached vectors and embed only new or
+edited sections; the model still loads at each launch, to embed the questions.
 
 Any failure degrades to BM25 or to today's behavior (no context):
 - folder missing;
@@ -368,6 +369,14 @@ After an answer that used notes, `[career] check unverified=N` gives the count o
 - latency.
 
 Each item's own source note is left out.
+
+**Try one question.** `node scripts/ask-career-kb.js "question"` prints the route, the ranked
+sections with their place in each ranking (keywords, note text, section title), and what would
+be sent; `--block` prints the exact text. Without a question it reads one per line, so
+follow-ups work as in the app. Its output shows note titles and text: keep it out of this repo.
+
+Both scripts read `CAREER_KB_PATH` from `.env` and use the app's vector cache
+(`userData/career-kb`), so they embed nothing the app already has.
 
 **Rollback.** Unset `CAREER_KB_PATH`.
 
@@ -513,6 +522,7 @@ Pick based on what kind of question it is:
 | Live Answer tests (pure helpers + integration) | `src/features/listen/summary/__tests__/liveAnswer.test.js`, `liveAnswerCareer.test.js` |
 | Career context (router, retrieval, context block, embedder) | `src/features/common/career/` (entry point `index.js`) |
 | Career context eval | `scripts/eval-career-kb.js` |
+| Career retrieval for one question | `scripts/ask-career-kb.js` |
 | Listen window / insights-vs-transcript toggle | `src/ui/listen/ListenView.js` |
 | Ask answer engine | `src/features/ask/askService.js` |
 | Ask UI | `src/ui/ask/AskView.js` |

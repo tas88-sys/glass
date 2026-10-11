@@ -5,7 +5,9 @@
 //
 //   node scripts/eval-career-kb.js [--kb <dir>] [--bm25-only] [--json] [--cache-dir <dir>] [--min-cosine <x>]
 //
-// Reads the KB at --kb or CAREER_KB_PATH and its glass-eval/questions.jsonl,
+// Reads the KB at --kb or CAREER_KB_PATH (also read from .env) and its
+// glass-eval/questions.jsonl, with the vectors the app already built (the
+// default --cache-dir is the app's own; see career-cache-dir.js). It
 // runs every item through the career module with the item's own source file
 // left out (leave-source-out), and reports:
 //   - the router confusion matrix (full set and holdout);
@@ -22,15 +24,17 @@
 // paths, so it can be pasted into a PR of this public repo (spec C5).
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const { performance } = require('node:perf_hooks');
+
+require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true });
 
 const { createCareerModule } = require('../src/features/common/career');
 const { createEmbedder } = require('../src/features/common/career/embedder');
 const { createKbService } = require('../src/features/common/career/kbService');
 const { companyAllows } = require('../src/features/common/career/retriever');
 const { slugify } = require('../src/features/common/career/textNormalize');
+const { appCacheDir } = require('./career-cache-dir');
 
 const ROUTES = ['personal', 'company', 'ambiguous', 'general'];
 const TARGETS = {
@@ -45,7 +49,7 @@ const TARGETS = {
 };
 
 function parseArgs(argv) {
-    const a = { kb: process.env.CAREER_KB_PATH || '', bm25Only: false, json: false, cacheDir: path.join(os.tmpdir(), 'glass-career-kb'), minCosine: undefined };
+    const a = { kb: process.env.CAREER_KB_PATH || '', bm25Only: false, json: false, cacheDir: appCacheDir(), minCosine: undefined };
     for (let i = 0; i < argv.length; i++) {
         const k = argv[i];
         if (k === '--kb') a.kb = argv[++i];

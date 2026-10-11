@@ -37,9 +37,13 @@ Optional `glass-kb.json` at the notes root (see `data-model.md`):
 npm test                                   # pure modules + summaryService wiring (synthetic fixtures)
 node scripts/eval-career-kb.js             # real KB: router matrix, recall@3, leaks, latency
 node scripts/eval-career-kb.js --bm25-only # baseline for comparison
+node scripts/ask-career-kb.js "Tell me about a time you disagreed with a teammate."   # one question: ranked notes, what is sent
+node scripts/ask-career-kb.js              # questions one per line; follow-ups carry over
 ```
 
-The eval reads `CAREER_KB_PATH` and `<KB>/glass-eval/questions.jsonl`. Pass criteria: SC-001 to SC-004 in `spec.md`.
+Both scripts read `CAREER_KB_PATH` (from `.env` too) and the app's vector cache. The eval also reads
+`<KB>/glass-eval/questions.jsonl`. Pass criteria: SC-001 to SC-004 in `spec.md`. The ask script prints
+note titles and text, so its output stays in your terminal (C5).
 
 ## 3. Manual verification (running app)
 

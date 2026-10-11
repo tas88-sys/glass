@@ -152,6 +152,7 @@ During a live interview, the interviewer asks "Tell me about a time you disagree
   - **Holdout:** success criteria are judged on the full set. The holdout items (excluded from tuning cues and thresholds) are reported separately; if their personal-route recall or injected recall is more than 10 points below the tuning split, the run is flagged as overfit. The holdout is too small to pass or fail on by itself.
 - **FR-020**: Docs MUST cover `CAREER_KB_PATH`, `CAREER_KB_COMPANY`, `CAREER_KB_VECTORS`, the manifest format and the debug output.
 - **FR-021**: When an answer with injected context finishes, the numbers in it (compared by value) and the manifest's employer, project and company names in it that appear nowhere in what the model was given (block, addendum, question and transcript) MUST ride on that answer's last `live-answer-update` payload as `unverified: string[]`. `applyLiveAnswerUpdate` MUST keep them on the entry, and `LiveAnswerView` MUST show them as a warning line under the answer. The check MUST never block or fail the answer, and the debug log MUST carry the count only.
+- **FR-022**: `scripts/ask-career-kb.js` MUST run a question (or one per line, follow-ups included) through the same module calls as the app and print the route, the ranked sections with their place in each ranking, and what the block carries. Its output may contain note titles and text, so it stays in the local terminal (C5). It and the eval MUST read `.env` and default to the app's vector cache.
 
 ### Success Criteria
 - **SC-001**: Router: ≥ 95% of personal items routed `personal`; general items routed `personal` ≤ 10% (full eval set, no overfit flag).
@@ -198,6 +199,7 @@ The retrieval core is pure and unit-tested under the Node built-in runner (`npm 
 | FR-016, FR-017 | Integration (temp dir) | Warm, mtime refresh, error containment |
 | FR-018 | Unit | Debug output contains no fixture body text |
 | FR-021 | Unit + Integration | `findUnsupported` cases; the last payload carries `unverified`; the reducer keeps it |
+| FR-022 | Unit + Manual | `trace.k` lists more of the ranking without changing the block; the script run against the real KB |
 | SC-001..SC-004 | Eval script | Real KB, outside the suite |
 
 **Distribution Estimate**:

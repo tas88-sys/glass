@@ -105,13 +105,14 @@ export interface CareerModule {
      * Resolve career context for the turn that fired the debounce.
      * Returns null when the feature is disabled or anything fails (FR-017, C1).
      * Awaits a pending prefetch for at most 150 ms (C3).
-     * `opts` is for the eval script only (FR-019): leave-source-out, BM25-only
-     * runs, and a trace of the fused ranking.
+     * `opts` is for the eval and ask scripts only (FR-019, FR-022): leave-source-out,
+     * BM25-only runs, and a trace of the fused ranking (`trace.k` lists more of it
+     * than the block uses; the block is unchanged).
      */
     getCareerContext(
         turnText: string,
         session: CareerSession,
-        opts?: { excludePaths?: string[]; bm25Only?: boolean; trace?: { hits?: Array<{ id: string; path: string; title: string }>; activeCompany?: string | null } },
+        opts?: { excludePaths?: string[]; bm25Only?: boolean; trace?: { k?: number; hits?: Array<{ id: string; path: string; title: string; score: number; bm25Rank: number | null; vectorRank: number | null; titleRank: number | null; cosine: number | null }>; activeCompany?: string | null } },
     ): Promise<CareerContext | null>;
 
     /** True when a personal or company cue is present: feeds shouldTriggerAnswer (FR-007). Always false while the module is disabled (C1). Sync. */

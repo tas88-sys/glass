@@ -320,7 +320,28 @@ function createCareerModule(options = {}) {
             k: TOP_K,
         });
         if (opts.trace && typeof opts.trace === 'object') {
-            opts.trace.hits = hits.map(h => ({ id: h.chunk.id, path: h.chunk.path, title: h.chunk.title }));
+            // trace.k lists more of the ranking than the block uses (scripts/ask-career-kb.js).
+            const listed = Number.isInteger(opts.trace.k) && opts.trace.k > TOP_K
+                ? fuseAndFilter({
+                    chunks: s.chunks,
+                    bm25: lexical,
+                    vector: semantic,
+                    title: titled,
+                    route: decision.route,
+                    activeCompany,
+                    k: opts.trace.k,
+                })
+                : hits;
+            opts.trace.hits = listed.map(h => ({
+                id: h.chunk.id,
+                path: h.chunk.path,
+                title: h.chunk.title,
+                score: h.score,
+                bm25Rank: h.bm25Rank,
+                vectorRank: h.vectorRank,
+                titleRank: h.titleRank,
+                cosine: h.cosine,
+            }));
             opts.trace.activeCompany = activeCompany;
         }
 
@@ -342,7 +363,7 @@ function createCareerModule(options = {}) {
     /**
      * @param {string} turnText
      * @param {{ prev?: object|null, activeCompany?: string|null, question?: string }} [session]
-     * @param {{ excludePaths?: string[], bm25Only?: boolean, trace?: object }} [opts]  eval only
+     * @param {{ excludePaths?: string[], bm25Only?: boolean, trace?: { k?: number } }} [opts]  eval and ask scripts only
      */
     async function getCareerContext(turnText, session, opts) {
         if (!isReady() || typeof turnText !== 'string' || !turnText.trim()) return null;

@@ -879,7 +879,7 @@ So, concretely, on first launch:
 | Ask (vision) | `src/features/ask/askService.js`, `src/ui/ask/AskView.js` |
 | Listen (audio/STT) | `src/features/listen/listenService.js`, `stt/sttService.js`, `src/ui/listen/audioCore/listenCapture.js` |
 | Summarization | `src/features/listen/summary/summaryService.js` |
-| Live Answer career context | `src/features/common/career/` (entry `index.js`), `scripts/eval-career-kb.js` |
+| Live Answer career context | `src/features/common/career/` (entry `index.js`), `scripts/eval-career-kb.js`, `scripts/ask-career-kb.js` |
 | AI providers / factory | `src/features/common/ai/factory.js`, `ai/providers/*.js` |
 | Gemini failover | `ai/providers/gemini.js`, `ai/providers/geminiModelRotator.js` |
 | Model & key state | `src/features/common/services/modelStateService.js` |

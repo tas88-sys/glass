@@ -363,6 +363,26 @@ describe('career module: ready (FR-008, FR-011, FR-012, FR-013, FR-014, FR-017)'
         assert.ok(!/Disagreement with a teammate/.test(ctx.block));
     });
 
+    it('trace.k lists more of the ranking without changing the block (ask script)', async () => {
+        const q = 'Tell me about your work on ferry schedules, lantern firmware, the tide service, storm logs, the lighthouse schema and falcons.';
+        const short = {};
+        const a = await mod.getCareerContext(q, session(), { trace: short });
+        const long = { k: 9 };
+        const b = await mod.getCareerContext(q, session(), { trace: long });
+        assert.equal(a.route, 'personal');
+        assert.equal(short.hits.length, 6);
+        assert.ok(long.hits.length > 6);
+        assert.deepEqual(long.hits.slice(0, 6).map(h => h.id), short.hits.map(h => h.id));
+        assert.deepEqual(b.chunkIds, a.chunkIds);
+        assert.equal(b.block, a.block);
+        const top = long.hits[0];
+        assert.equal(typeof top.score, 'number');
+        assert.equal(top.bm25Rank, 1);
+        assert.equal(top.vectorRank, null, 'no embedder');
+        assert.equal(top.titleRank, null);
+        assert.equal(top.cosine, null);
+    });
+
     it('returns null when something inside throws (FR-017)', async () => {
         const bad = { get prev() { throw new Error('boom'); }, activeCompany: null };
         assert.equal(await mod.getCareerContext('Tell me about yourself', bad), null);

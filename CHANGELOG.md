@@ -22,6 +22,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 - **Optional `glass-kb.json` manifest** at the notes root: include/exclude globs, the canonical card, employer names, and per-company prep folders with aliases.
 - **`CAREER_KB_COMPANY`** pins the interviewing company. **`CAREER_KB_VECTORS=off`** keeps retrieval keyword-only and never starts the embedding model (~0.7 GB RAM).
 - **`scripts/eval-career-kb.js`** reports router accuracy, recall (leave-source-out), company leaks and per-stage latency against `<KB>/glass-eval/questions.jsonl`.
+- **`scripts/ask-career-kb.js`** shows what Live Answer would retrieve for a question: the route, the ranked sections with their place in each ranking, and the block. Both scripts read `.env` and reuse the app's vector cache.
 - **Tests:** about 310 new `node:test` cases with synthetic fixtures (the real notes never enter the repo).
 
 #### Changed

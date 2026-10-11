@@ -74,3 +74,14 @@ Two chunker rules were added; the size cap did not change.
 | `data-model.md`, `contracts/career-context.contracts.d.ts` | `unverified` payload field; `checkAnswer` on the module |
 | `contracts/EDGE_CASES.md` | E37–E39 |
 | `quickstart.md` | Manual check 11 |
+
+## Update for T033 (ask script)
+
+| Document | Change |
+|----------|--------|
+| `docs/LIVE_INSIGHTS_AND_ASK.md` | §4.7: later launches embed only new or edited sections; "Try one question"; both scripts read `.env` and the app's cache; the file table |
+| `ARCHITECTURE.md` | Career row lists the ask script |
+| `CHANGELOG.md` | `[Unreleased]` Added: the ask script |
+| `spec.md` | FR-022 and its test-strategy row |
+| `contracts/career-context.contracts.d.ts` | `trace.k` and the per-ranking fields of `trace.hits` |
+| `quickstart.md` | §2: the ask script; both scripts read `.env` and the app's cache |
