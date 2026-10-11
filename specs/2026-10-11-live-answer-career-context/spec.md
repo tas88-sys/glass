@@ -121,7 +121,7 @@ During a live interview, the interviewer asks "Tell me about a time you disagree
 
 **Retrieval**
 - **FR-008**: The lexical index MUST be BM25 over chunk title (weight 3) and body (weight 1), with accent folding, EN+PT stopwords and light stemming; query = turn minus router cue phrases, extracted-question terms boosted, previous personal question merged on follow-ups, and on the `company` route the active company's name added ("why do you want to join us" has no content words of its own).
-- **FR-009**: The semantic index MUST embed chunks with a multilingual model in a worker, cache vectors keyed by content hash and model id, start the query embedding as soon as a gated `them` turn arrives (inside the 800 ms debounce), and fall back to BM25-only when the embedding is not ready within 150 ms.
+- **FR-009**: The semantic index MUST embed chunks with a multilingual model in a worker, cache vectors keyed by content hash and model id, start the query embedding as soon as a gated `them` turn arrives (inside the 800 ms debounce), and fall back to BM25-only when the embedding is not ready within 150 ms. The worker is an Electron `utilityProcess` in the app (a `worker_thread` under plain Node). `CAREER_KB_VECTORS=off` keeps retrieval BM25-only and never starts the model (spike T024: the model process holds ~0.5 GB).
 - **FR-010**: Results MUST be fused by RRF (k = 60) over the BM25 top 20 and the vector top 20, ties broken toward newer `date`, returning the top 3–4 chunks.
 - **FR-011**: On the `company` route, a chunk whose `companies` set is non-empty and does not contain the active company MUST NOT be used. Untagged chunks (empty set) MAY be used.
   - The active company comes from `CAREER_KB_COMPANY`, the reliable path: a company name as the manifest aliases spell it (or a folder name without aliases), compared by slug. Otherwise it is the first company name spoken in a `them` turn of the session, matched against folder names and aliases case- and accent-insensitively, with the longest match first, so a two-word name wins over its first word.
@@ -150,7 +150,7 @@ During a live interview, the interviewer asks "Tell me about a time you disagree
   - **Recall** is computed over personal items with at least one non-core gold note. It is reported two ways: `recall@3` on the fused ranking, and `injected recall` on the chunks that actually fit in the block after the budget. The second is the target.
   - **Latency:** the answer path is routing, BM25, fusion and packing, with the query embedding already prefetched. The query embedding is reported separately, and must finish inside the debounce window (p95 ≤ 800 ms; the spike targets ≤ 50 ms).
   - **Holdout:** success criteria are judged on the full set. The holdout items (excluded from tuning cues and thresholds) are reported separately; if their personal-route recall or injected recall is more than 10 points below the tuning split, the run is flagged as overfit. The holdout is too small to pass or fail on by itself.
-- **FR-020**: Docs MUST cover `CAREER_KB_PATH`, `CAREER_KB_COMPANY`, the manifest format and the debug output.
+- **FR-020**: Docs MUST cover `CAREER_KB_PATH`, `CAREER_KB_COMPANY`, `CAREER_KB_VECTORS`, the manifest format and the debug output.
 
 ### Success Criteria
 - **SC-001**: Router: ≥ 95% of personal items routed `personal`; general items routed `personal` ≤ 10% (full eval set, no overfit flag).
@@ -174,8 +174,8 @@ See `data-model.md`.
 | Dependency | Type | Risk Level | Quota/Limits | Fallback Behavior |
 |------------|------|------------|--------------|-------------------|
 | Configured LLM provider (unchanged) | SDK/HTTP streaming | MED | ≤ 6,000 extra characters (about 1.5–2k tokens) per injected question | Existing Gemini failover; career context is optional input |
-| transformers.js + multilingual embedding model (subject to spike T024) | Local library + model file (~120 MB, one download) | MED | CPU only; no network after first download | BM25-only retrieval |
-| `onnxruntime-node` (transitive, native) | Native module in the packaged app | MED | Installer size; must be unpacked from asar like `sharp` (`electron-builder.yml` `asarUnpack`) | Spike is go/no-go; no-go ships BM25-only |
+| transformers.js 4.2.0 + `multilingual-e5-small` (spike T024: GO) | Local library + model file (~120 MB, one download) | MED | CPU only; no network after first download; ~0.5 GB RAM in its own process | BM25-only retrieval |
+| `onnxruntime-node` (transitive, native) | Native module in the packaged app | MED | +~70 MB uncompressed (Windows x64 binaries only); unpacked from asar like `sharp` | BM25-only (Intel Macs have no binary) |
 | Career notes folder | Local filesystem, read-only | LOW | Hundreds of files | Feature disabled |
 
 **HIGH-RISK Dependency Checklist**: Not applicable; no new quota-limited remote API.

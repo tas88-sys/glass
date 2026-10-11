@@ -21,7 +21,10 @@ const { buildContextBlock, buildAddendum } = require('./contextBuilder');
 const TOP_K = 4;                   // chunks fused into the block (FR-010: 3–4)
 const CANDIDATES = 60;             // per ranking, before company scope and leave-source-out
 const PREFETCH_TIMEOUT_MS = 150;   // C3
-const DEFAULT_MIN_COSINE = 0.82;   // provisional; set by the spike (T024), calibrated by the eval (T027)
+// FR-012 ambiguous gate with vectors: about where relevant notes sit for e5-small
+// (spike T024: gold-note cosine p10 0.83, p50 0.86). Provisional until the eval
+// set labels which ambiguous questions should inject.
+const DEFAULT_MIN_COSINE = 0.85;
 const MAX_QUERY_TERMS = 40;
 
 // FR-011 company-context phrases, as [before, after] around the company name,
@@ -100,7 +103,11 @@ function createCareerModule(options = {}) {
     function getEmbedder() {
         if (!embedderResolved) {
             embedderResolved = true;
-            if (options.embedder === 'auto') {
+            const vectorsOff = /^(?:0|off|false|no)$/i.test(String(env.CAREER_KB_VECTORS || '').trim());
+            if (options.embedder === 'auto' && vectorsOff) {
+                careerDebug('[career] vectors off (CAREER_KB_VECTORS); BM25 only');
+                embedder = null;
+            } else if (options.embedder === 'auto') {
                 try {
                     const { createEmbedder } = require('./embedder');
                     embedder = createEmbedder({ env, log: careerDebug });
@@ -352,11 +359,10 @@ function createCareerModule(options = {}) {
     }
 
     function status() {
-        return {
-            state,
-            chunks: snap ? snap.chunks.length : 0,
-            vectors: snap ? vectorState().vectors : 0,
-        };
+        const v = snap ? vectorState() : { ready: false, vectors: 0 };
+        // Hybrid only while vectors can actually be used (a crashed worker drops back, E21).
+        const live = isReady() ? (v.ready ? 'ready-hybrid' : 'ready-bm25') : state;
+        return { state: live, chunks: snap ? snap.chunks.length : 0, vectors: v.vectors };
     }
 
     return { warm, prefetch, getCareerContext, hasCareerCue, detectCompany, status };

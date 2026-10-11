@@ -90,7 +90,8 @@ function stem(token) {
  */
 function tokenize(text) {
     if (text == null) return [];
-    const words = foldAccents(text).toLowerCase().split(/[^a-z0-9]+/);
+    // The Portuguese filler "aí" would fold into "ai" and match AI notes.
+    const words = foldAccents(String(text).replace(/(?<![\p{L}\p{N}])aí(?![\p{L}\p{N}])/giu, ' ')).toLowerCase().split(/[^a-z0-9]+/);
     const out = [];
     for (const w of words) {
         if (!w || STOPWORDS.has(w)) continue;

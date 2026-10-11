@@ -67,6 +67,12 @@ describe('textNormalize', () => {
         assert.equal(normalizeForMatch('I can’t say'), 'i can not say');
     });
 
+    it('drops the Portuguese filler "aí" but keeps "AI"', () => {
+        assert.deepEqual(tokenize('e aí, o deploy funcionou?'), ['deploy', 'funcionou']);
+        assert.deepEqual(tokenize('AI tools and ai agents'), ['ai', 'tool', 'ai', 'agent']);
+        assert.deepEqual(tokenize('Aí a IA ajudou'), ['ia', 'ajudou']);
+    });
+
     it('never throws on non-strings', () => {
         assert.deepEqual(tokenize(null), []);
         assert.deepEqual(tokenize(undefined), []);

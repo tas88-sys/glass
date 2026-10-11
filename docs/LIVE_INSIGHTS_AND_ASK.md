@@ -50,7 +50,7 @@ sttService  ──onTranscriptionComplete(speaker, text)──►  listenService
 ```
 
 So **every** `"Me"`/`"Them"` turn that lands in the transcript is also pushed into the insights
-engine as a string `"me: …"` / `"them: …"` (`summaryService.js:38-46`).
+engine as a string `"me: …"` / `"them: …"` (`summaryService.js:666-676`).
 
 ---
 
@@ -86,7 +86,7 @@ session** — it is not an error.
 ### 3.3 When it gets filled — the every-5-turns rule
 
 Insights are produced by `summaryService.triggerAnalysisIfNeeded()`, which runs after **every**
-conversation turn but only *fires an analysis* on multiples of 5 (`summaryService.js:305-306`):
+conversation turn but only *fires an analysis* on multiples of 5 (`summaryService.js:963-964`):
 
 ```js
 if (this.conversationHistory.length >= 5 && this.conversationHistory.length % 5 === 0) {
@@ -118,13 +118,13 @@ manual "analyze now"** button — the cadence is purely turn-count driven.
 
 ### 3.4 What populates each section
 
-`makeOutlineAndRequests()` (`summaryService.js:70-187`) builds the prompt and calls the LLM:
+`makeOutlineAndRequests()` (`summaryService.js:728-845`) builds the prompt and calls the LLM:
 
 1. **Prompt** = the `pickle_glass_analysis` system profile with its `{{CONVERSATION_HISTORY}}`
-   token replaced by the **last 30 turns** (`summaryService.js:93-94`,
-   `formatConversationForPrompt`, `:65-68`), plus the **previous analysis** folded back in for
-   continuity (`:82-91`), plus a hardcoded user message that requests this exact shape
-   (`:116-134`):
+   token replaced by the **last 30 turns** (`summaryService.js:751-752`,
+   `formatConversationForPrompt`, `:723-726`), plus the **previous analysis** folded back in for
+   continuity (`:739-749`), plus a hardcoded user message that requests this exact shape
+   (`:772-792`):
 
    ```
    **Summary Overview**      → parsed into  data.summary[]    (≤5 bullets)
@@ -134,15 +134,15 @@ manual "analyze now"** button — the cadence is purely turn-count driven.
    ```
 
 2. **LLM call** is **non-streaming** — `createLLM(provider).chat(messages)`
-   (`summaryService.js:140-149`) — unlike Ask, which streams.
+   (`summaryService.js:798-807`) — unlike Ask, which streams.
 
-3. **Parse** — `parseResponseText()` (`:189-300`) turns the markdown into
+3. **Parse** — `parseResponseText()` (`:847-958`) turns the markdown into
    `{ summary, topic{header,bullets}, actions, followUps }` and always appends the default
-   actions `"✨ What should I say next?"` and `"💬 Suggest follow-up questions"` (`:268-269`).
+   actions `"✨ What should I say next?"` and `"💬 Suggest follow-up questions"` (`:926-927`).
 
-4. **Render + persist** — `sendToRenderer('summary-update', data)` (`:312`) updates the panel
+4. **Render + persist** — `sendToRenderer('summary-update', data)` (`:970`) updates the panel
    (`SummaryView.connectedCallback` → `onSummaryUpdate`, `:266-270`); the row is also UPSERTed
-   into the `summaries` table (`:155-168`).
+   into the `summaries` table (`:813-826`).
 
 The rendered sections (`SummaryView.render`, `:455-547`):
 
@@ -177,7 +177,13 @@ After every `addConversationTurn(speaker, text)` call, `triggerAnswerIfNeeded` r
 `triggerAnalysisIfNeeded`. Four gates decide whether an answer stream starts:
 
 1. **Speaker gate** — `speaker.toLowerCase() !== 'them'` → skip. Only the interviewer's turns trigger answers (FR-001).
-2. **Question heuristic** — `isLikelyQuestion(text)` (FR-002): true when text ends with `?` or opens with a recognized question opener (`what`/`how`/`why`/…). When uncertain, favors `true` — the PASSIVE suppression step filters non-answers cheaply.
+2. **Question heuristic** — `isLikelyQuestion(text)` (FR-002). A turn counts as a question when any of these holds:
+   - a `?` appears anywhere;
+   - an interview cue appears (`tell me`, `walk me through`, `describe`, `design`, `compare`, `difference between`, `trade-offs`, …);
+   - an embedded question appears ("the question is what…", "I'm curious how…");
+   - a wh-word or yes/no auxiliary leads any clause, after peeling discourse markers ("okay so how does X work").
+
+   Declarative monologue is skipped to save quota. When the career module is ready, a turn with a career cue also passes ("your biggest weakness", §4.7); while it is off, the gate is exactly the one above.
 3. **800 ms debounce** — multi-segment utterances (STT delivers words in fragments) coalesce into one trigger (FR-003).
 4. **De-dup + abort-or-suppress** in the debounce callback:
    - Same normalized tail as `lastAnsweredTail` → skip (FR-004b).
@@ -199,7 +205,9 @@ then calls `parseAnswerOrPassive(prefix)`:
 
 `summaryService.sendToRenderer('live-answer-update', { id, question, answer, ts })` is emitted on
 every non-suppressed delta. The payload accumulates the full markdown string up to that point; the
-renderer replaces its `innerHTML` on each event (single swap per frame — C5/FR-015).
+renderer replaces its `innerHTML` on each event (single swap per frame — C5/FR-015). When career
+context was injected (§4.7), every answer payload of that `id` also carries `sources` (note titles),
+shown as a muted "from: …" line.
 
 The same channel also carries **status payloads** (no `answer` text), so the panel can say what is
 happening when there is no answer to show:
@@ -238,7 +246,119 @@ by T-VERIFY-SAFETY.
 `resetLiveAnswer()` is folded into `resetConversationHistory()` (C4/D4 — `listenService.js`
 already calls `resetConversationHistory` at session start and close; no `listenService.js` edit
 needed). It clears the debounce timer, aborts any in-flight `AbortController`, and resets
-`lastAnsweredTail`, `inFlight`, and `hadFallback`.
+`lastAnsweredTail`, `inFlight`, `hadFallback`, and the career session state (`careerPrev`,
+`activeCompany`, §4.7).
+
+### 4.6 Gemini failover and debugging
+
+With Gemini, `createStreamingLLM` (`src/features/common/ai/providers/gemini.js`) keeps one
+answer alive across model failures:
+
+- **Failover.** On a transient error (429, 503, …) or when no chunk arrives within the first-chunk
+  timeout (25 s for Flash-Lite models, 60 s for others; `GEMINI_FIRST_CHUNK_TIMEOUT_MS` overrides),
+  it emits a `_reset` sentinel and tries the next model. The panel shows "Trying <model>…" (§4.3).
+- **Hedge.** A Flash-Lite request that has sent nothing after 10 s gets a second, parallel request
+  to the same model; the first to stream wins (`GEMINI_HEDGE_DELAY_MS` overrides, `0` disables).
+- **Second round.** Models that failed fast with a transient error get one more round after a short wait.
+- **Deadline.** The request gives up when no answer has started within 60 s across every attempt.
+  Once an answer is streaming, it is never cut.
+
+When to expect 503s: [`GEMINI_503_PEAK_HOURS.md`](GEMINI_503_PEAK_HOURS.md).
+
+`LIVE_ANSWER_DEBUG=1` (env or `.env`) logs the lane's decisions: the trigger gate, the
+provider/model in use, the PASSIVE decision and the streamed character count. It never logs answer
+text. The career module adds its `[career]` lines under the same flag (§4.7).
+
+### 4.7 Career context (personal answers from your notes)
+
+When the interviewer asks about the candidate's own background, Live Answer can answer in first
+person from a local folder of career notes. Code: `src/features/common/career/` (only `index.js`
+is used from outside). Spec: `specs/2026-10-11-live-answer-career-context/`.
+
+**Enable.** In `.env`:
+
+| Variable | Meaning |
+|---|---|
+| `CAREER_KB_PATH` | Folder of markdown/text notes. Unset or missing → the feature is off and Live Answer behaves exactly as before |
+| `CAREER_KB_COMPANY` | Optional. The interviewing company, as the manifest aliases spell it (or a folder name without aliases). Otherwise the first company named by the interviewer in a company-context phrase ("here at X", "aqui na X", "conhece a X") is used |
+| `CAREER_KB_VECTORS` | Optional. `off` keeps retrieval keyword-only (BM25) and never starts the embedding model, saving ~0.5 GB of RAM |
+
+**Manifest.** An optional `glass-kb.json` at the notes root:
+
+```json
+{
+  "version": 1,
+  "core": ["about-me/canonical-facts.md"],
+  "entities": ["Example Corp", "Example Project"],
+  "include": ["**/*.md", "**/*.txt"],
+  "exclude": ["chats/**", "drafts/**"],
+  "companies": { "root": "interviews", "skip": ["shared"], "aliases": { "acme": ["Acme", "Acme Labs"] } }
+}
+```
+
+- `core`: the canonical-facts card. It is injected whole whenever context is injected, wins over
+  other notes, and is never chunked.
+- `entities`: employer and project names. The router treats them as personal cues.
+- `include`/`exclude`: globs (`*`, `**`, `?`). Exclude wins; `.git` and `node_modules` are always
+  excluded.
+- `companies`: each folder under `root` is one company's prep. Its chunks are tagged with the
+  folder's aliases (narrowed by file name) or the folder name. `skip` lists shared folders.
+
+Without a manifest, every `.md`/`.txt` is indexed. Lines with `[PREENCHER` or `⚠️ CONFIRMAR` are
+never injected.
+
+**Per question** (the debounce callback, after the `AbortController` exists):
+
+1. **Route.** A deterministic, provider-agnostic router (`intentRouter.js`, English and
+   Portuguese cue tables) picks one of four routes:
+   - `personal`: behavioral, background, experience, employer names;
+   - `company`: "why us", "what do you know about us";
+   - `ambiguous`: "how would you…", "how do you usually…";
+   - `general`: everything else.
+
+   A short follow-up ("and what was the outcome?") within 5 minutes stays on the previous route.
+2. **Retrieve.** The query is the turn minus framing phrases, with the extracted question boosted,
+   the previous question's terms merged on follow-ups, and the company name added on the company
+   route. Retrieval is BM25 over chunk titles (weight 3) and bodies, plus multilingual embeddings
+   (e5-small, worker process), merged by reciprocal rank fusion.
+   - The company route drops other companies' chunks.
+   - The ambiguous route injects only above a threshold.
+3. **Inject.** The card plus the top chunks, capped at 6,000 characters, go into the prompt's
+   existing *User-provided context* slot (`getSystemPrompt`'s `customPrompt`). A first-person
+   addendum is appended to the user message. On the `general` route, or when nothing is found,
+   the prompt is byte-identical to the pre-feature one.
+4. **Show.** The note titles ride on that answer's `live-answer-update` payloads as `sources`.
+   `LiveAnswerView` shows them as a muted "from: …" line under the question.
+
+**Lifecycle.** The index warms at app start and refreshes changed files (mtime) at every Listen
+session start, never on the answer path. The query embedding is prefetched when a gated turn
+arrives, so at debounce-fire it waits at most 150 ms; otherwise that answer is BM25-only. The
+embedding model is downloaded once (~120 MB) into `userData/career-kb/models`. Passage vectors
+are cached in `userData/career-kb/vectors-*.bin`, keyed by content hash and model id. The first
+full pass is CPU work in the background (a few minutes for a few thousand chunks).
+
+Any failure degrades to BM25 or to today's behavior (no context):
+- folder missing;
+- invalid manifest;
+- model offline;
+- worker crash.
+
+**Debug line** (`LIVE_ANSWER_DEBUG=1`), ids and timings only, never note or turn text:
+
+```
+[career] route=personal cue=behavioral:tell-me-about-a-time chunks=a1b2c3d4e5f6,… scores=0.0325,… top=cos:0.871/cov:0.67 bm25=0.4ms vector=used(0.1ms wait) total=3.2ms
+```
+
+**Quality check.** `node scripts/eval-career-kb.js [--bm25-only] [--json]` reads
+`<KB>/glass-eval/questions.jsonl` and reports:
+- router accuracy;
+- recall;
+- company leaks;
+- latency.
+
+Each item's own source note is left out.
+
+**Rollback.** Unset `CAREER_KB_PATH`.
 
 ---
 
@@ -357,14 +477,14 @@ Pick based on what kind of question it is:
   `getSystemPrompt('pickle_glass_analysis', conversationHistory, false)` (`askService.js:288`),
   which places the (empty) history in the *"User-provided context"* slot but does **not** replace
   the profile's trailing `{{CONVERSATION_HISTORY}}` token (`promptTemplates.js:402`) — only the
-  *summary* path calls `.replace('{{CONVERSATION_HISTORY}}', …)` (`summaryService.js:94`). So in
+  *summary* path calls `.replace('{{CONVERSATION_HISTORY}}', …)` (`summaryService.js:752`). So in
   `default` Ask mode the literal string `{{CONVERSATION_HISTORY}}` reaches the model. Cosmetic
   today (models ignore it); it would matter if/when Listen→Ask history is wired.
 - **Insights are non-streaming; Ask streams.** The panel updates in one shot per analysis
-  (`summaryService.js:149`); Ask renders token-by-token (`askService._processStream`,
+  (`summaryService.js:807`); Ask renders token-by-token (`askService._processStream`,
   `:401-474`).
 - **One summary row per session.** The `summaries` table is UPSERTed, not appended
-  (`summaryService.js:155-164`) — the panel reflects the latest rolling analysis, not a history.
+  (`summaryService.js:813-826`) — the panel reflects the latest rolling analysis, not a history.
 - **Follow-Ups appear only after Stop.** They're gated on `hasCompletedRecording`
   (`ListenView.js:473-477`, `SummaryView.js:528`), so they show up once the session ends, not
   mid-conversation.
@@ -379,7 +499,9 @@ Pick based on what kind of question it is:
 | Live Insights + Live Answer engine | `src/features/listen/summary/summaryService.js` |
 | Live Insights UI ("No insights yet…") | `src/ui/listen/summary/SummaryView.js` |
 | Live Answer UI (streamed markdown, above `<summary-view>`) | `src/ui/listen/summary/LiveAnswerView.js` |
-| Live Answer tests (pure helpers + integration) | `src/features/listen/summary/__tests__/liveAnswer.test.js` |
+| Live Answer tests (pure helpers + integration) | `src/features/listen/summary/__tests__/liveAnswer.test.js`, `liveAnswerCareer.test.js` |
+| Career context (router, retrieval, context block, embedder) | `src/features/common/career/` (entry point `index.js`) |
+| Career context eval | `scripts/eval-career-kb.js` |
 | Listen window / insights-vs-transcript toggle | `src/ui/listen/ListenView.js` |
 | Ask answer engine | `src/features/ask/askService.js` |
 | Ask UI | `src/ui/ask/AskView.js` |

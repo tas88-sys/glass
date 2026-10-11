@@ -12,6 +12,8 @@ CAREER_KB_PATH=D:\path\to\career-notes
 # optional: pin the interviewing company, as named in the manifest aliases
 # (or the folder name under companies.root when it has no aliases)
 CAREER_KB_COMPANY=
+# optional: keyword-only retrieval, never starts the embedding model (~0.5 GB RAM saved)
+CAREER_KB_VECTORS=
 # optional: see routing and retrieval decisions
 LIVE_ANSWER_DEBUG=1
 ```

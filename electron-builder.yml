@@ -26,6 +26,9 @@ files:
     - pickleglass_web/backend_node/**/*
     - '!**/node_modules/electron/**'
     - public/build/**/*
+    # Career context embeddings: transformers.js loads onnxruntime-node only;
+    # the web runtime (wasm, ~130 MB) is never used in Electron.
+    - '!**/node_modules/onnxruntime-web/**'
 
 # Additional resources to be copied into the app's resources directory
 extraResources:
@@ -36,10 +39,17 @@ asarUnpack:
     - "src/ui/assets/SystemAudioDump"
     - "**/node_modules/sharp/**/*"
     - "**/node_modules/@img/**/*"
+    # Native ONNX runtime for career-context embeddings (loaded in a utilityProcess)
+    - "**/node_modules/onnxruntime-node/**/*"
 
 # Windows configuration
 win:
     icon: src/ui/assets/logo.ico
+    # Ship only this platform's ONNX runtime binaries (~60 MB instead of ~210 MB).
+    files:
+        - '!**/node_modules/onnxruntime-node/bin/napi-v*/darwin/**'
+        - '!**/node_modules/onnxruntime-node/bin/napi-v*/linux/**'
+        - '!**/node_modules/onnxruntime-node/bin/napi-v*/win32/arm64/**'
     target:
         - target: nsis
           arch: x64
@@ -70,6 +80,10 @@ mac:
     icon: src/ui/assets/logo.icns
     # Minimum macOS version (supports both Intel and Apple Silicon)
     minimumSystemVersion: '11.0'
+    # ONNX runtime ships Apple Silicon only; Intel Macs fall back to BM25 career retrieval.
+    files:
+        - '!**/node_modules/onnxruntime-node/bin/napi-v*/linux/**'
+        - '!**/node_modules/onnxruntime-node/bin/napi-v*/win32/**'
     hardenedRuntime: true
     entitlements: entitlements.plist
     entitlementsInherit: entitlements.plist

@@ -225,10 +225,10 @@ Single local user; no roles, no API surface. N/A.
 
 | Item | Detail |
 |------|--------|
-| Env vars | `CAREER_KB_PATH` (enables the feature), `CAREER_KB_COMPANY` (optional). Documented in T028. |
-| Dependency | `@huggingface/transformers`, pinned exact after T024. Added to `dependencies`. |
-| Packaging | `electron-builder.yml` `asarUnpack` gains the `onnxruntime-node` binaries (T024 confirms the glob). |
-| Model file | Downloaded on first use into the transformers.js cache under `userData`. It is not bundled in the installer. |
+| Env vars | `CAREER_KB_PATH` (enables the feature), `CAREER_KB_COMPANY` (optional), `CAREER_KB_VECTORS` (optional, `off` = BM25 only). Documented in T028. |
+| Dependency | `@huggingface/transformers` 4.2.0, pinned exact (T024). Added to `dependencies`. |
+| Packaging | `electron-builder.yml`: `asarUnpack` gains `**/node_modules/onnxruntime-node/**/*`; `files` excludes `onnxruntime-web` (unused under Node) and, per platform, the other platforms' ONNX binaries (T024 verified on a packaged build). |
+| Model file | Downloaded on first use into `userData/career-kb/models`. It is not bundled in the installer. |
 | DB migrations | None |
 | Rollout | Inert until `CAREER_KB_PATH` is set. Rollback = unset it. |
 

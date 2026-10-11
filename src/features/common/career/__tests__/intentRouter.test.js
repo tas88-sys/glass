@@ -54,6 +54,22 @@ table('personal (English)', 'personal', [
     'What was your role in the rewrite?',
     'In your last role, what did the on-call rotation look like?',
     'What are you good at?',
+    'Tell me about your team.',
+    'What are you working on these days?',
+    'What kind of projects do you usually take?',
+    'Any experience with stream processing?',
+    'Current salary?',
+]);
+
+table('personal (Portuguese, implied subject and habits)', 'personal', [
+    'Trabalha remoto hoje?',
+    'Conhece filas de mensagens?',
+    'Atualmente lidera algum time?',
+    'E hoje, usa containers no dia a dia?',
+    'O que você faz hoje no projeto?',
+    'No que você trabalha atualmente?',
+    'Como é o seu dia a dia?',
+    'Você usa testes automatizados?',
 ]);
 
 table('personal (Portuguese)', 'personal', [
@@ -119,6 +135,7 @@ table('ambiguous (hypothetical, habitual, opinion)', 'ambiguous', [
     'Se presenciasse um colega sofrendo discriminação, como agiria?',
     'Como você explica ideias técnicas para um público não técnico?',
     'Dois membros do time estão em conflito. Como você resolve?',
+    'A base herdada é grande e sem testes. Como você gerencia isso?',
     'Explique como você implementaria concorrência com filas e workers.',
 ]);
 
@@ -136,6 +153,10 @@ table('general (no second-person background cue)', 'general', [
     'Do you know what a goroutine is?',
     'Okay, great, thanks.',
     'Pode compartilhar a tela com a gente?',
+    'Usa-se mutex quando há estado compartilhado?',
+    'Tell me about the CAP theorem.',
+    'What are the trade-offs of microservices?',
+    'Current state of the art in caching?',
     'O servidor de testes foi liberado?',
     '',
 ]);
@@ -222,6 +243,15 @@ describe('stripCuePhrases', () => {
         assert.ok(!/\bconta\b|\bvez\b/.test(s), s);
         assert.match(s, /liderou/);
         assert.match(s, /migracao/);
+    });
+
+    it('removes experience framing so the subject carries the query', () => {
+        assert.equal(stripCuePhrases('Você já trabalhou com alguém desempenhando abaixo do esperado?'), 'alguem desempenhando abaixo do esperado');
+        assert.equal(stripCuePhrases('Já trabalhou com filas?'), 'filas');
+        assert.equal(stripCuePhrases('Have you ever worked with message queues?'), 'message queues');
+        assert.equal(stripCuePhrases('Do you have hands-on experience with stream processing?'), 'stream processing');
+        assert.equal(stripCuePhrases('Possui experiência com aplicativos móveis?'), 'aplicativos moveis');
+        assert.equal(stripCuePhrases('Como lidou? Quais ações tomou?'), '');
     });
 
     it('removes the wrapper of company questions (the company name supplies the query)', () => {

@@ -41,6 +41,9 @@ const PERSONAL_CUES = [
     ['behavioral:have-you-ever', /\bhave you (?:ever|been)\b/],
     // Background
     ['background:about-yourself', /\b(?:about|introduce|describe|present) yourself\b/],
+    ['background:tell-me-about-your', /\b(?:tell|walk|talk) (?:me|us) (?:\w+ )?(?:about|through) your\b/],
+    ['background:what-you-do', /\bwhat (?:do|are) you (?:do|doing|working on|currently|building|focused on)\b|\bwhat (?:kind|type) of (?:work|projects|role) (?:do|did|are) you\b/],
+    ['background:fragment', /^(?:and |so )?(?:any|some|much|prior|previous|professional|hands on) (?:experience|exposure|background) (?:with|in|on|using)\b|^(?:and |so )?(?:current|expected|desired) (?:salary|compensation|role|company|employer|stack|location)\b/],
     ['background:your-career', /\byour (?:background|career|resume|cv|experience|journey|trajectory|track record|professional|story|path)\b/],
     ['background:your-role', /\byour (?:\w+ )?(?:current|previous|last|past|former|first|main|day to day|daily) (?:role|job|position|company|employer|team|project|manager|work|responsibilities|duties)\b|\byour (?:\w+ )?(?:responsibilities|duties|tech stack)\b/],
     ['background:your-trait', /\byour (?:biggest|greatest|main|key|top|best|worst|proudest|major) (?:weakness|weaknesses|strength|strengths|achievement|achievements|accomplishment|challenge|failure|mistake|win|contribution|lesson|regret|impact)\b/],
@@ -82,6 +85,12 @@ const PERSONAL_CUES = [
     ['experience:pt-voce-presente', new RegExp(`\\b${YOU} (?:mora|vive|trabalha|atua|esta trabalhando|esta atuando|esta buscando|esta procurando|esta considerando)\\b`)],
     ['experience:pt-voces', /\bvoces (?:\w+ )?(?:\w+am|\w+em)\b/],
     ['experience:pt-ja-past', /\bja \w{2,}(?:ou|eu|iu)\b/],
+    // Implied subject: Portuguese drops "você" ("Trabalha remoto hoje?", "Conhece Kafka?").
+    // "Usa-se X" is impersonal, not about the candidate.
+    ['experience:pt-implied-subject', /^(?:e |entao |mas )?(?:hoje |atualmente |ainda |ja |tambem )?(?:trabalha|atua|mora|usa|utiliza|conhece|possui|programa|desenvolve|lidera|gerencia|codifica|estuda|faz parte)\b(?! se\b)/],
+    // "Como você gerencia X?" asks for an approach (ambiguous), not a fact.
+    ['experience:pt-voce-habito', new RegExp(`(?<!\\bcomo (?:que )?)\\b${YOU} (?:hoje |atualmente |ainda |tambem )?(?:faz|fazia|trabalhava|atuava|cuida|cuidava|usa|usava|utiliza|utilizava|lidera|liderava|gerencia|programa|desenvolve|conhece|gosta)\\b`)],
+    ['background:pt-o-que-faz', new RegExp(`\\b(?:o que|no que|com o que) (?:${YOU} )?(?:faz|trabalha|atua|esta fazendo|esta trabalhando)\\b|\\b(?:seu|teu) dia a dia\\b`)],
 ];
 
 const AMBIGUOUS_CUES = [
@@ -125,6 +134,12 @@ const FRAMING = [
     /\bwhat do you know about\b/g,
     new RegExp(`\\bpor ?que (?:${YOU} )?(?:quer|gostaria de|deseja|pensa em) (?:trabalhar|entrar|fazer parte|se juntar)(?: (?:aqui|com a gente|conosco|na|no))?\\b`, 'g'),
     new RegExp(`\\bo que ${YOU} (?:sabe|conhece) (?:sobre|da|de)\\b`, 'g'),
+    // Experience questions: "have you worked with X" is about X.
+    /\b(?:have|had) you (?:ever )?(?:worked|used|dealt|done|had)(?: (?:with|on|in))?\b/g,
+    /\b(?:do|did) you have (?:any )?(?:\w+ ){0,2}(?:experience|exposure)(?: (?:with|in|on))?\b/g,
+    new RegExp(`\\b(?:${YOU} )?ja (?:trabalhou|usou|utilizou|atuou|teve|fez|precisou|lidou|passou)(?: (?:com|em|por|de))?\\b`, 'g'),
+    new RegExp(`\\b(?:${YOU} )?(?:tem|teve|possui) (?:alguma |muita )?experiencia(?: (?:com|em))?\\b`, 'g'),
+    new RegExp(`\\bcomo (?:${YOU} )?lidou\\b|\\bquais (?:acoes|atitudes|medidas) (?:${YOU} )?tomou\\b`, 'g'),
     /\b(?:can|could|would) you (?:please )?(?:tell|walk|talk|give|share|describe)(?: (?:me|us))?\b/g,
     /\b(?:tell|walk|talk) (?:me|us) (?:\w+ )?(?:about|through)\b/g,
     /\b(?:tell|give|show) (?:me|us)\b/g,

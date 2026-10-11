@@ -87,6 +87,8 @@ The library version is pinned at that point.
 
 **No-go path**: ship BM25-only (T010–T023 stand alone). Revisit Ollama embeddings if the user installs Ollama.
 
+**Outcome (2026-10-11): GO.** See [spike-embeddings.md](./spike-embeddings.md). The worker is an Electron `utilityProcess`. Library pinned at 4.2.0. Query embedding p50 ~8 ms. First full pass ~4 min, cached afterwards. +~70 MB uncompressed in the package; ~0.5 GB RAM in the model process, so `CAREER_KB_VECTORS=off` exists.
+
 ---
 
 ## R6: Intent routing

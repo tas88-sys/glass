@@ -13,9 +13,9 @@ spec_name: "live-answer-career-context"
 # --- Staleness Detection (v2 required) ---
 generation_context:
   generated_at: "2026-10-11T00:00:00Z"
-  spec_hash: "8fa3a2203a1c9f41dccac8a2f1be72ea6cb1f38c82d1a42784161069418fe2c0"
-  plan_hash: "52b373518e0c33bb2d43dabe9ba30e768819869d9e1c22132f5b7dd3ac22c0f0"
-  tasks_hash: "ce8ace89c13a6ac522f14c015cf932d4475e7f171e15cd64e3203b6d0d6d66b1"
+  spec_hash: "784e2c1a7a191e1c64387662cb29a1a4ca1d436438dbd1c3a577d8dd7f75fc1e"
+  plan_hash: "05d7a8115a2b1f0cf9160e047be9a5cd24f1576aaaafa3ad9e655098ec627f1d"
+  tasks_hash: "14dd03bf1ce83ef6044dbbeab6cb882f8e7ba4b41a16eedc6ad02bbdc637e267"
 
 # --- Drift Detection (v2 required) ---
 _references:
