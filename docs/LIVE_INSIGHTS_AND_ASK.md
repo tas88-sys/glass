@@ -339,6 +339,81 @@ never injected.
    an error, since a number worked out from the notes (years since a start date) is flagged too.
    Numbers written as words and names outside the manifest are not checked.
 
+**How the router picks a route.** `classifyCareerIntent` (`intentRouter.js`) runs four checks in
+a fixed order, and the first match wins. It calls no model and reads no files, so it takes well
+under a millisecond. Diagram source: [`diagrams/14-career-intent-router.mmd`](diagrams/14-career-intent-router.mmd).
+
+```mermaid
+%%{init: {"flowchart": {"wrappingWidth": 360}}}%%
+flowchart TB
+    turn(["Interviewer turn<br/>+ the previous career question, if any<br/>+ the names in the notes manifest"])
+    turn --> norm["Normalize: lowercase, accents folded,<br/>contractions expanded, punctuation removed"]
+
+    norm --> c1{{"1 · About the interviewer's company?<br/>a cue: 'why do you want to join us', 'what do you know about us',<br/>'por que você quer trabalhar com a gente'<br/>or a manifest company after 'heard of', 'join', 'conhece'…"}}
+    c1 -- yes --> C["<b>company</b><br/>search the notes with no company tag and the active company's prep;<br/>the company name joins the query"]
+
+    c1 -- no --> f1{{"2 · A follow-up?<br/>the previous question was personal or company, at most 5 minutes ago,<br/>and this turn has at most 10 words and a marker:<br/>'and then', 'what was the outcome', 'what did you learn', 'e depois'…"}}
+    f1 -- yes --> F["<b>the previous route</b>, cue follow-up<br/>search as that route, with the previous question:<br/>its terms in the keyword query, its text in the embedding query"]
+
+    f1 -- no --> p1{{"3 · About the candidate?<br/>a cue: 'tell me about a time', 'your biggest weakness',<br/>'have you worked with', 'what was your…', 'me conta de uma vez'<br/>or an employer or project named in the manifest"}}
+    p1 -- yes --> P["<b>personal</b><br/>search all notes"]
+
+    p1 -- no --> a1{{"4 · Hypothetical, habit or opinion?<br/>'how would you…', 'how do you usually…', 'what is your approach'"}}
+    a1 -- yes --> A["<b>ambiguous</b><br/>search all notes;<br/>keep them only if the best match is close enough"]
+    a1 -- no --> G["<b>general</b><br/>no search: the prompt is exactly<br/>what it was without the feature"]
+
+    C --> send(["Send the canonical facts and up to 6 sections<br/>(at most 9,000 characters) with the question"])
+    F --> send
+    P --> send
+    A --> send
+
+    classDef route fill:#e8f0fe,stroke:#4a6fa5,color:#1a1a1a
+    classDef none fill:#f1f1f1,stroke:#999,color:#1a1a1a
+    class C,F,P,A route
+    class G none
+```
+
+- **Cues.** Each check is a table of `[name, regex]` pairs, in English and Portuguese, matched
+  against the normalized text ("What's" becomes "what is", "você" becomes "voce"). The rule name
+  is the `cue=` of the debug line; the text itself is never logged.
+- **Order.** The first match wins, so the order settles mixed questions:
+  - company before everything: "Tell me about a time you led a project, and why do you want to
+    join us?" is company;
+  - follow-up before personal: "What did you learn?" right after a company question stays
+    company, while on its own it is personal ("did you");
+  - personal before ambiguous.
+- **Follow-ups.** All four conditions must hold. The previous question is the last answer that
+  used the personal or company route; any other answer clears it, and so does a new session.
+- **Manifest names.** An `entities` name (employer, project) anywhere in the turn makes it
+  personal. A `companies` name makes it company only after a phrase such as "heard of", "know
+  about", "join", "conhece" or "trabalhar na".
+- **Close enough** (ambiguous route): the best section's cosine is at least the model's threshold
+  (0.35 for Arctic Embed); when the answer is keyword-only, at least half the query terms, and
+  two or more, appear in it.
+- **The answer gate.** Live Answer answers turns that look like questions. While the notes are
+  loaded, a turn the router calls personal or company on its own (without the previous question)
+  is answered too, so a statement such as "Your biggest weakness." gets an answer.
+
+| Interviewer says | Route | Cue |
+|---|---|---|
+| "Why do you want to join us?" | company | `company:why-join` |
+| "Have you heard of Acme before?" (Acme is a manifest company) | company | `company:named` |
+| "Tell me about a time you disagreed with a teammate" | personal | `behavioral:tell-me-about-a-time` |
+| "Me conta de uma vez que você discordou de um colega" | personal | `behavioral:pt-uma-vez` |
+| "What was your biggest project?" | personal | `background:your-trait` |
+| "Have you worked with Kafka?" | personal | `experience:have-you` |
+| "How big was the team at Example Corp?" (a manifest entity) | personal | `entity` |
+| "How would you design a rate limiter?" | ambiguous | `hypothetical:how-would-you` |
+| "How do you usually handle conflict?" | ambiguous | `habitual:how-do-you` |
+| "What is a B-tree?" | general | none |
+| "And what was the outcome?", 1 minute after a personal answer | personal | `follow-up` |
+| "And what was the outcome?", with no previous question or 6 minutes later | general | none |
+
+**Change it.** Add a `[name, regex]` pair to the right table in `intentRouter.js`, written for the
+normalized text, and a case to `__tests__/intentRouter.test.js`. `node scripts/ask-career-kb.js
+"question"` prints the route and cue of one question; the eval reports router accuracy over its
+questions.
+
 **Lifecycle.** The index warms at app start and refreshes changed files (mtime) at every Listen
 session start, never on the answer path. The query embedding is prefetched when a gated turn
 arrives, so at debounce-fire it waits at most 150 ms; otherwise that answer is BM25-only. The

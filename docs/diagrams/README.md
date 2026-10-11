@@ -1,8 +1,9 @@
 # Glass Architecture Diagrams
 
 Mermaid (`.mmd`) source for every diagram referenced by
-[`../../ARCHITECTURE.md`](../../ARCHITECTURE.md). Each file is a standalone diagram
-grounded in the current code — read them next to the matching ARCHITECTURE.md section.
+[`../../ARCHITECTURE.md`](../../ARCHITECTURE.md) and
+[`../LIVE_INSIGHTS_AND_ASK.md`](../LIVE_INSIGHTS_AND_ASK.md). Each file is a standalone diagram
+grounded in the current code — read them next to the matching section.
 
 ## Index
 
@@ -21,6 +22,7 @@ grounded in the current code — read them next to the matching ARCHITECTURE.md 
 | 11 | `11-gemini-failover.mmd` | The Gemini CSV failover loop, error classification, and cooldown (LLM only) |
 | 12 | `12-data-persistence-and-auth.mmd` | Dual SQLite/Firebase repository pattern, schema, and auth-driven storage switching |
 | 13 | `13-run-as-is-decision.mmd` | "If I run it as-is" — what works on first launch, per platform |
+| 14 | `14-career-intent-router.mmd` | How Live Answer's career intent router picks a route (company, follow-up, personal, ambiguous, general) and what each route searches. Shown in `LIVE_INSIGHTS_AND_ASK.md` §4.7 |
 
 ## Rendering
 

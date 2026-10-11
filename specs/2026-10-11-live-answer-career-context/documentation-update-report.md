@@ -106,3 +106,12 @@ Two chunker rules were added; the size cap did not change.
 | `docs/LIVE_INSIGHTS_AND_ASK.md` | §4.7 Retrieve: the follow-up embedding query |
 | `contracts/EDGE_CASES.md` | E41 now fixed; E42 (a chain of follow-ups) |
 | `research.md` | R13: the follow-up finding, fixed, with the before and after check |
+
+## Update for T036 (intent router diagram)
+
+| Document | Change |
+|----------|--------|
+| `docs/diagrams/14-career-intent-router.mmd` | New: the router's four checks in order, the route each one picks, and what each route searches |
+| `docs/LIVE_INSIGHTS_AND_ASK.md` | §4.7: the diagram inline, then the rules (cues, order, follow-ups, manifest names, the ambiguous threshold, the answer gate), a table of examples with route and cue, and how to change a cue |
+| `docs/diagrams/README.md` | Index row 14; the folder also serves `LIVE_INSIGHTS_AND_ASK.md` |
+| `ARCHITECTURE.md` | §13 points to the diagram |

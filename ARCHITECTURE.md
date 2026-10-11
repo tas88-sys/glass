@@ -785,7 +785,8 @@ Live Answer passes career context through the same profile's `customPrompt` slot
 context") when the interviewer asks about the candidate and `CAREER_KB_PATH` is set. Otherwise
 the slot stays empty, as for Live Insights. When such an answer finishes, numbers and known names it
 states that the notes lack are flagged under it. See
-[`docs/LIVE_INSIGHTS_AND_ASK.md`](docs/LIVE_INSIGHTS_AND_ASK.md) §4.7.
+[`docs/LIVE_INSIGHTS_AND_ASK.md`](docs/LIVE_INSIGHTS_AND_ASK.md) §4.7, which also shows how the
+intent router picks a route ([`docs/diagrams/14-career-intent-router.mmd`](docs/diagrams/14-career-intent-router.mmd)).
 
 > Note: `ask:sendQuestionFromSummary` (the Listen "suggested action" buttons) only works in
 > `default` mode and is rejected in the other modes (`featureBridge.js:135-144`).
