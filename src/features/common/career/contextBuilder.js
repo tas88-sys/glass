@@ -13,7 +13,7 @@
 // order; the first one that does not fit whole is cut at a paragraph
 // boundary and the rest are dropped.
 
-const MAX_BLOCK_CHARS = 6000;
+const MAX_BLOCK_CHARS = 9000;
 const BLOCK_CARD_LABEL = '[canonical facts]';
 const CARD_SOURCE = 'canonical facts';
 const SECTION_SEP = '\n\n';

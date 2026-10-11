@@ -3,28 +3,47 @@
 // Semantic side of retrieval (FR-009, research R5). A multilingual embedding
 // model runs in a separate worker (Electron utilityProcess in the app, a
 // worker_thread under plain Node), so inference never blocks the main event
-// loop and a native crash cannot take the app down. Vectors are cached on
-// disk by content hash and model id. Queries jump ahead of the corpus pass,
-// are prefetched during the answer debounce and awaited for a bounded time.
+// loop and a native crash cannot take the app down. Each chunk gets two
+// vectors: its text and its section title (research R5: question-to-heading
+// matching finds Q&A notes well). Vectors are cached on disk by content hash
+// and model id. Queries jump ahead of the corpus pass, are prefetched during
+// the answer debounce and awaited for a bounded time.
 //
 // Total: nothing here throws to the caller. Any failure means "no vectors",
 // and retrieval falls back to BM25 (FR-017).
 
+const crypto = require('node:crypto');
 const nodePath = require('node:path');
 const os = require('node:os');
 const fsp = require('node:fs/promises');
 const { buildVectorIndex } = require('./vectorIndex');
 
-const DEFAULT_MODEL = 'Xenova/multilingual-e5-small';
-const DEFAULT_DTYPE = 'q8';
-const QUERY_PREFIX = 'query: ';       // e5 models expect these prefixes
-const PASSAGE_PREFIX = 'passage: ';
+// Per-model settings. Titles are embedded like queries: they are questions
+// or topics, and the match is question to question. minCosine is the FR-012
+// ambiguous-route gate on that model's cosine scale (research R5).
+const MODEL_PROFILES = {
+    'Snowflake/snowflake-arctic-embed-m-v2.0': {
+        dtype: 'q8', pooling: 'sentence_embedding', queryPrefix: 'query: ', passagePrefix: '', minCosine: 0.35,
+    },
+    'Xenova/multilingual-e5-small': {
+        dtype: 'q8', pooling: 'mean', queryPrefix: 'query: ', passagePrefix: 'passage: ', minCosine: 0.85,
+    },
+};
+const DEFAULT_MODEL = 'Snowflake/snowflake-arctic-embed-m-v2.0';
+const FALLBACK_PROFILE = MODEL_PROFILES['Xenova/multilingual-e5-small'];
 const MAX_PASSAGE_CHARS = 1500;
 const INIT_TIMEOUT_MS = 10 * 60 * 1000;   // the first run downloads the model
 const PERSIST_EVERY = 64;
 
 const normalizeKey = text => String(text).trim().replace(/\s+/g, ' ');
 const modelSlug = id => String(id).replace(/[^a-zA-Z0-9]+/g, '-');
+const sha1 = s => crypto.createHash('sha1').update(s).digest('hex');
+
+/** The section part of a breadcrumb title ("file › H2 › H3" → "H2 › H3"). */
+function sectionTitle(title) {
+    const parts = String(title || '').split(' › ');
+    return (parts.length > 1 ? parts.slice(1).join(' › ') : parts[0]).trim();
+}
 
 function defaultThreads() {
     return Math.max(1, Math.min(4, Math.floor(os.cpus().length / 4)));
@@ -79,6 +98,7 @@ function defaultSpawnWorker(log = () => {}) {
  *   log?: (line: string) => void,
  *   modelId?: string,
  *   dtype?: string,
+ *   pooling?: 'mean'|'sentence_embedding',
  *   threads?: number,
  *   fs?: typeof fsp,
  * }} [options]
@@ -88,7 +108,12 @@ function createEmbedder(options = {}) {
     const spawnWorker = options.spawnWorker || (() => defaultSpawnWorker(log));
     const cacheDirFn = options.cacheDir || defaultCacheDir;
     const modelId = options.modelId || DEFAULT_MODEL;
-    const dtype = options.dtype || DEFAULT_DTYPE;
+    const profile = MODEL_PROFILES[modelId] || FALLBACK_PROFILE;
+    const dtype = options.dtype || profile.dtype;
+    const pooling = options.pooling || profile.pooling;
+    const { queryPrefix, passagePrefix } = profile;
+    const passageText = c => `${passagePrefix}${c.title}\n${c.body}`.slice(0, MAX_PASSAGE_CHARS);
+    const titleText = c => `${queryPrefix}${sectionTitle(c.title)}`;
     const threads = options.threads || defaultThreads();
     const fs = options.fs || fsp;
 
@@ -98,7 +123,7 @@ function createEmbedder(options = {}) {
     let startPromise = null;
     let initWaiter = null;
 
-    const store = new Map();        // content hash → Float32Array
+    const store = new Map();        // content hash or title key → Float32Array
     let storeVersion = 0;
     let cacheDims = 0;
     let cacheLoaded = false;
@@ -111,6 +136,12 @@ function createEmbedder(options = {}) {
     let prefetched = null;          // { key, promise }
     let syncGen = 0;
     let indexCache = null;          // { chunks, version, index }
+    const titleKeys = new WeakMap(); // chunk → title key, hashed once per chunk object
+    const keyOfTitle = c => {
+        let k = titleKeys.get(c);
+        if (!k) titleKeys.set(c, (k = `t:${sha1(titleText(c))}`));
+        return k;
+    };
 
     function cacheDir() {
         try {
@@ -226,7 +257,7 @@ function createEmbedder(options = {}) {
                 w.onMessage(m => onMessage(w, m));
                 w.onExit(() => onExit(w));
                 const f = files();
-                w.send({ type: 'init', modelId, dtype, threads, cacheDir: f ? f.models : null });
+                w.send({ type: 'init', modelId, dtype, pooling, threads, cacheDir: f ? f.models : null });
             } catch {
                 stopWorker();
                 if (initWaiter) initWaiter(false);
@@ -245,17 +276,17 @@ function createEmbedder(options = {}) {
         const id = ++seq;
         inflight.set(id, job);
         try {
-            worker.send({ type: 'embed', id, texts: job.texts });
+            worker.send({ type: 'embed', id, texts: job.texts, kind: job.kind });
         } catch {
             stopWorker();
         }
     }
 
-    /** @returns {Promise<Float32Array[]|null>} */
-    function embed(texts, priority) {
+    /** @returns {Promise<Float32Array[]|null>} kind (query | passage | title) is informational only. */
+    function embed(texts, priority, kind) {
         if (state !== 'ready') return Promise.resolve(null);
         return new Promise(resolve => {
-            queues[priority].push({ texts, resolve });
+            queues[priority].push({ texts, kind, resolve });
             pump();
         });
     }
@@ -307,8 +338,9 @@ function createEmbedder(options = {}) {
     // --- public ------------------------------------------------------------------
 
     /**
-     * Embed the chunks that have no vector yet (FR-016). Starts or restarts the
-     * worker. Resolves when the pass ends, is superseded or the worker fails.
+     * Embed the chunk texts and section titles that have no vector yet
+     * (FR-016). Starts or restarts the worker. Resolves when the pass ends, is
+     * superseded or the worker fails.
      */
     async function sync(chunks) {
         const gen = ++syncGen;
@@ -317,18 +349,25 @@ function createEmbedder(options = {}) {
         try {
             await loadCache();
             if (!(await start())) return;
-            const missing = [];
+            const texts = [];           // { key, text, kind }: chunk texts first, then titles
+            const titles = [];
             for (const c of chunks || []) {
-                if (!c || !c.hash || keep.has(c.hash)) continue;
-                keep.add(c.hash);
-                if (!store.has(c.hash)) missing.push(c);
+                if (!c || !c.hash) continue;
+                if (!keep.has(c.hash)) {
+                    keep.add(c.hash);
+                    if (!store.has(c.hash)) texts.push({ key: c.hash, text: passageText(c), kind: 'passage' });
+                }
+                const tk = keyOfTitle(c);
+                if (!keep.has(tk)) {
+                    keep.add(tk);
+                    if (!store.has(tk)) titles.push({ key: tk, text: titleText(c), kind: 'title' });
+                }
             }
-            for (const c of missing) {
+            for (const job of texts.concat(titles)) {
                 if (gen !== syncGen || state !== 'ready') break;
-                const text = `${PASSAGE_PREFIX}${c.title}\n${c.body}`.slice(0, MAX_PASSAGE_CHARS);
-                const vecs = await embed([text], 'low');
+                const vecs = await embed([job.text], 'low', job.kind);
                 if (!vecs) continue;
-                store.set(c.hash, vecs[0]);
+                store.set(job.key, vecs[0]);
                 storeVersion++;
                 added++;
                 if (added % PERSIST_EVERY === 0) await persist(keep);
@@ -341,22 +380,33 @@ function createEmbedder(options = {}) {
     }
 
     function isReadyFor(chunks) {
-        return state === 'ready' && Array.isArray(chunks) && chunks.every(c => store.has(c.hash));
+        return state === 'ready' && Array.isArray(chunks) && chunks.every(c => store.has(c.hash) && store.has(keyOfTitle(c)));
     }
 
-    /** Vector index over the chunks that have vectors, row → chunk index; null when queries cannot be embedded. */
+    /** A search over the chunks whose key has a vector, row → chunk index. */
+    function searchOver(chunks, keyOf) {
+        const map = [];
+        for (let i = 0; i < chunks.length; i++) if (store.has(keyOf(chunks[i]))) map.push(i);
+        const rows = new Float32Array(map.length * dims);
+        map.forEach((ci, r) => rows.set(store.get(keyOf(chunks[ci])), r * dims));
+        const vi = buildVectorIndex(rows, dims);
+        return (query, k) => vi.search(query, k).map(h => ({ idx: map[h.idx], score: h.score }));
+    }
+
+    /**
+     * Vector indexes over the chunks that have vectors: search() on the chunk
+     * texts, searchTitles() on the section titles. Null when queries cannot be embedded.
+     */
     function indexFor(chunks) {
         if (state !== 'ready' || store.size === 0 || !Array.isArray(chunks)) return null;
         if (indexCache && indexCache.chunks === chunks && indexCache.version === storeVersion) return indexCache.index;
-        const map = [];
-        for (let i = 0; i < chunks.length; i++) if (store.has(chunks[i].hash)) map.push(i);
-        if (!map.length) return null;
-        const rows = new Float32Array(map.length * dims);
-        map.forEach((ci, r) => rows.set(store.get(chunks[ci].hash), r * dims));
-        const vi = buildVectorIndex(rows, dims);
+        let size = 0;
+        for (const c of chunks) if (store.has(c.hash)) size++;
+        if (!size) return null;
         const index = {
-            size: map.length,
-            search: (query, k) => vi.search(query, k).map(h => ({ idx: map[h.idx], score: h.score })),
+            size,
+            search: searchOver(chunks, c => c.hash),
+            searchTitles: searchOver(chunks, keyOfTitle),
         };
         indexCache = { chunks, version: storeVersion, index };
         return index;
@@ -367,7 +417,7 @@ function createEmbedder(options = {}) {
         if (state !== 'ready' || typeof text !== 'string') return;
         const key = normalizeKey(text);
         if (!key || (prefetched && prefetched.key === key)) return;
-        prefetched = { key, promise: embed([`${QUERY_PREFIX}${key}`], 'high').then(v => (v ? v[0] : null)) };
+        prefetched = { key, promise: embed([`${queryPrefix}${key}`], 'high', 'query').then(v => (v ? v[0] : null)) };
     }
 
     /** The query vector, or null when not ready within timeoutMs (E19). */
@@ -402,7 +452,8 @@ function createEmbedder(options = {}) {
         close,
         vectorCount: () => store.size,
         modelId,
+        minCosine: profile.minCosine,
     };
 }
 
-module.exports = { createEmbedder, QUERY_PREFIX, PASSAGE_PREFIX, DEFAULT_MODEL };
+module.exports = { createEmbedder, sectionTitle, MODEL_PROFILES, DEFAULT_MODEL };

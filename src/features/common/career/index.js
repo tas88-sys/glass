@@ -18,13 +18,13 @@ const { tokenize, normalizeForMatch, slugify } = require('./textNormalize');
 const { fuseAndFilter, passesAmbiguousThreshold } = require('./retriever');
 const { buildContextBlock, buildAddendum } = require('./contextBuilder');
 
-const TOP_K = 4;                   // chunks fused into the block (FR-010: 3–4)
+const TOP_K = 6;                   // sections fused into the block, one per file (FR-010)
 const CANDIDATES = 60;             // per ranking, before company scope and leave-source-out
 const PREFETCH_TIMEOUT_MS = 150;   // C3
-// FR-012 ambiguous gate with vectors: about where relevant notes sit for e5-small
-// (spike T024: gold-note cosine p10 0.83, p50 0.86). Provisional until the eval
-// set labels which ambiguous questions should inject.
-const DEFAULT_MIN_COSINE = 0.85;
+// FR-012 ambiguous gate with vectors: each model profile carries its own
+// (embedder.js, research R5); this is the fallback for an embedder without one.
+// Provisional until the eval set labels which ambiguous questions should inject.
+const DEFAULT_MIN_COSINE = 0.35;
 const MAX_QUERY_TERMS = 40;
 
 // FR-011 company-context phrases, as [before, after] around the company name,
@@ -80,7 +80,10 @@ function compileCompanyDetector(names) {
 function createCareerModule(options = {}) {
     const env = options.env || process.env;
     const sink = options.log || (line => console.log(line));
-    const minCosine = Number.isFinite(options.minCosine) ? options.minCosine : DEFAULT_MIN_COSINE;
+    const minCosineFor = emb =>
+        Number.isFinite(options.minCosine) ? options.minCosine
+            : emb && Number.isFinite(emb.minCosine) ? emb.minCosine
+                : DEFAULT_MIN_COSINE;
     const prefetchTimeoutMs = Number.isFinite(options.prefetchTimeoutMs) ? options.prefetchTimeoutMs : PREFETCH_TIMEOUT_MS;
 
     const debugOn = () =>
@@ -162,6 +165,10 @@ function createCareerModule(options = {}) {
         if (detector.key !== key) detector = { key, detect: compileCompanyDetector(snap.companyNames) };
         state = vectorState().ready ? 'ready-hybrid' : 'ready-bm25';
         careerDebug(`[career] ${state} files=${snap.files} chunks=${snap.chunks.length} card=${snap.core ? 'yes' : 'no'} refresh=${ms(performance.now() - t0)}ms`);
+        // First-use costs off the answer path: every cue regex and the name
+        // patterns compile on their first run (~20 ms once).
+        classifyCareerIntent('warm up', { entities: snap.entities, companies: snap.companyNames });
+        stripCuePhrases('warm up');
 
         // FR-016: the embedding pass runs in the background, never on the answer path.
         const emb = getEmbedder();
@@ -172,6 +179,7 @@ function createCareerModule(options = {}) {
                 .then(() => {
                     if (snap === forSnap && isReady() && vectorState().ready) {
                         state = 'ready-hybrid';
+                        emb.indexFor(forSnap.chunks);       // build the search rows now, not on the first answer
                         careerDebug(`[career] ready-hybrid vectors=${emb.vectorCount()}`);
                     }
                 })
@@ -279,6 +287,7 @@ function createCareerModule(options = {}) {
         timings.bm25Ms = ms(performance.now() - tb);
 
         let semantic = null;
+        let titled = null;
         let vectorNote = 'off';
         const emb = opts.bm25Only ? null : getEmbedder();
         if (emb) {
@@ -291,6 +300,7 @@ function createCareerModule(options = {}) {
                 timings.vectorMs = ms(performance.now() - tv);
                 if (query) {
                     semantic = vindex.search(query, CANDIDATES).filter(keep);
+                    if (vindex.searchTitles) titled = vindex.searchTitles(query, CANDIDATES).filter(keep);
                     timings.vectorUsed = true;
                     vectorNote = `used(${timings.vectorMs}ms wait)`;
                 } else {
@@ -303,6 +313,7 @@ function createCareerModule(options = {}) {
             chunks: s.chunks,
             bm25: lexical,
             vector: semantic,
+            title: titled,
             route: decision.route,
             activeCompany,
             k: TOP_K,
@@ -312,7 +323,7 @@ function createCareerModule(options = {}) {
             opts.trace.activeCompany = activeCompany;
         }
 
-        if (decision.route === 'ambiguous' && !passesAmbiguousThreshold(hits[0], { vectorUsed: timings.vectorUsed, minCosine })) {
+        if (decision.route === 'ambiguous' && !passesAmbiguousThreshold(hits[0], { vectorUsed: timings.vectorUsed, minCosine: minCosineFor(emb) })) {
             return done(hits, vectorNote, 'inject=no(below-threshold)');
         }
 

@@ -15,11 +15,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
   - markdown chunker;
   - deterministic intent router (personal / company / ambiguous / general, English and Portuguese, follow-ups);
   - BM25 index;
-  - multilingual embeddings (transformers.js 4.2.0 + `multilingual-e5-small` in an Electron `utilityProcess`) fused by reciprocal rank fusion;
+  - multilingual embeddings (transformers.js 4.2.0 + `snowflake-arctic-embed-m-v2.0` in an Electron `utilityProcess`) of each chunk's text and of its section title, fused with BM25 by reciprocal rank fusion, one section per note file;
   - company scoping;
-  - a 6,000-character context block led by a canonical-facts card.
+  - a context block of up to six notes, 9,000 characters, led by a canonical-facts card.
 - **Optional `glass-kb.json` manifest** at the notes root: include/exclude globs, the canonical card, employer names, and per-company prep folders with aliases.
-- **`CAREER_KB_COMPANY`** pins the interviewing company. **`CAREER_KB_VECTORS=off`** keeps retrieval keyword-only and never starts the embedding model (~0.5 GB RAM).
+- **`CAREER_KB_COMPANY`** pins the interviewing company. **`CAREER_KB_VECTORS=off`** keeps retrieval keyword-only and never starts the embedding model (~0.7 GB RAM).
 - **`scripts/eval-career-kb.js`** reports router accuracy, recall (leave-source-out), company leaks and per-stage latency against `<KB>/glass-eval/questions.jsonl`.
 - **Tests:** about 310 new `node:test` cases with synthetic fixtures (the real notes never enter the repo).
 

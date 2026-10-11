@@ -10,7 +10,7 @@ meta:
 # Quick Reference (for checkpoint resume)
 summary:
   tech_stack: [JavaScript (CommonJS, main process), Lit 2.7.4 (renderer), Electron 30 / Node 20.16, node:test]
-  external_deps: ["@huggingface/transformers (pinned after spike T024)", "multilingual embedding model, ~120 MB, downloaded once"]
+  external_deps: ["@huggingface/transformers (pinned after spike T024)", "multilingual embedding model, ~310 MB, downloaded once"]
   test_strategy: {unit: 70, integration: 20, contract: 0, e2e_manual: 10}
   deployment: immediate  # ships with the next Glass desktop build; inert until CAREER_KB_PATH is set
 ---
@@ -95,7 +95,7 @@ Question embeddings are prefetched during the existing 800 ms debounce, so the a
 | Grounding | The addendum restricts first-person facts to the injected notes, and the canonical card wins conflicts. |
 | Evaluation | Labeled eval set from real interviewer questions (research R9), with BM25 vs hybrid reported. |
 | Failure posture | Every failure degrades to today's behavior (C1). |
-| Data | Notes stay local except the ≤ 6,000-character excerpt sent with the transcript to the configured LLM. No note text in logs (C2). |
+| Data | Notes stay local except the ≤ 9,000-character excerpt sent with the transcript to the configured LLM. No note text in logs (C2). |
 
 ## Project Structure
 

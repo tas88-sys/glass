@@ -281,7 +281,7 @@ is used from outside). Spec: `specs/2026-10-11-live-answer-career-context/`.
 |---|---|
 | `CAREER_KB_PATH` | Folder of markdown/text notes. Unset or missing → the feature is off and Live Answer behaves exactly as before |
 | `CAREER_KB_COMPANY` | Optional. The interviewing company, as the manifest aliases spell it (or a folder name without aliases). Otherwise the first company named by the interviewer in a company-context phrase ("here at X", "aqui na X", "conhece a X") is used |
-| `CAREER_KB_VECTORS` | Optional. `off` keeps retrieval keyword-only (BM25) and never starts the embedding model, saving ~0.5 GB of RAM |
+| `CAREER_KB_VECTORS` | Optional. `off` keeps retrieval keyword-only (BM25) and never starts the embedding model, saving ~0.7 GB of RAM |
 
 **Manifest.** An optional `glass-kb.json` at the notes root:
 
@@ -319,11 +319,13 @@ never injected.
    A short follow-up ("and what was the outcome?") within 5 minutes stays on the previous route.
 2. **Retrieve.** The query is the turn minus framing phrases, with the extracted question boosted,
    the previous question's terms merged on follow-ups, and the company name added on the company
-   route. Retrieval is BM25 over chunk titles (weight 3) and bodies, plus multilingual embeddings
-   (e5-small, worker process), merged by reciprocal rank fusion.
+   route. Retrieval merges three rankings by reciprocal rank fusion: BM25 over chunk titles
+   (weight 3) and bodies, and multilingual embeddings (Arctic Embed v2.0, worker process) of the
+   question against each chunk's text and against its section title. At most one section per
+   note file is kept.
    - The company route drops other companies' chunks.
    - The ambiguous route injects only above a threshold.
-3. **Inject.** The card plus the top chunks, capped at 6,000 characters, go into the prompt's
+3. **Inject.** The card plus up to six chunks, capped at 9,000 characters, go into the prompt's
    existing *User-provided context* slot (`getSystemPrompt`'s `customPrompt`). A first-person
    addendum is appended to the user message. On the `general` route, or when nothing is found,
    the prompt is byte-identical to the pre-feature one.
@@ -333,9 +335,10 @@ never injected.
 **Lifecycle.** The index warms at app start and refreshes changed files (mtime) at every Listen
 session start, never on the answer path. The query embedding is prefetched when a gated turn
 arrives, so at debounce-fire it waits at most 150 ms; otherwise that answer is BM25-only. The
-embedding model is downloaded once (~120 MB) into `userData/career-kb/models`. Passage vectors
-are cached in `userData/career-kb/vectors-*.bin`, keyed by content hash and model id. The first
-full pass is CPU work in the background (a few minutes for a few thousand chunks).
+embedding model is downloaded once (~310 MB) into `userData/career-kb/models`. Text and title
+vectors are cached in `userData/career-kb/vectors-*.bin`, keyed by content hash and model id. The
+first full pass is CPU work in the background (about 25 minutes for a few thousand chunks);
+answers use BM25 until it finishes.
 
 Any failure degrades to BM25 or to today's behavior (no context):
 - folder missing;

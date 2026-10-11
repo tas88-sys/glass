@@ -89,6 +89,39 @@ The library version is pinned at that point.
 
 **Outcome (2026-10-11): GO.** See [spike-embeddings.md](./spike-embeddings.md). The worker is an Electron `utilityProcess`. Library pinned at 4.2.0. Query embedding p50 ~8 ms. First full pass ~4 min, cached afterwards. +~70 MB uncompressed in the package; ~0.5 GB RAM in the model process, so `CAREER_KB_VECTORS=off` exists.
 
+**Update (2026-10-11, T029): model and ranking replaced.** With the widened gold labels, hybrid injected recall was 47.2% against the 85% target (SC-002). The first gold note sat in the fused top 20 for only 66% of items, so a bigger block alone could not close the gap; ranking had to improve. Candidates were scored offline on the full eval set: 53 personal items with a retrievable note, leave-source-out, each passage embedded one at a time as the app does. Every column is the same scorer; e5-small's first row reproduces the module's 47.2%.
+
+| Injected recall | e5-small | e5-base | gte-multilingual-base | arctic-embed-m-v2.0 |
+|-----------------|----------|---------|-----------------------|---------------------|
+| Fusion as shipped (BM25 + text vectors, top 4, 6,000 chars) | 47.2% | 50.9% | 50.9% | 54.7% |
+| Text vectors alone | 32.1% | 43.4% | 56.6% | 56.6% |
+| + section-title vectors as a third ranking, one section per file | 50.9% | 54.7% | 62.3% | 60.4% |
+| + top 6 within 9,000 characters | 54.7% | 66.0% | 73.6% | 75.5% |
+
+| Cost on the target machine (q8, 4 threads, idle) | e5-small | e5-base | gte-multilingual-base | arctic-embed-m-v2.0 |
+|---|---|---|---|---|
+| Download | 118 MB | 279 MB | 340 MB | 311 MB |
+| Process RSS after load | ~0.5 GB | ~0.67 GB | ~0.73 GB | ~0.70 GB |
+| Query embedding p50 / p95 | 7 / 10 ms | 28 / 51 ms | 24 / 34 ms | 26 / 49 ms |
+
+Why each change helps:
+- **A stronger model.** Most remaining misses were Portuguese questions whose best note is in English. e5-small matches across languages poorly (text vectors alone: 32%); the two newer models reach 57%.
+- **Section-title vectors.** The notes are mostly "question → answer" sections. Matching the interviewer's question against each section heading (embedded like a query) finds them better than matching against the whole body.
+- **One section per file.** Answer banks have many near-duplicate sections; without a cap they fill the block with one file.
+- **Top 6 within 9,000 characters.** About three notes fit after the card at 6,000 characters. The extra ~3,000 characters (~750 tokens) are negligible next to the transcript.
+
+Rejected:
+- **Cross-encoder reranking** of the top 40 (`cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`, 119 MB). Recall fell to 43.4%, at ~12 s per question under load. The strong multilingual reranker (`bge-reranker-v2-m3`, 571 MB) is far too slow on CPU for the 800 ms debounce.
+- **Translating Portuguese questions to English** before searching (`Xenova/opus-mt-ROMANCE-en`, 113 MB, 0.3–0.8 s per question). It adds +3.7 points on Arctic (79.2%) and nothing on gte: not worth a second model and that latency. English to Portuguese with `opus-mt-en-ROMANCE` produced French or Spanish.
+- **EmbeddingGemma-300m.** 0.3 s per query and 1.6 GB RSS on this CPU; dropped before scoring.
+- **Smaller knobs** (query without framing words, list weights, RRF k, deeper lists, skipping research and outreach notes): within ±2 items, which is noise here.
+
+**Decision**: `Snowflake/snowflake-arctic-embed-m-v2.0` (Apache-2.0, 768 dims, `query: ` prefix on queries only, the model's own pooled output), section-title vectors, one section per file, top 6 within 9,000 characters. gte scored within one item of it, but Arctic indexes about 40% faster on this machine. The FR-012 gate moves to **0.35**, the same position on Arctic's gold-note cosine distribution (about the 23rd percentile) as 0.85 on e5-small. e5-small stays as a model profile, with its own gate.
+
+**Caveats.**
+- One item is ±1.9 points, and the holdout has 6 personal items, so differences under about 4 points are noise.
+- The metric undercounts. A manual audit of e5-small's 28 misses found about 10 where an injected note did answer the question but was not a labeled gold note.
+
 ---
 
 ## R6: Intent routing

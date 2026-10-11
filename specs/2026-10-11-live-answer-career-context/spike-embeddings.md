@@ -4,6 +4,8 @@
 **Date**: 2026-10-11
 **Decision**: **GO**, with the conditions listed at the end.
 
+> **Later change (T029).** The shipped model is now `Snowflake/snowflake-arctic-embed-m-v2.0`, chosen by the comparison in [research.md R5](./research.md). The worker, packaging and failure conditions below still hold. The e5-small numbers here are the spike's.
+
 The question was whether a small multilingual embedding model can run inside Glass, packaged, fast enough for the answer path and without destabilizing the app. All numbers below come from the target machine (Windows 11, 16 logical cores) and the real KB (78 files, 2,564 chunks). Per spec C5, this document reports numbers only, never note content.
 
 ## Setup

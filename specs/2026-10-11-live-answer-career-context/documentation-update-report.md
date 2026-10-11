@@ -31,3 +31,18 @@ Older specs were left alone (historical records); `live-answer-improvements/` is
 - No personal content (spec C5). The leak scan over all changed files (company names, employers, city, personal names) found 0 hits.
 - Every `summaryService.js:` line reference in the two docs points at the code it names (checked against the current file).
 - Environment variables in the docs match the code (`index.js`: `CAREER_KB_PATH`, `CAREER_KB_COMPANY`, `CAREER_KB_VECTORS`; `LIVE_ANSWER_DEBUG` gates `[career]` lines).
+
+## Update for T029 (retrieval quality)
+
+The embedding model, the fusion and the block size changed. Docs that named the old values:
+
+| Document | Change |
+|----------|--------|
+| `docs/LIVE_INSIGHTS_AND_ASK.md` | §4.7: three rankings (BM25, chunk text, section title), one section per file, up to six chunks within 9,000 characters, Arctic Embed v2.0, ~310 MB download, ~25 min first pass, ~0.7 GB saved by `CAREER_KB_VECTORS=off` |
+| `CHANGELOG.md` | `[Unreleased]` Added: model, title vectors, block size, RAM figure |
+| `spec.md` | FR-009 (text and title vectors), FR-010 (three rankings, one per file, top 6), FR-013 (9,000 chars), dependency table |
+| `research.md` | R5 update: the comparison, rejected options, decision and caveats |
+| `plan.md`, `data-model.md`, `contracts/EDGE_CASES.md`, `quickstart.md` | Download size, excerpt cap, vector shapes and keys, E23/E33 cap, RAM figure |
+| `spike-embeddings.md` | Note that the shipped model changed; the spike numbers stay as recorded |
+
+Checks: the leak scan over the changed files found 0 hits, and no doc still names e5-small as the shipped model (it remains a model profile in `embedder.js`).

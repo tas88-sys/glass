@@ -1,7 +1,7 @@
 'use strict';
 
 // Brute-force cosine search over L2-normalized rows (research R4): a few
-// thousand 384-d vectors scan in about a millisecond, so no ANN index.
+// thousand 768-d vectors scan in a few milliseconds, so no ANN index.
 
 /**
  * @param {Float32Array} rows  n × dims, row i ↔ chunk i, L2-normalized

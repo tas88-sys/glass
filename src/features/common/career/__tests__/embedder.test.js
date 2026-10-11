@@ -1,5 +1,5 @@
 /**
- * embedder.test.js — T025 (FR-009, FR-016, FR-017; E11, E19, E20, E21)
+ * embedder.test.js — T025, T029 (FR-009, FR-016, FR-017; E11, E19, E20, E21)
  *
  * Run: node --test src/features/common/career/__tests__/embedder.test.js
  *
@@ -15,7 +15,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 
-const { createEmbedder, QUERY_PREFIX, PASSAGE_PREFIX } = require('../embedder');
+const { createEmbedder, sectionTitle, MODEL_PROFILES, DEFAULT_MODEL } = require('../embedder');
 const { createCareerModule } = require('../index');
 
 const DIMS = 4;
@@ -36,7 +36,8 @@ function fakeVector(text) {
 
 /** A worker double: same message protocol as embedWorker.js. */
 function fakeWorkerFactory(opts = {}) {
-    const stats = { spawned: 0, embedCalls: 0, queryTexts: [], passageTexts: [], workers: [] };
+    const stats = { spawned: 0, embedCalls: 0, init: null, queryTexts: [], passageTexts: [], titleTexts: [], workers: [] };
+    const bucket = { query: 'queryTexts', passage: 'passageTexts', title: 'titleTexts' };
     const spawn = () => {
         stats.spawned++;
         let onMessage = () => {};
@@ -48,17 +49,19 @@ function fakeWorkerFactory(opts = {}) {
                 setImmediate(async () => {
                     if (!alive) return;
                     if (msg.type === 'init') {
+                        stats.init = msg;
                         if (opts.initError) onMessage({ type: 'init-error', message: 'offline' });
                         else onMessage({ type: 'ready', dims: DIMS });
                         return;
                     }
                     if (msg.type === 'embed') {
                         stats.embedCalls++;
-                        for (const t of msg.texts) (t.startsWith(QUERY_PREFIX) ? stats.queryTexts : stats.passageTexts).push(t);
+                        stats[bucket[msg.kind]].push(...msg.texts);
                         const delay = typeof opts.delay === 'function' ? opts.delay(msg) : opts.delay || 0;
                         if (delay) await sleep(delay);
                         if (!alive) return;
-                        if (opts.crashOnPassage && msg.texts[0].startsWith(PASSAGE_PREFIX) && stats.passageTexts.length >= opts.crashOnPassage) {
+                        const crashAt = msg.kind === 'passage' ? opts.crashOnPassage : msg.kind === 'title' ? opts.crashOnTitle : 0;
+                        if (crashAt && stats[bucket[msg.kind]].length >= crashAt) {
                             alive = false;
                             onExit(1);
                             return;
@@ -104,17 +107,63 @@ function embedder(worker, cacheDir, extra = {}) {
 }
 
 describe('embedder: corpus pass and cache (FR-009, FR-016)', () => {
-    it('embeds every chunk once, with the passage prefix, and becomes ready for those chunks', async () => {
+    it("embeds each chunk's text and section title once and becomes ready for those chunks", async () => {
         const w = fakeWorkerFactory();
         const e = embedder(w, await tmpDir());
         assert.equal(e.isReadyFor(CHUNKS), false);
         await e.sync(CHUNKS);
         assert.equal(e.isReadyFor(CHUNKS), true);
-        assert.equal(e.vectorCount(), 3);
-        assert.equal(w.stats.passageTexts.length, 3);
-        assert.ok(w.stats.passageTexts.every(t => t.startsWith(PASSAGE_PREFIX)));
-        assert.equal(PASSAGE_PREFIX, 'passage: ');
-        assert.equal(QUERY_PREFIX, 'query: ');
+        assert.equal(e.vectorCount(), 6, 'three texts and three titles');
+        assert.deepEqual(w.stats.passageTexts, CHUNKS.map(c => `${c.title}\n${c.body}`), 'default model: no passage prefix');
+        assert.deepEqual(w.stats.titleTexts, ['query: Storm night', 'query: Garden', 'query: Ferry'], 'titles embedded like queries');
+    });
+
+    it('the default model is Arctic Embed v2.0 with its own pooled output; e5-small keeps its prefixes', async () => {
+        assert.equal(DEFAULT_MODEL, 'Snowflake/snowflake-arctic-embed-m-v2.0');
+        const w = fakeWorkerFactory();
+        await embedder(w, await tmpDir()).sync(CHUNKS);
+        assert.equal(w.stats.init.modelId, DEFAULT_MODEL);
+        assert.equal(w.stats.init.pooling, 'sentence_embedding');
+        assert.equal(w.stats.init.dtype, 'q8');
+
+        const w2 = fakeWorkerFactory();
+        await embedder(w2, await tmpDir(), { modelId: 'Xenova/multilingual-e5-small' }).sync(CHUNKS);
+        assert.equal(w2.stats.init.pooling, 'mean');
+        assert.ok(w2.stats.passageTexts.every(t => t.startsWith('passage: ')));
+        assert.ok(w2.stats.titleTexts.every(t => t.startsWith('query: ')));
+    });
+
+    it('each model carries its ambiguous-route cosine gate', () => {
+        const e = createEmbedder({ spawnWorker: fakeWorkerFactory().spawn, cacheDir: () => null, log: () => {} });
+        assert.equal(e.minCosine, MODEL_PROFILES[DEFAULT_MODEL].minCosine);
+        assert.equal(e.minCosine, 0.35);
+        const e5 = createEmbedder({ spawnWorker: fakeWorkerFactory().spawn, cacheDir: () => null, log: () => {}, modelId: 'Xenova/multilingual-e5-small' });
+        assert.equal(e5.minCosine, 0.85);
+    });
+
+    it('sectionTitle drops the file label from the breadcrumb', () => {
+        assert.equal(sectionTitle('log › Storm night'), 'Storm night');
+        assert.equal(sectionTitle('log › Storm night › Q: What did you do?'), 'Storm night › Q: What did you do?');
+        assert.equal(sectionTitle('log'), 'log');
+        assert.equal(sectionTitle(''), '');
+    });
+
+    it('pieces of one section share a single title vector', async () => {
+        const w = fakeWorkerFactory();
+        const e = embedder(w, await tmpDir());
+        const pieces = [chunk(5, 'log › Storm night', 'Part one.'), chunk(6, 'log › Storm night', 'Part two.')];
+        await e.sync(pieces);
+        assert.equal(w.stats.passageTexts.length, 2);
+        assert.equal(w.stats.titleTexts.length, 1);
+        assert.equal(e.isReadyFor(pieces), true);
+    });
+
+    it('a pass that stops before the titles are done is not ready (E21)', async () => {
+        const w = fakeWorkerFactory({ crashOnTitle: 1 });
+        const e = embedder(w, await tmpDir());
+        await e.sync(CHUNKS);
+        assert.equal(w.stats.passageTexts.length, 3, 'texts go first');
+        assert.equal(e.isReadyFor(CHUNKS), false);
     });
 
     it('a second embedder with the same model reuses the cache file (hit skips work)', async () => {
@@ -124,6 +173,7 @@ describe('embedder: corpus pass and cache (FR-009, FR-016)', () => {
         const e2 = embedder(w2, dir);
         await e2.sync(CHUNKS);
         assert.equal(w2.stats.passageTexts.length, 0);
+        assert.equal(w2.stats.titleTexts.length, 0);
         assert.equal(e2.isReadyFor(CHUNKS), true);
     });
 
@@ -134,6 +184,7 @@ describe('embedder: corpus pass and cache (FR-009, FR-016)', () => {
         const changed = [CHUNKS[0], CHUNKS[1], { ...CHUNKS[2], body: 'The ferry ran on time.', hash: 'hash-2-new' }];
         await e.sync(changed);
         assert.equal(w.stats.passageTexts.length, 4);
+        assert.equal(w.stats.titleTexts.length, 3, 'the title did not change');
         assert.equal(e.isReadyFor(changed), true);
     });
 
@@ -172,6 +223,14 @@ describe('embedder: vector index', () => {
         assert.ok(hits[0].score > 0.9);
     });
 
+    it('searchTitles ranks the section titles, mapped back to chunk indexes', async () => {
+        const e = embedder(fakeWorkerFactory(), await tmpDir());
+        await e.sync(CHUNKS);
+        const hits = e.indexFor(CHUNKS).searchTitles(fakeVector('balsa'), 3);
+        assert.equal(hits[0].idx, 2);
+        assert.equal(hits.length, 3);
+    });
+
     it('covers only the chunks that have vectors while a pass is incomplete', async () => {
         const e = embedder(fakeWorkerFactory(), await tmpDir());
         await e.sync(CHUNKS.slice(0, 2));
@@ -192,7 +251,7 @@ describe('embedder: query path (FR-009; E19)', () => {
         const v = await e.query(text, 500);
         assert.ok(v instanceof Float32Array);
         assert.equal(w.stats.queryTexts.length, 1);
-        assert.equal(w.stats.queryTexts[0], `${QUERY_PREFIX}${text}`);
+        assert.equal(w.stats.queryTexts[0], `query: ${text}`);
     });
 
     it('matches the prefetch by normalized text', async () => {
@@ -205,7 +264,7 @@ describe('embedder: query path (FR-009; E19)', () => {
     });
 
     it('returns null when the embedding is not ready in time; the late result is ignored (E19)', async () => {
-        const w = fakeWorkerFactory({ delay: msg => (msg.texts[0].startsWith(QUERY_PREFIX) ? 120 : 0) });
+        const w = fakeWorkerFactory({ delay: msg => (msg.kind === 'query' ? 120 : 0) });
         const e = embedder(w, await tmpDir());
         await e.sync(CHUNKS);
         const t0 = Date.now();
@@ -268,7 +327,7 @@ describe('embedder: failures (FR-017; E20, E21)', () => {
     });
 
     it('a crash while a query waits resolves it to null', async () => {
-        const w = fakeWorkerFactory({ delay: msg => (msg.texts[0].startsWith(QUERY_PREFIX) ? 50 : 0) });
+        const w = fakeWorkerFactory({ delay: msg => (msg.kind === 'query' ? 50 : 0) });
         const e = embedder(w, await tmpDir());
         await e.sync(CHUNKS);
         const q = e.query('storm', 500);
@@ -305,7 +364,7 @@ describe('career module with an embedder (FR-009, FR-010; E11)', () => {
         await mod.warm();
         for (let i = 0; i < 50 && mod.status().state !== 'ready-hybrid'; i++) await sleep(5);
         assert.equal(mod.status().state, 'ready-hybrid');
-        assert.equal(mod.status().vectors, 2);
+        assert.equal(mod.status().vectors, 4, 'two texts and two titles');
 
         // No shared words with the note: only the vector side can find it.
         const ctx = await mod.getCareerContext('Me conta sobre uma vez em que você enfrentou uma tempestade.', { prev: null, activeCompany: null });

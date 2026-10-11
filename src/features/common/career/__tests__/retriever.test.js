@@ -1,5 +1,5 @@
 /**
- * retriever.test.js — T016 (FR-010, FR-011, FR-012, FR-013, FR-014; E13, E14, E23, E24, E33)
+ * retriever.test.js — T016, T029 (FR-010, FR-011, FR-012, FR-013, FR-014; E13, E14, E23, E24, E33)
  *
  * Run: node --test src/features/common/career/__tests__/retriever.test.js
  *
@@ -11,7 +11,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { fuseAndFilter, passesAmbiguousThreshold, RRF_K, LIST_DEPTH } = require('../retriever');
+const { fuseAndFilter, passesAmbiguousThreshold, RRF_K, LIST_DEPTH, MAX_PER_FILE } = require('../retriever');
 const { buildVectorIndex } = require('../vectorIndex');
 const {
     buildContextBlock, buildAddendum, BLOCK_CARD_LABEL, ADDENDUM_TEMPLATE, CARD_SOURCE, MAX_BLOCK_CHARS,
@@ -101,10 +101,64 @@ describe('fuseAndFilter: reciprocal rank fusion (FR-010)', () => {
         assert.equal(out.length, 20);
     });
 
+    it('the title ranking is a third list: its rank adds 1/(k + rank) like the others', () => {
+        const chunks = [mk(0), mk(1), mk(2)];
+        const out = fuseAndFilter({
+            chunks, route: 'personal', activeCompany: null, k: 3,
+            bm25: [bm(0), bm(1)],
+            vector: [vec(0, 0.9), vec(1, 0.8)],
+            title: [vec(1, 0.95), vec(2, 0.7)],
+        });
+        assert.equal(out[0].chunk.id, 'id1', 'second in two lists and first in titles beats first in two lists');
+        assert.equal(out[0].titleRank, 1);
+        assert.ok(Math.abs(out[0].score - (1 / 62 + 1 / 62 + 1 / 61)) < 1e-12);
+        const c = out.find(h => h.chunk.id === 'id2');
+        assert.equal(c.titleRank, 2);
+        assert.equal(c.bm25Rank, null);
+        assert.equal(c.cosine, null, 'cosine comes from the text ranking only');
+    });
+
+    it('title: null (or absent) leaves the two-list fusion unchanged', () => {
+        const chunks = [mk(0), mk(1)];
+        const base = { chunks, route: 'personal', activeCompany: null, k: 2, bm25: [bm(0), bm(1)], vector: [vec(1, 0.9)] };
+        assert.deepEqual(fuseAndFilter({ ...base, title: null }), fuseAndFilter(base));
+        assert.ok(fuseAndFilter(base).every(h => h.titleRank === null));
+    });
+
     it('returns [] for empty inputs and ignores out-of-range indexes', () => {
         assert.deepEqual(fuseAndFilter({ chunks: [], route: 'personal', activeCompany: null, k: 3, bm25: [], vector: null }), []);
         const out = fuseAndFilter({ chunks: [mk(0)], route: 'personal', activeCompany: null, k: 3, bm25: [bm(5), bm(0)], vector: [vec(9, 0.9)] });
         assert.deepEqual(out.map(h => h.chunk.id), ['id0']);
+    });
+});
+
+describe('fuseAndFilter: one section per file (FR-010)', () => {
+    const same = (i, extra = {}) => mk(i, { path: 'notes/bank.md', title: `bank › Q${i}`, ...extra });
+
+    it('keeps only the best-ranked section of each file by default', () => {
+        assert.equal(MAX_PER_FILE, 1);
+        const chunks = [same(0), same(1), mk(2), same(3)];
+        const out = fuseAndFilter({ chunks, route: 'personal', activeCompany: null, k: 4, vector: null, bm25: [bm(0), bm(1), bm(2), bm(3)] });
+        assert.deepEqual(out.map(h => h.chunk.id), ['id0', 'id2']);
+    });
+
+    it('the cap applies before k, so other files fill the freed places', () => {
+        const chunks = [same(0), same(1), mk(2), mk(3)];
+        const out = fuseAndFilter({ chunks, route: 'personal', activeCompany: null, k: 3, vector: null, bm25: [bm(0), bm(1), bm(2), bm(3)] });
+        assert.deepEqual(out.map(h => h.chunk.id), ['id0', 'id2', 'id3']);
+    });
+
+    it('maxPerFile raises or (with 0) removes the cap', () => {
+        const chunks = [same(0), same(1), same(2)];
+        const args = { chunks, route: 'personal', activeCompany: null, k: 3, vector: null, bm25: [bm(0), bm(1), bm(2)] };
+        assert.equal(fuseAndFilter({ ...args, maxPerFile: 2 }).length, 2);
+        assert.equal(fuseAndFilter({ ...args, maxPerFile: 0 }).length, 3);
+    });
+
+    it('the company filter runs first: a dropped chunk does not use up its file', () => {
+        const chunks = [same(0, { companies: ['Orbit Pay'] }), same(1, { companies: [] })];
+        const out = fuseAndFilter({ chunks, route: 'company', activeCompany: 'Bridge', k: 2, vector: null, bm25: [bm(0), bm(1)] });
+        assert.deepEqual(out.map(h => h.chunk.id), ['id1']);
     });
 });
 
@@ -234,14 +288,14 @@ describe('buildContextBlock (FR-013)', () => {
         assert.equal(block.split('[bank › Conflict]').length - 1, 2);
     });
 
-    it(`caps the block at ${6000} chars: the card stays whole, lowest-ranked chunks drop first, then a paragraph cut (E23)`, () => {
-        assert.equal(MAX_BLOCK_CHARS, 6000);
-        const core = 'C'.repeat(3000);
+    it(`caps the block at ${9000} chars: the card stays whole, lowest-ranked chunks drop first, then a paragraph cut (E23)`, () => {
+        assert.equal(MAX_BLOCK_CHARS, 9000);
+        const core = 'C'.repeat(6000);
         const p = n => `${String(n).repeat(1)}`.padEnd(500, 'x');
         const body = [p(1), p(2)].join('\n\n');                  // 1,002 chars
         const hits = [1, 2, 3, 4].map(i => scored(mk(i, { body }), i - 1));
         const { block, chunkIds } = buildContextBlock({ core, hits });
-        assert.ok(block.length <= 6000, `block is ${block.length}`);
+        assert.ok(block.length <= 9000, `block is ${block.length}`);
         assert.ok(block.startsWith(`[canonical facts]\n${core}\n\n`), 'card whole and first');
         assert.deepEqual(chunkIds, ['id1', 'id2', 'id3'], 'chunk 4 dropped; chunk 3 cut');
         const last = block.slice(block.lastIndexOf('[n3 › Section 3]'));
@@ -256,7 +310,7 @@ describe('buildContextBlock (FR-013)', () => {
     });
 
     it('a card over the cap is injected whole, without chunks (E33)', () => {
-        const core = 'C'.repeat(7000);
+        const core = 'C'.repeat(10000);
         const { block, chunkIds, sources, cardOverCap } = buildContextBlock({ core, hits: [scored(mk(1), 0)] });
         assert.equal(block, `[canonical facts]\n${core}`);
         assert.deepEqual(chunkIds, []);

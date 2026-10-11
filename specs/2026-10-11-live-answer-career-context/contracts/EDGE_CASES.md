@@ -29,12 +29,12 @@
 | E20 | Model download fails or offline on first run | `ready-bm25` for the session | FR-009, FR-017 |
 | E21 | Worker crashes mid-pass | BM25-only; cached rows kept; worker restarted on next warm | FR-017 |
 | E22 | Newer question aborts the in-flight one, including while its career context is still being resolved | Context is resolved after the AbortController exists; if aborted after the await, no LLM call is made. No `sources` leak to the new id | FR-015 |
-| E23 | Context block exceeds 6,000 chars | The card stays whole; lowest-ranked chunks dropped first, then the last chunk cut at a paragraph boundary | FR-013 |
+| E23 | Context block exceeds 9,000 chars | The card stays whole; lowest-ranked chunks dropped first, then the last chunk cut at a paragraph boundary | FR-013 |
 | E24 | Two chunks with the same title from different files | Both kept (dedupe is path + title) | FR-013 |
 | E25 | Same fact with different values in two chunks | Card value wins (addendum); newer chunk ranks first on ties | FR-010, FR-014 |
 | E26 | `LIVE_ANSWER_DEBUG=1` | Logs show route, cue, ids, scores, timings; no note text | FR-018 |
 | E27 | Statement-form career prompt without a question signal | Triggers (gate widened) | FR-007 |
 | E28 | `me` turn with a career cue | Never triggers (speaker gate unchanged) | FR-007 |
 | E32 | A company name that is also an ordinary word comes up in small talk (company "Bridge"; "we can bridge that gap") | No switch: detection needs a company-context phrase | FR-011 |
-| E33 | The card alone exceeds the 6,000-char cap | Card injected whole, no chunks, debug warning | FR-013 |
+| E33 | The card alone exceeds the 9,000-char cap | Card injected whole, no chunks, debug warning | FR-013 |
 | E34 | Feature disabled and a statement-form career prompt arrives ("your biggest weakness") | Does not trigger: the gate behaves exactly as today | FR-007, C1 |

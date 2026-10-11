@@ -52,8 +52,8 @@ Lifecycle: the chunks of a file are replaced whenever its mtime changes (FR-016)
 
 | Part | Shape |
 |------|-------|
-| In memory | `Float32Array(n × 384)`, L2-normalized, row i ↔ chunk i |
-| Cache files | `userData/career-kb/vectors-<model>.bin` (rows of float32) plus `vectors-<model>.json` (`{ modelId, dims, hashes }`, row i ↔ hashes[i]). Written atomically every 64 new vectors and at the end of each pass; rows for chunks no longer in the KB are pruned |
+| In memory | Two `Float32Array(n × 768)` indexes, L2-normalized, row i ↔ chunk i: chunk texts and section titles |
+| Cache files | `userData/career-kb/vectors-<model>.bin` (rows of float32) plus `vectors-<model>.json` (`{ modelId, dims, hashes }`, row i ↔ hashes[i]). A text row is keyed by the chunk hash, a title row by `t:` + the SHA-1 of the embedded title, so pieces of one section share a title row. Written atomically every 64 new vectors and at the end of each pass; rows for chunks no longer in the KB are pruned |
 | Model files | `userData/career-kb/models` (transformers.js cache), downloaded on first use |
 | Invalidation | A model-id change discards the cache. A chunk whose hash is missing gets embedded in the next low-priority pass |
 
