@@ -751,12 +751,11 @@ export class SettingsView extends LitElement {
         const llmValue = llmTokens.join(',');
         const sttValue = sttInput ? sttInput.value.trim() : '';
 
-        // Validate LLM CSV: every non-empty token must start with 'gemini-'
-        for (const token of llmTokens) {
-            if (!token.startsWith('gemini-')) {
-                alert(`Invalid Gemini LLM model ID: "${token}". Must start with "gemini-".`);
-                return;
-            }
+        // Validate LLM CSV: Gemini models ('gemini-…'), optionally ending in another provider's
+        const llmError = this.checkModelList('gemini', llmTokens, (token) => token.startsWith('gemini-'), 'Must start with "gemini-".');
+        if (llmError) {
+            alert(llmError);
+            return;
         }
 
         // Validate STT (single model, no CSV)
@@ -789,12 +788,11 @@ export class SettingsView extends LitElement {
         const llmTokens = llmRaw.split(',').map(s => s.trim()).filter(s => s.length > 0);
         const llmValue = llmTokens.join(',');
 
-        // Every entry must be a Claude model (Anthropic has no STT)
-        for (const token of llmTokens) {
-            if (!token.startsWith('claude-')) {
-                alert(`Invalid Anthropic LLM model ID: "${token}". Must start with "claude-".`);
-                return;
-            }
+        // Claude models (Anthropic has no STT), optionally ending in another provider's
+        const llmError = this.checkModelList('anthropic', llmTokens, (token) => token.startsWith('claude-'), 'Must start with "claude-".');
+        if (llmError) {
+            alert(llmError);
+            return;
         }
         if (!llmValue) return;
 
@@ -817,12 +815,12 @@ export class SettingsView extends LitElement {
         const llmTokens = llmRaw.split(',').map(s => s.trim()).filter(s => s.length > 0);
         const llmValue = llmTokens.join(',');
 
-        // Every entry must be a Groq model: vendor/model (Groq has no real-time STT)
-        for (const token of llmTokens) {
-            if (token.startsWith('claude-') || token.startsWith('gemini-') || !/^[^\s/]+\/\S+$/.test(token)) {
-                alert(`Invalid Groq LLM model ID: "${token}". Groq IDs are vendor/model, e.g. openai/gpt-oss-120b.`);
-                return;
-            }
+        // Groq models: vendor/model (Groq has no real-time STT), optionally ending in another provider's
+        const isGroq = (token) => !token.startsWith('claude-') && !token.startsWith('gemini-') && /^[^\s/]+\/\S+$/.test(token);
+        const llmError = this.checkModelList('groq', llmTokens, isGroq, 'Groq IDs are vendor/model, e.g. openai/gpt-oss-120b.');
+        if (llmError) {
+            alert(llmError);
+            return;
         }
         if (!llmValue) return;
 
@@ -836,6 +834,39 @@ export class SettingsView extends LitElement {
         } finally {
             this.saving = false;
         }
+    }
+
+    /**
+     * Check a model list typed in one provider's field. The first entry must
+     * be that provider's model (isOwn). A later entry may also be another
+     * provider's model whose key is saved: the list then runs across
+     * providers, the next one answering when every model before it fails
+     * (providerChain.js). Ollama and OpenAI models cannot join a list.
+     * @returns {string|null} the message to show, or null when the list is valid
+     */
+    checkModelList(fieldProvider, tokens, isOwn, ownRule) {
+        const names = { anthropic: 'Anthropic', gemini: 'Gemini', groq: 'Groq' };
+        const aModel = (provider) => `${/^[AEIOU]/.test(names[provider]) ? 'an' : 'a'} ${names[provider]} model`;
+        for (const [i, token] of tokens.entries()) {
+            if (isOwn(token)) continue;
+            if (i === 0) return `Invalid ${names[fieldProvider]} LLM model ID: "${token}". The first entry must be ${aModel(fieldProvider)}. ${ownRule}`;
+            const other = this.chainProviderOf(token);
+            if (!other) {
+                return `Invalid model ID: "${token}". After the first entry, a list takes ${names[fieldProvider]} models or another provider's: claude-… (Anthropic), gemini-… (Gemini) or vendor/model (Groq).`;
+            }
+            if (!this.apiKeys?.[other]) {
+                return `"${token}" is ${aModel(other)}, but no ${names[other]} API key is saved. Save one first, or remove it from the list.`;
+            }
+        }
+        return null;
+    }
+
+    /** The provider of a model ID typed after a list's first entry (same rule as factory.inferProviderFromModelId), or null. */
+    chainProviderOf(token) {
+        if (token.startsWith('claude-')) return 'anthropic';
+        if (token.startsWith('gemini-')) return 'gemini';
+        if (/^[^\s/]+\/\S+$/.test(token) && !this.ollamaModels?.some(m => m.name === token)) return 'groq';
+        return null;
     }
 
     async refreshModelData() {
@@ -1415,6 +1446,8 @@ export class SettingsView extends LitElement {
                                     Comma-separated list for failover. Models are tried in priority order;
                                     transient errors (429/503) skip to the next.
                                     Example: <code style="font-size: 10px;">gemini-3-flash-preview,gemini-3.5-flash-lite,gemini-3.1-flash-lite</code>
+                                    <br>You can end the list with another provider's models whose key is saved; they answer when every model before them fails.
+                                    Example: <code style="font-size: 10px;">gemini-3.5-flash-lite,gemini-3.1-flash-lite,openai/gpt-oss-120b</code>
                                 </p>
                                 <label for="gemini-stt-model-input">Gemini STT Model ID</label>
                                 <input type="text" id="gemini-stt-model-input"
@@ -1435,6 +1468,8 @@ export class SettingsView extends LitElement {
                                     Comma-separated list for failover. Models are tried in priority order;
                                     overloads, rate limits, timeouts and refusals skip to the next.
                                     Example: <code style="font-size: 10px;">claude-haiku-5-5,claude-sonnet-5-5</code>
+                                    <br>You can end the list with another provider's models whose key is saved; they answer when every model before them fails.
+                                    Example: <code style="font-size: 10px;">claude-haiku-5-5,claude-sonnet-5-5,gemini-3.5-flash-lite</code>
                                 </p>
                                 <div class="key-buttons">
                                     <button class="settings-button" @click=${() => this.handleSaveAnthropicModels()}>Save Anthropic Models</button>
@@ -1450,6 +1485,8 @@ export class SettingsView extends LitElement {
                                     Comma-separated list for failover. Groq IDs are vendor/model.
                                     Rate limits, overloads and timeouts skip to the next; screenshots go first to models that see images.
                                     Example: <code style="font-size: 10px;">openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b</code>
+                                    <br>You can end the list with another provider's models whose key is saved; they answer when every model before them fails.
+                                    Example: <code style="font-size: 10px;">openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b,gemini-3.5-flash-lite,gemini-3.1-flash-lite</code>
                                 </p>
                                 <div class="key-buttons">
                                     <button class="settings-button" @click=${() => this.handleSaveGroqModels()}>Save Groq Models</button>
