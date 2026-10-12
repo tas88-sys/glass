@@ -782,6 +782,34 @@ export class SettingsView extends LitElement {
         }
     }
 
+    async handleSaveAnthropicModels() {
+        const llmInput = this.shadowRoot.querySelector('#anthropic-llm-model-input');
+        // Trim and normalise: split on ',', trim each entry, drop empties, rejoin
+        const llmRaw = llmInput ? llmInput.value : '';
+        const llmTokens = llmRaw.split(',').map(s => s.trim()).filter(s => s.length > 0);
+        const llmValue = llmTokens.join(',');
+
+        // Every entry must be a Claude model (Anthropic has no STT)
+        for (const token of llmTokens) {
+            if (!token.startsWith('claude-')) {
+                alert(`Invalid Anthropic LLM model ID: "${token}". Must start with "claude-".`);
+                return;
+            }
+        }
+        if (!llmValue) return;
+
+        this.saving = true;
+        try {
+            await window.api.settingsView.setSelectedModel({ type: 'llm', modelId: llmValue });
+            await this.refreshModelData();
+        } catch (err) {
+            console.error('[SettingsView] Failed to save Anthropic models:', err);
+            alert(`Failed to save Anthropic models: ${err.message || err}`);
+        } finally {
+            this.saving = false;
+        }
+    }
+
     async refreshModelData() {
         const [availableLlm, availableStt, selected, storedKeys] = await Promise.all([
             window.api.settingsView.getAvailableModels({ type: 'llm' }),
@@ -961,6 +989,10 @@ export class SettingsView extends LitElement {
         }
         if (typeof modelId === 'string' && modelId.startsWith('gemini-')) {
             return 'gemini';
+        }
+        // Same rule as inferProviderFromModelId in factory.js (the renderer cannot require it).
+        if (type === 'llm' && typeof modelId === 'string' && modelId.trim().startsWith('claude-')) {
+            return 'anthropic';
         }
         return null;
     }
@@ -1323,6 +1355,9 @@ export class SettingsView extends LitElement {
                         const geminiSttValue = (id === 'gemini' && this.getProviderForModel('stt', this.selectedStt) === 'gemini')
                             ? this.selectedStt
                             : '';
+                        const anthropicLlmValue = (id === 'anthropic' && this.getProviderForModel('llm', this.selectedLlm) === 'anthropic')
+                            ? this.selectedLlm
+                            : '';
                         return html`
                         <div class="provider-key-group">
                             <label for="key-input-${id}">${config.name} API Key</label>
@@ -1352,6 +1387,21 @@ export class SettingsView extends LitElement {
                                 >
                                 <div class="key-buttons">
                                     <button class="settings-button" @click=${() => this.handleSaveGeminiModels()}>Save Gemini Models</button>
+                                </div>
+                            ` : ''}
+                            ${id === 'anthropic' ? html`
+                                <label for="anthropic-llm-model-input" style="margin-top: 8px;">Anthropic LLM Model ID</label>
+                                <input type="text" id="anthropic-llm-model-input"
+                                    placeholder="e.g. claude-haiku-5-5"
+                                    .value=${anthropicLlmValue}
+                                >
+                                <p style="font-size: 11px; opacity: 0.6; margin: 4px 0 8px 0; line-height: 1.4;">
+                                    Comma-separated list for failover. Models are tried in priority order;
+                                    overloads, rate limits, timeouts and refusals skip to the next.
+                                    Example: <code style="font-size: 10px;">claude-haiku-5-5,claude-sonnet-5-5</code>
+                                </p>
+                                <div class="key-buttons">
+                                    <button class="settings-button" @click=${() => this.handleSaveAnthropicModels()}>Save Anthropic Models</button>
                                 </div>
                             ` : ''}
                         </div>

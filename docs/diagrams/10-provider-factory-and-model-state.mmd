@@ -7,7 +7,7 @@ flowchart TB
         r1["openai: LLM gpt-4.1 · STT gpt-4o-mini-transcribe"]
         r2["openai-glass: hosted via Portkey virtual key"]
         r3["gemini: LLM gemini-3-flash-preview (CSV failover) · STT gemini-3.8-live"]
-        r4["anthropic: LLM claude-3.5-sonnet · STT none"]
+        r4["anthropic: LLM claude-opus-5-5 · claude-sonnet-5-5 · claude-haiku-5-5 (CSV failover) · STT none"]
         r5["deepgram: STT nova-3 · LLM none"]
         r6["ollama: LLM dynamic (local) · STT none"]
         r7["whisper: STT tiny/base/small/medium (local, main only)"]
@@ -18,6 +18,7 @@ flowchart TB
         auto["_autoSelectAvailableModels()<br/>picks a valid model when key added/removed"]
         resolve["getCurrentModelInfo('llm' | 'stt')<br/>-> {provider, model, apiKey}"]
         gate["areProvidersConfigured()<br/>requires BOTH an LLM key AND an STT key"]
+        infer["getProviderForModel(id)<br/>presets, then Ollama installs, then typed IDs / CSV:<br/>inferProviderFromModelId — gemini- → gemini, claude- → anthropic (LLM only)"]
     end
 
     subgraph consumers["Consumers"]
@@ -32,4 +33,7 @@ flowchart TB
     consumers --> dispatch["factory.createLLM / createStreamingLLM / createSTT<br/>sanitizeModelId strips '-glass'"]
     dispatch --> registry
 
-    settingsui["SettingsView (data-driven)<br/>renders one API-key field per provider"] --> keys
+    settingsui["SettingsView (data-driven)<br/>renders one API-key field per provider<br/>+ Gemini and Anthropic model-list inputs"] --> keys
+    settingsui --> infer
+    health["providers/modelHealth.js<br/>one in-memory cooldown registry,<br/>shared by the Gemini and Anthropic failover loops"]
+    registry -.-> health

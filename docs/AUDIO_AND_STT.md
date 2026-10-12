@@ -63,7 +63,7 @@ Audio format across all platforms: **PCM16, mono, 24 kHz**, chunked at 100 ms.
 
 ## 3. STT / LLM provider matrix
 
-Providers are declared in a single registry: `factory.js:20-96` (`PROVIDERS`). The model
+Providers are declared in a single registry: `factory.js:20-98` (`PROVIDERS`). The model
 selection layer (`modelStateService.js`) and the Settings UI are entirely **data-driven**
 from this registry — adding a model to a provider's `sttModels`/`llmModels` array is enough
 to surface it in the UI.
@@ -73,14 +73,14 @@ to surface it in the UI.
 | **OpenAI** | ✅ `gpt-4o-mini-transcribe` | ✅ `gpt-4.1` | Realtime STT; gets a 60 s keep-alive heartbeat (`sttService.js:504`) |
 | **OpenAI (Glass)** | ✅ | ✅ | Pickle-hosted key via Portkey; same OpenAI handler |
 | **Gemini** | ✅ `gemini-3.8-live` | ✅ `gemini-3-flash-preview` | LLM supports CSV failover; STT does **not** (see §5) |
-| **Anthropic** | ❌ | ✅ `claude-3-5-sonnet` | LLM only — `sttModels: []` |
+| **Anthropic** | ❌ | ✅ `claude-opus-5-5` · `claude-sonnet-5-5` · `claude-haiku-5-5` | LLM only — `sttModels: []`; LLM supports CSV failover |
 | **Deepgram** | ✅ `nova-3` | ❌ | STT only (see §4) |
 | **Whisper (local)** | ✅ tiny/base/small/medium | ❌ | Runs in main process only |
 | **Ollama (local)** | ❌ | ✅ (dynamic) | LLM only |
 
 **How selection resolves at runtime:** `modelStateService.getCurrentModelInfo('stt')`
 (`modelStateService.js:377`) returns `{ provider, model, apiKey }` for the active STT
-provider, which `sttService` hands to `createSTT(provider, opts)` (`factory.js:102`).
+provider, which `sttService` hands to `createSTT(provider, opts)` (`factory.js:118`).
 A model ID is mapped back to its provider by `getProviderForModel()` (`modelStateService.js:286`).
 
 `areProvidersConfigured()` requires **both** a working LLM key and a working STT key

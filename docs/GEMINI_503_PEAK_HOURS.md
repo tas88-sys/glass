@@ -57,7 +57,7 @@ The AI Studio usage dashboard only shows daily totals, and the Cloud Console met
   - the automatic second round for quick 5xx failures;
   - a 60 s limit on waiting for an answer to start, counted across all of the above.
 
-  [`ARCHITECTURE.md` §10](../ARCHITECTURE.md#10-gemini-failover) describes them.
+  [`ARCHITECTURE.md` §10.1](../ARCHITECTURE.md#101-gemini) describes them.
 - **For a critical session such as an interview, enable billing on the project.** Billed requests are not in the sheddable class. Changing the hour does not fix this, and on the free tier it does nothing for the newest Flash models.
 
 ## Measuring it ourselves
