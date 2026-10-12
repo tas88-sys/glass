@@ -275,6 +275,13 @@ An Ask with a screenshot declares `max_completion_tokens` 2048 on Qwen. That is 
 - A separate, small PR. The cross-provider PR keeps `groq.js` and `groqErrors.js` unchanged (its C2).
 - Workaround until then, no code: `GROQ_MAX_TOKENS=1000` in `.env`. It caps every Groq Ask answer at 1000 tokens, plus 1024 for gpt-oss's reasoning.
 
+### Alternatives checked (2026-10-12)
+
+- **No other Groq model sees images.** The live `models.list` (via Composio) returns 11 active models. Besides the three presets they are `openai/gpt-oss-safeguard-20b` (a safety classifier, 3 RPM and 2K TPM on this account), `allam-2-7b` (4,096-token context), `meta-llama/llama-prompt-guard-2-22m` and `-86m` (classifiers, 512-token context), two Whisper models (batch STT) and two Orpheus models (TTS). None replaces Qwen for screenshots.
+- **Settings does not block them.** A classifier ID such as `meta-llama/llama-prompt-guard-2-86m` has a slash, so `inferProviderFromModelId` sends it to Groq as a chat model. It was not tested; expect an error and a cooldown. IDs without a slash (`allam-2-7b`) fail the Groq check in Settings.
+- **`claude-haiku-5-5` sees images** (Anthropic's models overview and vision pages; the Models API `capabilities` field was not queried, as there was no Anthropic credential). It accepts up to 600 images per request, 10 MB each, and its price is $0.10 / $0.50 per million tokens up to 100K prompt tokens; a 1920×1080 screenshot is about 2,700 tokens. `anthropic.js` does not filter images by model and never sends `temperature` or `thinking`, so Haiku 5.5 already receives screenshots with no code change.
+- **The list order is what decides.** A Claude segment placed after Groq is not tried when Groq answers, even without the image (the same as Gemini). To get the screenshot to a vision model today, put a vision segment first for Asks with an image, or treat "answered with `images=dropped`" as a reason to continue. That is a cross-provider change, separate from the `groq.js` retry above.
+
 ### To watch
 
 1,000 output tokens per minute per model is tight for an interview. Several long answers in a minute could hit it on gpt-oss too, as a real per-minute 429. The three Groq models and the Gemini segment absorb it, but it is worth checking in the logs (`code=rate_limit_exceeded` with "OTPM").
