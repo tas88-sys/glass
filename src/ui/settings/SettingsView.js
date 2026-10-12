@@ -1,4 +1,10 @@
 import { html, css, LitElement } from '../assets/lit-core-2.7.4.min.js';
+import {
+    DEFAULT_LIVE_FEATURES,
+    normalizeLiveFeatures,
+    nextLiveFeatures,
+    liveFeaturesLabel,
+} from '../../features/listen/liveFeatures.js';
 // import { getOllamaProgressTracker } from '../../features/common/services/localProgressTracker.js'; // 제거됨
 
 export class SettingsView extends LitElement {
@@ -499,6 +505,9 @@ export class SettingsView extends LitElement {
         showPresets: { type: Boolean, state: true },
         autoUpdateEnabled: { type: Boolean, state: true },
         autoUpdateLoading: { type: Boolean, state: true },
+        // Live features: which Listen lanes run
+        liveFeatures: { type: String, state: true },
+        liveFeaturesLoading: { type: Boolean, state: true },
         // Ollama related properties
         ollamaStatus: { type: Object, state: true },
         ollamaModels: { type: Array, state: true },
@@ -539,6 +548,8 @@ export class SettingsView extends LitElement {
         this.handleUsePicklesKey = this.handleUsePicklesKey.bind(this)
         this.autoUpdateEnabled = true;
         this.autoUpdateLoading = true;
+        this.liveFeatures = DEFAULT_LIVE_FEATURES;
+        this.liveFeaturesLoading = true;
         // Ask Mode Shortcuts
         this.preferredCodeLanguage = 'go';
         this.loadInitialData();
@@ -576,6 +587,39 @@ export class SettingsView extends LitElement {
             console.error('Error toggling auto-update:', e);
         }
         this.autoUpdateLoading = false;
+        this.requestUpdate();
+    }
+
+    // Live features (FR-017): Answer + Insights → Answer only → Insights only
+    async loadLiveFeatures() {
+        if (!window.api) return;
+        this.liveFeaturesLoading = true;
+        try {
+            const state = await window.api.settingsView.getLiveFeatures();
+            this.liveFeatures = normalizeLiveFeatures(state && state.mode);
+        } catch (e) {
+            console.error('Error loading live features setting:', e);
+            this.liveFeatures = DEFAULT_LIVE_FEATURES;
+        }
+        this.liveFeaturesLoading = false;
+        this.requestUpdate();
+    }
+
+    async handleCycleLiveFeatures() {
+        if (!window.api || this.liveFeaturesLoading) return;
+        this.liveFeaturesLoading = true;
+        this.requestUpdate();
+        try {
+            const result = await window.api.settingsView.setLiveFeatures(nextLiveFeatures(this.liveFeatures));
+            if (result && result.success) {
+                this.liveFeatures = normalizeLiveFeatures(result.mode);
+            } else {
+                console.error('Failed to update live features setting:', result && result.error);
+            }
+        } catch (e) {
+            console.error('Error changing live features:', e);
+        }
+        this.liveFeaturesLoading = false;
         this.requestUpdate();
     }
 
@@ -1142,6 +1186,7 @@ export class SettingsView extends LitElement {
         this.setupIpcListeners();
         this.setupWindowResize();
         this.loadAutoUpdateSetting();
+        this.loadLiveFeatures();
         // Force one height calculation immediately (innerHeight may be 0 at first)
         setTimeout(() => this.updateScrollHeight(), 0);
     }
@@ -1182,6 +1227,7 @@ export class SettingsView extends LitElement {
                 this.firebaseUser = null;
             }
             this.loadAutoUpdateSetting();
+            this.loadLiveFeatures();
             // Reload model settings when user state changes (Firebase login/logout)
             this.loadInitialData();
         };
@@ -1715,6 +1761,12 @@ export class SettingsView extends LitElement {
                     <button class="settings-button full-width" @click=${this.handleToggleAutoUpdate} ?disabled=${this.autoUpdateLoading}>
                         <span>Automatic Updates: ${this.autoUpdateEnabled ? 'On' : 'Off'}</span>
                     </button>
+                    <button class="settings-button full-width" @click=${this.handleCycleLiveFeatures} ?disabled=${this.liveFeaturesLoading}>
+                        <span>Live panels: ${liveFeaturesLabel(this.liveFeatures)}</span>
+                    </button>
+                    <div style="font-size: 9px; color: rgba(255,255,255,0.5); margin-top: -2px;">
+                        Off means no calls for that panel. Insights off: no summary is made or saved. Takes effect on the next turn.
+                    </div>
                     
                     <div class="move-buttons">
                         <button class="settings-button half-width" @click=${this.handleMoveLeft}>

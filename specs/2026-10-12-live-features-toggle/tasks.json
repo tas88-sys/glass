@@ -1,7 +1,7 @@
 {
   "spec_id": "2026-10-12-live-features-toggle",
   "spec_name": "live-features-toggle",
-  "updated": "2026-10-12T17:08:36Z",
+  "updated": "2026-10-12T17:10:07Z",
   "anthropic_patterns": [
     "Ralph looping",
     "JSON task state"
@@ -193,7 +193,7 @@
       "description": "Listen window (FR-011..FR-016): liveAnswerHistory.js exports answersToText; LiveAnswerView gains showEmptyState (default false) and getAnswerText(), renders 'Waiting for a question...' (its own copy of the empty-state CSS) when visible, showEmptyState is true and there are no answers and no status, and renders as today otherwise; ListenView imports liveFeatures.js, holds liveFeatures state (default 'both'), reads window.api.listenView.getLiveFeatures() in connectedCallback and again on session-state-changed with isActive true (try/catch, keep the last value or 'both'), subscribes to onLiveFeaturesChanged and removes the same reference in disconnectedCallback, calls adjustWindowHeight on every change, passes .isVisible = viewMode==='insights' && answer / && insights to the two panes and .showEmptyState = !insights to live-answer-view, takes title / showButton / copyHover from viewLabels(mode) (the transcript title is unchanged), and handleCopy copies liveAnswerView.getAnswerText() when only Answer is on and the summary text otherwise. resetAnswer/resetAnalysis and the session-start reset are not changed."
     },
     {
-      "status": "pending",
+      "status": "completed",
       "parallel": true,
       "target_file": "src/ui/settings/SettingsView.js",
       "gate": "T014",
@@ -203,8 +203,8 @@
       "gate_type": null,
       "scope": null,
       "block_on": null,
-      "completed_at": null,
-      "evidence": null,
+      "completed_at": "2026-10-12T17:10:07Z",
+      "evidence": "npm run build:renderer builds (both Settings texts are in content.js); the button texts for the three modes and an invalid one are liveFeaturesLabel, covered by liveFeatures.test.js (15/15). SettingsView: state liveFeatures/liveFeaturesLoading, loadLiveFeatures beside both loadAutoUpdateSetting calls (connectedCallback, user-state-changed), handleCycleLiveFeatures applies the returned mode only on success and logs the error otherwise, button disabled while loading, the FR-018 help line in the existing 9px grey style. Rendered behaviour checked in T018",
       "evidence_type": null,
       "auto_skill": null,
       "auto_skill_timing": null,
