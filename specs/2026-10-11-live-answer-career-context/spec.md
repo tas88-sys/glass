@@ -116,7 +116,7 @@ During a live interview, the interviewer asks "Tell me about a time you disagree
   - Several folders may list the same name, so that one company's prep spread across folders shares one tag.
 
 **Routing**
-- **FR-006**: `intentRouter` MUST classify a turn as `personal`, `company`, `ambiguous` or `general`, return the cue that fired, cover English and Portuguese cues, treat employer/project names from the CV (manifest `entities`) as personal cues, and keep a follow-up on the previous personal or company route. A follow-up is a turn of at most 10 words that carries a follow-up marker ("what was the outcome", "how did that go", "and then", "e aí", "qual foi o resultado") and arrives within 5 minutes of the previous personal or company answer.
+- **FR-006**: `intentRouter` MUST classify a turn as `personal`, `company`, `ambiguous` or `general`, return the cue that fired, cover English and Portuguese cues (each cue with its twin in the other language), treat employer/project names from the CV (manifest `entities`) as personal cues, and keep a follow-up on the previous personal or company route. A follow-up is a turn of at most 10 words that carries a follow-up marker ("what was the outcome", "how did that go", "and then", "e aí", "qual foi o resultado") and arrives within 5 minutes of the previous personal or company answer.
 - **FR-007**: When the feature is enabled, `shouldTriggerAnswer` MUST also accept a `them` turn that carries a personal or company cue even without a question signal. When it is disabled, the gate MUST behave exactly as today (C1). All existing `liveAnswer.test.js` cases MUST still pass.
 
 **Retrieval**

@@ -134,3 +134,13 @@ Two chunker rules were added; the size cap did not change.
 | `contracts/EDGE_CASES.md` | E44 |
 | `research.md` | R15: the finding, the decision and the eval for each change and both |
 | `docs/LIVE_INSIGHTS_AND_ASK.md` | No change: it does not describe tokenization |
+
+## Update for T039 (English router cues)
+
+| Document | Change |
+|----------|--------|
+| `spec.md` | FR-006: each cue has its twin in the other language |
+| `contracts/EDGE_CASES.md` | E45, E46 |
+| `research.md` | R16: the finding, the decision and the checks before and after |
+| `docs/LIVE_INSIGHTS_AND_ASK.md` | §4.7: the twin rule under "Cues"; three rows in the examples table |
+| `docs/diagrams/14-career-intent-router.mmd` | No change: its cue examples still hold |

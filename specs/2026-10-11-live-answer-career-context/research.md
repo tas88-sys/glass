@@ -378,6 +378,46 @@ sent six sections on the theme. Its Portuguese version sent four, with the best 
   today's notes: net zero (two items gained, two lost), and 0.7 s typical, 1.3 s at p95 before
   the search can start. Not adopted.
 
+## R16: English questions about the candidate routed general
+
+**Question** (T039, from R15): R15 compared Portuguese questions with English ones. How do the
+eval's Portuguese questions do when asked in English?
+
+**Finding.** The 40 Portuguese personal items, translated to English by hand (machine
+translations were too poor to judge): 47.5% sent the right note, against 82.5% in Portuguese.
+16 of the 40 routed general and got no notes. The router had Portuguese cues for present-tense and
+job questions ("Trabalha remoto?", "Está participando de outros processos?", "Qual o motivo pra
+você querer mudar?") and no English twins. Of 30 everyday English questions written for this
+check, 23 routed general.
+
+**Decision.** English twins of those cues: present-tense job verbs ("do you work, lead,
+speak…", "the team you work with", "report to you"); "are you interviewing, open, working…";
+"how long have you"; "your manager, peers, colleagues"; the reason to change jobs; the start date
+after an offer; "where you'd do well" and "anything we haven't covered"; "do you have an example".
+Three phrasings that also open technical prompts route ambiguous instead: "Give an example." at
+the end of a turn, "your team", and "which … do you use". "How do you raise, grow, coach…" joins
+the habitual verbs.
+
+**Result.**
+
+| Check | Before | After |
+|---|---|---|
+| English versions of the 40 Portuguese items: right note sent | 47.5% (19/40) | 77.5% (31/40) |
+| The same 40: routed general, no notes | 16 | 3 |
+| 30 everyday English questions, written while making the cues: routed personal | 6 | 30 |
+| 24 more, written after the cues and not used to tune them: routed personal | 5 | 17 |
+| 25 technical or meeting turns written to trip the new cues: routed personal | 0 | 0 |
+| 267 study-bank question titles routed personal (all ask about the candidate) | 22 | 22, the same ones |
+| Eval: personal routed personal, general routed personal, injected recall | 96.6%, 0%, 86.8% | unchanged |
+
+- The 25 technical turns first sent 3 to personal. The three cues above moved to the ambiguous
+  route or were narrowed, and the turns are now unit tests.
+- The 7 held-out questions that still route general show what is left: "What's pushing you to
+  look for something new?", "When could you join if we made an offer?", "Do you mentor junior
+  developers?". They were not tuned on, so the 17 of 24 stays a fair figure.
+- The eval asks each item in its own language, so its numbers do not move. R15's script with the
+  hand translations measures this.
+
 ---
 
 ## Summary of Decisions
@@ -399,3 +439,4 @@ sent six sections on the theme. Its Portuguese version sent four, with the best 
 | R13 | A local ask script to check retrieval by hand; shares the app's vector cache | High |
 | R14 | The ambiguous gate passes when any section about to be sent clears it | High (eval) |
 | R15 | Portuguese "had to" is a stopword; Portuguese verb forms share the infinitive stem | Medium (eval +1 item, BM25-only +3.8 pts) |
+| R16 | English twins of the Portuguese present-tense and job cues; three that open technical prompts route ambiguous | High (held-out checks) |

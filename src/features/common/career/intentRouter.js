@@ -66,6 +66,17 @@ const PERSONAL_CUES = [
     ['experience:did-you', /\b(?:did|were) you (?!know\b|understand\b|hear\b|see\b|catch\b|get (?:that|it|me)\b|mean\b|say\b)\w+/],
     ['experience:you-past', /\byou (?:have |had )?(?:worked|led|built|managed|designed|implemented|handled|faced|chose|decided|learned|learnt|delivered|shipped|owned|migrated|created|wrote|mentored|solved|resolved|fixed|improved|reduced|increased|joined|left|started|dealt|convinced|disagreed|failed|ran|drove|introduced|proposed|influenced|debugged|scaled|optimized|optimised|launched|deployed|architected|refactored|onboarded|hired|received|spent|had to|were (?:responsible|in charge|the))\b/],
     ['experience:do-you-have', /\b(?:do|did) you have (?:\w+ ){0,3}(?:experience|exposure|background|knowledge)\b|\byears of experience\b|\bhow (?:much|many years of) experience\b|\bare you familiar with\b/],
+    // English twins of the Portuguese present-tense and job cues below ("Do you work
+    // remotely?", "Are you interviewing elsewhere?"). "How do you work with X?" asks for an
+    // approach, an ambiguous cue, as in Portuguese.
+    ['experience:do-you-now', /(?<!\bhow )\bdo you (?:currently |still |now |also |usually |normally |actually )?(?:work|live|lead|manage|speak|report|code|program)\b|(?<!\b(?:do|does|did|would|could|will|should|can|might|to) )\byou (?:currently |now |still )?work (?:with|on|for|at|in)\b|\breport(?:s|ing)? to you\b/],
+    ['experience:are-you-now', /\bare you (?:currently |still |also |actively |now |already )?(?:interviewing|working|looking|applying|talking|speaking|open|available|willing|planning|participating|leading|managing|based|employed|in (?:other|any|another|a) (?:\w+ )?process(?:es)?)\b/],
+    ['experience:how-long', /\bhow long (?:have|had|did) you\b|\byou\b.*\bfor how long\b/],
+    ['background:your-people', /\byour (?:\w+ )?(?:company|employer|manager|managers|boss|peers|colleagues|teammates|coworkers|co workers|tech lead|reports|direct reports)\b|\bat work\b/],
+    ['background:why-change', /\b(?:reason|reasons|motivation)(?: why)? (?:that )?you\b(?: \w+){0,4} (?:leav|chang|mov|switch|quit|look\w* (?:for|around|elsewhere)|open to)\w*|\bwhat (?:would|could|might|made|makes|is making) (?:make )?you\b(?: \w+){0,3} (?:leav|chang|mov|switch|quit|look\w* (?:for|around|elsewhere)|open to)\w*/],
+    ['background:start-date', /\bhow (?:soon|quickly|long|much time) (?:would|could|will|can|do) you (?:\w+ ){0,4}(?:start|join|be available)\b|\b(?:after|once) (?:you )?(?:get|getting|receive|receiving|accept|accepting) (?:an|the|our) offer\b/],
+    ['background:do-well', /\byou (?:would|could|will|might) (?:do|perform) (?:\w+ )?(?:well|great|best)\b|\byou (?:would|could|will) (?:shine|excel|stand out)\b|\bwe (?:have not|did not) (?:yet )?(?:covered|discussed|talked about|asked (?:you )?about)\b/],
+    ['behavioral:example-having-to', /\bexample (?:of )?(?:having to|having had to|you had to|you needed to)\b|\b(?:do|did) you have (?:an|a|any|one|some) (?:\w+ )?(?:example|story|situation|instance)s?\b/],
     // Portuguese
     ['behavioral:pt-uma-vez', /\b(?:uma|alguma) (?:vez|situacao|ocasiao|experiencia|historia) (?:em que|que|onde|na qual|quando)\b/],
     ['behavioral:pt-um-momento', /\b(?:um|algum) (?:momento|exemplo|caso|projeto) (?:em que|que|onde|no qual|quando|de quando)\b/],
@@ -114,7 +125,12 @@ const AMBIGUOUS_CUES = [
     ['hypothetical:how-you-would', /\bhow you would\b/],
     ['hypothetical:if-you', /\bif you (?:were|had to|could|need to|needed to|join|joined)\b/],
     ['hypothetical:imagine', /\b(?:imagine|suppose|assume) (?:that )?you\b|\blet (?:is|us) say\b|\blets say\b/],
-    ['habitual:how-do-you', /\bhow do you (?:\w+ )?(?:approach|handle|deal|manage|decide|prioritize|prioritise|ensure|keep|structure|organize|organise|balance|measure|review|onboard|mentor|go about|think about|adapt|stay|learn|grow|motivate|communicate|explain|give|receive|resolve|estimate|plan|lead|work with|make sure)\b/],
+    ['habitual:how-do-you', /\bhow do you (?:\w+ )?(?:approach|handle|deal|manage|decide|prioritize|prioritise|ensure|keep|structure|organize|organise|balance|measure|review|onboard|mentor|go about|think about|adapt|stay|learn|grow|motivate|communicate|explain|give|receive|resolve|estimate|plan|lead|work with|make sure|raise|grow|develop|level up|upskill|coach|support|help|teach|train|share|spread)\b/],
+    // "Give an example." closing a turn, and "your team", also open technical prompts
+    // ("What's a closure? Give an example.", "Your team needs to process...").
+    ['habitual:give-an-example', /\b(?:give|share) (?:me |us )?(?:an|one|a|some) (?:real |concrete |specific |practical |personal )?examples?$/],
+    ['habitual:your-team', /\byour (?:\w+ )?teams?\b/],
+    ['habitual:which-do-you-use', /\b(?:which|what) (?:\w+ ){0,3}(?:do|did) you (?:currently |usually |mostly |normally )?(?:use|prefer|pick|choose|reach for)\b/],
     ['opinion:your-take', /\b(?:what is|what are) your (?:approach|opinion|take|view|views|philosophy|process|strategy|preference|favorite|favourite|go to|thoughts)\b|\byour (?:thoughts|opinion|take|view) on\b|\bin your (?:opinion|view)\b|\bwhat do you think (?:about|of)\b|\bdo you (?:prefer|like|think|believe|agree)\b/],
     ['hypothetical:pt-faria', new RegExp(`\\b(?:como|o que|qual|onde|quando|por que) (?:${YOU} )?\\w+(?:aria|eria|iria)\\b`)],
     ['hypothetical:pt-se-voce', new RegExp(`\\bse (?:${YOU} )?\\w+(?:asse|esse|isse)\\b|\\bse (?:${YOU}) (?:fosse|tivesse|pudesse|precisasse)\\b`)],

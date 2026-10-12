@@ -375,7 +375,8 @@ flowchart TB
 
 - **Cues.** Each check is a table of `[name, regex]` pairs, in English and Portuguese, matched
   against the normalized text ("What's" becomes "what is", "você" becomes "voce"). The rule name
-  is the `cue=` of the debug line; the text itself is never logged.
+  is the `cue=` of the debug line; the text itself is never logged. A cue in one language has
+  its twin in the other: "Trabalha remoto?" and "Do you work remotely?" both route personal.
 - **Order.** The first match wins, so the order settles mixed questions:
   - company before everything: "Tell me about a time you led a project, and why do you want to
     join us?" is company;
@@ -402,9 +403,12 @@ flowchart TB
 | "Me conta de uma vez que você discordou de um colega" | personal | `behavioral:pt-uma-vez` |
 | "What was your biggest project?" | personal | `background:your-trait` |
 | "Have you worked with Kafka?" | personal | `experience:have-you` |
+| "Which databases do you work with?" | personal | `experience:do-you-now` |
+| "Are you interviewing with other companies?" | personal | `experience:are-you-now` |
 | "How big was the team at Example Corp?" (a manifest entity) | personal | `entity` |
 | "How would you design a rate limiter?" | ambiguous | `hypothetical:how-would-you` |
 | "How do you usually handle conflict?" | ambiguous | `habitual:how-do-you` |
+| "Your team needs to process a million events a second." | ambiguous | `habitual:your-team` |
 | "What is a B-tree?" | general | none |
 | "And what was the outcome?", 1 minute after a personal answer | personal | `follow-up` |
 | "And what was the outcome?", with no previous question or 6 minutes later | general | none |

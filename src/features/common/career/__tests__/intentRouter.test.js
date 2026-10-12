@@ -67,6 +67,25 @@ table('personal (English)', 'personal', [
     'What has been your hardest bug to fix?',
 ]);
 
+table('personal (English twins of the Portuguese present-tense and job cues)', 'personal', [
+    'Do you work remotely today?',
+    'Do you currently lead a team?',
+    'Which cloud services do you work with?',
+    'Do you speak English at work?',
+    'Are you interviewing with other companies?',
+    'Are you in other hiring processes?',
+    'Which tool do you use, and for how long?',
+    'What was the latest feedback from your peers?',
+    'How many people report to you?',
+    'How big is the team you work with?',
+    'What would make you move to a new challenge?',
+    "What's the reason you want to leave?",
+    'How soon could you start after getting an offer?',
+    "Is there a topic we haven't covered where you'd do well?",
+    'Do you have an example of a scope change you handled?',
+    'Can you share an example of having to adapt on a project?',
+]);
+
 table('personal (Portuguese, implied subject and habits)', 'personal', [
     'Trabalha remoto hoje?',
     'Conhece filas de mensagens?',
@@ -157,6 +176,11 @@ table('ambiguous (hypothetical, habitual, opinion)', 'ambiguous', [
     'Como você faria se tivesse o dobro do time?',
     'O que você faria com um prazo menor?',
     'Explique como você implementaria concorrência com filas e workers.',
+    'How do you raise the bar for the engineers around you?',
+    'Which AI tool do you use?',
+    "What's a closure? Give an example.",
+    'Your team needs to process a million events per second.',
+    'How would you work with a legacy codebase?',
 ]);
 
 table('general (no second-person background cue)', 'general', [
@@ -187,6 +211,12 @@ table('general (no second-person background cue)', 'general', [
     'What was the root cause of the outage?',
     'What was the biggest project in the history of the language?',
     'Which was the first version with generics?',
+    'How long does it take for a pod to become ready?',
+    'What happens if you close a channel twice?',
+    'What would make your solution more scalable?',
+    "What's the reason for using a buffered channel here?",
+    'Are you able to see my screen?',
+    'Give an example of a deadlock.',
     '',
 ]);
 

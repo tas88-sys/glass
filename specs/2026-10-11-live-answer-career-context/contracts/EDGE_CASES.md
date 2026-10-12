@@ -24,6 +24,8 @@
 | E42 | A chain of follow-ups ("And what was the outcome?", then "What did you learn?") | Each one searches with the original question, not the follow-up before it | FR-009 |
 | E43 | An ambiguous turn whose first section has no cosine (found by keywords and title only) or one under the threshold, while a later section clears it | Injected (R14) | FR-012 |
 | E44 | A Portuguese turn in another verb form than the note ("discordar" against "discordei"), or with "precisou" ("had to") | The forms share a stem and match; "precisou" and "tive" are stopwords, so they rank no note (R15) | FR-008 |
+| E45 | An English question about the candidate's present job or plans, with no past tense and no "your" ("Do you work remotely?", "Are you in other hiring processes?") | Personal (`experience:do-you-now`, `experience:are-you-now`), like its Portuguese twin; "How do you work with X?" stays ambiguous (R16) | FR-006 |
+| E46 | A technical prompt that ends in "Give an example." or speaks of "your team" | Ambiguous: notes only when one is close enough (R16) | FR-006, FR-012 |
 | E11 | Turn in Portuguese, best note in English | Retrieved through the vector side; answer in Portuguese | FR-009, FR-014 |
 | E12 | Turn names a tool or vendor exactly | BM25 rank carries it into the fused top k | FR-008, FR-010 |
 | E13 | "why us" with active company A; notes of B rank higher | B's chunks dropped; A's and untagged chunks kept | FR-011 |
