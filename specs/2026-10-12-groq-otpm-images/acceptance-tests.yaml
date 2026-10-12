@@ -1,0 +1,222 @@
+# Acceptance Tests Manifest (v2)
+# Feature: Groq Output Limit and Screenshots.
+# Hand-authored in the /tasks format (SpecKit not installed on this machine).
+# Deterministic checks cover the classification, the request cap, visionOnly in the provider
+# and in the chain, scope guards and the test suite. The app behavior (SC-004) is manual.
+# Commands are YAML literal blocks (no escaping); each is one shell line, run from the repo root.
+# Diff guards compare the working tree with origin/main, so they hold before and after the commit.
+
+# --- Root Fields ---
+_version: 2
+spec_id: "2026-10-12-groq-otpm-images"
+spec_name: "groq-otpm-images"
+
+# --- Staleness Detection (v2 required) ---
+generation_context:
+  generated_at: "2026-10-12T19:44:08Z"
+  spec_hash: "bf27a34c01db76801bf0151be2fe0ba560a87af580bce5da3a5c1ef0179de684"
+  plan_hash: "5b0a2b0afd5a54c1917827a352b062777121e8590ff5ad5295f1983ea6fef6d5"
+  tasks_hash: "74a925a4c66c4aff9cb1e4716790ea56b0fe2631420a94601b938e323ae98087"
+
+# --- Drift Detection (v2 required) ---
+_references:
+  tables: []
+  routes: []
+  files:
+    - "src/features/common/ai/providers/groqErrors.js"
+    - "src/features/common/ai/providers/groq.js"
+    - "src/features/common/ai/providerChain.js"
+  ecs_tasks: []
+
+# --- Supported Environments ---
+# local: repo only. local-key: repo + the recommended list in Settings with the Groq and Gemini keys saved (live calls use provider quota).
+environments: [local, local-key]
+
+# =============================================================================
+# CLI TESTS (deterministic)
+# =============================================================================
+cli_tests:
+  - id: "AT-CLI-001"
+    requirement: "FR-001, E1-E4"
+    environments: [local]
+    command: |-
+      node -e "const {classify}=require('./src/features/common/ai/providers/groqErrors.js');const e=(status,message)=>({status,error:{error:{message,type:'tokens',code:'rate_limit_exceeded'}}});const ok=[classify(e(429,'Request too large for model qwen on output tokens per minute (OTPM): Limit 1000, Requested 1679.'))==='too-large',classify(e(413,'Request too large for model x on tokens per minute (TPM): Limit 8000, Requested 9400'))==='too-large',classify(e(429,'Rate limit reached for model x on tokens per minute (TPM): Limit 8000, Used 5454, Requested 4212.'))==='transient',classify({status:429})==='transient'];const bad=ok.map((v,i)=>v?null:i).filter(x=>x!==null);if(bad.length){console.error('cases '+bad.join(','));process.exit(1)}"
+    expected_exit_code: 0
+    description: "A 429 'Request too large' (OTPM) is too-large; a 413 stays too-large; a rate-limit 429 and a bare 429 stay transient."
+    severity: critical
+
+  - id: "AT-CLI-002"
+    requirement: "FR-002, E1-E3"
+    environments: [local]
+    command: |-
+      node -e "const {tooLargeNumbers:n}=require('./src/features/common/ai/providers/groqErrors.js');const j=JSON.stringify;const m=message=>({status:429,error:{error:{message}}});const ok=[j(n(m('Request too large ... (OTPM): Limit 1000, Requested 1679.')))===j({limit:1000,requested:1679,output:true}),j(n(m('Request too large ... (TPM): Limit 8000, Requested 9400')))===j({limit:8000,requested:9400,output:false}),n(m('Rate limit reached ... (TPM): Limit 8000, Used 5454, Requested 4212.'))===null];const bad=ok.map((v,i)=>v?null:i).filter(x=>x!==null);if(bad.length){console.error('cases '+bad.join(','));process.exit(1)}"
+    expected_exit_code: 0
+    description: "tooLargeNumbers returns { limit, requested, output } and null for a rate-limit message."
+    severity: critical
+
+  - id: "AT-CLI-003"
+    requirement: "FR-003, D1, E20-E23"
+    environments: [local]
+    command: |-
+      node -e "const {buildRequest:b}=require('./src/features/common/ai/providers/groq.js');const c=o=>b({messages:[{role:'user',content:'x'}],env:{},...o}).params.max_completion_tokens;const ok=[c({modelId:'qwen/qwen3.8-27b'})===16384,c({modelId:'openai/gpt-oss-120b'})===17408,c({modelId:'acme/foo-1'})===16384,c({modelId:'qwen/qwen3.8-27b',maxTokens:900})===900,c({modelId:'openai/gpt-oss-120b',maxTokens:900})===1924,c({modelId:'openai/gpt-oss-120b',env:{GROQ_MAX_TOKENS:'2048'}})===3072];const bad=ok.map((v,i)=>v?null:i).filter(x=>x!==null);if(bad.length){console.error('cases '+bad.join(','));process.exit(1)}"
+    expected_exit_code: 0
+    description: "Ask's Groq cap is 16,384 (17,408 with gpt-oss's reasoning); Live Answer's 900 is unchanged; GROQ_MAX_TOKENS still overrides."
+    severity: critical
+
+  - id: "AT-CLI-004"
+    requirement: "FR-007, E9"
+    environments: [local]
+    command: |-
+      node -e "const g=require('./src/features/common/ai/providers/groq.js');console.warn=()=>{};console.error=()=>{};const msgs=[{role:'user',content:[{type:'text',text:'x'},{type:'image_url',image_url:{url:'data:image/png;base64,AAAA'}}]}];(async()=>{const r=await g.createStreamingLLM({apiKey:'gsk_x',model:'openai/gpt-oss-120b,openai/gpt-oss-20b',visionOnly:true}).streamChat(msgs);const rd=r.body.getReader();try{for(;;){const {done}=await rd.read();if(done)break}process.exit(1)}catch(e){process.exit(e.code==='NO_VISION_MODEL'&&e.userMessage==='No Groq model in the list sees images.'?0:1)}})()"
+    expected_exit_code: 0
+    description: "visionOnly with an image and no vision model ends with NO_VISION_MODEL before any request (no network is touched: the fake key never reaches Groq)."
+    severity: critical
+
+  - id: "AT-CLI-005"
+    requirement: "FR-008, E12-E15"
+    environments: [local]
+    command: |-
+      node -e "const {createChainStreamingLLM:chain}=require('./src/features/common/ai/providerChain.js');console.log=()=>{};console.warn=()=>{};const enc=s=>new TextEncoder().encode(s);const ok=()=>new Response(new ReadableStream({start(c){c.enqueue(enc('data: [DONE]\n\n'));c.close()}}));const fail=()=>new Response(new ReadableStream({start(c){c.error(Object.assign(new Error('x'),{userMessage:'x'}))}}));const fake=(id,sees,resp,log)=>({id,seesImages:()=>sees,requestDeadlineMs:()=>60000,firstModel:m=>m[0],createStreamingLLM:o=>{log.push([id,o.visionOnly]);return{streamChat:async()=>resp()}}});const run=async(msgs,keys,geminiSees)=>{const log=[];const r=await chain({segments:[{provider:'groq',models:['qwen/qwen3.8-27b']},{provider:'gemini',models:['gemini-3.5-flash-lite']}],keys,opts:{apiKey:'k'},adapters:{groq:fake('groq',true,fail,log),gemini:fake('gemini',geminiSees,ok,log)},env:{}}).streamChat(msgs);const rd=r.body.getReader();try{for(;;){if((await rd.read()).done)break}}catch{}return JSON.stringify(log)};const img=[{role:'user',content:[{type:'text',text:'x'},{type:'image_url',image_url:{url:'data:image/png;base64,AAAA'}}]}];const txt=[{role:'user',content:'x'}];const K={groq:'g',gemini:'m'};(async()=>{const a=await run(img,K,true);const b=await run(txt,K,true);const c=await run(img,K,false);const d=await run(img,{groq:'g'},true);const want=[JSON.stringify([['groq',true],['gemini',undefined]]),JSON.stringify([['groq',undefined],['gemini',undefined]]),JSON.stringify([['groq',undefined],['gemini',undefined]]),JSON.stringify([['groq',undefined]])];const got=[a,b,c,d];const bad=got.map((g,i)=>g===want[i]?null:i+':'+g).filter(Boolean);if(bad.length){process.stderr.write(bad.join(' '));process.exit(1)}})()"
+    expected_exit_code: 0
+    description: "The chain sets visionOnly on a segment only with an image and a later segment, with a key, that sees images; never on the later segment itself."
+    severity: critical
+
+  - id: "AT-CLI-006"
+    requirement: "FR-004, FR-005, D6"
+    environments: [local]
+    command: |-
+      node -e "const s=require('fs').readFileSync('src/features/common/ai/providers/groq.js','utf8');const ok=s.includes('limit=\${tooLarge.limit} requested=\${tooLarge.requested}')&&s.includes('asks for up to \${n.requested} output tokens; this key allows \${n.limit} per minute.');process.exit(ok?0:1)"
+    expected_exit_code: 0
+    description: "The attempt log carries limit= / requested=, and the OTPM message names output tokens."
+    severity: warning
+
+# =============================================================================
+# TEST GATES
+# =============================================================================
+test_gates:
+  - id: "AT-GATE-001"
+    requirement: "All FRs, SC-001, SC-002"
+    environments: [local]
+    command: |-
+      npm test
+    expected_exit_code: 0
+    description: "Full node:test suite green, including the OTPM, visionOnly, default-cap and chain cases and every pre-existing test."
+    severity: critical
+
+  - id: "AT-GATE-002"
+    requirement: "Code quality"
+    environments: [local]
+    command: |-
+      node -e "const {execSync}=require('child_process');const fs=require('fs');const files=execSync('git diff --name-only origin/main',{encoding:'utf8'}).split(String.fromCharCode(10)).map(s=>s.trim()).filter(f=>f.endsWith('.js')&&fs.existsSync(f));for(const f of files)execSync('node --check '+JSON.stringify(f));console.log(files.length+' files ok')"
+    expected_exit_code: 0
+    description: "Syntax gate. eslint is not installed in this repo, so npm run lint cannot run. Every changed .js file passes node --check. No renderer file changes."
+    severity: warning
+
+  - id: "AT-GATE-003"
+    requirement: "Contracts"
+    environments: [local]
+    command: |-
+      npx -p typescript@5.4.5 tsc -p specs/2026-10-12-groq-otpm-images/contracts/tsconfig.json
+    expected_exit_code: 0
+    description: "The contract declarations type-check."
+    severity: warning
+
+# =============================================================================
+# NEGATIVE ASSERTIONS (scope and invariant guards)
+# =============================================================================
+negative_assertions:
+  - id: "AT-NEG-001"
+    requirement: "C1, FR-010"
+    environments: [local]
+    check_type: "cli"
+    command: |-
+      node -e "const {execSync}=require('child_process');const out=execSync('git diff --name-only origin/main',{encoding:'utf8'});const guarded=['src/features/ask/askService.js','src/features/ask/askStreamState.js','src/features/listen/summary/summaryService.js','src/features/common/ai/factory.js','src/features/common/ai/providers/gemini.js','src/features/common/ai/providers/geminiModelRotator.js','src/features/common/ai/providers/anthropic.js','src/features/common/ai/providers/anthropicErrors.js','src/features/common/ai/providers/modelHealth.js'];process.stdout.write(String(out.split(/\r?\n/).filter(f=>guarded.includes(f.trim())).length))"
+    expected_result: "0"
+    description: "The consumers, the factory, the other providers and the cooldown registry are not modified."
+    severity: critical
+
+  - id: "AT-NEG-002"
+    requirement: "C5"
+    environments: [local]
+    check_type: "cli"
+    command: |-
+      node -e "const {execSync}=require('child_process');const del=f=>{const r=execSync('git diff --numstat origin/main -- '+f,{encoding:'utf8'}).trim().split(/\s+/);return r.length>=2?Number(r[1]):0};const t='src/features/common/ai/__tests__/';process.stdout.write(String(del(t+'providerChain.test.js')+del(t+'providerChain.integration.test.js')))"
+    expected_result: "0"
+    description: "The chain tests only gain lines."
+    severity: critical
+
+  - id: "AT-NEG-003"
+    requirement: "C5"
+    environments: [local]
+    check_type: "cli"
+    command: |-
+      node -e "const {execSync}=require('child_process');const del=f=>{const r=execSync('git diff --numstat origin/main -- '+f,{encoding:'utf8'}).trim().split(/\s+/);return r.length>=2?Number(r[1]):0};const t='src/features/common/ai/providers/__tests__/';process.stdout.write([del(t+'groq.test.js'),del(t+'groqErrors.test.js'),del(t+'groqRequest.test.js')].join('|'))"
+    expected_result: "1|2|6"
+    description: "In the Groq tests only the assertions that pinned the old default cap (1 in groq.test.js, 6 lines in groqRequest.test.js) or the old tooLargeNumbers shape (2 in groqErrors.test.js) changed; everything else is an addition."
+    severity: critical
+
+  - id: "AT-NEG-004"
+    requirement: "C3"
+    environments: [local]
+    check_type: "cli"
+    command: |-
+      node -e "const {execSync}=require('child_process');const d=execSync('git diff origin/main -U0 -- src/features/common/ai/providers/groq.js src/features/common/ai/providers/groqErrors.js src/features/common/ai/providerChain.js',{encoding:'utf8',maxBuffer:100000000});const bad=d.split(/\r?\n/).filter(l=>l.startsWith('+')&&!l.startsWith('+++')&&/console\.(log|warn|error)|parts\.push/.test(l)&&/\x24\{[^}]*(messages|content|prompt|answer|apiKey|text)[^}]*\}/.test(l));process.stdout.write(String(bad.length))"
+    expected_result: "0"
+    description: "No added log line interpolates messages, content, prompt, answer, text or a key: only model IDs, the mode and numbers (fixed words such as answered_by are fine)."
+    severity: critical
+
+  - id: "AT-NEG-005"
+    requirement: "C2, D4"
+    environments: [local]
+    check_type: "cli"
+    command: |-
+      node -e "const s=require('fs').readFileSync('src/features/common/ai/providers/groq.js','utf8');process.stdout.write(String((s.match(/tooLargeNumbers\(/g)||[]).length))"
+    expected_result: "2"
+    description: "Groq's limit is read only to log it and to word the message (logAttempt, describeFailure). It is never used to build a smaller request: no smaller-cap retry."
+    severity: critical
+
+  - id: "AT-NEG-006"
+    requirement: "FR-006, E27"
+    environments: [local]
+    check_type: "cli"
+    command: |-
+      node -e "const s=require('fs').readFileSync('src/features/common/ai/providers/groq.js','utf8');const i=s.indexOf('function buildRequest(');const sig=s.slice(i,s.indexOf(')',i));process.stdout.write(String(/visionOnly/.test(sig)?1:0))"
+    expected_result: "0"
+    description: "buildRequest does not take visionOnly, so the option never reaches the SDK request."
+    severity: warning
+
+# =============================================================================
+# MANUAL TESTS (running app)
+# =============================================================================
+manual_tests:
+  - id: "AT-MANUAL-001"
+    requirement: "SC-004, G1, G2"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "System Design Ask with a screenshot: 'Trying gemini-3.5-flash-lite…', then the full answer through section 11; log shows Qwen too-large with limit=1000, the Groq segment failed, Gemini ok, and no images=dropped (quickstart #1)."
+    severity: critical
+
+  - id: "AT-MANUAL-002"
+    requirement: "G1"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Code Ask with a coding problem on screen: Gemini answers from the screenshot (quickstart #2)."
+    severity: critical
+
+  - id: "AT-MANUAL-003"
+    requirement: "G2, D5"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "A Groq-only list, System Design Ask with a typed question: gpt-oss answers all twelve sections with stop=stop (quickstart #3)."
+    severity: warning
+
+  - id: "AT-MANUAL-004"
+    requirement: "G4"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Live Answer with a question on the system audio answers as before (quickstart #4)."
+    severity: warning

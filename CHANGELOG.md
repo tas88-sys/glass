@@ -6,6 +6,53 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 
 ## [Unreleased]
 
+### Model catalog: what each model can do comes from the providers' APIs (branch `2026-10-12-groq-otpm-images`)
+
+#### Changed
+
+- **No table keyed by model name decides what a model can do.** `modelCatalog.js` reads each provider's models API and keeps the answer in a new SQLite table, `model_catalog`:
+  - Groq: `input_modalities` (sees images), `max_completion_tokens`, `supported_features` (reasons);
+  - Anthropic: `capabilities.image_input`, the `capabilities.effort` levels, `capabilities.thinking`, `max_tokens`;
+  - Gemini: `outputTokenLimit` and `thinking`. Its list does not say which models see images, so they do by default.
+  - It replaces Groq's `MODEL_TRAITS`, Anthropic's `acceptsEffort` regex and `SERVER_FALLBACK_MODELS`, and the chain's rule that Gemini and Anthropic always see images. A new model works once its provider lists it, with no code change.
+- **The provider of a model ID** is the one whose models list has it. When several do, the Settings field the list was typed in decides. The `claude-` / `gemini-` / `vendor/model` prefix is only the last resort, logged once per ID. Settings no longer keeps its own copy of the rule.
+- **The lists are read** at startup and when a key is saved (both in the background), and when a model list is saved (up to 5 s, so Settings shows the result). A request naming a model the catalog does not know waits at most 2 s for it, then uses the provider default. A failed read keeps what is known.
+- **Settings shows what each model of the active list can do**: its provider, whether it sees images, its output maximum and whether it reasons, each marked when it is a default or an override. Warnings appear for an ID the provider does not have, for the key's output limit, and for a maximum under Ask's 16,384. **Edit** sets an override (stored in SQLite, never overwritten by a refresh); **Refresh** reads the lists again.
+- **Every provider follows `visionOnly`** (Gemini and Anthropic as well as Groq), and sends no image to a model set not to see one.
+- **Output caps never exceed the model maximum** the API reports (Anthropic `max_tokens`, Gemini `maxOutputTokens`, Groq `max_completion_tokens`).
+
+#### Fixed
+
+- **Groq: an Ask screenshot no longer costs a refused Qwen request every time.** The first 429 OTPM stores the key's output limit for the model. Until it expires (24 h) or the key changes, a request whose cap is over it skips that model with no call (`skip … reason=key-output-limit`). Live Answer (900) still runs on Qwen.
+- **Anthropic: the server-side fallback beta is no longer limited to Opus and Sonnet 5.5.** It is sent to every model. A 400 on it is resent once without the beta; when that is accepted, the catalog marks the model and does not send it the beta again, across restarts. Before, one refusal turned the beta off for every model until restart.
+
+#### Docs
+
+- `specs/2026-10-12-model-catalog/` holds the spec set: spec, research (live probes, the source of each field), plan, data model, contracts, edge cases, quickstart, tasks and acceptance tests.
+- `ARCHITECTURE.md` §9.1 (new) describes the catalog; §9, §10.1–10.4 and §11 point to it. New diagram 18; diagrams 10, 15, 16 and 17 updated.
+
+### Groq: screenshots reach a model that sees them, and Ask answers are not cut (branch `2026-10-12-groq-otpm-images`)
+
+#### Fixed
+
+- **An Ask screenshot is no longer answered blind when Gemini or Claude follows Groq in the list.**
+  - On this key Groq limits Qwen, its only model that sees images, to 1,000 output tokens per minute (OTPM). It refuses any request whose cap is over that limit.
+  - Qwen therefore refused every Ask. gpt-oss then answered without the screenshot, and Gemini was never tried.
+  - Now the chain passes `visionOnly` to a segment when a later one sees images. Groq tries only Qwen and, if it is refused, leaves the request to Gemini with the image.
+  - A Groq-only list keeps today's fallback.
+- **Long Ask answers on Groq are no longer cut.** The default cap for a caller without one (only Ask) goes from 2,048 to 16,384. A system design answer measured 4,204 tokens, over the 3,072 gpt-oss got. The declared cap is not metered against the per-minute limit.
+- **Qwen's OTPM refusal is read as `too-large`, not as a rate limit.**
+  - The model gets no 60 s cooldown, so Live Answer (900) can still use it.
+  - The log line carries `limit=L requested=R`.
+  - The message reads "asks for up to R output tokens; this key allows L per minute".
+
+#### Docs
+
+- `specs/2026-10-12-groq-otpm-images/` holds the spec set for this fix: spec, research (the incident, the live probes, the options), plan, data model, contracts, edge cases, quickstart, tasks and acceptance tests.
+- `specs/2026-10-12-groq-provider/research.md` R20 records the live probes: the OTPM refusal, gpt-oss not held to it, and answer sizes per Ask mode.
+- `ARCHITECTURE.md` §10.3, §10.4 and diagrams 16 and 17 cover the new default cap, the `too-large` 429 and `visionOnly`.
+- `docs/future-work.md` item 6 is marked done. A notice for Groq-only lists (screenshot not sent) is still open.
+
 ### Live panels: Live Answer, Live Insights or both (branch `2026-10-12-live-features-toggle`)
 
 #### Added

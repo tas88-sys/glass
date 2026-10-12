@@ -1,0 +1,219 @@
+# Acceptance Tests Manifest (v2)
+# Feature: Model Catalog.
+# Hand-authored in the /tasks format (SpecKit not installed on this machine).
+# Deterministic checks cover the catalog, each provider reading it, the provider of an ID,
+# scope guards, the contracts and the build. The Settings screen (SC-004) is manual.
+# Commands are YAML literal blocks (no escaping); each is one shell line, run from the repo root.
+# The checks seed the catalog themselves: none makes a network call.
+
+# --- Root Fields ---
+_version: 2
+spec_id: "2026-10-12-model-catalog"
+spec_name: "model-catalog"
+
+# --- Staleness Detection (v2 required) ---
+generation_context:
+  generated_at: "2026-10-12T23:19:14Z"
+  spec_hash: "72db304c77c7608c29999fbb5aa04b79cbbaebc2f58626add4b48590de6c20e3"
+  plan_hash: "a0db1fde3924c914bb2083d2c5527c9b0cf3328fb5f1a46e8735a14550d88e31"
+  tasks_hash: "a5a3944192abb4ff6b1ba6ece264438538b88d4a6a1c60f757c6a35e2d051eac"
+
+# --- Drift Detection (v2 required) ---
+_references:
+  tables: ["model_catalog"]
+  routes: []
+  files:
+    - "src/features/common/ai/modelCatalog.js"
+    - "src/features/common/repositories/modelCatalog/sqlite.repository.js"
+    - "src/features/common/config/schema.js"
+    - "src/features/common/ai/providers/groq.js"
+    - "src/features/common/ai/providers/anthropic.js"
+    - "src/features/common/ai/providers/gemini.js"
+    - "src/features/common/ai/providerChain.js"
+    - "src/features/common/ai/factory.js"
+    - "src/features/common/services/modelStateService.js"
+    - "src/bridge/featureBridge.js"
+    - "src/preload.js"
+    - "src/ui/settings/SettingsView.js"
+  ecs_tasks: []
+
+# --- Supported Environments ---
+# local: repo only. local-key: repo + the Groq key in .env (reads the model list; no tokens).
+environments: [local, local-key]
+
+# =============================================================================
+# CLI TESTS (deterministic)
+# =============================================================================
+cli_tests:
+  - id: "AT-CLI-001"
+    requirement: "FR-001, E1-E3"
+    environments: [local]
+    command: |-
+      node -e "const c=require('./src/features/common/ai/modelCatalog');const a=c.capabilities('groq','x/new').vision===false&&c.capabilities('gemini','gemini-x').vision===true&&c.capabilities('anthropic','claude-x').vision===true;c.seed('groq',[{id:'x/v',vision:true,maxOutput:32768}]);const b=c.capabilities('groq','x/v');c.setOverride('groq','x/v','vision',false);const o=c.capabilities('groq','x/v');process.exit(a&&b.vision===true&&b.source.vision==='api'&&o.vision===false&&o.source.vision==='override'?0:1)"
+    expected_exit_code: 0
+    description: "Defaults per provider; the API value wins over the default; an override wins over the API."
+
+  - id: "AT-CLI-002"
+    requirement: "FR-009, SC-001, E20"
+    environments: [local]
+    command: |-
+      node -e "const c=require('./src/features/common/ai/modelCatalog');const g=require('./src/features/common/ai/providers/groq');c.seed('groq',[{id:'qwen/qwen3.9-27b',vision:true,maxOutput:32768,reasoning:true}]);const t=g.modelTraits('qwen/qwen3.9-27b');const b=g.buildRequest({modelId:'qwen/qwen3.9-27b',messages:[{role:'user',content:['q',{type:'image_url',image_url:{url:'data:image/png;base64,AA'}}]}],env:{}});process.exit(t.vision&&t.reasoning==='qwen3'&&t.maxOutput===32768&&b.imagesSent===1?0:1)"
+    expected_exit_code: 0
+    description: "A Groq model the catalog reports as seeing images gets the image, with no code change."
+
+  - id: "AT-CLI-003"
+    requirement: "FR-016, E17-E19"
+    environments: [local]
+    command: |-
+      node -e "const c=require('./src/features/common/ai/modelCatalog');const f=require('./src/features/common/ai/factory');console.warn=()=>{};c.seed('groq',[{id:'allam-2-7b'},{id:'shared/m'}]);c.seed('gemini',[{id:'shared/m'}]);const s=JSON.stringify(f.splitByProvider('openai/gpt-oss-120b,allam-2-7b,gemini-3.5-flash-lite','groq'));process.exit(f.inferProviderFromModelId('allam-2-7b')==='groq'&&f.inferProviderFromModelId('shared/m','gemini')==='gemini'&&f.inferProviderFromModelId('claude-new')==='anthropic'&&s.includes('allam-2-7b\"]}')?0:1)"
+    expected_exit_code: 0
+    description: "The provider of an ID comes from the catalog (any shape), the context decides between two, the prefix is the last resort."
+
+  - id: "AT-CLI-004"
+    requirement: "FR-011, E26, E27"
+    environments: [local]
+    command: |-
+      node -e "const c=require('./src/features/common/ai/modelCatalog');const a=require('./src/features/common/ai/providers/anthropic');const b=(id,m)=>a.buildRequest({modelId:id,messages:[{role:'user',content:'hi'}],maxTokens:m,env:{}}).params;const u=b('claude-x',900);c.seed('anthropic',[{id:'claude-y',maxOutput:8000,effortLevels:['low','high'],thinking:true}]);const y=b('claude-y',20000);process.exit(!('output_config' in u)&&u.max_tokens===4096&&y.output_config.effort==='low'&&y.max_tokens===8000?0:1)"
+    expected_exit_code: 0
+    description: "Anthropic: an unknown model gets no effort but the floor; a known one gets its levels and is capped at its max_tokens."
+
+  - id: "AT-CLI-005"
+    requirement: "FR-013"
+    environments: [local]
+    command: |-
+      node -e "const c=require('./src/features/common/ai/modelCatalog');const g=require('./src/features/common/ai/providers/gemini');c.seed('gemini',[{id:'gemini-small',maxOutput:8192}]);process.exit(g.maxOutputTokensFor('gemini-new')===65536&&g.maxOutputTokensFor('gemini-small')===8192&&g.maxOutputTokensFor('gemini-small',900)===900?0:1)"
+    expected_exit_code: 0
+    description: "Gemini: maxOutputTokens never over the model's outputTokenLimit."
+
+  - id: "AT-CLI-006"
+    requirement: "FR-008"
+    environments: [local]
+    command: |-
+      node -e "const g=require('./src/features/common/ai/providers/groq');const f=require('./src/features/common/ai/__tests__/fixtures/groq-models.json');const m=Object.fromEntries(f.data.map(g.normalizeModel).map(x=>[x.id,x]));process.exit(m['qwen/qwen3.8-27b'].vision===true&&m['qwen/qwen3.8-27b'].maxOutput===16384&&m['openai/gpt-oss-120b'].vision===false&&m['openai/gpt-oss-120b'].reasoning===true?0:1)"
+    expected_exit_code: 0
+    description: "Groq: the recorded models response normalizes to the old table's values (research R1)."
+
+  - id: "AT-CLI-007"
+    requirement: "FR-002, FR-005, D2"
+    environments: [local]
+    command: |-
+      node -e "const {DatabaseSync}=require('node:sqlite');const S=require('./src/features/common/config/schema').model_catalog;const db=new DatabaseSync(':memory:');db.exec('CREATE TABLE model_catalog ('+S.columns.map(c=>c.name+' '+c.type).join(', ')+', '+S.constraints.join(', ')+')');const r=require('./src/features/common/repositories/modelCatalog/sqlite.repository').createRepository(()=>db);const c=require('./src/features/common/ai/modelCatalog');c.configure({store:r});c.setOverride('groq','x/y','maxOutput',4000);c.resetCatalog();c.configure({store:r});c.load();process.exit(c.capabilities('groq','x/y').maxOutput===4000?0:1)"
+    expected_exit_code: 0
+    description: "The model_catalog table (built from schema.js) keeps an override across a reload."
+
+  - id: "AT-CLI-008"
+    requirement: "FR-020, R4"
+    environments: [local]
+    command: |-
+      node -e "const s=require('fs').readFileSync('src/ui/settings/SettingsView.js','utf8');const bad=['chainProviderOf','modelListOrder(','/^[^\\\\s/]+\\\\/\\\\S+$/'].filter(x=>s.includes(x));if(bad.length){console.error(bad.join(','));process.exit(1)}"
+    expected_exit_code: 0
+    description: "Settings keeps no copy of the prefix rule or of splitByProvider."
+
+  - id: "AT-CLI-009"
+    requirement: "G1, R4"
+    environments: [local]
+    command: |-
+      node -e "const fs=require('fs');const hits=[['src/features/common/ai/providers/groq.js','MODEL_TRAITS'],['src/features/common/ai/providers/anthropic.js','SERVER_FALLBACK_MODELS'],['src/features/common/ai/providers/anthropic.js','claude-(?:fable'],['src/features/common/ai/providerChain.js','seesImages: () => true']].filter(([f,x])=>fs.readFileSync(f,'utf8').includes(x));if(hits.length){console.error(JSON.stringify(hits));process.exit(1)}"
+    expected_exit_code: 0
+    description: "The capability tables by model name are gone."
+
+  - id: "AT-CLI-010"
+    requirement: "C4, E16"
+    environments: [local]
+    command: |-
+      node -e "const s=require('fs').readFileSync('src/features/common/ai/providers/gemini.js','utf8');const a=s.indexOf('async function listModels');const b=s.indexOf('function maxOutputTokensFor');const part=s.slice(s.indexOf('async function fetchModels'),b);process.exit(a>0&&part.includes('x-goog-api-key')&&!part.includes('?key=')?0:1)"
+    expected_exit_code: 0
+    description: "Gemini's models list sends the key in a header, never in the URL."
+
+  - id: "AT-CLI-011"
+    requirement: "Contracts"
+    environments: [local]
+    command: |-
+      npx -y -p typescript@5.4.5 tsc -p specs/2026-10-12-model-catalog/contracts/tsconfig.json
+    expected_exit_code: 0
+    description: "The contracts type-check."
+
+  - id: "AT-CLI-012"
+    requirement: "FR-019"
+    environments: [local]
+    command: |-
+      node build.js > /dev/null && node --input-type=module --check < src/ui/settings/SettingsView.js
+    expected_exit_code: 0
+    description: "The renderer builds and SettingsView.js parses as a module."
+
+# =============================================================================
+# TEST GATES
+# =============================================================================
+test_gates:
+  - id: "AT-GATE-001"
+    requirement: "FR-001-FR-007"
+    environments: [local]
+    command: |-
+      node --test src/features/common/ai/__tests__/modelCatalog.test.js
+    expected_exit_code: 0
+    description: "The catalog tests."
+
+  - id: "AT-GATE-002"
+    requirement: "FR-010, E22-E25"
+    environments: [local]
+    command: |-
+      node --test --test-name-pattern="key output limit" src/features/common/ai/providers/__tests__/groq.test.js
+    expected_exit_code: 0
+    description: "Groq: the learned key output limit."
+
+  - id: "AT-GATE-003"
+    requirement: "FR-012, E28, E29"
+    environments: [local]
+    command: |-
+      node --test --test-name-pattern="beta" src/features/common/ai/providers/__tests__/anthropic.test.js
+    expected_exit_code: 0
+    description: "Anthropic: the fallback beta per model."
+
+  - id: "AT-GATE-004"
+    requirement: "FR-017, FR-018"
+    environments: [local]
+    command: |-
+      node --test src/features/common/services/__tests__/modelStateService.catalog.test.js
+    expected_exit_code: 0
+    description: "The main-process wiring."
+
+  - id: "AT-GATE-005"
+    requirement: "SC-002"
+    environments: [local]
+    command: |-
+      npm test
+    expected_exit_code: 0
+    description: "The whole suite."
+
+# =============================================================================
+# LIVE (local-key; reads the model list, no tokens)
+# =============================================================================
+live_tests:
+  - id: "AT-LIVE-001"
+    requirement: "SC-003"
+    environments: [local-key]
+    command: |-
+      node -e "require('dotenv').config({quiet:true});const c=require('./src/features/common/ai/modelCatalog');c.configure({fetchers:c.defaultFetchers()});c.refresh('groq',process.env.GROQ_API_KEY,{force:true}).then(()=>{const q=c.capabilities('groq','qwen/qwen3.8-27b');process.exitCode=(q.vision===true&&q.maxOutput===16384&&q.source.vision==='api'&&c.providerOf('openai/gpt-oss-120b')==='groq'?0:1)})"
+    expected_exit_code: 0
+    description: "Groq's live models list gives Qwen vision and 16,384 from the API."
+
+# =============================================================================
+# MANUAL (app)
+# =============================================================================
+manual_tests:
+  - id: "AT-MAN-001"
+    requirement: "SC-004, FR-019"
+    steps: "quickstart.md §4 steps 1-2"
+    expected: "Under the active list, one line per model with its provider, what it can do and the source"
+  - id: "AT-MAN-002"
+    requirement: "SC-004, E12"
+    steps: "quickstart.md §4 step 3"
+    expected: "A wrong ID shows 'Groq has no model with this ID'"
+  - id: "AT-MAN-003"
+    requirement: "SC-004, FR-005"
+    steps: "quickstart.md §4 step 4"
+    expected: "An override shows '(override)', survives Refresh, and Reset clears it"
+  - id: "AT-MAN-004"
+    requirement: "SC-004, FR-010"
+    steps: "quickstart.md §4 step 5"
+    expected: "After the first refused Ask, the next one skips Qwen with no Groq request and Gemini answers with the image"

@@ -142,8 +142,11 @@ for (const k of Object.keys(require.cache)) {
 }
 
 const health = require('../providers/modelHealth');
+const catalog = require('../modelCatalog');
+const GROQ_MODELS_RESPONSE = require('./fixtures/groq-models.json');
 // Through the factory, as the three lanes call it.
 const { splitByProvider, createStreamingLLM, createLLM } = require('../factory');
+const { normalizeModel: groqModel } = require('../providers/groq');
 
 // ---------------------------------------------------------------------------
 // Scripts
@@ -230,6 +233,9 @@ const chainLine = (kind) => logs.find(l => l.startsWith(`[LLM Chain] ${kind}`));
 
 beforeEach(() => {
   health.resetHealth();
+  // What Groq's models API reported (recorded 2026-10-12): Qwen sees images.
+  catalog.resetCatalog();
+  catalog.seed('groq', GROQ_MODELS_RESPONSE.data.map(groqModel));
   logs.length = 0;
   for (const s of Object.values(sdk)) { s.calls = []; s.script = async (call) => { throw new Error(`unexpected ${call.model} call`); }; }
 });
@@ -361,6 +367,26 @@ describe('chain over the real providers (SC-003)', () => {
     assert.equal(sdk.groq.calls.length, 0);
     assert.deepEqual(sdk.gemini.calls[0].request.contents[0].parts.find(p => p.inlineData), { inlineData: { mimeType: 'image/png', data: 'AAAA' } });
     assert.match(chainLine('request'), / order=images-first$/);
+  });
+
+  it('an Ask screenshot on the recommended list: Qwen refused on output tokens (OTPM) → Gemini with the image; gpt-oss never answers blind', async () => {
+    const otpm = groqHttpError(429, {
+      message: "Request too large for model `qwen/qwen3.8-27b` in organization `org_x` service tier `on_demand` on output tokens per minute (OTPM): Limit 1000, Requested 1679. The request's expected output tokens exceed the enforced limit; reduce max_tokens (or the request's expected output) and try again.",
+      type: 'tokens', code: 'rate_limit_exceeded',
+    });
+    sdk.groq.script = byModel({ 'qwen/qwen3.8-27b': otpm, 'openai/gpt-oss-120b': groqAnswer('openai/gpt-oss-120b', 'blind') });
+    sdk.gemini.script = async () => ({ texts: ['I see the problem.'] });
+    const msgs = [{ role: 'user', content: [{ type: 'text', text: 'User Request: solve it' }, { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,AAAA' } }] }];
+    // What askService passes: no maxTokens.
+    const askOpts = { apiKey: KEYS.groq, model: RECOMMENDED, keys: KEYS, temperature: 0.7, usePortkey: false, portkeyVirtualKey: undefined };
+    const { text, events } = await readAll(await createStreamingLLM('groq', askOpts).streamChat(msgs));
+    assert.equal(text, 'I see the problem.');
+    assert.deepEqual(sdk.groq.calls.map(c => c.model), ['qwen/qwen3.8-27b']);
+    assert.equal(sdk.groq.calls[0].params.max_completion_tokens, 16_384, 'Ask\'s budget: an answer is not cut to fit');
+    assert.deepEqual(resets(events), [{ _reset: true, next_model: 'gemini-3.5-flash-lite', reason: 'provider' }]);
+    assert.deepEqual(sdk.gemini.calls[0].request.contents[0].parts.find(p => p.inlineData), { inlineData: { mimeType: 'image/png', data: 'AAAA' } });
+    assert.equal(health.isCoolingDown('qwen/qwen3.8-27b'), false, 'a request with a smaller cap may still use Qwen');
+    assert.ok(logs.some(l => l.includes('model=qwen/qwen3.8-27b outcome=too-large') && l.includes('limit=1000 requested=1679')), logs.join('\n'));
   });
 
   it('chat() (Live Insights) through a Groq failure returns Gemini\'s result', async () => {

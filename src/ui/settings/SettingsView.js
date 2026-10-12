@@ -7,6 +7,10 @@ import {
 } from '../../features/listen/liveFeatures.js';
 // import { getOllamaProgressTracker } from '../../features/common/services/localProgressTracker.js'; // 제거됨
 
+// The cap Ask runs with on Groq (it sets none; the provider default). A model
+// whose maximum is under it may stop a long code or system design answer.
+const ASK_MAX_TOKENS = 16_384;
+
 export class SettingsView extends LitElement {
     static styles = css`
         * {
@@ -498,6 +502,14 @@ export class SettingsView extends LitElement {
         availableSttModels: { type: Array, state: true },
         selectedLlm: { type: String, state: true },
         selectedStt: { type: String, state: true },
+        // The provider row each active model is saved in (main process)
+        selectedLlmProvider: { type: String, state: true },
+        selectedSttProvider: { type: String, state: true },
+        // The active LLM list as the main process runs it, with what the
+        // model catalog knows about each model (modelStateService.planModelList)
+        activeListPlan: { type: Object, state: true },
+        // Model ID whose capability overrides are open
+        editingCapabilities: { type: String, state: true },
         isLlmListVisible: { type: Boolean },
         isSttListVisible: { type: Boolean },
         presets: { type: Array, state: true },
@@ -533,6 +545,10 @@ export class SettingsView extends LitElement {
         this.availableSttModels = [];
         this.selectedLlm = null;
         this.selectedStt = null;
+        this.selectedLlmProvider = null;
+        this.selectedSttProvider = null;
+        this.activeListPlan = null;
+        this.editingCapabilities = null;
         this.isLlmListVisible = false;
         this.isSttListVisible = false;
         this.presets = [];
@@ -679,6 +695,9 @@ export class SettingsView extends LitElement {
                 this.availableSttModels = availableStt;
                 this.selectedLlm = selectedModels.llm;
                 this.selectedStt = selectedModels.stt;
+                this.selectedLlmProvider = selectedModels.llmProvider || null;
+                this.selectedSttProvider = selectedModels.sttProvider || null;
+                this.loadActiveListPlan();
             }
 
             this.presets = presets || [];
@@ -787,35 +806,20 @@ export class SettingsView extends LitElement {
     }
 
     async handleSaveGeminiModels() {
-        const llmInput = this.shadowRoot.querySelector('#gemini-llm-model-input');
         const sttInput = this.shadowRoot.querySelector('#gemini-stt-model-input');
-        // Trim and normalise LLM input: split on ',', trim each entry, drop empties, rejoin
-        const llmRaw = llmInput ? llmInput.value : '';
-        const llmTokens = llmRaw.split(',').map(s => s.trim()).filter(s => s.length > 0);
-        const llmValue = llmTokens.join(',');
         const sttValue = sttInput ? sttInput.value.trim() : '';
 
-        // Validate LLM CSV: Gemini models ('gemini-…'), optionally ending in another provider's
-        const llmError = this.checkModelList('gemini', llmTokens, (token) => token.startsWith('gemini-'), 'Must start with "gemini-".');
-        if (llmError) {
-            alert(llmError);
-            return;
-        }
-
-        // Validate STT (single model, no CSV)
+        // Validate STT (single model, no CSV): a Gemini Live model
         if (sttValue && !sttValue.startsWith('gemini-')) {
             alert(`Invalid Gemini STT model ID: "${sttValue}". Must start with "gemini-".`);
             return;
         }
 
+        const saved = await this.saveModelList('gemini', { allowEmpty: true });
+        if (saved === false || !sttValue) return;
         this.saving = true;
         try {
-            if (llmValue) {
-                await window.api.settingsView.setSelectedModel({ type: 'llm', modelId: llmValue });
-            }
-            if (sttValue) {
-                await window.api.settingsView.setSelectedModel({ type: 'stt', modelId: sttValue });
-            }
+            await window.api.settingsView.setSelectedModel({ type: 'stt', modelId: sttValue });
             await this.refreshModelData();
         } catch (err) {
             console.error('[SettingsView] Failed to save Gemini models:', err);
@@ -826,123 +830,93 @@ export class SettingsView extends LitElement {
     }
 
     async handleSaveAnthropicModels() {
-        const llmInput = this.shadowRoot.querySelector('#anthropic-llm-model-input');
-        // Trim and normalise: split on ',', trim each entry, drop empties, rejoin
-        const llmRaw = llmInput ? llmInput.value : '';
-        const llmTokens = llmRaw.split(',').map(s => s.trim()).filter(s => s.length > 0);
-        const llmValue = llmTokens.join(',');
-
-        // Claude models (Anthropic has no STT), optionally ending in another provider's
-        const llmError = this.checkModelList('anthropic', llmTokens, (token) => token.startsWith('claude-'), 'Must start with "claude-".');
-        if (llmError) {
-            alert(llmError);
-            return;
-        }
-        if (!llmValue) return;
-
-        this.saving = true;
-        try {
-            await window.api.settingsView.setSelectedModel({ type: 'llm', modelId: llmValue });
-            await this.refreshModelData();
-        } catch (err) {
-            console.error('[SettingsView] Failed to save Anthropic models:', err);
-            alert(`Failed to save Anthropic models: ${err.message || err}`);
-        } finally {
-            this.saving = false;
-        }
+        await this.saveModelList('anthropic');
     }
 
     async handleSaveGroqModels() {
-        const llmInput = this.shadowRoot.querySelector('#groq-llm-model-input');
-        // Trim and normalise: split on ',', trim each entry, drop empties, rejoin
-        const llmRaw = llmInput ? llmInput.value : '';
-        const llmTokens = llmRaw.split(',').map(s => s.trim()).filter(s => s.length > 0);
-        const llmValue = llmTokens.join(',');
+        await this.saveModelList('groq');
+    }
 
-        // Groq models: vendor/model (Groq has no real-time STT), optionally ending in another provider's
-        const isGroq = (token) => !token.startsWith('claude-') && !token.startsWith('gemini-') && /^[^\s/]+\/\S+$/.test(token);
-        const llmError = this.checkModelList('groq', llmTokens, isGroq, 'Groq IDs are vendor/model, e.g. openai/gpt-oss-120b.');
-        if (llmError) {
-            alert(llmError);
-            return;
+    /**
+     * Save the LLM list typed in one provider's field (#<provider>-llm-model-input),
+     * after checkModelList. The main process learns its models first (the
+     * model catalog), so the capabilities show right after Save.
+     * @param {string} fieldProvider
+     * @param {{ allowEmpty?: boolean }} [o] - an empty field is not an error (Gemini: STT only)
+     * @returns {Promise<boolean|null>} true saved, false refused or failed, null nothing to save
+     */
+    async saveModelList(fieldProvider, { allowEmpty = false } = {}) {
+        const input = this.shadowRoot.querySelector(`#${fieldProvider}-llm-model-input`);
+        // Trim and normalise: split on ',', trim each entry, drop empties, rejoin
+        const list = (input ? input.value : '').split(',').map(s => s.trim()).filter(Boolean).join(',');
+        if (!list) return allowEmpty ? null : false;
+
+        const error = await this.checkModelList(fieldProvider, list);
+        if (error) {
+            alert(error);
+            return false;
         }
-        if (!llmValue) return;
 
         this.saving = true;
         try {
-            await window.api.settingsView.setSelectedModel({ type: 'llm', modelId: llmValue });
+            await window.api.settingsView.setSelectedModel({ type: 'llm', modelId: list, fieldProvider });
             await this.refreshModelData();
+            return true;
         } catch (err) {
-            console.error('[SettingsView] Failed to save Groq models:', err);
-            alert(`Failed to save Groq models: ${err.message || err}`);
+            console.error(`[SettingsView] Failed to save ${fieldProvider} models:`, err);
+            alert(`Failed to save ${this.providerName(fieldProvider)} models: ${err.message || err}`);
+            return false;
         } finally {
             this.saving = false;
         }
     }
 
     /**
-     * Check a model list typed in one provider's field. The first entry must
-     * be that provider's model (isOwn). A later entry may also be another
-     * provider's model whose key is saved: the list then runs across
-     * providers, the next one answering when every model before it fails
-     * (providerChain.js). Ollama and OpenAI models cannot join a list.
-     * @returns {string|null} the message to show, or null when the list is valid
+     * Check a model list typed in one provider's field, as the main process
+     * will run it (modelStateService.planModelList: each ID's provider comes
+     * from the providers' models lists, else its prefix). The first entry must
+     * belong to this field's provider; a later entry may be another provider's
+     * model whose key is saved: the list then runs across providers, the next
+     * one answering when every model before it fails (providerChain.js).
+     * @returns {Promise<string|null>} the message to show, or null when the list is valid
      */
-    checkModelList(fieldProvider, tokens, isOwn, ownRule) {
-        const names = { anthropic: 'Anthropic', gemini: 'Gemini', groq: 'Groq' };
-        const aModel = (provider) => `${/^[AEIOU]/.test(names[provider]) ? 'an' : 'a'} ${names[provider]} model`;
-        for (const [i, token] of tokens.entries()) {
-            if (isOwn(token)) continue;
-            if (i === 0) return `Invalid ${names[fieldProvider]} LLM model ID: "${token}". The first entry must be ${aModel(fieldProvider)}. ${ownRule}`;
-            const other = this.chainProviderOf(token);
-            if (!other) {
-                return `Invalid model ID: "${token}". After the first entry, a list takes ${names[fieldProvider]} models or another provider's: claude-… (Anthropic), gemini-… (Gemini) or vendor/model (Groq).`;
-            }
-            if (!this.apiKeys?.[other]) {
-                return `"${token}" is ${aModel(other)}, but no ${names[other]} API key is saved. Save one first, or remove it from the list.`;
-            }
+    async checkModelList(fieldProvider, list) {
+        let plan;
+        try {
+            plan = await window.api.settingsView.planModelList({ list, fieldProvider });
+        } catch (err) {
+            return `Could not check the model list: ${err.message || err}`;
+        }
+        const here = this.providerName(fieldProvider);
+        const first = plan.segments[0];
+        if (first && first.provider !== fieldProvider) {
+            const there = this.providerName(first.provider);
+            return `"${first.models[0]}" is a ${there} model, so this list belongs in the ${there} field. The first entry of the ${here} field must be a ${here} model.`;
+        }
+        for (const provider of plan.missingKeys) {
+            const ids = plan.segments.filter(s => s.provider === provider).flatMap(s => s.models);
+            const there = this.providerName(provider);
+            return `"${ids[0]}" is a ${there} model, but no ${there} API key is saved. Save one first, or remove it from the list.`;
         }
         return null;
-    }
-
-    /** The provider of a model ID typed after a list's first entry (same rule as factory.inferProviderFromModelId), or null. */
-    chainProviderOf(token) {
-        if (token.startsWith('claude-')) return 'anthropic';
-        if (token.startsWith('gemini-')) return 'gemini';
-        if (/^[^\s/]+\/\S+$/.test(token) && !this.ollamaModels?.some(m => m.name === token)) return 'groq';
-        return null;
-    }
-
-    /**
-     * A model list cut the way the factory runs it (factory.splitByProvider): runs
-     * of one provider's IDs, in order; an ID with no known prefix joins the current run.
-     * @returns {{ provider: string, models: string[] }[]}
-     */
-    modelListOrder(list, firstProvider) {
-        const ids = typeof list === 'string' ? list.split(',').map(s => s.trim()).filter(Boolean) : [];
-        if (ids.length === 0) return [];
-        if (!['anthropic', 'gemini', 'groq'].includes(firstProvider)) return [{ provider: firstProvider, models: ids }];
-        const segments = [];
-        let current = firstProvider;
-        for (const id of ids) {
-            current = this.chainProviderOf(id) || current;
-            const last = segments[segments.length - 1];
-            if (last && last.provider === current) last.models.push(id);
-            else segments.push({ provider: current, models: [id] });
-        }
-        return segments;
     }
 
     providerName(provider) {
         return this.providerConfig?.[provider]?.name || provider;
     }
 
+    /** Whether the provider's models feed the model catalog (and its lists can run across providers). */
+    isCatalogProvider(provider) {
+        return !!this.providerConfig?.[provider]?.catalog;
+    }
+
     /** Under the field that holds the active LLM list: the order it runs in, and any provider skipped for a missing key. */
     modelListOrderText(fieldProvider) {
-        if (!this.selectedLlm || this.getProviderForModel('llm', this.selectedLlm) !== fieldProvider) return '';
-        const parts = this.modelListOrder(this.selectedLlm, fieldProvider).map(({ provider, models }) => {
+        const plan = this.activeListPlan;
+        if (!plan || plan.fieldProvider !== fieldProvider) return '';
+        const parts = plan.segments.map(({ provider, models }) => {
             const count = `${models.length} model${models.length === 1 ? '' : 's'}`;
-            const skipped = this.apiKeys?.[provider] ? '' : ', no API key: skipped';
+            const skipped = plan.missingKeys.includes(provider) ? ', no API key: skipped' : '';
             return `${this.providerName(provider)} (${count}${skipped})`;
         });
         return parts.length ? `Active list, tried in this order: ${parts.join(' → ')}` : '';
@@ -950,19 +924,132 @@ export class SettingsView extends LitElement {
 
     /** In a field that does not hold the active LLM list: where that list is, and what saving here does. */
     modelListHintText(fieldProvider) {
-        const active = this.getProviderForModel('llm', this.selectedLlm);
-        if (!active || active === fieldProvider) return '';
+        const active = this.selectedLlmProvider;
+        if (!this.selectedLlm || !active || active === fieldProvider) return '';
         const here = this.providerName(fieldProvider);
-        const where = ['anthropic', 'gemini', 'groq'].includes(active)
-            ? `Your active LLM list is in the ${this.providerName(active)} field${this.modelListOrder(this.selectedLlm, active).some(s => s.provider === fieldProvider) ? `, and it already uses ${here} models` : ''}.`
+        const usesHere = !!this.activeListPlan?.segments.some(s => s.provider === fieldProvider);
+        const where = this.isCatalogProvider(active)
+            ? `Your active LLM list is in the ${this.providerName(active)} field${usesHere ? `, and it already uses ${here} models` : ''}.`
             : `Your active LLM is ${this.selectedLlm} (${this.providerName(active)}).`;
         return `${where} Saving an LLM list here makes ${here} the active LLM provider instead.`;
+    }
+
+    /** "16,384" */
+    formatTokens(n) {
+        return Number(n).toLocaleString('en-US');
+    }
+
+    /** One model of the active list: what it can do and where each value came from, and its warnings. */
+    capabilityText(model) {
+        const tag = (field) => {
+            const source = model.source?.[field];
+            return source === 'override' ? ' (override)' : source === 'default' ? ' (default)' : '';
+        };
+        const parts = [];
+        if (model.vision != null) parts.push(`${model.vision ? 'sees images' : 'text only'}${tag('vision')}`);
+        if (model.maxOutput != null) parts.push(`max output ${this.formatTokens(model.maxOutput)}${tag('maxOutput')}`);
+        if (model.reasoning != null) parts.push(`${model.reasoning ? 'reasoning' : 'no reasoning'}${tag('reasoning')}`);
+        const warnings = [];
+        const name = this.providerName(model.provider);
+        if (model.listed === false) warnings.push(`${name} has no model with this ID`);
+        else if (model.providerSource === 'prefix' && model.hasKey) warnings.push(`not in ${name}'s models list yet: defaults apply`);
+        if (model.keyOutputLimit != null) warnings.push(`your key allows ${this.formatTokens(model.keyOutputLimit)} output tokens/min — long answers go to the next model`);
+        if (model.maxOutput != null && model.maxOutput < ASK_MAX_TOKENS) warnings.push(`answers may stop at ${this.formatTokens(model.maxOutput)} tokens`);
+        return { summary: parts.join(' · ') || 'nothing known yet', warnings };
+    }
+
+    async handleCapabilityOverride(model, field, value) {
+        const result = await window.api.settingsView.setCapabilityOverride({ provider: model.provider, modelId: model.modelId, field, value });
+        if (!result?.success) {
+            alert(`Could not change ${model.modelId}: ${result?.error || 'unknown error'}`);
+            return;
+        }
+        await this.loadActiveListPlan();
+        this.requestUpdate();
+    }
+
+    async handleResetCapabilities(model) {
+        for (const field of ['vision', 'maxOutput', 'reasoning']) {
+            if (model.override?.[field] != null) {
+                await window.api.settingsView.setCapabilityOverride({ provider: model.provider, modelId: model.modelId, field, value: null });
+            }
+        }
+        await this.loadActiveListPlan();
+        this.requestUpdate();
+    }
+
+    async handleRefreshCatalog() {
+        this.saving = true;
+        try {
+            await window.api.settingsView.refreshModelCatalog({});
+            await this.refreshModelData();
+        } finally {
+            this.saving = false;
+        }
+    }
+
+    /** Auto / Yes / No for a boolean override. */
+    renderBooleanOverride(model, field, label) {
+        const current = model.override?.[field];
+        const value = current == null ? 'auto' : current ? 'yes' : 'no';
+        return html`
+            <label style="display: flex; justify-content: space-between; gap: 6px; font-size: 10px; margin: 2px 0;">
+                ${label}
+                <select style="font-size: 10px;" .value=${value}
+                    @change=${(e) => this.handleCapabilityOverride(model, field, e.target.value === 'auto' ? null : e.target.value === 'yes')}>
+                    <option value="auto">Auto</option>
+                    <option value="yes">Yes</option>
+                    <option value="no">No</option>
+                </select>
+            </label>`;
+    }
+
+    /** Under the field that holds the active LLM list: each model's capabilities, with overrides. */
+    renderModelCapabilities(fieldProvider) {
+        const plan = this.activeListPlan;
+        if (!plan || plan.fieldProvider !== fieldProvider || !plan.models?.length) return '';
+        return html`
+            <div style="font-size: 10px; margin: 6px 0 0 0; line-height: 1.4;">
+                <div style="display: flex; justify-content: space-between; align-items: center; opacity: 0.85;">
+                    <b>What each model can do</b>
+                    <button class="settings-button" style="font-size: 10px; padding: 1px 6px;" ?disabled=${this.saving}
+                        title="Read the providers' models lists again" @click=${() => this.handleRefreshCatalog()}>Refresh</button>
+                </div>
+                ${plan.models.map((model) => {
+                    const { summary, warnings } = this.capabilityText(model);
+                    const editing = this.editingCapabilities === `${model.provider}:${model.modelId}`;
+                    return html`
+                        <div style="margin: 4px 0; padding: 3px 4px; border-radius: 4px; background: rgba(255,255,255,0.05);">
+                            <div style="display: flex; justify-content: space-between; gap: 4px;">
+                                <code style="font-size: 10px; word-break: break-all;">${model.modelId}</code>
+                                <button class="settings-button" style="font-size: 9px; padding: 0 4px;"
+                                    @click=${() => { this.editingCapabilities = editing ? null : `${model.provider}:${model.modelId}`; }}>${editing ? 'Done' : 'Edit'}</button>
+                            </div>
+                            <div style="opacity: 0.75;">${this.providerName(model.provider)} · ${summary}</div>
+                            ${warnings.map((w) => html`<div style="color: #ffcc66;">${w}</div>`)}
+                            ${editing ? html`
+                                <div style="margin-top: 3px;">
+                                    ${this.renderBooleanOverride(model, 'vision', 'Sees images')}
+                                    ${this.renderBooleanOverride(model, 'reasoning', 'Reasoning')}
+                                    <label style="display: flex; justify-content: space-between; gap: 6px; font-size: 10px; margin: 2px 0;">
+                                        Max output
+                                        <input type="number" min="1" placeholder="Auto" style="width: 70px; font-size: 10px;"
+                                            .value=${model.override?.maxOutput != null ? String(model.override.maxOutput) : ''}
+                                            @change=${(e) => this.handleCapabilityOverride(model, 'maxOutput', e.target.value.trim() === '' ? null : Number(e.target.value))}>
+                                    </label>
+                                    <button class="settings-button" style="font-size: 9px; padding: 0 4px;" @click=${() => this.handleResetCapabilities(model)}>Reset to automatic</button>
+                                </div>` : ''}
+                        </div>`;
+                })}
+            </div>`;
     }
 
     /** The notes under a model-list field: where the active list is, or the order it runs in. */
     renderModelListNotes(fieldProvider) {
         const text = this.modelListHintText(fieldProvider) || this.modelListOrderText(fieldProvider);
-        return text ? html`<p style="font-size: 11px; opacity: 0.85; margin: 4px 0 0 0; line-height: 1.4;">${text}</p>` : '';
+        return html`
+            ${text ? html`<p style="font-size: 11px; opacity: 0.85; margin: 4px 0 0 0; line-height: 1.4;">${text}</p>` : ''}
+            ${this.renderModelCapabilities(fieldProvider)}`;
     }
 
     /** The rule for lists that mix providers, inside each model-list help line. */
@@ -984,8 +1071,26 @@ export class SettingsView extends LitElement {
         this.availableSttModels = availableStt;
         this.selectedLlm = selected.llm;
         this.selectedStt = selected.stt;
+        this.selectedLlmProvider = selected.llmProvider || null;
+        this.selectedSttProvider = selected.sttProvider || null;
         this.apiKeys = storedKeys;
+        await this.loadActiveListPlan();
         this.requestUpdate();
+    }
+
+    /** How the main process runs the active LLM list, and what the catalog knows about its models. */
+    async loadActiveListPlan() {
+        const fieldProvider = this.selectedLlmProvider;
+        if (!this.selectedLlm || !this.isCatalogProvider(fieldProvider) || !window.api?.settingsView?.planModelList) {
+            this.activeListPlan = null;
+            return;
+        }
+        try {
+            this.activeListPlan = { fieldProvider, ...(await window.api.settingsView.planModelList({ list: this.selectedLlm, fieldProvider })) };
+        } catch (err) {
+            console.error('[SettingsView] Failed to load the model list plan:', err);
+            this.activeListPlan = null;
+        }
     }
     
     async toggleModelList(type) {
@@ -1029,11 +1134,10 @@ export class SettingsView extends LitElement {
         }
         
         this.saving = true;
-        await window.api.settingsView.setSelectedModel({ type, modelId });
-        if (type === 'llm') this.selectedLlm = modelId;
-        if (type === 'stt') this.selectedStt = modelId;
+        await window.api.settingsView.setSelectedModel({ type, modelId, fieldProvider: provider || undefined });
         this.isLlmListVisible = false;
         this.isSttListVisible = false;
+        await this.refreshModelData();
         this.saving = false;
         this.requestUpdate();
     }
@@ -1143,24 +1247,22 @@ export class SettingsView extends LitElement {
         }
     }
     
+    /**
+     * The provider of a model the main process already placed: the active
+     * model's row, or the provider of an entry it offers (getAvailableModels),
+     * or a preset. The renderer keeps no rule of its own.
+     */
     getProviderForModel(type, modelId) {
+        if (!modelId) return null;
+        if (type === 'llm' && modelId === this.selectedLlm && this.selectedLlmProvider) return this.selectedLlmProvider;
+        if (type === 'stt' && modelId === this.selectedStt && this.selectedSttProvider) return this.selectedSttProvider;
+        const offered = (type === 'llm' ? this.availableLlmModels : this.availableSttModels)?.find(m => m.id === modelId);
+        if (offered?.provider) return offered.provider;
         for (const [providerId, config] of Object.entries(this.providerConfig)) {
             const models = type === 'llm' ? config.llmModels : config.sttModels;
             if (models?.some(m => m.id === modelId)) {
                 return providerId;
             }
-        }
-        if (typeof modelId === 'string' && modelId.startsWith('gemini-')) {
-            return 'gemini';
-        }
-        // Same rule as inferProviderFromModelId in factory.js (the renderer cannot require it).
-        if (type === 'llm' && typeof modelId === 'string' && modelId.trim().startsWith('claude-')) {
-            return 'anthropic';
-        }
-        // 'vendor/model' is Groq, unless it names an installed Ollama model.
-        if (type === 'llm' && typeof modelId === 'string' && !this.ollamaModels?.some(m => m.name === modelId)) {
-            const first = modelId.split(',').map(s => s.trim()).find(Boolean) || '';
-            if (/^[^\s/]+\/\S+$/.test(first)) return 'groq';
         }
         return null;
     }
@@ -1261,8 +1363,14 @@ export class SettingsView extends LitElement {
             this.shortcuts = keybinds;
         };
         
+        // The model catalog was read again (startup, a key saved) or changed: show what it knows now.
+        this._modelStateListener = () => {
+            this.loadActiveListPlan().then(() => this.requestUpdate());
+        };
+
         window.api.settingsView.onUserStateChanged(this._userStateListener);
         window.api.settingsView.onSettingsUpdated(this._settingsUpdatedListener);
+        window.api.settingsView.onModelStateUpdated?.(this._modelStateListener);
         window.api.settingsView.onPresetsUpdated(this._presetsUpdatedListener);
         window.api.settingsView.onShortcutsUpdated(this._shortcutListener);
     }
@@ -1275,6 +1383,9 @@ export class SettingsView extends LitElement {
         }
         if (this._settingsUpdatedListener) {
             window.api.settingsView.removeOnSettingsUpdated(this._settingsUpdatedListener);
+        }
+        if (this._modelStateListener) {
+            window.api.settingsView.removeOnModelStateUpdated?.(this._modelStateListener);
         }
         if (this._presetsUpdatedListener) {
             window.api.settingsView.removeOnPresetsUpdated(this._presetsUpdatedListener);

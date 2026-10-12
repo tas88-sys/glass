@@ -87,7 +87,9 @@ Module._load = function (request, parent, isMain) {
 for (const k of Object.keys(require.cache)) if (k.includes('anthropic.js')) delete require.cache[k];
 
 const health = require('../modelHealth');
-const { createLLM, createStreamingLLM, resetServerFallback } = require('../anthropic');
+const catalog = require('../../modelCatalog');
+const ANTHROPIC_MODELS = require('../../__tests__/fixtures/anthropic-models.json');
+const { createLLM, createStreamingLLM, normalizeModel } = require('../anthropic');
 
 // ---------------------------------------------------------------------------
 // Scripts
@@ -209,7 +211,9 @@ const C = 'claude-opus-4-8';
 
 beforeEach(() => {
   health.resetHealth();
-  resetServerFallback();
+  // What the Models API reports, as the catalog keeps it.
+  catalog.resetCatalog();
+  catalog.seed('anthropic', ANTHROPIC_MODELS.data.filter((m) => m.lifecycle !== 'retired').map(normalizeModel));
   script = null;
   calls = [];
 });
@@ -324,9 +328,12 @@ describe('streamChat: failover', () => {
       captureLogs(t);
       script = byModel({ [A]: httpError(status, { type, message: 'the reason' }), [B]: answer(B, 'unreachable') });
       const { events, error } = await readAll(await stream(`${A},${B}`).streamChat(ask));
-      assert.equal(calls.length, 1);
+      // A 400 on the beta method is resent once without the beta (it fails the same way).
+      assert.deepEqual(calls.map(c => c.method), status === 400 ? ['beta', 'messages'] : ['beta']);
+      assert.ok(calls.every(c => c.params.model === A), 'model 2 never called');
       assert.equal(resets(events).length, 0);
       assert.equal(error.userMessage, `${A} — the reason`);
+      assert.equal(catalog.capabilities('anthropic', A).serverFallback, null, 'not mistaken for a refused beta');
     });
   }
 
@@ -555,30 +562,70 @@ describe('streamChat: server-side fallback (FR-009, FR-016)', () => {
     assert.ok(logs.some(l => l.includes(`fallback=${S}→claude-sonnet-5`)), logs.join('\n'));
   });
 
-  test('beta rejected: the attempt is resent once without it, and it is not sent again (E41)', async (t) => {
+  test('beta rejected: the attempt is resent once without it, and the model is not sent it again (E41)', async (t) => {
     const logs = captureLogs(t);
     const rejected = httpError(400, { type: 'invalid_request_error', message: 'Unexpected value(s) `server-side-fallback-2026-07-01` for the `anthropic-beta` header.' });
     script = async (call) => {
       if (call.method === 'beta') throw rejected;
-      return answer(S, 'ok');
+      return answer(call.params.model, 'ok');
     };
     const first = await readAll(await stream(S).streamChat(ask));
     assert.equal(first.error, null);
     assert.equal(first.text, 'ok');
     assert.deepEqual(calls.map(c => c.method), ['beta', 'messages']);
     assert.equal('fallbacks' in calls[1].params, false);
-    assert.equal(logs.filter(l => l.includes('server-side fallback disabled')).length, 1);
+    assert.equal(logs.filter(l => l.includes(`server-side fallback off for model=${S}`)).length, 1);
+    assert.equal(catalog.capabilities('anthropic', S).serverFallback, false, 'kept in the catalog');
 
     await readAll(await stream(S).streamChat(ask));
     assert.deepEqual(calls.map(c => c.method), ['beta', 'messages', 'messages']);
+
+    // Another model still tries the beta: the refusal is per model.
+    await readAll(await stream(A).streamChat(ask));
+    assert.deepEqual(calls.slice(3).map(c => c.method), ['beta', 'messages']);
   });
 
-  test('another 400 on the beta method is not mistaken for a rejected beta', async (t) => {
+  test('another 400 on the beta method: resent once, fails the same way, nothing recorded', async (t) => {
     captureLogs(t);
     script = byModel({ [S]: httpError(400, { type: 'invalid_request_error', message: 'messages: text content blocks must be non-empty' }) });
     const { error } = await readAll(await stream(S).streamChat(ask));
-    assert.equal(calls.length, 1);
+    assert.deepEqual(calls.map(c => c.method), ['beta', 'messages']);
     assert.equal(error.userMessage, `${S} — messages: text content blocks must be non-empty`);
+    assert.equal(catalog.capabilities('anthropic', S).serverFallback, null);
+  });
+});
+
+describe('streamChat: images (catalog)', () => {
+  const screen = [{ role: 'user', content: [{ type: 'text', text: 'What is on screen?' }, { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,AAAA' } }] }];
+  const hasImage = (params) => JSON.stringify(params.messages).includes('"type":"image"');
+
+  test('a screenshot goes to the models that see images first', async (t) => {
+    captureLogs(t);
+    catalog.setOverride('anthropic', A, 'vision', false);
+    script = byModel({ [B]: answer(B, 'I see it') });
+    const { text } = await readAll(await stream(`${A},${B}`).streamChat(screen));
+    assert.deepEqual(calls.map(c => c.params.model), [B]);
+    assert.equal(hasImage(calls[0].params), true);
+    assert.equal(text, 'I see it');
+  });
+
+  test('visionOnly: a model that does not see images is not tried; none left is NO_VISION_MODEL', async (t) => {
+    captureLogs(t);
+    catalog.setOverride('anthropic', A, 'vision', false);
+    script = byModel({ [A]: answer(A, 'blind') });
+    const { error } = await readAll(await stream(A, { visionOnly: true }).streamChat(screen));
+    assert.equal(calls.length, 0);
+    assert.equal(error.code, 'NO_VISION_MODEL');
+    assert.equal(error.userMessage, 'No Anthropic model in the list sees images.');
+  });
+
+  test('without visionOnly, a model that does not see images gets the request without them', async (t) => {
+    captureLogs(t);
+    catalog.setOverride('anthropic', A, 'vision', false);
+    script = byModel({ [A]: answer(A, 'blind') });
+    const { text } = await readAll(await stream(A).streamChat(screen));
+    assert.equal(hasImage(calls[0].params), false);
+    assert.equal(text, 'blind');
   });
 });
 
@@ -707,7 +754,7 @@ describe('chat and generateContent (FR-021)', () => {
       assert.equal(err.userMessage, `${A} — bad`);
       return true;
     });
-    assert.equal(calls.length, 1);
+    assert.deepEqual(calls.map(c => `${c.params.model} ${c.method}`), [`${A} beta`, `${A} messages`]);
   });
 
   test('refusal: the next model answers', async (t) => {

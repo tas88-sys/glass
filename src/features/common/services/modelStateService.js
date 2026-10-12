@@ -1,8 +1,14 @@
 const { EventEmitter } = require('events');
 const Store = require('electron-store');
 const { PROVIDERS, getProviderClass, inferProviderFromModelId, splitByProvider } = require('../ai/factory');
+const modelCatalog = require('../ai/modelCatalog');
 const encryptionService = require('./encryptionService');
 const providerSettingsRepository = require('../repositories/providerSettings');
+const modelCatalogRepository = require('../repositories/modelCatalog');
+
+// How long saving a model list waits for the catalog to learn its models, so
+// Settings shows what they can do right after Save.
+const SAVE_CATALOG_TIMEOUT_MS = 5_000;
 const authService = require('./authService');
 const ollamaModelRepository = require('../repositories/ollamaModel');
 
@@ -18,9 +24,96 @@ class ModelStateService extends EventEmitter {
         console.log('[ModelStateService] Initializing one-time setup...');
         await this._initializeEncryption();
         await this._runMigrations();
+        this._initializeCatalog();
         this.setupLocalAIStateSync();
         await this._autoSelectAvailableModels([], true);
         console.log('[ModelStateService] One-time setup complete.');
+    }
+
+    /**
+     * The model catalog (modelCatalog.js): saved in SQLite, filled from each
+     * provider's models API. Loads what was saved, then reads every list
+     * with a key again in the background.
+     */
+    _initializeCatalog() {
+        modelCatalog.configure({ store: modelCatalogRepository, fetchers: modelCatalog.defaultFetchers() });
+        modelCatalog.load();
+        this.refreshCatalog({ force: true }).catch(err => console.warn('[ModelStateService] Catalog refresh failed:', err.message));
+    }
+
+    /**
+     * Read the models lists of the catalog providers that have a key (all, or
+     * the one named), then tell the windows. A failed read keeps what is known.
+     * @param {{ provider?: string, force?: boolean }} [o]
+     */
+    async refreshCatalog({ provider, force = false } = {}) {
+        const keys = await this.getAllApiKeys();
+        const providers = provider ? [provider] : modelCatalog.CATALOG_PROVIDERS;
+        await Promise.all(providers.filter(p => keys[p]).map(p => modelCatalog.refresh(p, keys[p], { force })));
+        this.emit('state-updated', await this.getLiveState());
+        return true;
+    }
+
+    /**
+     * Let the catalog learn every model a list names before it is resolved:
+     * the lists of the providers with a key (when stale), then a lookup of
+     * each ID still unknown at the provider it resolves to (an alias).
+     * Waits at most SAVE_CATALOG_TIMEOUT_MS.
+     */
+    async _learnModelList(list, fieldProvider) {
+        const keys = await this.getAllApiKeys();
+        const work = (async () => {
+            await Promise.all(modelCatalog.CATALOG_PROVIDERS.filter(p => keys[p]).map(p => modelCatalog.refresh(p, keys[p])));
+            const segments = splitByProvider(list, fieldProvider);
+            await Promise.all(segments.filter(s => keys[s.provider]).map(s =>
+                modelCatalog.ensureKnown(s.provider, keys[s.provider], s.models, { timeoutMs: SAVE_CATALOG_TIMEOUT_MS })));
+        })();
+        let timer = null;
+        await Promise.race([work, new Promise(resolve => { timer = setTimeout(resolve, SAVE_CATALOG_TIMEOUT_MS); })]);
+        clearTimeout(timer);
+    }
+
+    /**
+     * For Settings: how a list typed in a field runs, and what the catalog
+     * knows about each model. Nothing is saved.
+     * @param {{ list: string, fieldProvider: string }} input
+     * @returns {Promise<{ segments: object[], models: object[], missingKeys: string[] }>}
+     */
+    async planModelList({ list, fieldProvider }) {
+        const keys = await this.getAllApiKeys();
+        const segments = splitByProvider(list, fieldProvider);
+        const models = [];
+        for (const s of segments) {
+            for (const id of s.models) {
+                const listedBy = modelCatalog.providersListing(id);
+                models.push({
+                    ...modelCatalog.snapshot({ provider: s.provider, ids: [id] })[0],
+                    providerSource: listedBy.includes(s.provider) ? 'catalog' : 'prefix',
+                    hasKey: !!keys[s.provider],
+                });
+            }
+        }
+        const missingKeys = [...new Set(segments.map(s => s.provider).filter(p => !keys[p]))];
+        return { segments, models, missingKeys };
+    }
+
+    /** For Settings: what the catalog knows about these models. */
+    getCatalog({ provider, ids } = {}) {
+        return modelCatalog.snapshot({ provider, ids });
+    }
+
+    /**
+     * Set or clear (value null) one capability override, from Settings.
+     * @returns {{ success: boolean, error?: string }}
+     */
+    async setCapabilityOverride({ provider, modelId, field, value }) {
+        try {
+            modelCatalog.setOverride(provider, modelId, field, value);
+        } catch (err) {
+            return { success: false, error: err.message };
+        }
+        this.emit('state-updated', await this.getLiveState());
+        return { success: true };
     }
 
     async _initializeEncryption() {
@@ -234,7 +327,13 @@ class ModelStateService extends EventEmitter {
         const finalKey = (provider === 'ollama' || provider === 'whisper') ? 'local' : key;
         const existingSettings = await providerSettingsRepository.getByProvider(provider) || {};
         await providerSettingsRepository.upsert(provider, { ...existingSettings, api_key: finalKey });
-        
+
+        if (modelCatalog.CATALOG_PROVIDERS.includes(provider)) {
+            // A new key: the limits learned for the old one may not hold, and its list may differ.
+            modelCatalog.clearKeyLimits(provider);
+            this.refreshCatalog({ provider, force: true }).catch(err => console.warn(`[ModelStateService] Catalog refresh failed for ${provider}:`, err.message));
+        }
+
         // 키가 추가/변경되었으므로, 해당 provider의 모델을 자동 선택할 수 있는지 확인
         await this._autoSelectAvailableModels([]);
         
@@ -258,6 +357,7 @@ class ModelStateService extends EventEmitter {
         const setting = await providerSettingsRepository.getByProvider(provider);
         if (setting && setting.api_key) {
             await providerSettingsRepository.upsert(provider, { ...setting, api_key: null });
+            modelCatalog.clearKeyLimits(provider);
             await this._autoSelectAvailableModels(['llm', 'stt']);
             this.emit('state-updated', await this.getLiveState());
             this.emit('settings-updated');
@@ -283,7 +383,11 @@ class ModelStateService extends EventEmitter {
         return allSettings.some(s => s.api_key && s.api_key.trim().length > 0);
     }
 
-    getProviderForModel(arg1, arg2) {
+    /**
+     * The provider of a model ID or list. `context` is the Settings field the
+     * list was typed in: it decides an ID that several providers list.
+     */
+    getProviderForModel(arg1, arg2, context) {
         // Compatibility: support both (type, modelId) old order and (modelId, type) new order
         let type, modelId;
         if (arg1 === 'llm' || arg1 === 'stt') {
@@ -304,23 +408,37 @@ class ModelStateService extends EventEmitter {
             const installedModels = ollamaModelRepository.getInstalledModels();
             if (installedModels.some(m => m.name === modelId)) return 'ollama';
         }
-        // A typed ID or CSV list: 'gemini-…' (LLM or STT), 'claude-…' and
-        // 'vendor/model' for Groq (LLM only).
-        const inferred = inferProviderFromModelId(modelId);
+        // A typed ID or CSV list: the provider whose models list has it (the
+        // catalog), else its prefix. Gemini for LLM or STT; Anthropic and Groq
+        // for LLM only.
+        const inferred = inferProviderFromModelId(modelId, context);
         if (inferred === 'gemini' || ((inferred === 'anthropic' || inferred === 'groq') && type === 'llm')) return inferred;
         return null;
     }
 
+    /** The active LLM and STT models, and the provider row each is saved in. */
     async getSelectedModels() {
         const active = await providerSettingsRepository.getActiveSettings();
         return {
             llm: active.llm?.selected_llm_model || null,
             stt: active.stt?.selected_stt_model || null,
+            llmProvider: active.llm?.provider || null,
+            sttProvider: active.stt?.provider || null,
         };
     }
     
-    async setSelectedModel(type, modelId) {
-        const provider = this.getProviderForModel(modelId, type);
+    /**
+     * @param {'llm'|'stt'} type
+     * @param {string} modelId - one ID or a CSV list
+     * @param {string} [fieldProvider] - the Settings field it was typed in
+     */
+    async setSelectedModel(type, modelId, fieldProvider) {
+        // The catalog learns the list's models first, so their provider comes
+        // from the providers' lists and Settings can show what they can do.
+        if (type === 'llm' && modelCatalog.CATALOG_PROVIDERS.includes(fieldProvider)) {
+            await this._learnModelList(modelId, fieldProvider);
+        }
+        const provider = this.getProviderForModel(modelId, type, fieldProvider);
         if (!provider) {
             console.warn(`[ModelStateService] No provider found for model ${modelId}`);
             return false;
@@ -349,10 +467,12 @@ class ModelStateService extends EventEmitter {
         return true;
     }
 
+    /** The models Settings offers, each with the provider it belongs to. */
     async getAvailableModels(type) {
         const allSettings = await providerSettingsRepository.getAll();
         const available = [];
         const modelListKey = type === 'llm' ? 'llmModels' : 'sttModels';
+        const withProvider = (provider, models) => models.map(m => ({ ...m, provider }));
 
         for (const setting of allSettings) {
             if (!setting.api_key) continue;
@@ -360,16 +480,16 @@ class ModelStateService extends EventEmitter {
             const providerId = setting.provider;
             if (providerId === 'ollama' && type === 'llm') {
                 const installed = ollamaModelRepository.getInstalledModels();
-                available.push(...installed.map(m => ({ id: m.name, name: m.name })));
-            } else if (['gemini', 'anthropic', 'groq'].includes(providerId) && PROVIDERS[providerId]?.[modelListKey]) {
+                available.push(...installed.map(m => ({ id: m.name, name: m.name, provider: 'ollama' })));
+            } else if (modelCatalog.CATALOG_PROVIDERS.includes(providerId) && PROVIDERS[providerId]?.[modelListKey]) {
                 const presets = PROVIDERS[providerId][modelListKey];
                 const customId = type === 'llm' ? setting.selected_llm_model : setting.selected_stt_model;
                 if (customId && !presets.some(m => m.id === customId)) {
-                    available.push({ id: customId, name: `${customId} (custom)` });
+                    available.push({ id: customId, name: `${customId} (custom)`, provider: providerId });
                 }
-                available.push(...presets);
+                available.push(...withProvider(providerId, presets));
             } else if (PROVIDERS[providerId]?.[modelListKey]) {
-                available.push(...PROVIDERS[providerId][modelListKey]);
+                available.push(...withProvider(providerId, PROVIDERS[providerId][modelListKey]));
             }
         }
         return [...new Map(available.map(item => [item.id, item])).values()];
@@ -431,7 +551,8 @@ class ModelStateService extends EventEmitter {
         const config = {};
         for (const key in PROVIDERS) {
             const { handler, ...rest } = PROVIDERS[key];
-            config[key] = rest;
+            // catalog: its models API feeds the model catalog, and its lists can run across providers
+            config[key] = { ...rest, catalog: modelCatalog.CATALOG_PROVIDERS.includes(key) };
         }
         return config;
     }
@@ -452,8 +573,8 @@ class ModelStateService extends EventEmitter {
         return await this.setApiKey(provider, key);
     }
 
-    async handleSetSelectedModel(type, modelId) {
-        return await this.setSelectedModel(type, modelId);
+    async handleSetSelectedModel(type, modelId, fieldProvider) {
+        return await this.setSelectedModel(type, modelId, fieldProvider);
     }
 
     async areProvidersConfigured() {

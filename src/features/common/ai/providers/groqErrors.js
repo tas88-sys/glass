@@ -48,13 +48,19 @@ function errorCode(err) {
  * Classify an error:
  *   'transient'     – cool the model down, try the next one
  *   'unavailable'   – the model is decommissioned, blocked or not found for this key
- *   'too-large'     – this request alone is over the model's per-minute token limit (413)
+ *   'too-large'     – this request alone is over a per-minute limit of the model:
+ *                     tokens (413, TPM) or output tokens (429, OTPM)
  *   'fatal-request' – wrong for every model (bad payload); surface at once
  *   'fatal-auth'    – key or permission; surface at once
  *
  * Inspection order: provider code → Groq model_ code → HTTP status → body
  * type → fail-open (connection errors and anything unknown are transient, as
  * in Gemini and Anthropic).
+ *
+ * A 429 is a rate limit, except "Request too large … (OTPM)": before it runs,
+ * Groq refuses a request whose expected output (from max_completion_tokens) is
+ * over the model's output tokens per minute, so waiting does not help and the
+ * next request with a smaller cap may fit (live check, groq-provider research R20).
  *
  * @param {unknown} err
  * @returns {'transient'|'unavailable'|'too-large'|'fatal-request'|'fatal-auth'}
@@ -71,6 +77,7 @@ function classify(err) {
   const status = err.status;
   if (typeof status === 'number') {
     if (status === 413) return 'too-large';
+    if (status === 429 && isRequestTooLarge(err)) return 'too-large';
     if (status === 404) return 'unavailable';
     if (TRANSIENT_STATUSES.includes(status) || status >= 500) return 'transient';
     if (FATAL_REQUEST_STATUSES.includes(status)) return 'fatal-request';
@@ -145,16 +152,27 @@ function shortErrorMessage(err) {
   return msg.slice(0, 160);
 }
 
+/** The server's message, from the body and the SDK's own text. */
+function messageText(err) {
+  return `${errorBody(err)?.message ?? ''} ${err.message ?? ''}`;
+}
+
+/** Whether the message is Groq's "Request too large …" (TPM or OTPM). */
+function isRequestTooLarge(err) {
+  return /Request too large/.test(messageText(err));
+}
+
 /**
- * "Limit L, Requested R" from a 413 "Request too large … (TPM)" message.
+ * "Limit L, Requested R" from a "Request too large" message: a 413 on tokens
+ * per minute (TPM), or a 429 on output tokens per minute (OTPM, output: true).
  * @param {unknown} err
- * @returns {{ limit: number, requested: number }|null}
+ * @returns {{ limit: number, requested: number, output: boolean }|null}
  */
 function tooLargeNumbers(err) {
   if (!err || typeof err !== 'object') return null;
-  const text = `${errorBody(err)?.message ?? ''} ${err.message ?? ''}`;
+  const text = messageText(err);
   const m = /Limit (\d+), Requested (\d+)/.exec(text);
-  return m ? { limit: Number(m[1]), requested: Number(m[2]) } : null;
+  return m ? { limit: Number(m[1]), requested: Number(m[2]), output: /\(OTPM\)/.test(text) } : null;
 }
 
 module.exports = {

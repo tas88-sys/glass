@@ -247,50 +247,36 @@ Four gaps are still open after T038 to T040. Each was measured with the eval, `s
 
 ## 6. Groq — the output-token limit (OTPM) blocks screenshots on Qwen
 
-**Status:** Pending. Found on 2026-10-12 in an app session; not started (the user chose to only record it).
-**Specs:** `specs/2026-10-12-groq-provider/`, `specs/2026-10-12-cross-provider-failover/`
+**Status:** Done on 2026-10-12, except the notice below. Found that day in an app session; checked live and fixed on branch `2026-10-12-groq-otpm-images`.
+**Spec:** `specs/2026-10-12-groq-otpm-images/`. Related: `specs/2026-10-12-groq-provider/` (research R20), `specs/2026-10-12-cross-provider-failover/`.
 
-### Summary
+### What was found (live, research R20)
 
-The Groq console's Limits page now splits the 8K tokens per minute of `qwen/qwen3.8-27b` and `openai/gpt-oss-120b` into **7K in / 1K out**: at most 1,000 output tokens per minute per model (OTPM, read on 2026-10-12). Groq's docs say only some organizations get separate input and output limits.
+- The Groq console splits the 8K tokens per minute of `qwen/qwen3.8-27b` and `openai/gpt-oss-120b` into 7K in / 1K out. Only Qwen enforces the 1K.
+  - Before running, it refuses any request whose expected output, which Groq derives from the declared cap, is over 1,000: `429` "Request too large … (OTPM): Limit 1000, Requested R". Every cap over 1,000 tried so far was refused.
+  - gpt-oss accepted 20,000 declared and wrote 4,204 output tokens in one answer.
+- Ask passes no cap, so Groq declared its default, 2048. Qwen therefore refused every Ask with a screenshot. gpt-oss then answered **without the image**, and Gemini, which sees images, was never tried.
+- The default also cut long answers: a real system design answer is 4,204 tokens, over the 3,072 gpt-oss got (2,048 plus 1,024 for reasoning).
+- The first idea, retrying Qwen with the limit (1,000) as the cap, was dropped. It would cut code and system design answers in the middle.
 
-An Ask with a screenshot declares `max_completion_tokens` 2048 on Qwen. That is the default cap, with no reasoning allowance at effort `none`.
-- Groq refuses the request outright: `429 rate_limit_exceeded`, "Request too large for model `qwen/qwen3.8-27b` … on output tokens per minute (OTPM)". The 8K budget was untouched (`tpm_left=8000`).
-- The same 2048 passed earlier that day (Groq spec research R19), so the split looks new on Groq's side.
-- gpt-oss-120b was accepted with 3072 declared, so Groq does not compare gpt-oss's declared cap with the limit.
+### What changed
 
-### What the user sees
+- **Ask's budget:** Groq's default cap is 16,384 (only Ask uses it), so a long answer is not cut.
+- **The refusal:** a 429 "Request too large" is `too-large`. There is no cooldown, the log adds `limit=L requested=R`, and the message reads "asks for up to R output tokens; this key allows L per minute".
+- **Screenshots:** the cross-provider chain passes `visionOnly` to a segment when a later segment (with a key) sees images. Groq then tries only Qwen and fails rather than answer blind, so the screenshot reaches Gemini whole.
+- **Later the same day** (spec `2026-10-12-model-catalog`): the refusal's limit is kept for the model, so the next screenshot skips Qwen with no Groq request; which models see images comes from Groq's models API instead of a table by name.
 
-- Qwen is the only Groq model that sees images. When it is refused, gpt-oss-120b answers **without the screenshot** (`images=dropped:1`), with no sign of it in the Ask window.
-- With a mixed list, Gemini, which sees images, is not tried, because Groq did answer.
-- This happens on every Ask with a screenshot while the account has this limit.
-- Live Answer (cap 900) is not affected. Live Insights (cap 1024) would be on Qwen, but Qwen is only its third text model.
-- `groqErrors.classify` reads the refusal as a transient rate limit, because Groq sends 429 rather than 413. The model is cooled down, and the message says "rate limit" instead of "request too large".
+### Still open
 
-### Proposed
-
-- In `groq.js`, when a refusal reads "Request too large … (OTPM): Limit L, Requested R", retry the same model once with `max_completion_tokens` = L, inside the same attempt budget. The screenshot then still reaches Qwen, with the answer capped at about 750 words.
-- The fix adapts if the account's limit changes (e.g. a paid tier). `groqErrors.tooLargeNumbers` already reads "Limit L, Requested R" from the 413 TPM message.
-- Classify a 429 whose message is "Request too large" as `too-large`: no cooldown, and the matching message.
-- A separate, small PR. The cross-provider PR keeps `groq.js` and `groqErrors.js` unchanged (its C2).
-- Workaround until then, no code: `GROQ_MAX_TOKENS=1000` in `.env`. It caps every Groq Ask answer at 1000 tokens, plus 1024 for gpt-oss's reasoning.
-
-### Alternatives checked (2026-10-12)
-
-- **No other Groq model sees images.** The live `models.list` (via Composio) returns 11 active models. Besides the three presets they are `openai/gpt-oss-safeguard-20b` (a safety classifier, 3 RPM and 2K TPM on this account), `allam-2-7b` (4,096-token context), `meta-llama/llama-prompt-guard-2-22m` and `-86m` (classifiers, 512-token context), two Whisper models (batch STT) and two Orpheus models (TTS). None replaces Qwen for screenshots.
-- **Settings does not block them.** A classifier ID such as `meta-llama/llama-prompt-guard-2-86m` has a slash, so `inferProviderFromModelId` sends it to Groq as a chat model. It was not tested; expect an error and a cooldown. IDs without a slash (`allam-2-7b`) fail the Groq check in Settings.
-- **`claude-haiku-5-5` sees images** (Anthropic's models overview and vision pages; the Models API `capabilities` field was not queried, as there was no Anthropic credential). It accepts up to 600 images per request, 10 MB each, and its price is $0.10 / $0.50 per million tokens up to 100K prompt tokens; a 1920×1080 screenshot is about 2,700 tokens. `anthropic.js` does not filter images by model and never sends `temperature` or `thinking`, so Haiku 5.5 already receives screenshots with no code change.
-- **The list order is what decides.** A Claude segment placed after Groq is not tried when Groq answers, even without the image (the same as Gemini). To get the screenshot to a vision model today, put a vision segment first for Asks with an image, or treat "answered with `images=dropped`" as a reason to continue. That is a cross-provider change, separate from the `groq.js` retry above.
-
-### To watch
-
-1,000 output tokens per minute per model is tight for an interview. Several long answers in a minute could hit it on gpt-oss too, as a real per-minute 429. The three Groq models and the Gemini segment absorb it, but it is worth checking in the logs (`code=rate_limit_exceeded` with "OTPM").
+- With a **Groq-only** list nothing after Groq sees the image, so gpt-oss still answers without it (`images=dropped:1`), with no sign in the Ask window. A short notice there ("the screenshot was not sent: no model in the list sees images") would tell the user to add Gemini or Claude to the list.
 
 ### Acceptance
 
-- [ ] An Ask with a screenshot under a 1K OTPM answers on Qwen with the image (`images=sent:1`, `outcome=ok`), after at most one retry.
-- [ ] A test in `groq.test.js` replays the OTPM 429 and checks the retry's `max_completion_tokens` and the absence of a cooldown.
-- [ ] `groqErrors.test.js` covers a 429 "Request too large" read as `too-large`.
+- [x] `groqErrors.test.js` covers a 429 "Request too large" read as `too-large`.
+- [x] `groq.test.js` replays the OTPM 429: no cooldown, the numbers in the log, and `visionOnly` without a text-only answer.
+- [x] `providerChain.integration.test.js`: an Ask screenshot on the recommended list reaches Gemini with the image after Qwen's OTPM refusal; gpt-oss is never called.
+- [ ] In the app: an Ask with a screenshot in System Design mode answers from Gemini with the image, uncut.
+- [ ] The Groq-only notice above.
 
 ---
 
@@ -312,3 +298,30 @@ The Live panels button in Settings picks Answer + Insights, Answer only or Insig
 - [ ] The bar toggle and the Settings button show the same mode after either one changes it.
 - [ ] With the cadence set to N, the analysis runs at multiples of N only, and turning it on mid-session starts no analysis at once.
 - [ ] With a per-lane list, each lane's provider request lines name its own models.
+
+---
+
+## 8. Model catalog — what it leaves out
+
+**Status:** Deferred by the spec (out of its scope).
+**Spec:** `specs/2026-10-12-model-catalog/`
+
+### Summary
+
+Since 2026-10-12 what a Groq, Gemini or Anthropic model can do comes from its provider's models API (`modelCatalog.js`, `ARCHITECTURE.md` §9.1). These were left out:
+
+- **OpenAI and Ollama** have no catalog. Neither joins a cross-provider list today. Ollama's `/api/show` reports `capabilities` (`vision` among them), so the catalog could read it; OpenAI's `/v1/models` reports no capabilities.
+- **Timeouts chosen by name.** Gemini's first-chunk timeout and hedge (`isLiteModel`, "lite" in the ID) and Claude's first-text timeout (Haiku 20 s, others 45 s) are latency tuning, not capabilities. Each is overridable by env (`GEMINI_FIRST_CHUNK_TIMEOUT_MS`, `GEMINI_HEDGE_DELAY_MS`, `ANTHROPIC_FIRST_TEXT_TIMEOUT_MS`). A per-model setting in Settings would replace the name rules.
+- **A notice when an Ask answer is cut.** Caps never go over the model maximum and Ask declares 16,384 on Groq, so a cut answer is unlikely (the longest measured is 4,204 tokens). When it happens the provider logs `stop=length` (Groq) or `stop=max_tokens` (Anthropic), but the Ask window shows nothing.
+
+Found while sweeping for model-name rules, not related to the catalog:
+
+- `gemini.js` sends every Ask screenshot as `mimeType: "image/png"`, but Ask captures JPEG.
+- `askService._isMultimodalError` (retry text-only when a provider rejects the image) never fires for Groq, Gemini, Anthropic or the chain: their `streamChat` resolves at once and reports errors inside the stream.
+- `ollama.js` `generateContent` joins image objects into the text, so an image becomes `[object Object]`.
+
+### Acceptance (when implemented)
+
+- [ ] An Ollama model whose `/api/show` lists `vision` gets the screenshot; one without it gets the question only.
+- [ ] A per-model first-text timeout set in Settings applies without an env override.
+- [ ] An Ask answer that stops on the model's cap shows a short "answer cut" note.

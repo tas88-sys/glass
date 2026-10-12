@@ -239,7 +239,12 @@ contextBridge.exposeInMainWorld('api', {
     saveApiKey: (key) => ipcRenderer.invoke('model:save-api-key', key),
     removeApiKey: (provider) => ipcRenderer.invoke('model:remove-api-key', provider),
     setSelectedModel: (data) => ipcRenderer.invoke('model:set-selected-model', data),
-    
+    // Model catalog: what each model can do, and the overrides
+    getModelCatalog: (query) => ipcRenderer.invoke('model:get-catalog', query),
+    planModelList: (data) => ipcRenderer.invoke('model:plan-model-list', data),
+    setCapabilityOverride: (data) => ipcRenderer.invoke('model:set-capability-override', data),
+    refreshModelCatalog: (data) => ipcRenderer.invoke('model:refresh-catalog', data),
+
     // Ollama Management
     getOllamaStatus: () => ipcRenderer.invoke('ollama:get-status'),
     ensureOllamaReady: () => ipcRenderer.invoke('ollama:ensure-ready'),
@@ -280,6 +285,8 @@ contextBridge.exposeInMainWorld('api', {
     removeOnUserStateChanged: (callback) => ipcRenderer.removeListener('user-state-changed', callback),
     onSettingsUpdated: (callback) => ipcRenderer.on('settings-updated', callback),
     removeOnSettingsUpdated: (callback) => ipcRenderer.removeListener('settings-updated', callback),
+    onModelStateUpdated: (callback) => ipcRenderer.on('model-state:updated', callback),
+    removeOnModelStateUpdated: (callback) => ipcRenderer.removeListener('model-state:updated', callback),
     onPresetsUpdated: (callback) => ipcRenderer.on('presets-updated', callback),
     removeOnPresetsUpdated: (callback) => ipcRenderer.removeListener('presets-updated', callback),
     onShortcutsUpdated: (callback) => ipcRenderer.on('shortcuts-updated', callback),

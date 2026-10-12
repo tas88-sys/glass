@@ -2,8 +2,9 @@
  * anthropicRequest.test.js
  *
  * The pure half of the Anthropic provider: request building (data-model
- * "Request params"), the effort gate, the timeout settings, and key
- * validation against a mocked SDK.
+ * "Request params"), the effort gate (from the catalog, seeded with a Models
+ * API response in the SDK's shape), the timeout settings, and key validation
+ * and the models list against a mocked SDK.
  * Every env read is injected; process.env is never touched.
  * Run: node --test src/features/common/ai/providers/__tests__/anthropicRequest.test.js
  */
@@ -19,6 +20,7 @@ const Module = require('module');
 const realSdk = require('@anthropic-ai/sdk');
 
 let modelsList = null; // (params, options) => Promise, set per test
+let modelsRetrieve = null; // (id, params, options) => Promise, set per test
 let sdkCalls = [];
 const originalLoad = Module._load;
 Module._load = function (request, parent, isMain) {
@@ -32,6 +34,10 @@ Module._load = function (request, parent, isMain) {
               sdkCalls.push({ kind: 'models.list', clientOpts: opts, params, options });
               return modelsList(params, options);
             },
+            retrieve: (id, params, options) => {
+              sdkCalls.push({ kind: 'models.retrieve', id, params, options });
+              return modelsRetrieve(id, params, options);
+            },
           };
           const noMessages = () => { sdkCalls.push({ kind: 'messages' }); throw new Error('unexpected messages call'); };
           this.messages = { create: noMessages };
@@ -44,10 +50,16 @@ Module._load = function (request, parent, isMain) {
 };
 for (const k of Object.keys(require.cache)) if (k.includes('anthropic.js')) delete require.cache[k];
 
+const catalog = require('../../modelCatalog');
+const ANTHROPIC_MODELS = require('../../__tests__/fixtures/anthropic-models.json');
 const {
   AnthropicProvider,
+  listModels,
+  getModel,
+  normalizeModel,
   buildRequest,
   acceptsEffort,
+  effortLevels,
   firstTextTimeoutMs,
   requestDeadlineMs,
   idleTimeoutMs,
@@ -56,6 +68,13 @@ const {
 const PRESETS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'];
 const user = (content) => ({ role: 'user', content });
 const build = (input) => buildRequest({ messages: [user('hi')], env: {}, ...input });
+const LISTED = ANTHROPIC_MODELS.data.filter((m) => m.lifecycle !== 'retired');
+
+// What the Models API reports, as the catalog keeps it.
+beforeEach(() => {
+  catalog.resetCatalog();
+  catalog.seed('anthropic', LISTED.map(normalizeModel));
+});
 
 describe('buildRequest: never sends sampling parameters or thinking (SC-005)', () => {
   for (const modelId of [...PRESETS, 'claude-haiku-4-5', 'claude-sonnet-4-5']) {
@@ -70,19 +89,82 @@ describe('buildRequest: never sends sampling parameters or thinking (SC-005)', (
   }
 });
 
-describe('acceptsEffort', () => {
-  const yes = [
-    'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-opus-5', 'claude-sonnet-5',
-    'claude-fable-5-1', 'claude-mythos-5-1', 'claude-opus-6',
-    'claude-opus-4-5', 'claude-opus-4-5-20251101', 'claude-opus-4-6', 'claude-opus-4-7', 'claude-opus-4-8',
-    'claude-sonnet-4-6',
-  ];
-  const no = [
-    'claude-haiku-4-5', 'claude-haiku-4-5-20251001', 'claude-sonnet-4-5', 'claude-sonnet-4', 'claude-sonnet-4-20250514',
-    'claude-opus-4-1', 'claude-opus-4-50', 'claude-3-5-sonnet-20241022', 'gemini-3-flash-preview', '', undefined,
-  ];
-  for (const id of yes) it(`${id} → true`, () => assert.equal(acceptsEffort(id), true));
-  for (const id of no) it(`${id} → false`, () => assert.equal(acceptsEffort(id), false));
+describe('acceptsEffort (catalog: capabilities.effort)', () => {
+  for (const id of PRESETS) it(`${id} → true`, () => assert.equal(acceptsEffort(id), true));
+  for (const id of ['claude-haiku-4-5', 'claude-sonnet-4-5']) it(`${id} → false (effort.supported false)`, () => assert.equal(acceptsEffort(id), false));
+  for (const id of ['claude-opus-9', 'gemini-3-flash-preview', '', undefined]) {
+    it(`${String(id)} → false (not in the catalog: no effort sent)`, () => assert.equal(acceptsEffort(id), false));
+  }
+
+  it('the levels are the ones the API marks supported', () => {
+    assert.deepEqual([...effortLevels('claude-opus-5-5')].sort(), ['high', 'low', 'max', 'medium', 'xhigh']);
+    assert.deepEqual([...effortLevels('claude-haiku-5-5')].sort(), ['high', 'low', 'max', 'medium'], 'xhigh: null');
+    assert.deepEqual(effortLevels('claude-haiku-4-5'), []);
+  });
+
+  it('a new model the API reports gets effort with no code change', () => {
+    catalog.seed('anthropic', [{ id: 'claude-opus-6', vision: true, maxOutput: 256_000, effortLevels: ['low', 'high'], thinking: true }]);
+    assert.equal(build({ modelId: 'claude-opus-6', effort: 'high' }).params.output_config.effort, 'high');
+    assert.equal(build({ modelId: 'claude-opus-6', effort: 'xhigh' }).params.output_config.effort, 'low', 'a level the model lacks falls back to low');
+  });
+});
+
+describe('models list for the catalog', () => {
+  it('normalizes capabilities, max_tokens and the effort levels', () => {
+    const opus = normalizeModel(LISTED[0]);
+    assert.equal(opus.id, 'claude-opus-5-5');
+    assert.equal(opus.vision, true);
+    assert.equal(opus.maxOutput, 128_000);
+    assert.equal(opus.thinking, true);
+    assert.equal(opus.reasoning, true);
+    assert.deepEqual([...opus.effortLevels].sort(), ['high', 'low', 'max', 'medium', 'xhigh']);
+    assert.deepEqual(normalizeModel(LISTED.find((m) => m.id === 'claude-haiku-4-5')).effortLevels, []);
+  });
+
+  it('capabilities null: every field unknown', () => {
+    assert.deepEqual(normalizeModel({ id: 'claude-x', max_tokens: null, capabilities: null }), {
+      id: 'claude-x', vision: null, maxOutput: null, reasoning: null, effortLevels: null, thinking: null,
+    });
+  });
+
+  it('listModels pages through the list and leaves out retired models', async () => {
+    sdkCalls = [];
+    modelsList = () => (async function* () { yield* ANTHROPIC_MODELS.data; })();
+    const models = await listModels('sk-ant-test');
+    assert.deepEqual(models.map((m) => m.id), LISTED.map((m) => m.id));
+    assert.equal(sdkCalls[0].clientOpts.apiKey, 'sk-ant-test');
+  });
+
+  it('getModel: an alias, null on 404, other errors thrown', async () => {
+    modelsRetrieve = async (id) => ({ ...LISTED[0], id });
+    assert.equal((await getModel('sk-ant-test', 'claude-opus-latest')).maxOutput, 128_000);
+    const { APIError } = realSdk;
+    modelsRetrieve = async () => { throw APIError.generate(404, { type: 'error', error: { type: 'not_found_error', message: 'model: x' } }, undefined, new Headers()); };
+    assert.equal(await getModel('sk-ant-test', 'claude-typo'), null);
+    modelsRetrieve = async () => { throw APIError.generate(500, { type: 'error', error: { type: 'api_error', message: 'boom' } }, undefined, new Headers()); };
+    await assert.rejects(getModel('sk-ant-test', 'claude-x'), /boom/);
+  });
+});
+
+describe('buildRequest: what the catalog says about the model', () => {
+  it('a model the catalog does not know: no effort, but the thinking floor', () => {
+    const { params } = build({ modelId: 'claude-opus-9', maxTokens: 900 });
+    assert.equal('output_config' in params, false);
+    assert.equal(params.max_tokens, 4_096);
+  });
+
+  it('the cap never goes over the model maximum', () => {
+    assert.equal(build({ modelId: 'claude-haiku-4-5', maxTokens: 100_000 }).params.max_tokens, 64_000);
+    catalog.setOverride('anthropic', 'claude-opus-5-5', 'maxOutput', 10_000);
+    assert.equal(build({ modelId: 'claude-opus-5-5', maxTokens: 20_000 }).params.max_tokens, 10_000);
+  });
+
+  it('a model set to not see images gets the request without them', () => {
+    catalog.setOverride('anthropic', 'claude-haiku-5-5', 'vision', false);
+    const built = build({ modelId: 'claude-haiku-5-5', messages: [user(['q', { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } }])] });
+    assert.deepEqual(built.params.messages[0].content, [{ type: 'text', text: 'q' }]);
+    assert.equal(built.imagesDropped, 1);
+  });
 });
 
 describe('buildRequest: effort (FR-006)', () => {
@@ -206,8 +288,8 @@ describe('buildRequest: messages (FR-008)', () => {
 });
 
 describe('buildRequest: server-side fallback (FR-009)', () => {
-  for (const modelId of ['claude-opus-5-5', 'claude-sonnet-5-5']) {
-    it(`${modelId} goes through the beta method with fallbacks (E11)`, () => {
+  for (const modelId of [...PRESETS, 'claude-haiku-4-5', 'claude-opus-9']) {
+    it(`${modelId} goes through the beta method with fallbacks until the API refuses it (E11)`, () => {
       const { method, params } = build({ modelId });
       assert.equal(method, 'beta');
       assert.deepEqual(params.betas, ['server-side-fallback-2026-07-01']);
@@ -215,14 +297,14 @@ describe('buildRequest: server-side fallback (FR-009)', () => {
     });
   }
 
-  for (const modelId of ['claude-haiku-5-5', 'claude-haiku-4-5', 'claude-opus-4-8', 'claude-sonnet-5']) {
-    it(`${modelId} gets no fallbacks (E12)`, () => {
-      const { method, params } = build({ modelId });
-      assert.equal(method, 'messages');
-      assert.equal('betas' in params, false);
-      assert.equal('fallbacks' in params, false);
-    });
-  }
+  it('a model the API refused the beta for gets no fallbacks (E12)', () => {
+    catalog.markServerFallback('anthropic', 'claude-haiku-5-5', false);
+    const { method, params } = build({ modelId: 'claude-haiku-5-5' });
+    assert.equal(method, 'messages');
+    assert.equal('betas' in params, false);
+    assert.equal('fallbacks' in params, false);
+    assert.equal(build({ modelId: 'claude-opus-5-5' }).method, 'beta', 'per model');
+  });
 
   it('ANTHROPIC_SERVER_FALLBACK=off turns it off', () => {
     const { method, params } = build({ modelId: 'claude-opus-5-5', env: { ANTHROPIC_SERVER_FALLBACK: 'off' } });

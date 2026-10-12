@@ -20,7 +20,8 @@ flowchart TB
         auto["_autoSelectAvailableModels()<br/>picks a valid model when key added/removed"]
         resolve["getCurrentModelInfo('llm' | 'stt')<br/>-> {provider, model, apiKey}<br/>llm also: keys of every provider the list names"]
         gate["areProvidersConfigured()<br/>requires BOTH an LLM key AND an STT key"]
-        infer["getProviderForModel(id)<br/>presets, then Ollama installs, then typed IDs / CSV:<br/>inferProviderFromModelId — gemini- → gemini, claude- → anthropic,<br/>vendor/model → groq (the last two LLM only)"]
+        infer["getProviderForModel(id, field)<br/>presets, then Ollama installs, then typed IDs / CSV:<br/>inferProviderFromModelId — the provider whose models list has it<br/>(model catalog; several: the field); else the prefix:<br/>gemini- → gemini, claude- → anthropic, vendor/model → groq<br/>(Anthropic and Groq LLM only)"]
+        catalog["model_catalog table + modelCatalog.js<br/>what each model can do, read from the models APIs;<br/>refreshed at startup, on a key or list saved;<br/>overrides from Settings"]
     end
 
     subgraph consumers["Consumers"]
@@ -30,6 +31,7 @@ flowchart TB
     end
 
     registry --> state
+    catalog --> infer
     keys --> resolve
     resolve --> consumers
     consumers --> dispatch["factory.createLLM / createStreamingLLM / createSTT<br/>removes keys; sanitizeModelId strips '-glass'"]

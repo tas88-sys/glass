@@ -1,6 +1,103 @@
 const { GoogleGenerativeAI } = require("@google/generative-ai")
 const { GoogleGenAI } = require("@google/genai")
 const rotator = require('./geminiModelRotator')
+const catalog = require('../modelCatalog')
+
+// Whether Glass messages (or generateContent parts) carry an image. Required
+// when called: providerChain requires the providers lazily too.
+const hasImages = (input) => require('../providerChain').hasImages(input)
+
+const MODELS_URL = 'https://generativelanguage.googleapis.com/v1beta/models'
+const MODELS_TIMEOUT_MS = 15_000
+// The cap when the caller sets none; the catalog's outputTokenLimit lowers it.
+const DEFAULT_MAX_OUTPUT_TOKENS = 65536
+
+/**
+ * One model of models.list in the catalog's shape. The API reports no input
+ * modalities, so vision is null: the provider default (sees images) applies.
+ * @param {object} m - a Model resource
+ */
+function normalizeModel(m) {
+  const max = Number(m?.outputTokenLimit)
+  const thinking = typeof m?.thinking === 'boolean' ? m.thinking : null
+  return {
+    id: String(m?.name || '').replace(/^models\//, ''),
+    vision: null,
+    maxOutput: Number.isFinite(max) && max > 0 ? max : null,
+    reasoning: thinking,
+    effortLevels: null,
+    thinking,
+  }
+}
+
+const generates = (m) => Array.isArray(m?.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent')
+
+async function fetchModels(apiKey, path, query = {}) {
+  const url = new URL(path ? `${MODELS_URL}/${path}` : MODELS_URL)
+  for (const [k, v] of Object.entries(query)) if (v != null) url.searchParams.set(k, v)
+  // The key goes in a header, not in the URL (logs and proxies keep URLs).
+  return fetch(url, { headers: { 'x-goog-api-key': apiKey }, signal: AbortSignal.timeout(MODELS_TIMEOUT_MS) })
+}
+
+/**
+ * Every model of the key's list that generates content, for the catalog
+ * (modelCatalog.refresh), page by page.
+ * @param {string} apiKey
+ * @returns {Promise<object[]>} normalizeModel entries
+ */
+async function listModels(apiKey) {
+  const out = []
+  let pageToken = null
+  do {
+    const res = await fetchModels(apiKey, '', { pageSize: '1000', pageToken })
+    if (!res.ok) throw Object.assign(new Error(`models.list ${res.status}`), { status: res.status })
+    const body = await res.json()
+    for (const m of body.models || []) if (generates(m)) out.push(normalizeModel(m))
+    pageToken = body.nextPageToken || null
+  } while (pageToken)
+  return out
+}
+
+/**
+ * One model the list did not name (an alias), for the catalog
+ * (modelCatalog.ensureKnown).
+ * @param {string} apiKey
+ * @param {string} modelId
+ * @returns {Promise<object|null>} null when there is no such model
+ */
+async function getModel(apiKey, modelId) {
+  const res = await fetchModels(apiKey, encodeURIComponent(modelId))
+  if (res.status === 404) return null
+  if (!res.ok) throw Object.assign(new Error(`models.get ${res.status}`), { status: res.status })
+  return { ...normalizeModel(await res.json()), id: modelId }
+}
+
+/** The caller's cap (else 65,536), never over the model's outputTokenLimit (catalog). */
+function maxOutputTokensFor(modelId, maxTokens) {
+  const want = Number.isFinite(maxTokens) && maxTokens > 0 ? Math.floor(maxTokens) : DEFAULT_MAX_OUTPUT_TOKENS
+  const max = catalog.capabilities('gemini', modelId).maxOutput
+  return max != null ? Math.min(want, max) : want
+}
+
+/**
+ * The attempt order and the models allowed for this request: with an image,
+ * the models that see images first (catalog); with visionOnly, only those.
+ * Throws NO_VISION_MODEL when visionOnly leaves none.
+ */
+function planModels(list, input, visionOnly, mode) {
+  const withImages = hasImages(input)
+  let models = catalog.orderForImages('gemini', list, withImages)
+  if (visionOnly && withImages) {
+    models = models.filter((m) => catalog.seesImages('gemini', m))
+    if (models.length === 0) {
+      console.warn(`[Gemini Provider] request ${mode} answered_by=none attempts=0 no model sees images: ${list.join(',')}`)
+      const err = Object.assign(new Error('no model in the list sees images'), { code: 'NO_VISION_MODEL' })
+      err.userMessage = 'No Gemini model in the list sees images.'
+      throw err
+    }
+  }
+  return models
+}
 
 class GeminiProvider {
     static async validateApiKey(key) {
@@ -278,21 +375,30 @@ async function callWithFailover(modelList, doCall) {
 }
 
 /**
- * Creates a Gemini LLM instance with proper text response handling
+ * Creates a Gemini LLM instance with proper text response handling.
+ * maxTokens (default 65,536) never goes over the model's outputTokenLimit
+ * (catalog). With visionOnly (set by providerChain when a later provider sees
+ * the image), a request with an image goes only to the models that see images.
  */
-function createLLM({ apiKey, model = "gemini-3-flash-preview", temperature = 0.7, maxTokens = 65536, ...config }) {
+function createLLM({ apiKey, model = "gemini-3-flash-preview", temperature = 0.7, maxTokens, visionOnly, ...config }) {
   const client = new GoogleGenerativeAI(apiKey)
   const modelList = rotator.parseModelList(model);
   const effectiveModelList = modelList.length > 0 ? modelList : [model];
+  // The models for this request, once the catalog knows them.
+  const modelsFor = async (input) => {
+    await catalog.ensureKnown('gemini', apiKey, effectiveModelList)
+    return planModels(effectiveModelList, input, visionOnly, 'once')
+  }
 
   return {
     generateContent: async (parts) => {
-      return callWithFailover(effectiveModelList, async (modelId, stats) => {
+      return callWithFailover(await modelsFor(parts), async (modelId, stats) => {
+        const sees = catalog.seesImages('gemini', modelId)
         const geminiModel = client.getGenerativeModel({
           model: modelId,
           generationConfig: {
             temperature,
-            maxOutputTokens: maxTokens,
+            maxOutputTokens: maxOutputTokensFor(modelId, maxTokens),
             // Ensure we get text responses, not JSON
             responseMimeType: "text/plain",
           },
@@ -305,7 +411,7 @@ function createLLM({ apiKey, model = "gemini-3-flash-preview", temperature = 0.7
             // Don't automatically assume strings starting with "You are" are system prompts
             // Check if it's explicitly marked as a system instruction
             userContent.push(part)
-          } else if (part.inlineData) {
+          } else if (part.inlineData && sees) {
             userContent.push({
               inlineData: {
                 mimeType: part.inlineData.mimeType,
@@ -329,7 +435,8 @@ function createLLM({ apiKey, model = "gemini-3-flash-preview", temperature = 0.7
     },
 
     chat: async (messages) => {
-      return callWithFailover(effectiveModelList, async (modelId, stats) => {
+      return callWithFailover(await modelsFor(messages), async (modelId, stats) => {
+        const sees = catalog.seesImages('gemini', modelId)
         // Filter out any system prompts that might be causing JSON responses
         let systemInstruction = ""
         const history = []
@@ -366,7 +473,7 @@ function createLLM({ apiKey, model = "gemini-3-flash-preview", temperature = 0.7
             "Respond naturally in plain text format. Do not use JSON or structured responses unless specifically requested.",
           generationConfig: {
             temperature: temperature,
-            maxOutputTokens: maxTokens,
+            maxOutputTokens: maxOutputTokensFor(modelId, maxTokens),
             // Force plain text responses
             responseMimeType: "text/plain",
           },
@@ -386,7 +493,7 @@ function createLLM({ apiKey, model = "gemini-3-flash-preview", temperature = 0.7
               geminiContent.push(part)
             } else if (part.type === "text") {
               geminiContent.push(part.text)
-            } else if (part.type === "image_url" && part.image_url) {
+            } else if (part.type === "image_url" && part.image_url && sees) {
               const base64Data = part.image_url.url.split(",")[1]
               geminiContent.push({
                 inlineData: {
@@ -439,7 +546,7 @@ function createLLM({ apiKey, model = "gemini-3-flash-preview", temperature = 0.7
  * @param {number|null} [opts.requestDeadlineMs] - overrides requestDeadlineMs(); null disables
  * @param {number} [opts.retryRoundDelayMs] - wait before the second round (default RETRY_ROUND_DELAY_MS)
  */
-function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperature = 0.7, maxTokens = 65536, firstChunkTimeoutMs: firstChunkTimeoutOverride, hedgeDelayMs: hedgeDelayOverride, requestDeadlineMs: requestDeadlineOverride, retryRoundDelayMs = RETRY_ROUND_DELAY_MS, ...config }) {
+function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperature = 0.7, maxTokens, visionOnly, firstChunkTimeoutMs: firstChunkTimeoutOverride, hedgeDelayMs: hedgeDelayOverride, requestDeadlineMs: requestDeadlineOverride, retryRoundDelayMs = RETRY_ROUND_DELAY_MS, ...config }) {
   const client = new GoogleGenerativeAI(apiKey)
 
   return {
@@ -481,13 +588,15 @@ function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperat
             "Respond naturally in plain text format. Do not use JSON or structured responses unless specifically requested.",
           generationConfig: {
             temperature,
-            maxOutputTokens: maxTokens || 65536,
+            maxOutputTokens: maxOutputTokensFor(modelId, maxTokens),
             responseMimeType: "text/plain",
           },
         })
 
         const lastMessage = msgs[msgs.length - 1]
         let geminiContent = []
+        // A model set to not see images (catalog) gets the request without them.
+        const sees = catalog.seesImages('gemini', modelId)
 
         if (Array.isArray(lastMessage.content)) {
           for (const part of lastMessage.content) {
@@ -495,7 +604,7 @@ function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperat
               geminiContent.push(part)
             } else if (part.type === "text") {
               geminiContent.push(part.text)
-            } else if (part.type === "image_url" && part.image_url) {
+            } else if (part.type === "image_url" && part.image_url && sees) {
               const base64Data = part.image_url.url.split(",")[1]
               geminiContent.push({
                 inlineData: {
@@ -676,8 +785,16 @@ function createStreamingLLM({ apiKey, model = "gemini-3-flash-preview", temperat
           const encode = (obj) => new TextEncoder().encode(`data: ${JSON.stringify(obj)}\n\n`)
           const encodeDone = () => new TextEncoder().encode("data: [DONE]\n\n")
 
-          let remaining = rotator.parseModelList(modelCsv);
-          if (remaining.length === 0) remaining = [modelCsv];
+          let listed = rotator.parseModelList(modelCsv);
+          if (listed.length === 0) listed = [modelCsv];
+          let remaining;
+          try {
+            await catalog.ensureKnown('gemini', apiKey, listed);
+            remaining = planModels(listed, messages, visionOnly, 'stream');
+          } catch (err) {
+            if (!cancelled) try { controller.error(err); } catch {}
+            return;
+          }
           // Planned attempts for the "attempt i/n" log; grows when a second round starts.
           let plannedAttempts = remaining.length;
           let lastErr;
@@ -819,6 +936,10 @@ module.exports = {
     createSTT,
     createLLM,
     createStreamingLLM,
+    listModels,
+    getModel,
+    normalizeModel,
+    maxOutputTokensFor,
     firstChunkTimeoutMs,
     hedgeDelayMs,
     requestDeadlineMs,

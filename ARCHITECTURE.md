@@ -80,7 +80,7 @@ your microphone is `"Me"` (`sttService.js:82`), the system/loopback audio is `"T
 "interviewer vs you" because the other person comes through system audio — but **two people
 sharing your one microphone are both tagged `"Me"`.** And nothing transcribes at all until you
 have both an LLM key and an STT key configured (`modelStateService.areProvidersConfigured`,
-`modelStateService.js:459-477`).
+`modelStateService.js:580-598`).
 
 **Does transcription + that speaker split work on Windows too?**
 **Yes.** Windows captures system audio via Electron's **native loopback** (the handler at
@@ -570,27 +570,32 @@ flowchart TB
     keys --> resolve --> consumers --> dispatch["factory.createLLM/createStreamingLLM/createSTT"] --> registry
     dispatch -->|"list names 2+ providers"| chain["providerChain.js (§10.4)"] --> registry
     settingsui["SettingsView (renders one key field per provider)"] --> keys
+    catalog["modelCatalog.js (§9.1): what each model can do, its provider"] --> dispatch
+    catalog --> chain
+    state -->|"startup, key saved, list saved"| catalog
 ```
 
-- The **registry** `PROVIDERS` (`factory.js:22-110`) declares each provider's `llmModels` and
-  `sttModels`. The factory exposes `createSTT` / `createLLM` / `createStreamingLLM`
-  (`factory.js:169-216`), normalizing the `-glass` suffix via `sanitizeModelId` (`:165-167`).
+- The **registry** `PROVIDERS` (`factory.js:23-111`) declares each provider's `llmModels` and
+  `sttModels`: the presets Settings offers, not what the models can do (that is the catalog,
+  §9.1). The factory exposes `createSTT` / `createLLM` / `createStreamingLLM`
+  (`factory.js:189-236`), normalizing the `-glass` suffix via `sanitizeModelId` (`:185`).
 - **Lists across providers.** `createLLM` and `createStreamingLLM` first remove the caller's
-  `keys` (`takeKeys`, `:159`), so no provider ever receives them. Then `splitByProvider` (`:140`)
+  `keys` (`takeKeys`, `:179`), so no provider ever receives them. Then `splitByProvider` (`:160`)
   cuts the model list into runs of one provider's IDs. With one run, the call goes to that
   provider exactly as before. With two or more (e.g. three Groq models then two Gemini models),
   it goes to `providerChain.js`, which gives each provider its own key (§10.4).
 - **`modelStateService`** is the single arbiter of *which* model and key are live. It stores
   keys + selections in the `provider_settings` table, auto-selects a valid model when keys
-  change (`_autoSelectAvailableModels`, `:142-179`), maps a model ID back to its provider
-  (`getProviderForModel`, `:286-312`: presets, then installed Ollama models, then a typed ID or CSV
-  list by prefix through `inferProviderFromModelId` (`factory.js:121`): `gemini-` → Gemini,
-  `claude-` → Anthropic, `vendor/model` (a slash, e.g. `openai/gpt-oss-120b`) → Groq; the last
-  two LLM only; for a list, the first entry decides), and returns the runtime triple via
-  `getCurrentModelInfo` (`:378-392`). For `'llm'` it also returns `keys`: the saved key of every
-  provider the list names, or `null` (`_keysForModelList`, `:399-411`). Ask, Live Answer and
-  Live Insights pass them to the factory.
-- **Configuration gate**: `areProvidersConfigured` (`:438-456`) requires **both** a working LLM
+  change (`_autoSelectAvailableModels`, `:235`), maps a model ID back to its provider
+  (`getProviderForModel`, `:390`: presets, then installed Ollama models, then a typed ID or CSV
+  list through `inferProviderFromModelId` (`factory.js:139`): the provider whose models API lists
+  the ID (§9.1); when several do, the Settings field the list was typed in; an ID no catalog has
+  falls back to its prefix (`providerFromPrefix`, `:121`: `gemini-` → Gemini, `claude-` →
+  Anthropic, `vendor/model` → Groq), logged once. Anthropic and Groq are LLM only; for a list,
+  the first entry decides), and returns the runtime triple via `getCurrentModelInfo` (`:498`).
+  For `'llm'` it also returns `keys`: the saved key of every provider the list names, or `null`
+  (`_keysForModelList`, `:519`). Ask, Live Answer and Live Insights pass them to the factory.
+- **Configuration gate**: `areProvidersConfigured` (`:580`) requires **both** a working LLM
   key and a working STT key — so an STT-only provider (Deepgram) or LLM-only provider
   (Anthropic/Groq/Ollama) can't satisfy the app alone.
 
@@ -600,10 +605,81 @@ flowchart TB
 | OpenAI (Glass) | ✅ | ✅ | Pickle-hosted key via Portkey |
 | Gemini | ✅ `gemini-3-flash-preview` | ✅ `gemini-3.8-live` | LLM supports CSV failover, also across providers (§10.4); STT does not |
 | Anthropic | ✅ `claude-opus-5-5` · `claude-sonnet-5-5` · `claude-haiku-5-5` | ❌ | LLM only; supports CSV failover, also across providers (§10.4) |
-| Groq | ✅ `openai/gpt-oss-120b` · `openai/gpt-oss-20b` · `qwen/qwen3.8-27b` | ❌ | LLM only; supports CSV failover, also across providers (§10.4); only Qwen 3.8 sees images |
+| Groq | ✅ `openai/gpt-oss-120b` · `openai/gpt-oss-20b` · `qwen/qwen3.8-27b` | ❌ | LLM only; supports CSV failover, also across providers (§10.4); of the presets, Groq's models API says only Qwen 3.8 sees images (§9.1) |
 | Deepgram | ❌ | ✅ `nova-3` | STT only (pinned to nova-3) |
 | Whisper (local) | ❌ | ✅ tiny/base/small/medium | Main process only |
 | Ollama (local) | ✅ (dynamic) | ❌ | LLM only |
+
+### 9.1 Model catalog
+
+`modelCatalog.js` (spec `2026-10-12-model-catalog`) says what each Groq, Gemini and Anthropic
+model can do, and which provider an ID belongs to. It reads each provider's models API; no
+table keyed by model name decides it. A new model works once its provider lists it.
+
+```mermaid
+flowchart LR
+    apis["models APIs<br/>Groq GET /openai/v1/models<br/>Anthropic GET /v1/models<br/>Gemini models.list"] -->|"listModels / getModel<br/>(each provider)"| cat["modelCatalog<br/>in memory, read synchronously"]
+    user["Settings: override<br/>(sees images, reasoning, max output)"] --> cat
+    refusals["refusals: Groq 429 OTPM (key output limit),<br/>Anthropic 400 on the fallback beta"] --> cat
+    cat <-->|"load at startup / upsert"| table[("SQLite model_catalog")]
+    cat --> uses["providers: images, max output, reasoning, effort<br/>providerChain: seesImages, visionOnly<br/>factory: the provider of an ID<br/>Settings: what each model can do"]
+```
+
+- **Resolution, per provider and ID** (`capabilities`, `modelCatalog.js:209`):
+  1. the user's override, set in Settings;
+  2. what the provider's models API reported;
+  3. the provider default (`PROVIDER_DEFAULTS`, `:33`), one rule per provider: a Groq model
+     does not see images (an image sent to a text-only model is a 400); Gemini and Anthropic
+     models do. Output cap and reasoning have no default: each provider keeps its own
+     behavior without one.
+- **What each API reports** (each provider's `normalizeModel`; null is "not reported"):
+
+  | Provider | Sees images | Max output | Reasoning / effort |
+  |---|---|---|---|
+  | Groq | `input_modalities` has `image` | `max_completion_tokens` | `supported_features` has `reasoning` |
+  | Anthropic | `capabilities.image_input` | `max_tokens` | `capabilities.thinking`; the effort levels marked supported in `capabilities.effort` |
+  | Gemini | not reported (provider default) | `outputTokenLimit` | `thinking` |
+
+  Anthropic leaves out retired models (`lifecycle`); Gemini keeps the models with
+  `generateContent`, and its key goes in the `x-goog-api-key` header, not the URL.
+- **Learned from refusals:**
+  - **Groq key output limit.** A 429 "Request too large … (OTPM): Limit L" stores L for that
+    model (`recordKeyOutputLimit`, `:473`). The next request whose declared cap is over L skips
+    the model with no call (§10.3). It is forgotten after 24 h and when the key changes.
+  - **Anthropic server-side fallback.** A 400 on the beta method is resent once without the
+    beta; when that is accepted, the model is marked as not taking it (`markServerFallback`,
+    `:465`) (§10.2).
+- **The provider of an ID** (`providerOf`, `:270`): the provider whose list has it; when several
+  do, the context (the Settings field, or the run it continues). `factory.inferProviderFromModelId`
+  falls back to the prefix only for an ID no catalog has.
+- **Storage and refresh.** The `model_catalog` table (`schema.js`; one row per provider and
+  model; reported fields, override columns, the learned limit, `fetched_at`) is loaded into
+  memory at startup (`modelStateService._initializeCatalog`, `:38`). Every read is synchronous.
+  The lists are read again:
+  - at startup, in the background, for each provider with a key;
+  - when a key is saved (`setApiKey`; the learned key limits are also cleared);
+  - when a list is saved (`setSelectedModel` → `_learnModelList`, `:63`: up to 5 s, so Settings
+    shows the result right after Save);
+  - when a request names an ID the catalog does not know (`ensureKnown`, `:413`: the chain and
+    each provider wait at most 2 s, then go on with the defaults while the lookup finishes in the
+    background). A list older than 24 h is read again in the background.
+
+  A failed read keeps what is known. An ID the list does not name (an alias) is looked up
+  alone (`getModel`); an ID the provider does not have is recorded as missing and checked
+  again after 24 h.
+- **Settings** (`SettingsView.renderModelCapabilities`): under the field that holds the active
+  list, one line per model: its provider, what it can do with the source of each value
+  (`override` or `default` when not from the API), and warnings ("no model with this ID", the key
+  output limit, "answers may stop at N tokens" under Ask's 16,384). **Edit** sets an override
+  (sees images and reasoning: Auto / Yes / No; max output: a number). **Refresh** reads the lists
+  again. The renderer keeps no rule of its own: it validates and lays out a list through
+  `model:plan-model-list` (`modelStateService.planModelList`, `:82`).
+- **What stays in code:** the provider defaults above; the Groq reasoning dialect (§10.3: which
+  fields a reasoning family takes, which no API reports); the preset lists in `PROVIDERS`; and
+  the per-name timeout tuning of Gemini Lite and Claude Haiku (latency, overridable by env).
+- **IPC** (`featureBridge.js`): `model:get-catalog`, `model:plan-model-list`,
+  `model:set-capability-override`, `model:refresh-catalog`; `model:set-selected-model` also
+  takes `fieldProvider`.
 
 ---
 
@@ -653,7 +729,7 @@ flowchart TB
 - Cooldown honors `Retry-After` / `retryDelay`, defaults to 60 s, clamped to `[5 s, 300 s]`
   (`parseRetryAfter`, `:87-130`; constants `modelHealth.js:19-21`).
 - **Streaming** emits a `_reset` sentinel so the Ask consumer discards the partial answer before
-  the next model streams in, then a `_final_model` sentinel (`gemini.js:663-804`); the Ask
+  the next model streams in, then a `_final_model` sentinel (`gemini.js:772-921`); the Ask
   consumer applies both through the pure reducer `applyAskSseEvent` (`askStreamState.js:42-70`),
   which also keeps `isLoading` ("Thinking...") on until the first token and exposes
   `retryingWith` (the `next_model` of the last `_reset`) so the Ask header can show
@@ -662,7 +738,7 @@ flowchart TB
   first chunk. Each request gets an `AbortController` passed to `generateContentStream` as
   `{ signal }`; if no chunk arrives in time the attempt is aborted, logged as `outcome=timeout`,
   and a `_reset` with `reason: 'timeout'` moves on to the next model. Budget per model
-  (`firstChunkTimeoutMs`, `gemini.js:143-147`): 25 s for Lite models, 60 s for models that
+  (`firstChunkTimeoutMs`, `gemini.js:240-244`): 25 s for Lite models, 60 s for models that
   think before answering; `GEMINI_FIRST_CHUNK_TIMEOUT_MS` overrides it for every model. Only the
   first chunk is timed — a slow stream after that is never cut off. A timed-out model is cooled
   down for only `TIMEOUT_COOLDOWN_MS` (10 s, `:160`): a stall is specific to one request, and the
@@ -670,7 +746,7 @@ flowchart TB
   `isLiteModel` (`:127-129`): a `lite` segment anywhere in the ID, so suffixed IDs such as
   `gemini-2.5-flash-lite-preview-06-17` or `gemini-flash-lite-latest` count too.
 - **Hedged (parallel) request:** within an attempt, a request that has sent nothing after
-  `hedgeDelayMs(modelId)` (`gemini.js:162-169`; 10 s for Lite models, none for other models)
+  `hedgeDelayMs(modelId)` (`gemini.js:259-266`; 10 s for Lite models, none for other models)
   gets a second request to the **same** model (`raceFirstChunk`, `:550`). On 2026-10-06 a fresh
   request to a model that had just stalled usually answered in a few seconds. The first request
   to yield a chunk is streamed and the other is aborted, so the consumer never sees it. The
@@ -681,12 +757,12 @@ flowchart TB
   model (`0` disables, `1` forces a hedge for manual testing); `createStreamingLLM` takes
   `hedgeDelayMs` (`null` disables).
 - **End of the answer:** an attempt ends at the chunk that carries `candidates[0].finishReason`,
-  not when the HTTP response closes (`gemini.js:644-647`). The server was seen keeping the
+  not when the HTTP response closes (`gemini.js:753-756`). The server was seen keeping the
   connection open ~7 s after a complete answer; the attempt now counts as `ok` right away
   (`_final_model` + `[DONE]` are sent, Ask stops streaming and saves) and the leftover
   connection is aborted.
 - **Request deadline:** a streaming request gives up when no answer has started within
-  `REQUEST_DEADLINE_MS` (60 s, `gemini.js:178`), counted from the request start across every
+  `REQUEST_DEADLINE_MS` (60 s, `gemini.js:275`), counted from the request start across every
   attempt, hedge and the second round. Each attempt's timeout is shortened to what is left, the
   second round is skipped when less time is left than its wait, and the error reads `No answer
   within 60s (N attempts). Last: <model> — <reason>`. Once any chunk has arrived the deadline no
@@ -696,7 +772,7 @@ flowchart TB
   `createStreamingLLM` takes `requestDeadlineMs` (`null` disables).
 - **Second round:** when every model fails in the streaming path, the models whose failure was
   quick and transient get one more try after `RETRY_ROUND_DELAY_MS` (3 s; `MAX_ROUNDS = 2`,
-  `gemini.js:200-201`). `retryableNextRound` (`:211-215`) leaves out first-chunk timeouts (25-60 s
+  `gemini.js:297-298`). `retryableNextRound` (`:308-312`) leaves out first-chunk timeouts (25-60 s
   each) and 429s (quota; retrying seconds later only burns quota), so 500/502/503/504 and
   network errors qualify. The round is announced with `_reset` `{ reason: 'retry', next_model }`
   (the Ask header shows "Thinking... trying <model>" during the wait), logged as
@@ -721,17 +797,23 @@ flowchart TB
   `state.errorMessage` (also `The model returned an empty response.` when a stream ends with no
   text) and the Ask window renders it instead of an empty "...".
 - **Diagnostics:** every attempt logs one line to the main-process console (`logAttempt`,
-  `gemini.js:86-103`) with model, outcome (`ok` / `aborted` / `timeout` / `transient` / `fatal-*`),
+  `gemini.js:183-200`) with model, outcome (`ok` / `aborted` / `timeout` / `transient` / `fatal-*`),
   HTTP status, when the hedged request started (`hedge=`) and which request answered (`winner=first|hedge`),
   time to first chunk (`ttft`), time of the last chunk (`last`; `total - last` is how
   long the connection stayed open after it), total time, chunk count, `finish` reason, token usage
   (`thoughts` = thinking tokens) and the server's error reason; each request ends with a summary
-  line (`logRequest`, `:234-237`, with `hedges=N` when any) whose
+  line (`logRequest`, `:331-334`, with `hedges=N` when any) whose
   `total` includes the time spent on failed attempts. Grep the `npm start` terminal for
   `[Gemini Provider]`:
   `attempt 1/5 stream model=gemini-3.8-flash outcome=transient status=503 total=4210ms error="..."`.
+- **What the model takes** comes from the model catalog (§9.1). `maxOutputTokens` is the
+  caller's cap, else 65,536, never over the model's `outputTokenLimit` (`maxOutputTokensFor`,
+  `gemini.js:76`). Gemini's models list does not say which models see images, so every model
+  does by default; one set otherwise in Settings gets the request without the image, and goes
+  after the ones that see it. With `visionOnly` (the chain, §10.4), only the models that see
+  images are tried (`planModels`, `:87`; none: `NO_VISION_MODEL`, no request).
 - **STT deliberately does NOT fail over** — `createSTT` takes only the first model in the list
-  (`gemini.js:38-40`), because a persistent live STT session has no clean rotation semantics
+  (`gemini.js:135-137`), because a persistent live STT session has no clean rotation semantics
   (locked decision #3 in the spec).
 
 ### 10.2 Anthropic (Claude)
@@ -761,33 +843,42 @@ flowchart TB
     round -->|no| allfail["All Claude models failed (…) / No answer within 60s (…)"]
 ```
 
-- **One loop, both shapes:** `runWithFailover` (`anthropic.js:546-664`) serves `streamChat` and
+- **One loop, both shapes:** `runWithFailover` (`anthropic.js:621-754`) serves `streamChat` and
   `chat` / `generateContent`. Every Messages call **streams**, the non-streaming lanes included:
   a non-streaming response sends its headers only when the whole answer is written, so the SDK's
   15 s timeout would cut it. `chat()` joins the text and returns `_modelUsed`.
-- **The SDK never retries** (`maxRetries: 0`, `anthropic.js:215`). It would wait out the
+- **The SDK never retries** (`maxRetries: 0`, `anthropic.js:269`). It would wait out the
   server's `retry-after` inside the attempt, however long. A transient failure moves to the next
   model at once. When every model has failed fast, they get one more round after
-  `RETRY_ROUND_DELAY_MS` (2 s, `:286`), announced with `_reset` `reason: 'retry'`. Timeouts,
+  `RETRY_ROUND_DELAY_MS` (2 s, `:373`), announced with `_reset` `reason: 'retry'`. Timeouts,
   refusals and 404s stay out of it, and so does a 429 whose `retry-after` is longer than the wait
-  (`joinsNextRound`, `:369`). The round is skipped when the request deadline leaves less than the
+  (`joinsNextRound`, `:445`). The round is skipped when the request deadline leaves less than the
   wait.
-- **Requests** (`buildRequest`, `anthropic.js:135`, pure):
+- **Requests** (`buildRequest`, `anthropic.js:186`, pure). What the model takes comes from the
+  model catalog (§9.1), that is the Models API or an override in Settings:
   - It never sends `temperature`, `top_p`, `top_k` or `thinking`. Every lane passes
     `temperature: 0.7`, and Opus, Sonnet and Haiku 5.5 reject a non-default value with a 400.
-  - `output_config.effort` defaults to `low` and is sent only to models that accept it
-    (`acceptsEffort`, `:28`).
-  - On those models `max_tokens` is at least 4096, since thinking counts toward it and Live
-    Answer passes 900.
+  - `output_config.effort` is sent only to a model whose `capabilities.effort` lists levels
+    (`effortLevels`, `:32`; Haiku 4.5 and Sonnet 4.5 reject effort with a 400). The level is the
+    caller's, else `ANTHROPIC_EFFORT`, else `low`, among the model's levels. A model the catalog
+    does not know gets no effort.
+  - On a model that thinks (it has effort levels, or the catalog does not know it) `max_tokens`
+    is at least 4096, since thinking counts toward it and Live Answer passes 900. It never goes
+    over the model's `max_tokens` from the Models API.
+  - A model set not to see images gets the request without them (`images=dropped:N` in the log).
+    With `visionOnly` (the chain, §10.4), those models are left out, and when none sees images
+    the request fails with `NO_VISION_MODEL` before any call.
   - Consecutive messages with the same role are merged.
   - `generateContent` never promotes a "You are…" string to the system prompt.
-- **Server-side refusal fallback:** requests to `claude-opus-5-5` and `claude-sonnet-5-5` go
-  through `beta.messages.create` with `fallbacks: 'default'` (beta
-  `server-side-fallback-2026-07-01`). A `fallback` block mid-stream is not a failure: no
-  `_reset`, and `_final_model` names the model that finished. If the API rejects the beta
-  (a 400 naming it), the attempt is resent once without it, and it is not sent again in the
-  process. A final `stop_reason: refusal` fails over to the next model in the list, with no
-  cooldown.
+- **Server-side refusal fallback:** every request goes through `beta.messages.create` with
+  `fallbacks: 'default'` (beta `server-side-fallback-2026-07-01`), unless the catalog records
+  that the API refused the beta for that model. A `fallback` block mid-stream is not a failure:
+  no `_reset`, and `_final_model` names the model that finished. A 400 on the beta method is
+  resent once without the beta (`openStream`, `:481`). When that is accepted, the beta was the
+  cause (an org or a model without it): the catalog marks the model (`server_fallback = 0`,
+  kept across restarts) and it is not sent the beta again. When the resend fails too, its error
+  is the attempt's and nothing is recorded. A final `stop_reason: refusal` fails over to the
+  next model in the list, with no cooldown.
 - **Errors** (`anthropicErrors.js`). `classify` (`:44`) checks the provider's own codes first,
   then the HTTP status, then the error type (`err.type`, also set on stream `error` events),
   and treats anything unknown as transient (fail-open):
@@ -841,21 +932,24 @@ IDs, e.g. `openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b`.
 The presets are the three chat models active on a Free-plan key in October 2026:
 - `openai/gpt-oss-120b`, the default;
 - `openai/gpt-oss-20b`;
-- `qwen/qwen3.8-27b`, a preview model and the only one that sees images.
+- `qwen/qwen3.8-27b`, a preview model, and the only one of the three that sees images (Groq's
+  models API reports it; §9.1).
 
 The loop is modelled on §10.2 and speaks the same protocol to the consumers.
 
 ```mermaid
 flowchart TB
-    start(["createStreamingLLM / createLLM with Groq CSV"]) --> order["orderForImages: image in the request? vision models first"]
-    order --> pick["pickModel (shared modelHealth registry)"]
+    start(["createStreamingLLM / createLLM with Groq CSV"]) --> learn["modelCatalog.ensureKnown: a model it does not know is looked up (2 s at most)"]
+    learn --> order["orderForImages: image in the request? models that see images (catalog) first (visionOnly: only those)"]
+    order --> limit["skip a model whose declared cap is over this key's learned output limit (no call)"]
+    limit --> pick["pickModel (shared modelHealth registry)"]
     pick --> attempt["attempt: streaming chat.completions.create, maxRetries 0, timeout 15 s (headers)"]
     attempt --> ok{"how did it end?"}
     ok -->|"finish_reason stop, or length after text"| done["markSucceeded; _final_model; [DONE]"]
     ok -->|"error / timeout / x_groq.error / length before text"| kind{"groqErrors.classify"}
     kind -->|"fatal 400/401/403/424"| fatal["surface: MODEL — reason"]
     kind -->|"unavailable 404 or model_ code"| next["cooldown 5 min / none for too-large / 10 s own codes and 422 / else retry-after"]
-    kind -->|"too-large 413, transient"| next
+    kind -->|"too-large 413 or 429 OTPM (OTPM: the limit is kept in the catalog), transient"| next
     next --> more{"models left and deadline not hit?"}
     more -->|yes| reset["_reset {next_model, reason}"] --> pick
     more -->|no| round{"round 1 and some failed fast?"}
@@ -863,24 +957,42 @@ flowchart TB
     round -->|no| allfail["All Groq models failed (…) / No answer within 45s (…)"]
 ```
 
-- **Same shape as Anthropic:** one `runWithFailover` (`groq.js:527-648`) for `streamChat` and
+- **Same shape as Anthropic:** one `runWithFailover` (`groq.js:608-769`) for `streamChat` and
   `chat` / `generateContent`; every call streams; the SDK never retries (`SDK_MAX_RETRIES`,
-  `:236`); one more round after 2 s for fast transient failures (`joinsNextRound`, `:381`);
+  `:282`); one more round after 2 s for fast transient failures (`joinsNextRound`, `:459`);
   cancellation aborts the request or the wait.
-- **Requests** (`buildRequest`, `groq.js:154`, pure; `modelTraits`, `:22`):
-  - Reasoning is set per family:
+- **Requests** (`buildRequest`, `groq.js:187`, pure; `modelTraits`, `:28`). Whether a model sees
+  images, its output maximum and whether it reasons come from the model catalog (§9.1): Groq's
+  `input_modalities`, `max_completion_tokens` and `supported_features`, or an override in
+  Settings. A model the catalog does not know gets no image and no cap.
+  - Reasoning is set per family (`REASONING_DIALECTS`, `:16`), the one table by model name that
+    stays: the API says only that a model reasons, not which fields it takes, and a field a
+    model does not know is a 400. It applies unless the catalog says the model does not reason:
     - gpt-oss gets `reasoning_effort: 'low'` and `include_reasoning: false`, so the reasoning
       text never reaches the app or the logs;
     - qwen3 gets `reasoning_effort: 'none'` (instruct mode), plus `reasoning_format: 'hidden'`
       at any other effort;
-    - unknown models get no reasoning field at all.
+    - a model of no known family gets no reasoning field, and reasons at its own default.
   - `temperature` is passed through when it is within [0, 2].
-  - `max_completion_tokens` is the caller's cap (else 2048) plus 1024 for reasoning on models
-    that reason, capped at the model's maximum. Reasoning counts toward it. Groq does not
-    meter the declared value against the per-minute limit, only the tokens used.
+  - `max_completion_tokens` is the caller's cap (else 16,384) plus 1024 for reasoning on models
+    that reason, capped at the model's maximum. Reasoning counts toward it. Only Ask sets no
+    cap: its code and system design answers run to thousands of tokens (4,204 measured), and
+    an Ask answer must not stop mid-way. Groq does not meter the declared value against the
+    per-minute limit, only the tokens used, with one exception: on a key with a separate
+    output limit (OTPM), Qwen refuses before running a request whose expected output, which
+    Groq derives from the declared cap, is over that limit (research R20).
   - Images go only to a model that sees them, at most 3. A request with an image tries those
-    models first (`orderForImages`, `:133`; log `order=vision-first`), then text-only models
-    without the image (`images=dropped:N`).
+    models first (`orderForImages`, `:166`; log `order=vision-first`), then text-only models
+    without the image (`images=dropped:N`). With `visionOnly`, which the chain sets when a
+    later provider sees the image (§10.4), only the models that see it are tried. When they
+    fail, or the list has none (`NO_VISION_MODEL`, no request sent), the request fails rather
+    than answer without the image.
+  - **The key's output limit** (learned, §9.1). A 429 OTPM stores the limit L for the model.
+    Until it expires (24 h) or the key changes, a request whose declared cap
+    (`declaredMaxTokens`, `:219`) is over L skips that model with no call (log
+    `skip model=… reason=key-output-limit limit=L requested=R`). Live Answer (900) still runs on
+    Qwen. When every candidate is skipped, the request fails with `KEY_OUTPUT_LIMIT` and the
+    output-token message, and the chain moves to the next provider.
 - **Stream reading:**
   - The attempt stops at the chunk that carries `finish_reason` and closes the connection.
     groq-sdk keeps reading past `[DONE]` until the server closes it.
@@ -888,17 +1000,17 @@ flowchart TB
   - A chunk with `x_groq.error` fails the attempt (`STREAM_ERROR`). The string itself is
     never logged.
 - **Errors** (`groqErrors.js`). groq-sdk keeps the whole body on HTTP errors and the inner
-  object on stream errors. `classify` (`:62`) reads both:
+  object on stream errors. `classify` (`:68`) reads both:
 
   | Kind | What triggers it | Cooldown |
   |---|---|---|
   | transient | 408/409/429/498/5xx, network, mid-stream `{"error"}` | `retry-after`, else 60 s, clamped to 5 s–5 min |
   | transient (short) | first-text or idle timeout, `length` before any text, `x_groq.error`, 422 | 10 s |
   | unavailable | 404, or any `model_…` code (not found, decommissioned, blocked) | 5 min |
-  | too-large | 413 "Request too large … (TPM): Limit L, Requested R" | none; never retried in round 2 |
+  | too-large | 413 "Request too large … (TPM): Limit L, Requested R", or 429 "Request too large … (OTPM)" (output tokens per minute) | none; never retried in round 2 |
   | fatal-request | 400/424 | none; surfaces at once |
   | fatal-auth | 401/403 | none; surfaces at once |
-- **Timeouts:** first text within 15 s (`firstTextTimeoutMs`, `:199`); 15 s idle once text
+- **Timeouts:** first text within 15 s (`firstTextTimeoutMs`, `:245`); 15 s idle once text
   streams; an answer must start within 45 s.
 - **Rate limits:** a Free-plan key has 8K tokens per minute and 200K per day **per model**.
   Cached tokens do not count, and Live Answer and Live Insights share the fixed ~2.4K-token
@@ -906,18 +1018,25 @@ flowchart TB
   2.5K, so a one-hour interview uses about 240K of the 400K the two text models share
   (estimate in the spec's research R5): one interview fits, two in a day probably do not. The list
   spreads load across models. Each attempt logs `tpm_left` (`x-ratelimit-remaining-tokens`), and a
-  413 tells the user the request is over the limit.
-- **Key validation** lists models (`models.list()`). Keys start with `gsk_`.
+  413 tells the user the request is over the limit. Since October 2026 the console also splits
+  the 8K of Qwen and gpt-oss-120b into 7K in / 1K out. Only Qwen enforces the 1K: it refuses a
+  request whose expected output is over 1,000. Groq derives that estimate from the declared
+  cap: 1,001 for 1,001, 1,168 for 16,384. So Qwen serves Live Answer (900) but not Ask
+  (16,384) or Live Insights (1,024). gpt-oss wrote 4,204 output tokens in one answer
+  (research R20).
+- **Key validation** lists models (`models.list()`). Keys start with `gsk_`. The same list feeds
+  the model catalog (`listModels`, `:320`; inactive models left out).
 - **Diagnostics:** grep `[Groq Provider]`, e.g. `attempt 1/3 stream model=openai/gpt-oss-120b
   outcome=ok ttft=310ms last=1900ms total=1910ms chunks=42 stop=stop effort=low
   tokens=in:6100,out:520,reasoning:180,cached:2300 queue=90ms tpm_left=1400 request_id=req_…`.
-  No log line carries prompt, answer or reasoning text.
+  A request-too-large refusal adds `limit=L requested=R`, which the 160-character `error=`
+  cuts off. No log line carries prompt, answer or reasoning text.
 - **Tuning (`.env`, all optional):**
 
   | Variable | Default | Effect |
   |---|---|---|
   | `GROQ_REASONING_EFFORT` | gpt-oss `low`, qwen3 `none` | gpt-oss: `low`/`medium`/`high`; qwen3: `none`/`default`/`low`/`medium`/`high` |
-  | `GROQ_MAX_TOKENS` | 2048 | Answer budget when the caller gives none |
+  | `GROQ_MAX_TOKENS` | 16384 | Answer budget when the caller gives none (Ask) |
   | `GROQ_REASONING_TOKENS` | 1024 | Extra budget on models that reason |
   | `GROQ_FIRST_TEXT_TIMEOUT_MS` | 15000 | Per-attempt wait for the first text |
   | `GROQ_REQUEST_DEADLINE_MS` | 45000 | Wait for an answer to start; `0` disables |
@@ -954,7 +1073,7 @@ The order of the list is the order of priority, left to right.
 flowchart TB
     split(["factory.splitByProvider: runs of one provider's IDs"]) --> n{"segments?"}
     n -->|"0 or 1"| today["the provider, exactly as before"]
-    n -->|"2+"| order["image in the request? segments that see images first"]
+    n -->|"2+"| order["image in the request? segments that see images first; visionOnly for a segment with a later one that sees it"]
     order --> turn["next segment's turn"]
     turn --> skip{"no key / all models cooling (a later one healthy) / no time left before a later one?"}
     skip -->|yes| logskip["outcome=skipped-…"] --> turn
@@ -966,14 +1085,17 @@ flowchart TB
     more -->|no| fail["its own message, or All providers failed (groq → gemini). Last: …"]
 ```
 
-- **Segments** (`factory.splitByProvider`, `factory.js:140`, pure). Consecutive IDs with the same
+- **Segments** (`factory.splitByProvider`, `factory.js:160`, pure). Consecutive IDs with the same
   prefix provider form one segment. An ID with no known prefix joins the current segment, so
-  the provider tries it as before. Only Anthropic, Gemini and Groq lists are cut; OpenAI and
+  the provider tries it as before. An ID's provider is the one whose models API lists it (the
+  model catalog, §9.1), else its prefix. Only Anthropic, Gemini and Groq lists are cut; OpenAI and
   Ollama lists never are. An interleaved list (`groq, gemini, groq`) gives three segments.
 - **Composition, not a new loop.** `providerChain.js` calls each segment's provider through its
   public `createStreamingLLM` / `createLLM`, so every provider keeps its own failover, cooldowns,
-  rounds, timeouts and image routing (§10.1–10.3). The providers are unchanged. The module never
-  calls an SDK, and loads a provider only when one of its segments runs.
+  rounds, timeouts and image routing (§10.1–10.3). The only option the chain adds is
+  `visionOnly` (see Images below). Before the plan, it lets the model catalog learn every
+  segment's models (`ensureKnown`, 2 s at most; §9.1). The module never calls an SDK, and loads
+  a provider only when one of its segments runs.
 - **Stream protocol.** The running segment's events pass through unchanged: deltas, its own
   `_reset`s and `_final_model`. Its `[DONE]` becomes the chain's `[DONE]`. When a segment fails
   and another can run, the chain sends `{ _reset: true, next_model, reason: 'provider' }`, where
@@ -993,7 +1115,8 @@ flowchart TB
   | Fast failures on every Groq model (5xx, network, a per-minute 429 whose `retry-after` fits in 2 s) | Groq waits its 2 s and gives them a second round. Only if they fail again does the next provider take over |
   | Daily 429 (budget spent) | No second round: the hint is minutes. The next provider takes over in under a second |
   | Timeouts on every Groq model | No second round (a timeout already cost seconds). The next provider takes over |
-  | 413, request too large | Groq's next model (no cooldown), then the next provider |
+  | 413, or a 429 on output tokens (OTPM): request too large | Groq's next model (no cooldown), then the next provider |
+  | A screenshot, and a later provider sees images | Groq tries only Qwen (`visionOnly`). If Qwen is refused, e.g. over its 1K output limit, the next provider answers with the image; gpt-oss never answers without it. The limit is then kept: the next screenshot skips Qwen with no Groq request |
   | 401, 403, 400 (bad key or request) | Groq stops at once, since every model shares the key and the rules. The next provider takes over; without the chain this would end in an error |
   | Groq started answering, then failed | The partial answer is discarded (`_reset`), and the next provider answers from scratch with no chain deadline |
   | The stream ended without `[DONE]` | Treated as a failure: the next provider |
@@ -1005,7 +1128,7 @@ flowchart TB
   - a timeout or a 422: 10 s;
   - a 503 or a network error with no hint: 60 s;
   - a daily 429, or a model not available to the key: 5 min (the registry's ceiling);
-  - a 413: none.
+  - a 413, or a 429 on output tokens (OTPM): none.
 
   While **every** Groq model is cooling down, later requests go straight to the next provider
   with no Groq request (`skipped-cooling`). If only some are, Groq runs and uses the healthy ones.
@@ -1035,8 +1158,19 @@ flowchart TB
 
     Checked over fake providers with an injected clock (spec research R13).
 - **Images.** With an image in the request, segments that see images go first (stable order).
-  A Groq segment sees images only when it has `qwen/qwen3.8-27b`; Gemini and Anthropic segments
-  always do. The request line then carries `order=images-first`.
+  A segment sees images when one of its models does, by the model catalog (`seesImages` in
+  `adapterFor`, `providerChain.js:72`; §9.1): for Groq, a model whose `input_modalities` has
+  `image` (today `qwen/qwen3.8-27b`); Gemini and Anthropic models do by default, unless an
+  override in Settings says otherwise. The request line then carries `order=images-first`.
+  - A segment followed by another one (with a key) that sees images runs with `visionOnly`
+    (`decideTurn`, `providerChain.js:248`). Every provider then tries only its models that see
+    the image, and fails rather than let another model answer without it, so the image reaches
+    the next provider.
+  - Without a later segment that sees images, a segment keeps its own fallback: a model that
+    does not see images answers without them (`images=dropped:N`).
+  - Why: since October 2026 Qwen refuses Ask's 16,384-token cap on its 1K output limit (§10.3).
+    Before `visionOnly`, gpt-oss then answered every screenshot blind and Gemini was never
+    tried (future-work item 6).
 - **Order and position.** Consecutive IDs of one provider form one segment. The provider tries
   them in the order typed, with its own failover. The chain moves to the next segment only when
   every model of the current one fails.
@@ -1112,6 +1246,8 @@ transcripts       (id, session_id, start_at, end_at, speaker, text, lang, ...)  
 ai_messages       (id, session_id, sent_at, role, content, tokens, model, ...)   -- Ask Q&A
 summaries         (session_id PRIMARY KEY, text, tldr, bullet_json, action_json, model, ...)
 provider_settings (provider PK, api_key, selected_llm_model, selected_stt_model, is_active_*)
+model_catalog     ((provider, model_id) PK, listed, vision, max_output, reasoning, effort_levels,
+                   thinking, server_fallback, override_*, key_output_limit, key_limit_at, fetched_at)  -- §9.1
 prompt_presets · shortcuts · ollama_models · whisper_models · users · permissions
 ```
 
@@ -1123,11 +1259,11 @@ Glass can run fully local — no cloud, no API key:
 
 - **Ollama** (local LLM) is managed by `ollamaService` + `localAIManager`. Models are tracked
   in the `ollama_models` table; the selected model is warmed up in the background at startup
-  (`index.js:209-216`) and on selection (`modelStateService.js:343-345`). Ollama's `llmModels`
+  (`index.js:209-216`) and on selection (`modelStateService.js:461-463`). Ollama's `llmModels`
   list in the registry is empty and **populated dynamically** from installed models
-  (`factory.js:85`, `modelStateService.getAvailableModels` `:361-363`).
+  (`factory.js:86`, `modelStateService.getAvailableModels` `:481-483`).
 - **Whisper** (local STT) runs **only in the main process** — the factory returns a stub in the
-  renderer (`factory.js:90-101`). Models (tiny/base/small/medium) are downloaded with SHA-256
+  renderer (`factory.js:91-102`). Models (tiny/base/small/medium) are downloaded with SHA-256
   verification from the manifest in `checksums.js`. STT output is filtered for noise tokens like
   `[BLANK_AUDIO]` (`sttService.js:175-205`).
 - `localAIManager` periodically syncs service health and, if a local service goes down,

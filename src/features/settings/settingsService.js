@@ -46,8 +46,8 @@ async function clearApiKey(provider) {
     return { success };
 }
 
-async function setSelectedModel(type, modelId) {
-    const success = await modelStateService.handleSetSelectedModel(type, modelId);
+async function setSelectedModel(type, modelId, fieldProvider) {
+    const success = await modelStateService.handleSetSelectedModel(type, modelId, fieldProvider);
     return { success };
 }
 
