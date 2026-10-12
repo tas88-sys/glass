@@ -1,0 +1,303 @@
+# Acceptance Tests Manifest (v2)
+# Feature: Live Features Toggle.
+# Hand-authored in the /tasks format (SpecKit not installed on this machine).
+# Deterministic checks cover the pure rule, the lane gates, the wiring guards and the test suite.
+# Behavior in the running app (SC-006 and the Listen window) is manual.
+# Commands are YAML literal blocks (no escaping); each is one shell line.
+# The CLI checks fail until the tasks that create their targets are done.
+
+# --- Root Fields ---
+_version: 2
+spec_id: "2026-10-12-live-features-toggle"
+spec_name: "live-features-toggle"
+
+# --- Staleness Detection (v2 required) ---
+generation_context:
+  generated_at: "2026-10-12T00:00:00Z"
+  spec_hash: "67f729360e291c1d89ea1ae158908be4bfdcc46174efb127993e38a22822caa5"
+  plan_hash: "e3af1dbad57008d96c1b783a9a301ac67896435d21cc592a2f9ce7c1d2d74565"
+  tasks_hash: "e39e4d5d9f05ee0d788669f0fbf353e23a9e22bb9dc59b4433f770cd50ad1147"
+
+# --- Drift Detection (v2 required) ---
+_references:
+  tables: []
+  routes: []
+  files:
+    - "src/features/listen/liveFeatures.js"
+    - "src/features/listen/summary/summaryService.js"
+    - "src/features/listen/listenService.js"
+    - "src/features/settings/settingsService.js"
+    - "src/bridge/featureBridge.js"
+    - "src/preload.js"
+    - "src/ui/listen/ListenView.js"
+    - "src/ui/listen/summary/LiveAnswerView.js"
+    - "src/ui/listen/summary/liveAnswerHistory.js"
+    - "src/ui/settings/SettingsView.js"
+  ecs_tasks: []
+
+# --- Supported Environments ---
+# local: repo only. local-key: repo + a valid LLM key in Settings and audio on the system channel (live calls use provider quota).
+environments: [local, local-key]
+
+# =============================================================================
+# CLI TESTS (deterministic)
+# =============================================================================
+cli_tests:
+  - id: "AT-CLI-001"
+    requirement: "FR-001, contracts"
+    environments: [local]
+    command: |-
+      node -e "const m=require('./src/features/listen/liveFeatures.js');const fn=['normalizeLiveFeatures','answerEnabled','insightsEnabled','nextLiveFeatures','liveFeaturesState','liveFeaturesLabel','viewLabels'];const miss=fn.filter(k=>typeof m[k]!=='function');if(JSON.stringify(m.LIVE_FEATURES)!==JSON.stringify(['both','answer','insights']))miss.push('LIVE_FEATURES');if(m.DEFAULT_LIVE_FEATURES!=='both')miss.push('DEFAULT_LIVE_FEATURES');if(miss.length){console.error('missing: '+miss.join(','));process.exit(1)}"
+    expected_exit_code: 0
+    description: "liveFeatures.js exports the contract surface."
+    severity: critical
+
+  - id: "AT-CLI-002"
+    requirement: "FR-001, D1, E1-E4"
+    environments: [local]
+    command: |-
+      node -e "const m=require('./src/features/listen/liveFeatures.js');const j=JSON.stringify;const ok=[m.normalizeLiveFeatures('answer')==='answer',m.normalizeLiveFeatures('ANSWER')==='both',m.normalizeLiveFeatures(null)==='both',m.answerEnabled('answer')&&!m.insightsEnabled('answer'),!m.answerEnabled('insights')&&m.insightsEnabled('insights'),m.answerEnabled('both')&&m.insightsEnabled('both'),m.nextLiveFeatures('both')==='answer',m.nextLiveFeatures('answer')==='insights',m.nextLiveFeatures('insights')==='both',m.nextLiveFeatures('x')==='answer',j(m.liveFeaturesState('answer'))===j({mode:'answer',answer:true,insights:false}),j(m.liveFeaturesState(7))===j({mode:'both',answer:true,insights:true})];const bad=ok.map((v,i)=>v?null:i).filter(x=>x!==null);if(bad.length){console.error('cases '+bad.join(','));process.exit(1)}"
+    expected_exit_code: 0
+    description: "Normalize, enabled flags, the cycle and the state follow the mode table; an unknown value reads as 'both'."
+    severity: critical
+
+  - id: "AT-CLI-003"
+    requirement: "FR-013, D9"
+    environments: [local]
+    command: |-
+      node -e "const m=require('./src/features/listen/liveFeatures.js');const j=JSON.stringify;const a=m.viewLabels('answer'),b=m.viewLabels('both'),i=m.viewLabels('insights');const ok=j(a)===j({title:'Live answer',showButton:'Show Answer',copyHover:'Copy Glass Answer'})&&j(b)===j({title:'Live insights',showButton:'Show Insights',copyHover:'Copy Glass Analysis'})&&j(i)===j(b)&&m.liveFeaturesLabel('both')==='Answer + Insights'&&m.liveFeaturesLabel('answer')==='Answer only'&&m.liveFeaturesLabel('insights')==='Insights only'&&m.viewLabels('answer')!==a;process.exit(ok?0:1)"
+    expected_exit_code: 0
+    description: "The Listen window labels and the Settings button labels match the spec tables; viewLabels returns a fresh object."
+    severity: critical
+
+  - id: "AT-CLI-004"
+    requirement: "FR-005..FR-009, SC-001..SC-004"
+    environments: [local]
+    command: |-
+      node --test src/features/listen/summary/__tests__/summaryService.liveFeatures.test.js
+    expected_exit_code: 0
+    description: "The lane gates, the pause, the memory kept and the unchanged default, on a real SummaryService over a stub LLM."
+    severity: critical
+
+  - id: "AT-CLI-005"
+    requirement: "FR-002, FR-003, FR-004"
+    environments: [local]
+    command: |-
+      node -e "const fs=require('fs');const r=f=>fs.readFileSync(f,'utf8');const miss=[];if(!/liveFeatures:\s*'both'/.test(r('src/features/settings/settingsService.js')))miss.push('settingsService default');const ch=['settings:getLiveFeatures','settings:setLiveFeatures','listen:liveFeaturesChanged'];const fb=r('src/bridge/featureBridge.js');const pl=r('src/preload.js');for(const c of ch){if(!fb.includes(c))miss.push('featureBridge '+c);if(!pl.includes(c))miss.push('preload '+c)}if(miss.length){console.error(miss.join('; '));process.exit(1)}"
+    expected_exit_code: 0
+    description: "The default, the two IPC handlers, the push channel and the preload surface exist."
+    severity: critical
+
+  - id: "AT-CLI-006"
+    requirement: "FR-005, FR-007, FR-008, FR-010"
+    environments: [local]
+    command: |-
+      node -e "const fs=require('fs');const r=f=>fs.readFileSync(f,'utf8');const miss=[];const ss=r('src/features/listen/summary/summaryService.js');for(const c of ['setLiveFeatures(','pauseLiveAnswer(','answerEnabled(this.liveFeatures)','insightsEnabled(this.liveFeatures)'])if(!ss.includes(c))miss.push('summaryService '+c);const ls=r('src/features/listen/listenService.js');for(const c of ['setLiveFeatures(','getSettings'])if(!ls.includes(c))miss.push('listenService '+c);if(miss.length){console.error(miss.join('; '));process.exit(1)}"
+    expected_exit_code: 0
+    description: "The service methods and gates exist, and listenService sets the mode and reads the saved one."
+    severity: warning
+
+  - id: "AT-CLI-007"
+    requirement: "FR-014, E32, E33"
+    environments: [local]
+    command: |-
+      node -e "const {answersToText:f}=require('./src/ui/listen/summary/liveAnswerHistory.js');const ok=f([])===''&&f(null)===''&&f([{question:'Q2',text:'A2'},{question:'Q1',text:'A1'}])==='Q2\nA2\n\nQ1\nA1'&&f([{text:'A'}])==='A'&&f([{question:'Q',text:''},{text:'B'}])==='B';process.exit(ok?0:1)"
+    expected_exit_code: 0
+    description: "answersToText joins the answers newest first, skips empty text and returns '' for none."
+    severity: critical
+
+  - id: "AT-CLI-008"
+    requirement: "FR-007, FR-008, D4"
+    environments: [local]
+    command: |-
+      node -e "const s=require('fs').readFileSync('src/features/listen/summary/summaryService.js','utf8');const body=sig=>{const i=s.indexOf(sig);if(i<0)return '';const j=s.indexOf('{',i);return s.slice(j+1).replace(/^\s+/,'').slice(0,300)};const a=body('triggerAnswerIfNeeded(speaker, text)');const b=body('async triggerAnalysisIfNeeded()');const ok=/^(?:\/\/[^\n]*\s*)*if \(!answerEnabled\(this\.liveFeatures\)\) return;/.test(a)&&/^(?:\/\/[^\n]*\s*)*if \(!insightsEnabled\(this\.liveFeatures\)\) return;/.test(b);process.exit(ok?0:1)"
+    expected_exit_code: 0
+    description: "The gate is the first statement of each lane trigger, so nothing runs before it (company detection, trace, prefetch, timer, turn count)."
+    severity: critical
+
+# =============================================================================
+# TEST GATES
+# =============================================================================
+test_gates:
+  - id: "AT-GATE-001"
+    requirement: "All FRs, SC-001..SC-005"
+    environments: [local]
+    command: |-
+      npm test
+    expected_exit_code: 0
+    description: "Full node:test suite green: the rule, the lane gates, the answersToText additions and every pre-existing test."
+    severity: critical
+
+  - id: "AT-GATE-002"
+    requirement: "Code quality"
+    environments: [local]
+    command: |-
+      node -e "const {execSync}=require('child_process');const fs=require('fs');const files=execSync('git diff --name-only origin/main...HEAD',{encoding:'utf8'}).split(String.fromCharCode(10)).map(s=>s.trim()).filter(f=>f.endsWith('.js')&&!f.startsWith('src/ui/')&&fs.existsSync(f));for(const f of files)execSync('node --check '+JSON.stringify(f));console.log(files.length+' files ok')" && npm run build:renderer
+    expected_exit_code: 0
+    description: "Syntax gate. eslint is not installed in this repo, so npm run lint cannot run. Main-process files changed on the branch pass node --check, and the renderer builds with esbuild (this is also the check that ListenView and SettingsView can import liveFeatures.js)."
+    severity: warning
+
+  - id: "AT-GATE-003"
+    requirement: "Contracts"
+    environments: [local]
+    command: |-
+      npx -p typescript@5.4.5 tsc -p specs/2026-10-12-live-features-toggle/contracts/tsconfig.json
+    expected_exit_code: 0
+    description: "The contract declarations type-check."
+    severity: warning
+
+# =============================================================================
+# NEGATIVE ASSERTIONS (scope and invariant guards)
+# =============================================================================
+negative_assertions:
+  - id: "AT-NEG-001"
+    requirement: "C1, FR-019"
+    environments: [local]
+    check_type: "cli"
+    command: |-
+      node -e "const {execSync}=require('child_process');const out=execSync('git diff --name-only origin/main...HEAD',{encoding:'utf8'});const guarded=f=>f.startsWith('src/features/common/ai/')||f==='src/features/common/services/modelStateService.js'||f.startsWith('src/features/ask/')||f.startsWith('src/features/listen/stt/');process.stdout.write(String(out.split(/\r?\n/).filter(guarded).length))"
+    expected_result: "0"
+    description: "The providers, the factory, the chain, the cooldown registry, the model state, Ask and the STT code are not modified."
+    severity: critical
+
+  - id: "AT-NEG-002"
+    requirement: "C2, FR-019"
+    environments: [local]
+    check_type: "cli"
+    command: |-
+      node -e "const {execSync}=require('child_process');const out=execSync('git diff --name-only origin/main...HEAD',{encoding:'utf8'});const bad=f=>f==='src/features/common/config/schema.js'||/\/repositories\//.test(f);process.stdout.write(String(out.split(/\r?\n/).filter(bad).length))"
+    expected_result: "0"
+    description: "No schema, table, column or repository changes: the choice lives in the settings store."
+    severity: critical
+
+  - id: "AT-NEG-003"
+    requirement: "C1, D4"
+    environments: [local]
+    check_type: "cli"
+    command: |-
+      node -e "const {execSync}=require('child_process');const r=execSync('git diff --numstat origin/main...HEAD -- src/features/listen/summary/summaryService.js',{encoding:'utf8'}).trim().split(/\s+/);process.stdout.write(r.length>=2?String(Number(r[1])):'no-diff')"
+    expected_result: "0"
+    description: "summaryService.js has no deleted or changed line: only additions (the mode, two methods, two early returns). makeLiveAnswer and makeOutlineAndRequests are untouched."
+    severity: critical
+
+  - id: "AT-NEG-004"
+    requirement: "FR-019, G3, SC-003"
+    environments: [local]
+    check_type: "cli"
+    command: |-
+      node -e "const {execSync}=require('child_process');const d=f=>execSync('git diff --numstat origin/main...HEAD -- '+f,{encoding:'utf8'}).trim();const t='src/features/listen/summary/__tests__/';const h=d('src/ui/listen/summary/__tests__/liveAnswerHistory.test.js').split(/\s+/);const del=h.length>=2?Number(h[1]):0;process.stdout.write([d(t+'liveAnswer.test.js'),d(t+'liveAnswerCareer.test.js')].join('')+'|'+del)"
+    expected_result: "|0"
+    description: "liveAnswer.test.js and liveAnswerCareer.test.js are not edited, and liveAnswerHistory.test.js only gains lines."
+    severity: critical
+
+  - id: "AT-NEG-005"
+    requirement: "C3"
+    environments: [local]
+    check_type: "cli"
+    command: |-
+      node -e "const {execSync}=require('child_process');const d=execSync('git diff origin/main...HEAD -U0 -- src',{encoding:'utf8',maxBuffer:100000000});const bad=d.split(/\r?\n/).filter(l=>l.startsWith('+')&&!l.startsWith('+++')&&l.includes('[Live]')&&!/\[Live\] features=.{0,24}$/.test(l)&&!/(error|err)\.message/.test(l));process.stdout.write(String(bad.length))"
+    expected_result: "0"
+    description: "Every added [Live] log line carries only the mode name or an error message, never prompt, answer or transcript text."
+    severity: critical
+
+  - id: "AT-NEG-006"
+    requirement: "D2, R8"
+    environments: [local]
+    check_type: "cli"
+    command: |-
+      node -e "const s=require('fs').readFileSync('src/features/listen/liveFeatures.js','utf8');process.stdout.write(String((s.match(/require\(|import /g)||[]).length))"
+    expected_result: "0"
+    description: "liveFeatures.js imports nothing, so the renderer bundle and node:test load it alone."
+    severity: warning
+
+# =============================================================================
+# MANUAL TESTS (running app)
+# =============================================================================
+manual_tests:
+  - id: "AT-MANUAL-001"
+    requirement: "FR-017, FR-018, E4"
+    environments: [local]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Settings shows 'Live panels: Answer + Insights' with its help; three presses cycle through the three modes (quickstart #1)."
+    severity: critical
+
+  - id: "AT-MANUAL-002"
+    requirement: "FR-002, E8"
+    environments: [local]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "'Answer only' survives a restart (quickstart #2)."
+    severity: critical
+
+  - id: "AT-MANUAL-003"
+    requirement: "FR-007, FR-008, FR-012, FR-013, FR-015, SC-001"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Answer only: one pane titled 'Live answer', 'Waiting for a question...', answers stream, no analysis call, no Summary pane (quickstart #3)."
+    severity: critical
+
+  - id: "AT-MANUAL-004"
+    requirement: "FR-007, FR-008, SC-002"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Insights only: no answer lines or pane; the summary fills at turn 5 and 10 (quickstart #4)."
+    severity: critical
+
+  - id: "AT-MANUAL-005"
+    requirement: "FR-006, D5, SC-004"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Switching Answer off while an answer streams stops the stream and hides the pane; switching back answers the next question (quickstart #5)."
+    severity: critical
+
+  - id: "AT-MANUAL-006"
+    requirement: "FR-008, E24"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Turning Insights on at turn 7 gives the next summary at turn 10, not at once (quickstart #6)."
+    severity: warning
+
+  - id: "AT-MANUAL-007"
+    requirement: "D10, E25"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "A session recorded with Insights off has no summary, and the Activity page shows it without breaking (quickstart #7)."
+    severity: warning
+
+  - id: "AT-MANUAL-008"
+    requirement: "FR-014, E32"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "In answer-only mode the copy button copies the answers newest first and hover reads 'Copy Glass Answer' (quickstart #8)."
+    severity: warning
+
+  - id: "AT-MANUAL-009"
+    requirement: "FR-019, E41"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Ask works as today in every mode (quickstart #9)."
+    severity: critical
+
+  - id: "AT-MANUAL-010"
+    requirement: "G3, SC-003"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "The default mode shows the same panes, labels, calls and log lines as before the change (quickstart #10)."
+    severity: critical
+
+  - id: "AT-MANUAL-011"
+    requirement: "SC-006, R10 V1"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Provider request counts per mode over the same audio are recorded in research.md R10 (quickstart #11)."
+    severity: warning
