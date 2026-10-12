@@ -286,16 +286,29 @@ describe('chain over the real providers (SC-003)', () => {
     assert.match(chainLine('segment 1/2'), /outcome=ok answered_by=openai\/gpt-oss-120b /);
   });
 
-  it('Groq 503 on every model: its second round runs at once (no round wait), then Gemini', async () => {
+  it('Groq 503 on every model: Groq keeps its 2 s wait and second round, then Gemini', async () => {
     sdk.groq.script = byModel(Object.fromEntries(GROQ_MODELS.map(m => [m, groqHttpError(503, { message: 'Service unavailable' })])));
     sdk.gemini.script = async () => ({ texts: ['ok'] });
     const started = Date.now();
     const { text, events } = await readAll(await createStreamingLLM('groq', laneOpts(RECOMMENDED)).streamChat(MSGS));
+    const elapsed = Date.now() - started;
     assert.equal(text, 'ok');
     assert.equal(sdk.groq.calls.length, 6, 'two rounds of three');
     assert.deepEqual(resets(events).map(e => e.reason), ['transient', 'transient', 'retry', 'transient', 'transient', 'provider']);
-    assert.ok(Date.now() - started < 1_500, 'no 2 s wait before the second round');
-    assert.ok(logs.some(l => l.includes('[Groq Provider] all models failed — retry round 2 in 0ms')));
+    assert.ok(elapsed >= 1_900 && elapsed < 4_000, `Groq's own 2 s wait before its second round (${elapsed} ms)`);
+    assert.ok(logs.some(l => l.includes('[Groq Provider] all models failed — retry round 2 in 2000ms')));
+  });
+
+  it('a brief Groq overload (429, retry-after 1 s, every model) resolves on Groq\'s second round; Gemini is not called', async () => {
+    const perMinute = (m) => groqHttpError(429, { message: `Rate limit reached for model \`${m}\` on tokens per minute (TPM): Limit 8000, Used 7900, Requested 1200. Please try again in 1s.`, type: 'tokens', code: 'rate_limit_exceeded', headers: { 'retry-after': '1' } });
+    sdk.groq.script = byModel(Object.fromEntries(GROQ_MODELS.map(m => [m, [perMinute(m), groqAnswer(m, 'From Groq after the wait.')]])));
+    sdk.gemini.script = async () => ({ texts: ['no'] });
+    const { text, events } = await readAll(await createStreamingLLM('groq', laneOpts(RECOMMENDED)).streamChat(MSGS));
+    assert.equal(text, 'From Groq after the wait.');
+    assert.equal(sdk.gemini.calls.length, 0);
+    assert.deepEqual(resets(events).map(e => e.reason), ['transient', 'transient', 'retry']);
+    assert.equal(events.find(e => e._final_model)._final_model, 'openai/gpt-oss-120b');
+    assert.equal(sdk.groq.calls.length, 4, 'three 429s, then the first model answers in round 2');
   });
 
   it('Groq 401 (key revoked) moves on to Gemini (D4)', async () => {

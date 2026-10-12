@@ -37,8 +37,8 @@
 | E31 | `LLM_CHAIN_DEADLINE_MS=0` | No chain deadline; segments keep their own; reserve not applied | FR-010 |
 | E32 | Provider deadline disabled by env (`GROQ_REQUEST_DEADLINE_MS=0`) | Treated as no limit; the chain's remaining time applies | FR-009 |
 | E33 | Text was forwarded, then the segment failed | The next segment runs with no chain deadline | FR-010 |
-| E34 | Non-last segment | Called with `retryRoundDelayMs: 0` | FR-009 |
-| E35 | Last runnable segment | Called with no `retryRoundDelayMs` (provider default) | FR-009 |
+| E34 | Non-last segment | Called with no `retryRoundDelayMs`: the provider keeps its own wait before its second round (2 s Groq/Anthropic, 3 s Gemini) | FR-009, D7 |
+| E35 | Last runnable segment | Same: no `retryRoundDelayMs` | FR-009 |
 | E36 | Each segment's options | `apiKey` = its own provider's key; `model` = its models joined; no `keys` field | FR-009, C4 |
 | E37 | Consumer cancels during segment 1 | Segment 1's reader cancelled → its request aborted; segment 2 never created; no error | FR-012, SC-004 |
 | E38 | Consumer cancels between segments (after the `_reset`) | Nothing more starts; no error | FR-012 |

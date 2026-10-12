@@ -199,10 +199,10 @@ describe('segmentTiming (FR-009, FR-010, D7)', () => {
   const cases = [
     ['later segment: provider deadline when it fits the reserve',
       { providerDeadlineMs: 45_000, leftMs: 60_000, laterCanRun: true, answerStarted: false },
-      { requestDeadlineMs: 45_000, retryRoundDelayMs: 0 }],
+      { requestDeadlineMs: 45_000 }],
     ['later segment: chain time left minus 15 s when smaller',
       { providerDeadlineMs: 45_000, leftMs: 50_000, laterCanRun: true, answerStarted: false },
-      { requestDeadlineMs: 35_000, retryRoundDelayMs: 0 }],
+      { requestDeadlineMs: 35_000 }],
     ['last segment: all the time left',
       { providerDeadlineMs: 60_000, leftMs: 59_000, laterCanRun: false, answerStarted: false },
       { requestDeadlineMs: 59_000 }],
@@ -211,19 +211,19 @@ describe('segmentTiming (FR-009, FR-010, D7)', () => {
       { requestDeadlineMs: 45_000 }],
     ['provider deadline disabled (E32): the chain time applies',
       { providerDeadlineMs: null, leftMs: 40_000, laterCanRun: true, answerStarted: false },
-      { requestDeadlineMs: 25_000, retryRoundDelayMs: 0 }],
+      { requestDeadlineMs: 25_000 }],
     ['chain deadline disabled (E31): the provider deadline, no reserve',
       { providerDeadlineMs: 45_000, leftMs: Infinity, laterCanRun: true, answerStarted: false },
-      { requestDeadlineMs: 45_000, retryRoundDelayMs: 0 }],
+      { requestDeadlineMs: 45_000 }],
     ['both disabled: nothing',
       { providerDeadlineMs: null, leftMs: Infinity, laterCanRun: false, answerStarted: false },
       {}],
     ['answer started (E33), last: nothing',
       { providerDeadlineMs: 60_000, leftMs: 5_000, laterCanRun: false, answerStarted: true },
       {}],
-    ['answer started, later can run: only the round delay',
+    ['answer started, later can run: nothing',
       { providerDeadlineMs: 60_000, leftMs: -1_000, laterCanRun: true, answerStarted: true },
-      { retryRoundDelayMs: 0 }],
+      {}],
   ];
   const defined = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
   for (const [name, input, expected] of cases) {
@@ -233,6 +233,15 @@ describe('segmentTiming (FR-009, FR-010, D7)', () => {
   it('skips a segment with no time left when a later one can run (E30)', () => {
     assert.equal(segmentTiming({ providerDeadlineMs: 45_000, leftMs: 10_000, laterCanRun: true, answerStarted: false }).skip, 'deadline');
     assert.equal(segmentTiming({ providerDeadlineMs: 45_000, leftMs: 15_000, laterCanRun: true, answerStarted: false }).skip, 'deadline');
+  });
+
+  it('never sets the provider\'s wait before its second round (each keeps its own 2-3 s)', () => {
+    for (const laterCanRun of [true, false]) {
+      for (const answerStarted of [true, false]) {
+        const timing = segmentTiming({ providerDeadlineMs: 45_000, leftMs: 60_000, laterCanRun, answerStarted });
+        assert.equal('retryRoundDelayMs' in timing, false);
+      }
+    }
   });
 
   it('never skips the last runnable segment', () => {
@@ -623,7 +632,7 @@ describe('createChainStreamingLLM: options per segment (FR-009, E34-E36)', () =>
     await readAll(await streamingChain({ segments: [GROQ, GEMINI], fakes: [groq, gemini], opts: { ...OPTS, keys: { groq: 'leak' } }, now: () => clock }).streamChat(MSGS));
     assert.deepEqual(groq.calls[0].opts, {
       apiKey: 'gsk_test', model: 'openai/gpt-oss-120b,openai/gpt-oss-20b', temperature: 0.7, maxTokens: 900, usePortkey: false,
-      requestDeadlineMs: 45_000, retryRoundDelayMs: 0,
+      requestDeadlineMs: 45_000,
     });
     assert.deepEqual(gemini.calls[0].opts, {
       apiKey: 'AIza_test', model: 'gemini-3.5-flash-lite,gemini-3.1-flash-lite', temperature: 0.7, maxTokens: 900, usePortkey: false,
@@ -639,9 +648,8 @@ describe('createChainStreamingLLM: options per segment (FR-009, E34-E36)', () =>
     await readAll(await streamingChain({ segments: [CLAUDE, GROQ, GEMINI], fakes: [claude, groq, gemini], now: () => clock }).streamChat(MSGS));
     assert.equal(claude.calls[0].opts.requestDeadlineMs, 45_000);
     assert.equal(groq.calls[0].opts.requestDeadlineMs, 15_000);
-    assert.equal(groq.calls[0].opts.retryRoundDelayMs, 0);
     assert.equal(gemini.calls[0].opts.requestDeadlineMs, 20_000);
-    assert.equal('retryRoundDelayMs' in gemini.calls[0].opts, false);
+    for (const fake of [claude, groq, gemini]) assert.equal('retryRoundDelayMs' in fake.calls[0].opts, false, `${fake.adapter.id} keeps its own round wait`);
   });
 
   it('skips a non-last segment with no time left; the last runs with what is left (E30)', async () => {
@@ -882,7 +890,7 @@ describe('createChainLLM (FR-014)', () => {
     await onceChain({ segments: [GROQ, GEMINI], fakes: [groq, gemini], opts: { ...OPTS, keys: KEYS }, now: () => clock }).chat(MSGS);
     assert.deepEqual(groq.calls[0].opts, {
       apiKey: 'gsk_test', model: 'openai/gpt-oss-120b,openai/gpt-oss-20b', temperature: 0.7, maxTokens: 900, usePortkey: false,
-      requestDeadlineMs: 45_000, retryRoundDelayMs: 0,
+      requestDeadlineMs: 45_000,
     });
     assert.deepEqual(gemini.calls[0].opts, {
       apiKey: 'AIza_test', model: 'gemini-3.5-flash-lite,gemini-3.1-flash-lite', temperature: 0.7, maxTokens: 900, usePortkey: false,

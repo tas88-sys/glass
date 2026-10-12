@@ -45,7 +45,7 @@ Let one model list name several providers, so that when Groq's free budget runs 
 - **Segments.** `factory.splitByProvider` cuts the stored list into runs of one provider's IDs, using the existing prefix rule. A list with one run takes today's path untouched.
 - **Composition, not a new engine.** A new `providerChain.js` calls each provider's public `createStreamingLLM` / `createLLM` with its own sub-list and key, reads its SSE stream, passes the events through, and moves on when it fails. The providers keep every rule they have and are not edited.
 - **Skip what just failed.** One read-only query in the shared registry, `modelHealth.isCoolingDown`, lets the chain skip a provider whose models are all cooling down, so a spent Groq costs no time after the first failure.
-- **Time.** A 60 s chain deadline for an answer to start, a 15 s reserve for the fallback, and no round wait in front of a fallback.
+- **Time.** A 60 s chain deadline for an answer to start and a 15 s reserve for the fallback. Each provider keeps its own wait before its second round (changed after review; first built with no wait).
 - **Images.** Image-capable segments go first for a screenshot.
 - **Keys.** `getCurrentModelInfo('llm')` returns the keys of every provider the list names. The three LLM call sites pass them; the factory strips them before any provider call.
 - **Settings.** Each model field accepts other providers' IDs after its first entry, when their key is saved.
@@ -59,7 +59,7 @@ Let one model list name several providers, so that when Groq's free budget runs 
 **Target Platform**: Electron desktop (Windows primary; macOS must not break).
 **Performance Goals**:
 - A single-provider list adds no work beyond one split of the list.
-- A switch adds no wait beyond the failed segment's own attempts (no round wait in front of a fallback).
+- A switch adds no wait beyond the failed segment's own attempts and rounds.
 - A skipped segment costs no request.
 - Cancellation reaches the running provider within one event-loop turn.
 
@@ -155,7 +155,7 @@ Consolidated in [research.md](./research.md):
 | R5 | How do keys reach the chain? | `getCurrentModelInfo` returns `keys`; three one-line call-site edits |
 | R6 | How is the list cut? | Consecutive runs by prefix; only anthropic, gemini, groq |
 | R7 | How is a spent provider skipped? | `isCoolingDown`; skip a fully cooling segment while a later one can run |
-| R8 | Time limits | 60 s chain deadline; 15 s reserve; no round wait before a fallback |
+| R8 | Time limits | 60 s chain deadline; 15 s reserve; each provider keeps its own round wait |
 | R9 | Images | Image-capable segments first |
 | R10 | Which failures move on? | All; only cancel stops |
 | R11 | Stream | Pass-through plus one `_reset` `reason: 'provider'` |
@@ -169,7 +169,7 @@ Consolidated in [research.md](./research.md):
 |-------|--------|
 | External APIs | Groq, Gemini, Anthropic; mocked in every test |
 | Test types | Unit (split, plan, timing, messages, registry query, factory routing), integration (chain over fake providers; chain over the real providers with mocked SDKs), manual (quickstart §4, live keys) |
-| Mocking strategy | **Fake providers** expose `createStreamingLLM(opts)` / `createLLM(opts)`. They record the options (key, model, deadline, round delay). They return scripted SSE `Response`s: deltas, `_reset`, `_final_model`, `[DONE]`, an error with `userMessage`, an error after text, an end without `[DONE]`, a hang that records `cancel()`. **Real providers**: `Module._load` intercepts `groq-sdk`, `@google/generative-ai` (+ `@google/genai`) and `@anthropic-ai/sdk`, as each provider's own test does, so the provider code under test is the shipping code. `modelHealth.resetHealth()` before each test |
+| Mocking strategy | **Fake providers** expose `createStreamingLLM(opts)` / `createLLM(opts)`. They record the options (key, model, deadline). They return scripted SSE `Response`s: deltas, `_reset`, `_final_model`, `[DONE]`, an error with `userMessage`, an error after text, an end without `[DONE]`, a hang that records `cancel()`. **Real providers**: `Module._load` intercepts `groq-sdk`, `@google/generative-ai` (+ `@google/genai`) and `@anthropic-ai/sdk`, as each provider's own test does, so the provider code under test is the shipping code. `modelHealth.resetHealth()` before each test |
 
 **Testing Summary**:
 ```
@@ -247,7 +247,7 @@ See spec § Error Handling and `data-model.md`. The rules match the providers':
 | Core | A provider closes its stream without `[DONE]` (bug or cancel race) | Counts as a failure (FR-011); test E13 | Y (T014) |
 | Core | Cancelling the chain while a segment's `streamChat` promise is still pending | Keep the pending promise; when it resolves after cancel, cancel its body at once; never start the next segment | Y (T014/T015) |
 | Core | `reader.cancel()` on a provider stream that already errored | Wrapped in try/catch; a cancel never raises | Y (T015) |
-| Core | Passing `retryRoundDelayMs: 0` changes a provider's rounds in ways its tests never ran | All three loops already take `retryRoundDelayMs` and compare `timeLeft() <= delay`; 0 is a valid value. The integration file runs a Groq second round at 0 | Y (T018) |
+| Core | Passing `retryRoundDelayMs: 0` changes a provider's rounds in ways its tests never ran | All three loops already take `retryRoundDelayMs` and compare `timeLeft() <= delay`; 0 is a valid value. The integration file ran a Groq second round at 0. Superseded after review: the chain no longer passes it (T026) | Y (T018) |
 | Integration | Mocking three SDKs in one file collides with the providers' own tests | Each test file is its own process under `node --test`; the integration file clears the provider modules from `require.cache` before loading them, as `groq.test.js` does | Y (T018) |
 | Wiring | `modelStateService` cannot load under `npm test` (better-sqlite3 ABI) | The key-map rule is `splitByProvider` (pure, tested in the factory); `modelStateService` only loops over it and reads rows. `node --check` plus manual check 4 | Y (T021) |
 | Wiring | Consumer tests stub `getCurrentModelInfo` without `keys` | `keys: undefined` is valid; E3 covers it; `liveAnswer*.test.js` stay unedited | Y (T021) |

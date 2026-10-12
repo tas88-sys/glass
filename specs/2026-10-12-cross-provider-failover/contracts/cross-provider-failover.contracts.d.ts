@@ -193,10 +193,8 @@ export interface SegmentTimingInput {
 }
 
 export interface SegmentTiming {
-  /** Omitted when no limit applies. */
+  /** Omitted when no limit applies. The provider's own round wait is never changed. */
   requestDeadlineMs?: number;
-  /** 0 when laterCanRun. */
-  retryRoundDelayMs?: 0;
   /** Set when laterCanRun and the computed deadline is ≤ 0. */
   skip?: 'deadline';
 }

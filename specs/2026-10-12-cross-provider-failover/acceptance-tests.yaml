@@ -14,9 +14,9 @@ spec_name: "cross-provider-failover"
 # --- Staleness Detection (v2 required) ---
 generation_context:
   generated_at: "2026-10-12T00:00:00Z"
-  spec_hash: "f98d0005b9083d0b1e2eb65cf61d33c6aac0790f57e96ca5fc1eff2f86f49911"
-  plan_hash: "902153f2b87bf1b1b1301176b83099b83d6129ffd37d4d8e12a4f10288d1dcc9"
-  tasks_hash: "21289eb4f94596c7b782c21324cbc08628ed44a8974b0d1e2042762be53cca1a"
+  spec_hash: "7bcf71c144c6b2edb9964b4d91686529a2ac1c22c2bfa7dbd90844f26fc5ca2c"
+  plan_hash: "a3dc6eb202fce23274d4c8fd2c7c43cb18a0be9ae159b14f53a570f0424333c3"
+  tasks_hash: "aa4ddc533ef608abc9f1dbb10077a40f58610c1134dfbd7918bca3b5b033a99d"
 
 # --- Drift Detection (v2 required) ---
 _references:
@@ -62,9 +62,9 @@ cli_tests:
     requirement: "FR-009, FR-010, D7"
     environments: [local]
     command: |-
-      node -e "const c=require('./src/features/common/ai/providerChain.js');const t=c.segmentTiming;const n=o=>JSON.stringify(Object.keys(o).filter(k=>o[k]!==undefined).sort().map(k=>[k,o[k]]));const a=t({providerDeadlineMs:45000,leftMs:60000,laterCanRun:true,answerStarted:false});const b=t({providerDeadlineMs:60000,leftMs:59000,laterCanRun:false,answerStarted:false});const s=t({providerDeadlineMs:45000,leftMs:10000,laterCanRun:true,answerStarted:false});const i=t({providerDeadlineMs:null,leftMs:Infinity,laterCanRun:false,answerStarted:false});const st=t({providerDeadlineMs:60000,leftMs:5000,laterCanRun:false,answerStarted:true});const ok=n(a)===n({requestDeadlineMs:45000,retryRoundDelayMs:0})&&n(b)===n({requestDeadlineMs:59000})&&s.skip==='deadline'&&n(i)==='[]'&&n(st)==='[]';const d=c.chainDeadlineMs({})===60000&&c.chainDeadlineMs({LLM_CHAIN_DEADLINE_MS:'0'})===null&&c.chainDeadlineMs({LLM_CHAIN_DEADLINE_MS:'30000'})===30000&&c.chainDeadlineMs({LLM_CHAIN_DEADLINE_MS:'abc'})===60000;process.exit(ok&&d?0:1)"
+      node -e "const c=require('./src/features/common/ai/providerChain.js');const t=c.segmentTiming;const n=o=>JSON.stringify(Object.keys(o).filter(k=>o[k]!==undefined).sort().map(k=>[k,o[k]]));const a=t({providerDeadlineMs:45000,leftMs:60000,laterCanRun:true,answerStarted:false});const b=t({providerDeadlineMs:60000,leftMs:59000,laterCanRun:false,answerStarted:false});const s=t({providerDeadlineMs:45000,leftMs:10000,laterCanRun:true,answerStarted:false});const i=t({providerDeadlineMs:null,leftMs:Infinity,laterCanRun:false,answerStarted:false});const st=t({providerDeadlineMs:60000,leftMs:5000,laterCanRun:false,answerStarted:true});const ok=n(a)===n({requestDeadlineMs:45000})&&n(b)===n({requestDeadlineMs:59000})&&s.skip==='deadline'&&n(i)==='[]'&&n(st)==='[]';const d=c.chainDeadlineMs({})===60000&&c.chainDeadlineMs({LLM_CHAIN_DEADLINE_MS:'0'})===null&&c.chainDeadlineMs({LLM_CHAIN_DEADLINE_MS:'30000'})===30000&&c.chainDeadlineMs({LLM_CHAIN_DEADLINE_MS:'abc'})===60000;process.exit(ok&&d?0:1)"
     expected_exit_code: 0
-    description: "Segment deadlines keep 15 s for a later segment, skip a segment with no time left, drop the chain limit once an answer started, and give no round wait before a fallback; the chain deadline defaults to 60 s and 0 disables it."
+    description: "Segment deadlines keep 15 s for a later segment, skip a segment with no time left, drop the chain limit once an answer started, and never change a provider's own wait before its second round; the chain deadline defaults to 60 s and 0 disables it."
     severity: critical
 
   - id: "AT-CLI-004"

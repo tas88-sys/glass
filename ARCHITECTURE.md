@@ -959,9 +959,36 @@ flowchart TB
   and another can run, the chain sends `{ _reset: true, next_model, reason: 'provider' }`, where
   `next_model` is the model that segment will try first. The consumers already show
   "Trying <model>…", discard any partial answer, and mark the answer "(fallback)".
-- **Every failure moves on**, including a 401, 400 or 413: keys, limits and request rules differ
-  per provider. A segment fails when its stream errors, ends without `[DONE]`, or its call
-  throws. Only a cancel stops the chain.
+- **The chain switches only when a provider as a whole gives up.** Intermittent errors are handled
+  first by that provider's own failover: its other models, its cooldowns, and its second round.
+  A segment fails when its stream errors, ends without `[DONE]`, or its call throws. Then the
+  chain moves on whatever the cause, a 401, 400 or 413 included, because keys, limits and request
+  rules differ per provider. Only a cancel stops the chain.
+- **How each failure is handled**, with Groq first (its rules, §10.3; Gemini and Anthropic apply
+  their own, §10.1–10.2):
+
+  | Situation | What happens |
+  |---|---|
+  | 429, 503 or timeout on one Groq model | Groq tries its next model. The next provider is not called |
+  | Fast failures on every Groq model (5xx, network, a per-minute 429 whose `retry-after` fits in 2 s) | Groq waits its 2 s and gives them a second round. Only if they fail again does the next provider take over |
+  | Daily 429 (budget spent) | No second round: the hint is minutes. The next provider takes over in under a second |
+  | Timeouts on every Groq model | No second round (a timeout already cost seconds). The next provider takes over |
+  | 413, request too large | Groq's next model (no cooldown), then the next provider |
+  | 401, 403, 400 (bad key or request) | Groq stops at once, since every model shares the key and the rules. The next provider takes over; without the chain this would end in an error |
+  | Groq started answering, then failed | The partial answer is discarded (`_reset`), and the next provider answers from scratch with no chain deadline |
+  | The stream ended without `[DONE]` | Treated as a failure: the next provider |
+  | The next provider has no saved key | It is skipped; the one after it runs, if any |
+  | A newer question replaced this one (cancel) | The running request is aborted. Nothing else starts and no error is shown |
+
+  **Cooldowns decide whether the next request skips Groq.** Each failed Groq model cools down:
+  - a per-minute 429: the server's hint, at least 5 s;
+  - a timeout or a 422: 10 s;
+  - a 503 or a network error with no hint: 60 s;
+  - a daily 429, or a model not available to the key: 5 min (the registry's ceiling);
+  - a 413: none.
+
+  While **every** Groq model is cooling down, later requests go straight to the next provider
+  with no Groq request (`skipped-cooling`). If only some are, Groq runs and uses the healthy ones.
 - **Skips** (decided when a segment's turn comes; logged, no request):
   - `skipped-no-key`: its provider has no saved key;
   - `skipped-cooling`: every one of its models is cooling down in the shared registry
@@ -972,8 +999,10 @@ flowchart TB
   - `skipped-deadline`: see below.
 - **Time.** An answer must start within `LLM_CHAIN_DEADLINE_MS` (60 s) across segments.
   - A segment with a later one behind it gets `requestDeadlineMs` = min(its provider's own
-    deadline, time left − 15 s), and `retryRoundDelayMs: 0`, so it does not wait 2–3 s before
-    its second round while another provider is ready.
+    deadline, time left − 15 s).
+  - The chain never changes a provider's wait before its second round: 2 s for Groq and
+    Anthropic, 3 s for Gemini. A 1–2 s overload therefore still resolves on the provider the
+    user put first. This was a review decision; the first build passed `retryRoundDelayMs: 0`.
   - When that comes to 0 or less, the segment is skipped.
   - The last segment gets what is left.
   - Once answer text has been forwarded, no chain deadline applies.

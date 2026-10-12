@@ -177,9 +177,10 @@ Each provider's own limits (defaults; env overrides exist):
 - **Each segment's deadline** is the smaller of its provider's deadline and the time left. While a later segment can run, it is the time left minus **15 s**, kept for the fallback.
   - With the recommended list, Groq gets min(45 s, 60 − 15 s) = 45 s.
   - If Groq stalls to the end, Gemini still gets 15 s. Flash-Lite's 25 s first-chunk timeout is cut to that, and its 10 s hedge still fires.
-- **`retryRoundDelayMs: 0` for every segment but the last.**
-  - A provider's second round waits 2–3 s for a brief overload to pass. With another provider ready, the wait is waste.
-  - At 0 the second round still retries fast transient failures at once. It never retries rate limits: Groq and Anthropic need a hint ≤ the delay, and Gemini excludes 429.
+- **Each provider keeps its own wait before its second round** (2 s Groq and Anthropic, 3 s Gemini).
+  - First built as `retryRoundDelayMs: 0` for every segment but the last, on the idea that the wait is waste when another provider is ready. At 0, a Groq or Anthropic 429 never joins the second round, because its hint must fit the wait.
+  - Changed after review, by the user's choice. The wait lets a 1–2 s overload, or a per-minute 429 whose hint fits in 2 s, resolve on Groq, whose answers are better than Gemini Flash-Lite's. Cost: up to 2 s more before a switch on that path.
+  - A spent daily budget is unaffected: its hint is minutes, so there is no second round, and the switch still takes under a second.
 - **Once text has been forwarded, no chain deadline applies**, matching the providers: a long answer is never cut.
 
 **Typical switch cost** (Groq budget spent, first request): 0.3–0.9 s of fast 429s, then Gemini's own time to first token. SC-006 measures it.
@@ -270,7 +271,7 @@ Each provider's own limits (defaults; env overrides exist):
 
   | How Groq failed | Groq | Middle (Claude) | Last (Gemini) |
   |---|---|---|---|
-  | Spent: 429s in 0.6 s | `requestDeadlineMs` 45,000, round delay 0 | 44,400 ms, round delay 0 | 59,400 ms when reached |
+  | Spent: 429s in 0.6 s | `requestDeadlineMs` 45,000 | 44,400 ms | 59,400 ms when reached |
   | Stalled until its 45 s deadline | 45,000 | `skipped-deadline` | 15,000 ms |
 
   In any three-provider list, a first provider that stalls to its deadline skips the middle one. With Claude at the end, a stalled Groq goes straight to Claude; with Claude in the middle, it goes to Gemini. A stall is rarer than a 429. Groq's stalls end at the 15 s first-text timeout per model, and three such models make 45 s.
@@ -307,9 +308,9 @@ Each provider's own limits (defaults; env overrides exist):
 `providerChain.integration.test.js` runs the shipping `groq.js`, `gemini.js` and `anthropic.js` under the chain, with their SDKs mocked through `Module._load`. The Groq and Anthropic fakes use the real SDKs' error classes. All 11 cases passed on the first run; `providerChain.js` needed no fix (T019).
 
 What it confirmed:
-- **A spent Groq fails in one pass.** The daily 429 with `retry-after: 371` gives three attempts, one per model, and no second round: the hint (371 s) does not fit the 0 ms round wait the chain passes. The consumer sees Groq's two `transient` resets, then the chain's `provider` reset naming `gemini-3.5-flash-lite`. Each Groq model then cools down for 5 min (the registry's clamp).
+- **A spent Groq fails in one pass.** The daily 429 with `retry-after: 371` gives three attempts, one per model, and no second round: the hint (371 s) does not fit the round wait (0 ms then; Groq's own 2 s since T026). The consumer sees Groq's two `transient` resets, then the chain's `provider` reset naming `gemini-3.5-flash-lite`. Each Groq model then cools down for 5 min (the registry's clamp).
 - **The next request costs Groq nothing.** It logs `outcome=skipped-cooling`, makes no Groq SDK call and sends no `_reset`.
-- **`retryRoundDelayMs: 0` works in Groq's loop.** A 503 on every model gives the second round at once (`retry round 2 in 0ms`), six SDK calls in all, then Gemini. The whole request took well under 1.5 s.
+- **`retryRoundDelayMs: 0` works in Groq's loop.** A 503 on every model gave the second round at once (`retry round 2 in 0ms`), six SDK calls in all, then Gemini, in well under 1.5 s. Superseded by T026: the chain no longer passes it, so the same case now waits Groq's 2 s (`retry round 2 in 2000ms`). A per-minute 429 with `retry-after: 1` on every model then resolves on Groq's second round, and Gemini is not called.
 - **Fatal errors move on.** A Groq 401 (`invalid_api_key`) ends Groq's own request after one attempt, and Gemini answers.
 - **A Gemini 429 gets no second round** (`retryableNextRound`), so a spent Gemini also fails fast. The user then reads "All providers failed (groq → gemini). Last: All Gemini models failed (1 attempt). Last: gemini-3.5-flash-lite — …".
 - **Cancel reaches the SDK in the same turn.** Cancelling the chain's stream aborts the Groq SDK request's signal before `cancel()` returns, and no Gemini call is made.
@@ -331,10 +332,10 @@ One protocol note, found with the fake providers (T015): a `ReadableStream` that
 | R5 | Keys | `getCurrentModelInfo` returns `keys`; three call sites pass them; the factory strips them |
 | R6 | Segments | Consecutive runs by prefix; unknown IDs join the current run; only anthropic, gemini, groq |
 | R7 | Skipping | `modelHealth.isCoolingDown`; skip a fully cooling segment while a later one can run |
-| R8 | Time | Chain deadline 60 s; 15 s reserve for the fallback; no round wait before a fallback |
+| R8 | Time | Chain deadline 60 s; 15 s reserve for the fallback; each provider keeps its own round wait (after review) |
 | R9 | Images | Image-capable segments first when the request has an image |
 | R10 | Errors | Every segment failure moves on; only a cancel stops |
 | R11 | Stream | Pass-through plus one `_reset` `reason: 'provider'` per switch |
 | R12 | Settings | Mixed list in the first provider's field; first entry its own; others need a saved key |
 | R13 | List | `openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b,gemini-3.5-flash-lite,gemini-3.1-flash-lite` (+ `claude-haiku-5-5` optional) |
-| R16 | Real providers under the chain | A spent Groq fails in one pass (three attempts, no second round); the next request skips it; `retryRoundDelayMs: 0` works; cancel reaches the SDK in the same turn; no chain fix needed |
+| R16 | Real providers under the chain | A spent Groq fails in one pass (three attempts, no second round); the next request skips it; cancel reaches the SDK in the same turn; no chain fix needed; a brief overload resolves on Groq's own second round (T026) |

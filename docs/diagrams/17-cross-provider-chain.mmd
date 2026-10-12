@@ -18,13 +18,13 @@ flowchart TB
     cooling -->|yes| skipcool["outcome=skipped-cooling<br/>no request"] --> turn
     cooling -->|no| left{"answer started, or chain time left?<br/>(LLM_CHAIN_DEADLINE_MS, 60 s)"}
     left -->|"no time left"| deadline["No answer within 60s (groq → gemini). Last: …"]
-    left -->|yes| timing["timing: requestDeadlineMs = min(provider's own,<br/>time left − 15 s when a later segment can run);<br/>≤ 0 with a later one: outcome=skipped-deadline<br/>retryRoundDelayMs 0 when a later segment can run"]
+    left -->|yes| timing["timing: requestDeadlineMs = min(provider's own,<br/>time left − 15 s when a later segment can run);<br/>≤ 0 with a later one: outcome=skipped-deadline<br/>the provider keeps its own wait before its second round (2-3 s)"]
     timing -->|"skipped-deadline"| turn
     timing --> announce["after a failed segment:<br/>_reset {next_model: its first model, reason: 'provider'}"]
     announce --> run["run the segment: own key only, its models joined;<br/>pass its SSE events through unchanged<br/>(deltas, its own _resets, _final_model)"]
     run --> ended{"how did it end?"}
     ended -->|"[DONE]"| answered["chain sends [DONE]<br/>outcome=ok answered_by=MODEL"]
-    ended -->|"error, end without [DONE], throw<br/>(any kind: 429, 503, timeout, 401, 400, 413)"| failed["outcome=failed error=userMessage"]
+    ended -->|"the provider gave up after its own failover<br/>(other models, second round): any kind,<br/>429, 503, timeout, 401, 400, 413; or no [DONE]"| failed["outcome=failed error=userMessage"]
     failed --> more{"another segment can run?"}
     more -->|yes| turn
     more -->|"no, one ran"| own["its own userMessage"]

@@ -13,9 +13,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 - **A model list can name several providers.** The Gemini, Anthropic and Groq fields in Settings accept another provider's models after the first entry, in any position, when that provider's key is saved. The order is the priority. For example, the Groq field can hold `openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b,gemini-3.5-flash-lite,gemini-3.1-flash-lite`. When every Groq model fails (a spent daily budget, an outage, a revoked key), Gemini answers in Ask, Live Answer and Live Insights. A list of one provider behaves exactly as before.
 - **`providerChain.js`** runs the list's segments through each provider's own `createStreamingLLM` / `createLLM`, so each provider keeps its failover, cooldowns, timeouts and image routing:
   - the running segment's events pass through unchanged, and a switch is announced with a `_reset` whose `reason` is `provider` ("Trying gemini-3.5-flash-lite…");
+  - the chain switches only when a provider as a whole gives up, after its own failover; then any cause moves on, a bad key included;
   - a provider with no saved key is skipped;
   - a provider whose models all cool down is skipped with no request while a later one is healthy, so a spent Groq costs nothing after its first failure until a cooldown ends;
-  - an answer must start within 60 s across providers (`LLM_CHAIN_DEADLINE_MS`; `0` disables). 15 s are kept for a later provider, which also gets no wait before the earlier provider's second round;
+  - an answer must start within 60 s across providers (`LLM_CHAIN_DEADLINE_MS`; `0` disables). 15 s are kept for a later provider. Each provider keeps its own wait before its second round, so a brief overload still resolves on the first provider;
   - with a screenshot, providers that see images go first;
   - a cancel aborts the running provider's request;
   - when nothing answers, the user reads `All providers failed (groq → gemini). Last: …`;

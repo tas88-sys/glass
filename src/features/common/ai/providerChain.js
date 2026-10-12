@@ -14,8 +14,9 @@
  *  - a segment whose models all cool down (modelHealth) is skipped while a
  *    later segment with a key has a healthy model;
  *  - an answer must start within chainDeadlineMs() across segments; a segment
- *    with a later one behind it keeps FALLBACK_RESERVE_MS for it and gets no
- *    wait before its second round.
+ *    with a later one behind it keeps FALLBACK_RESERVE_MS for it. Each provider
+ *    keeps its own wait before its second round (2-3 s), so a brief overload
+ *    still resolves on the provider the user put first.
  *
  * Never calls an SDK, never logs prompt, answer or reasoning text, and gives
  * each provider its own key only. Providers are required when a segment runs,
@@ -146,14 +147,13 @@ function skipReason({ index, segments, keys, isCoolingDown }) {
  *  - requestDeadlineMs: the smaller of the provider's own deadline and the
  *    chain time left (less the reserve when a later segment can run); omitted
  *    once an answer started or when neither applies;
- *  - retryRoundDelayMs: 0 when a later segment can run (it is ready now);
  *  - skip: 'deadline' when a later segment can run and no time is left.
+ * The provider's wait before its second round is never changed.
  * @param {{ providerDeadlineMs: number|null, leftMs: number, laterCanRun: boolean, answerStarted: boolean }} input
- * @returns {{ requestDeadlineMs?: number, retryRoundDelayMs?: 0, skip?: 'deadline' }}
+ * @returns {{ requestDeadlineMs?: number, skip?: 'deadline' }}
  */
 function segmentTiming({ providerDeadlineMs, leftMs, laterCanRun, answerStarted }) {
   const timing = {};
-  if (laterCanRun) timing.retryRoundDelayMs = 0;
   if (answerStarted) return timing;
   const own = providerDeadlineMs > 0 ? providerDeadlineMs : Infinity;
   const deadline = Math.min(own, laterCanRun ? leftMs - FALLBACK_RESERVE_MS : leftMs);
@@ -242,7 +242,6 @@ function decideTurn({ i, ordered, segmentKeys, adapters, base, deadlineMs, start
   if (timing.skip) return { skip: timing.skip };
   const options = { ...base, apiKey: segmentKeys[segment.provider], model: segment.models.join(',') };
   if (timing.requestDeadlineMs !== undefined) options.requestDeadlineMs = timing.requestDeadlineMs;
-  if (timing.retryRoundDelayMs !== undefined) options.retryRoundDelayMs = timing.retryRoundDelayMs;
   return { adapter, options };
 }
 

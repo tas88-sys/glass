@@ -49,3 +49,16 @@ The user asked whether Claude can go in the middle of the list. The answer is no
 Updated: `ARCHITECTURE.md` §10.4 (intro, Time, a new "Order and position" bullet), `specs/…/quickstart.md` §2, `specs/…/research.md` R13, `docs/LIVE_INSIGHTS_AND_ASK.md` §4.6, `README.md`, `CHANGELOG.md`.
 
 Not changed: the Settings help line still says "You can end the list with another provider's models". That is true but incomplete, and it is UI copy, not a doc.
+
+## Round wait kept, and the failure table (T026, 2026-10-12)
+
+The user chose to keep each provider's own wait before its second round (2 s for Groq and Anthropic, 3 s for Gemini), so the chain no longer passes `retryRoundDelayMs: 0`. The user also asked for the table of how each failure is handled to be in the docs.
+
+Updated:
+- `ARCHITECTURE.md` §10.4:
+  - the Time bullet;
+  - the first bullet now says the chain switches only when a provider as a whole gives up;
+  - a new "How each failure is handled" table, with Groq's cooldowns and when the next request skips Groq.
+- `docs/diagrams/17-cross-provider-chain.mmd`: the timing node and the failure edge. It renders.
+- `docs/LIVE_INSIGHTS_AND_ASK.md` §4.6 and `CHANGELOG.md`.
+- The spec set: D7, FR-009, a clarification, `data-model.md`, the contract (it type-checks), E34/E35, `plan.md`, `research.md` R8/R13/R16, and AT-CLI-003.

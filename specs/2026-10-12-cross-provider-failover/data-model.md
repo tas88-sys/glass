@@ -63,7 +63,6 @@ The factory removes `keys` from the options before any provider call. Each segme
 | `segment` | Segment | |
 | `skip` | `null \| 'no-key' \| 'cooling' \| 'deadline'` | Rules below |
 | `requestDeadlineMs` | number \| undefined | Passed to the provider; omitted when no limit applies |
-| `retryRoundDelayMs` | 0 \| undefined | 0 when a later segment can still run |
 
 **Order.** When the request carries an image, image-capable segments first (stable), then the others. Otherwise list order.
 
