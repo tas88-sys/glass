@@ -380,6 +380,23 @@ Groq serves `whisper-large-v3` and `whisper-large-v3-turbo` through `/audio/tran
 
 ---
 
+## R18: Real SDK check (found in implementation)
+
+groq.js ran with the real groq-sdk 1.6.0 against a local HTTP server that played the Groq API. GROQ_BASE_URL pointed the SDK at it. It ran under Node 24.17 and under Electron 30.5.1 (Node 20.16), and all 7 checks passed on both:
+- **Failover.** A 503 on the first model failed over with exactly one call per model, with retry-count 0, so the SDK did not retry.
+- **Request fields.** The request carried ,  and the Bearer key.
+- **Connection close.** The server kept the connection open after , and the client closed it at .
+- **Images.** A request with an image went first to , with the image and .
+- **Cancel** closed the HTTP connection.
+- **413.** A 413 on the only model gave the user message with the numbers.
+- **** failed over and joined the text.
+- **Key validation.**  sent .
+- **Logs.** The lines carried , from  or , and , with no answer text.
+
+The live probe (T006) still decides R17 V1–V6 against the real API.
+
+---
+
 ## Summary of Decisions
 
 | # | Decision |
@@ -400,3 +417,4 @@ Groq serves `whisper-large-v3` and `whisper-large-v3-turbo` through `/audio/tran
 | R15 | Prompt caching is automatic; log cached tokens |
 | R16 | No STT |
 | R17 | Six live checks before calling it done |
+| R18 | The provider ran with the real SDK against a local fake API under Node and Electron: 7/7 |

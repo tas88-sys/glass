@@ -253,7 +253,7 @@
       "scope": null,
       "block_on": null,
       "completed_at": "2026-10-12T04:30:13Z",
-      "evidence": "groq.test.js streaming cases green (stop at finish_reason with the fake hanging, x_groq.error, too-large, 422, image routing, timeouts, cancel, logs without text); ℹ tests 919 ℹ pass 919 ℹ fail 0 ",
+      "evidence": "groq.test.js streaming cases green (stop at finish_reason with the fake hanging, x_groq.error, too-large, 422, image routing, timeouts, cancel, logs without text); ℹ tests 919 ℹ pass 919 ℹ fail 0 ; real groq-sdk 1.6.0 against a local fake API under node 24.17.0 and Electron 30.5.1 (node 20.16.0): 7/7 (failover with one call per model, close at finish_reason, image routing, cancel closes the connection, 413 message, chat(), models.list, logs) — research R18",
       "evidence_type": "execution",
       "auto_skill": null,
       "auto_skill_timing": null,
