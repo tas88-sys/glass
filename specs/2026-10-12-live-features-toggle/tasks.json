@@ -1,7 +1,7 @@
 {
   "spec_id": "2026-10-12-live-features-toggle",
   "spec_name": "live-features-toggle",
-  "updated": "2026-10-12T16:52:48Z",
+  "updated": "2026-10-12T16:58:14Z",
   "anthropic_patterns": [
     "Ralph looping",
     "JSON task state"
@@ -9,7 +9,7 @@
   "completion_promise": "<promise>SPEC-2026-10-12-live-features-toggle-COMPLETE</promise>",
   "tasks": [
     {
-      "status": "pending",
+      "status": "completed",
       "parallel": false,
       "target_file": null,
       "gate": null,
@@ -19,8 +19,8 @@
       "gate_type": null,
       "scope": "changed",
       "block_on": "Pattern check returns FAIL",
-      "completed_at": null,
-      "evidence": null,
+      "completed_at": "2026-10-12T16:58:08Z",
+      "evidence": "Manual (no pattern-check skill on this machine): liveFeatures.js follows liveAnswerHistory.js (use strict, JSDoc, plain module.exports, no dependencies; AT-NEG-006 = 0); anchors the later tasks rely on exist as the plan says: triggerAnswerIfNeeded (summaryService.js:559) and triggerAnalysisIfNeeded (:980) for the early returns, resetLiveAnswer (:703) with the inFlightController abort path that pauseLiveAnswer reuses, the askMode setting pattern (settingsService.js:219 default, featureBridge.js:84-101 own IPC pair + push to one window, preload.js:116-121), the Automatic Updates button in SettingsView.js (:500-565)",
       "evidence_type": "execution",
       "auto_skill": "pattern-registry",
       "auto_skill_timing": null,
@@ -32,7 +32,7 @@
       "description": "Pattern compliance check before implementation: liveFeatures.js is CommonJS with no imports and exports a plain object (the style of liveAnswerHistory.js, importable by esbuild and require-able under node:test); the lane gates are early returns at the top of triggerAnswerIfNeeded/triggerAnalysisIfNeeded and makeLiveAnswer/makeOutlineAndRequests are not edited; pauseLiveAnswer reuses the inFlightController abort path and is separate from resetLiveAnswer; the setting follows the askMode pattern (getDefaultSettings, saveSettings, own IPC pair, push to one window through windowPool); the Settings control follows the Automatic Updates button; the listen window is notified directly (it is not a settings-updated target); no text or key in logs."
     },
     {
-      "status": "pending",
+      "status": "completed",
       "parallel": true,
       "target_file": "src/features/listen/__tests__/liveFeatures.test.js",
       "gate": null,
@@ -42,8 +42,8 @@
       "gate_type": null,
       "scope": null,
       "block_on": null,
-      "completed_at": null,
-      "evidence": null,
+      "completed_at": "2026-10-12T16:58:08Z",
+      "evidence": "liveFeatures.test.js written first: the run failed with MODULE_NOT_FOUND for src/features/listen/liveFeatures.js before T011",
       "evidence_type": null,
       "auto_skill": null,
       "auto_skill_timing": null,
@@ -55,7 +55,7 @@
       "description": "TEST liveFeatures.js (src/features/listen/__tests__/liveFeatures.test.js). LIVE_FEATURES is ['both','answer','insights'] and DEFAULT_LIVE_FEATURES 'both'. normalizeLiveFeatures: the three values pass; null, undefined, 42, '', 'ANSWER', {} and ['answer'] -> 'both'. answerEnabled/insightsEnabled table over the three modes and invalid input (both true). nextLiveFeatures: both->answer->insights->both, invalid -> 'answer'. liveFeaturesState returns {mode, answer, insights} with mode normalized, and no mode has both flags false. liveFeaturesLabel: 'Answer + Insights' | 'Answer only' | 'Insights only'; invalid -> the 'both' label. viewLabels table from data-model (answer: 'Live answer' / 'Show Answer' / 'Copy Glass Answer'; both and insights: 'Live insights' / 'Show Insights' / 'Copy Glass Analysis'); returns a new object each call (callers cannot mutate a shared table). The module has no imports (require.cache gains no other module when it loads)."
     },
     {
-      "status": "pending",
+      "status": "completed",
       "parallel": false,
       "target_file": "src/features/listen/liveFeatures.js",
       "gate": "T010",
@@ -65,8 +65,8 @@
       "gate_type": null,
       "scope": null,
       "block_on": null,
-      "completed_at": null,
-      "evidence": null,
+      "completed_at": "2026-10-12T16:58:08Z",
+      "evidence": "liveFeatures.test.js 15/15; AT-CLI-001, AT-CLI-002, AT-CLI-003 and AT-NEG-006 pass; contracts tsc PASS; npm test 1075/1075",
       "evidence_type": null,
       "auto_skill": null,
       "auto_skill_timing": null,
