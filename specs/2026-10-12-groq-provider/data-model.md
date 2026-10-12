@@ -107,7 +107,7 @@ Content mapping:
 | `{ inlineData: { mimeType, data } }` (`generateContent`) | `{ type: 'image_url', image_url: { url: 'data:<mimeType or image/jpeg>;base64,<data>' } }`, same vision rule |
 | empty text, `null`, unknown | dropped |
 
-Content with no image left is sent as one string, its text parts joined with a newline. A message whose content ends up empty is dropped.
+Content with no image left is sent as one string, its text parts joined with a newline. This is required, not a style choice: gpt-oss rejects array content with `400 "messages[0].content must be a string"` (T006, research R17). A message whose content ends up empty is dropped.
 
 ### Attempt order (`orderForImages`, pure)
 

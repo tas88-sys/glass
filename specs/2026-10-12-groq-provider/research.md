@@ -400,6 +400,21 @@ Groq serves `whisper-large-v3` and `whisper-large-v3-turbo` through `/audio/tran
 | V5 | Error codes for an unknown or retired model | R8 | quickstart §4 checks 6–7 |
 | V6 | Does `reasoning_effort: 'none'` on `qwen/qwen3.8-27b` stream content straight away? | D6 | T006 |
 
+### Results (T006, `scripts/probe-groq-stream.js` on the user's Free-plan key, 2026-10-12)
+
+| # | Answer | Effect on the provider |
+|---|--------|------------------------|
+| V1 | **Yes.** Three chunks per answer on every model. The last carries `finish_reason: 'stop'`, `x_groq.id`, `x_groq.usage` and a top-level `usage`. Groq closed the connection right after `[DONE]` (the iteration ended 1–2 ms after `finish_reason`) | None. Usage arrives on the finish chunk, so the plan's fallback of waiting up to 250 ms is not needed. Stopping at `finish_reason` still guards a connection that stays open (R4) |
+| V2 | **Yes.** `x_groq.id` is in the first and the last chunk, and the `x-request-id` header is sent (`req_01m4qy5bf6e84s6cfsyze4mbq9`, …) | None |
+| V3 | **No.** No `delta.reasoning` chunk arrived with `include_reasoning: false` | None |
+| V4 | **Per model.** `x-ratelimit-limit-tokens: 8000` and `x-ratelimit-limit-requests: 1000` (RPD) on all three models. After a call to `gpt-oss-20b`, `gpt-oss-120b` still showed its own full window. **New:** `x-ratelimit-remaining-tokens` drops by exactly the prompt plus the declared `max_completion_tokens` (8000 − 7858 = 78 + 64 on gpt-oss; 8000 − 7917 = 19 + 64 on Qwen). So the declared budget is reserved against the minute's headroom when the request starts. A request declaring 60,000 on this same key was still not refused (R5) | The reservation can turn a second call in the same minute into a 429 earlier than the tokens actually used would. Failover covers it (the next model has its own window). The 1024-token reasoning allowance (D5) adds to it. It stays until real-session logs (`tpm_left`) show 429s that a smaller allowance would avoid. Whether the reservation is released when the answer is shorter is not visible from single requests |
+| V5 | An unknown model and a retired one (`llama-3.3-70b-versatile`) both return **404 `invalid_request_error` `model_not_found`**: "The model `…` does not exist or you do not have access to it." | None. Classified `unavailable` by status and by code |
+| V6 | **Yes.** Qwen at `none` sent its first content at 242 ms (headers at 241 ms) and no reasoning | None |
+
+**Also observed:**
+- **An image sent to `openai/gpt-oss-20b` returns `400 invalid_request_error "messages[0].content must be a string"`.** gpt-oss rejects array content altogether, not only image parts. The provider never sends an image to a text-only model (D8). It also already sends text-only content as a single string (data-model, content mapping). A test pins that, and with this finding it is required behavior, not a style choice.
+- **First content with a short prompt:** `gpt-oss-20b` 480 ms, `gpt-oss-120b` 441 ms, `qwen3.8-27b` 242 ms, most of it before the headers arrived. SC-006 measures it with real prompts.
+
 ---
 
 ## R18: Real SDK check (found in implementation)
@@ -438,5 +453,5 @@ The live probe (T006) still decides R17 V1–V6 against the real API.
 | R14 | `openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b` |
 | R15 | Prompt caching is automatic and cached tokens do not count against rate limits; the fixed ~2.4K-token prefix is shared by Live Answer and Live Insights; log cached tokens |
 | R16 | No STT |
-| R17 | Six live checks before calling it done |
+| R17 | Live probe (T006): usage on the finish chunk, request ids in chunks and header, no reasoning chunks, per-model windows that reserve prompt + declared budget, `model_not_found` 404s, Qwen at `none` streams at once; gpt-oss rejects array content |
 | R18 | The provider ran with the real SDK against a local fake API under Node and Electron: 7/7 |

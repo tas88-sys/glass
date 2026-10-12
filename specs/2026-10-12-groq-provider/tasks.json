@@ -1,7 +1,7 @@
 {
   "spec_id": "2026-10-12-groq-provider",
   "spec_name": "groq-provider",
-  "updated": "2026-10-12T11:08:12Z",
+  "updated": "2026-10-12T11:33:49Z",
   "anthropic_patterns": [
     "Ralph looping",
     "JSON task state"
@@ -58,7 +58,7 @@
       "id": "T006",
       "phase": "0-sdk",
       "description": "Live probe (optional; needs the user's approval and GROQ_API_KEY; one tiny request per model, fractions of a cent). scripts/probe-groq-stream.js streams 'Reply with the word ok' through groq-sdk with maxRetries 0 to openai/gpt-oss-20b (reasoning_effort low, include_reasoning false) and to qwen/qwen3.8-27b (reasoning_effort none). For each chunk it prints only: index, ms since start, Object.keys of the chunk / choices[0].delta / x_groq, finish_reason, and whether usage is present. It never prints content or reasoning. After the last chunk it prints whether the connection closed within 2 s after [DONE] (R17 V1), the response headers x-request-id and x-ratelimit-* (V2, V4), whether any delta.reasoning arrived (V3) and Qwen's time to first content (V6). Record the findings in research.md R17 and adjust FR-017 if usage arrives after finish_reason (plan risk table).",
-      "status": "pending",
+      "status": "completed",
       "parallel": false,
       "target_file": "scripts/probe-groq-stream.js",
       "gate": "T005",
@@ -68,8 +68,8 @@
       "gate_type": null,
       "scope": null,
       "block_on": null,
-      "completed_at": null,
-      "evidence": null,
+      "completed_at": "2026-10-12T11:33:49Z",
+      "evidence": "scripts/probe-groq-stream.js on the user's Free-plan key, 2026-10-12: research R17 results V1-V6. Usage on the finish chunk (no wait needed); x_groq.id first and last chunk + x-request-id header; no reasoning chunks with include_reasoning false; per-model 8K TPM windows whose remaining-tokens reserve prompt + max_completion_tokens; unknown and retired models 404 model_not_found; Qwen at none first content 242 ms; image to gpt-oss 400 \"content must be a string\". No content text printed",
       "evidence_type": "execution",
       "auto_skill": null,
       "auto_skill_timing": null,

@@ -14,8 +14,8 @@ spec_name: "groq-provider"
 generation_context:
   generated_at: "2026-10-12T00:00:00Z"
   spec_hash: "f862c97eea867d4759bcca4c387d3a01f88f8691a3aefa1e77704d7013e212bc"
-  plan_hash: "384d5de19c643d6cc917ce861f162374149c930a81397946fcdec9378cfd3ed7"
-  tasks_hash: "4ed93711099e85b947336f9b84c21670a5f3eea78c12d0b34122faacc7be9d2d"
+  plan_hash: "69a615542fa2cd569222d12a11139a8397c59c0c2d65c44debbba02f04ccd242"
+  tasks_hash: "f772db6b75a86b798c46976784084de2f7adef8b9e64b111bac3b10322d320e0"
 
 # --- Drift Detection (v2 required) ---
 _references:
