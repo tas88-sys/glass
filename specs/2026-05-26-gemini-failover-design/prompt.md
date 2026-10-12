@@ -28,6 +28,10 @@ Help me decide if this is the best approach or if I am missing something and thi
 ## DEFAULT (CODING CHALLENGES, DESING SYSTEM, ETC): gemini-3-flash-preview,gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-3.8-flash
 ## SPEED (ORAL TECH INTERVIEWS): gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-3-flash-preview
 
+### TLDR
+## openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b,gemini-3.5-flash-lite,gemini-3.1-flash-lite 
+
+
 Why:
 - Last 7 days (free tier): gemini-3.5-flash, 3.6-flash, 3.7-flash and 3.8-flash got requests but never produced output (all 503 ServiceUnavailable, never 429). Only gemini-3-flash-preview, 3.1-flash-lite and 3.5-flash-lite answered. Small sample (1-2 tries per model per day).
 - Every failed attempt adds a full round trip before the next model, and the 60 s cooldown means the same failures repeat every minute. Models that answer go first.
