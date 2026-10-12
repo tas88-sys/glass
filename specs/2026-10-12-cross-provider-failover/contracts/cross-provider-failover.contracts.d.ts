@@ -224,12 +224,18 @@ export interface ChainInput {
   keys: KeysMap;
   /** The caller's options without keys (temperature, maxTokens, …). */
   opts: Omit<FactoryLlmOptions, 'keys' | 'apiKey' | 'model'> & { apiKey?: string; model?: string };
-  /** Defaults to the real providers. */
+  /** Defaults to the real providers (DEFAULT_ADAPTERS). */
   adapters?: ChainAdapters;
+  /** For chainDeadlineMs; defaults to process.env. */
+  env?: { [name: string]: string | undefined };
+  /** Clock in epoch ms; defaults to Date.now (tests inject one). */
+  now?: () => number;
 }
 
 export interface ProviderChain {
   CHAIN_PROVIDERS: readonly ChainProviderId[];
+  /** The real providers, each required only when one of its segments runs. */
+  DEFAULT_ADAPTERS: ChainAdapters;
   /** 15 000: kept for the fallback while a later segment can run. */
   FALLBACK_RESERVE_MS: number;
   /** 60 000; LLM_CHAIN_DEADLINE_MS overrides; 0 → null (disabled). */
