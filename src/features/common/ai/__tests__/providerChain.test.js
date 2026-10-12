@@ -735,6 +735,41 @@ describe('createChainStreamingLLM: images (FR-007, D8)', () => {
     assert.equal(text, 'Groq');
     assert.doesNotMatch(chainLines('request')[0], /order=/);
   });
+
+  const SCREEN = [{ role: 'user', content: [{ type: 'text', text: 'what is on screen?' }, IMAGE] }];
+
+  it('with an image that a later segment sees, the segment runs visionOnly; the last one does not', async () => {
+    const groq = fakeProvider('groq', { steps: [{ error: providerErr('No Groq model in the list sees images.') }] });
+    const gemini = fakeProvider('gemini', { steps: answer('gemini-3.5-flash-lite', 'I see it') });
+    const { text, events } = await readAll(await streamingChain({ segments: [GROQ_VISION, GEMINI], fakes: [groq, gemini] }).streamChat(SCREEN));
+    assert.equal(text, 'I see it');
+    assert.equal(groq.calls[0].opts.visionOnly, true);
+    assert.equal('visionOnly' in gemini.calls[0].opts, false);
+    assert.deepEqual(gemini.calls[0].messages, SCREEN, 'the image reaches the next segment');
+    assert.deepEqual(resets(events), [{ _reset: true, next_model: 'gemini-3.5-flash-lite', reason: 'provider' }]);
+  });
+
+  it('no visionOnly without an image', async () => {
+    const groq = fakeProvider('groq', { steps: answer('openai/gpt-oss-120b', 'ok') });
+    const gemini = fakeProvider('gemini', { steps: answer('gemini-3.5-flash-lite', 'no') });
+    await readAll(await streamingChain({ segments: [GROQ_VISION, GEMINI], fakes: [groq, gemini] }).streamChat(MSGS));
+    assert.equal('visionOnly' in groq.calls[0].opts, false);
+  });
+
+  it('no visionOnly when no later segment sees images', async () => {
+    const groq = fakeProvider('groq', { steps: answer('openai/gpt-oss-120b', 'ok') });
+    const blind = fakeProvider('gemini', { steps: answer('gemini-3.5-flash-lite', 'no') }, { seesImages: false });
+    await readAll(await streamingChain({ segments: [GROQ_VISION, GEMINI], fakes: [groq, blind] }).streamChat(SCREEN));
+    assert.equal('visionOnly' in groq.calls[0].opts, false);
+  });
+
+  it('no visionOnly when the later segment that sees images has no key', async () => {
+    const groq = fakeProvider('groq', { steps: answer('openai/gpt-oss-120b', 'ok') });
+    const gemini = fakeProvider('gemini', { steps: answer('gemini-3.5-flash-lite', 'no') });
+    await readAll(await streamingChain({ segments: [GROQ_VISION, GEMINI], fakes: [groq, gemini], keys: { groq: 'gsk_test' } }).streamChat(SCREEN));
+    assert.equal('visionOnly' in groq.calls[0].opts, false);
+    assert.equal(gemini.calls.length, 0);
+  });
 });
 
 describe('createChainStreamingLLM: cancel (FR-012, SC-004)', () => {
@@ -866,6 +901,17 @@ describe('createChainLLM (FR-014)', () => {
     assert.equal(gemini.calls[0].method, 'generateContent');
     assert.deepEqual(gemini.calls[0].input, parts);
     assert.match(chainLines('request')[0], /^\[LLM Chain\] request once answered_by=gemini-3\.5-flash-lite provider=gemini segments_run=1 total=\d+ms order=images-first$/);
+  });
+
+  it('generateContent with an image a later segment sees: visionOnly on the first segment, as the stream path does', async () => {
+    const parts = ['describe the screen', { inlineData: { mimeType: 'image/png', data: 'AAAA' } }];
+    const result = { response: { text: () => 'a screen' }, _modelUsed: 'gemini-3.5-flash-lite' };
+    const groq = fakeProvider('groq', { once: () => { throw providerErr('No Groq model in the list sees images.'); } });
+    const gemini = fakeProvider('gemini', { once: () => result });
+    const out = await onceChain({ segments: [GROQ_VISION, GEMINI], fakes: [groq, gemini] }).generateContent(parts);
+    assert.equal(out, result);
+    assert.equal(groq.calls[0].opts.visionOnly, true);
+    assert.equal('visionOnly' in gemini.calls[0].opts, false);
   });
 
   it('skips a cooling segment and a keyless one, as the stream path does', async () => {

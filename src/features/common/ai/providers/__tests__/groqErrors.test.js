@@ -24,6 +24,9 @@ const {
 } = require('../groqErrors');
 
 const TOO_LARGE = 'Request too large for model `openai/gpt-oss-20b` in organization `org_x` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Requested 9400, please reduce your message size and try again.';
+// The live refusal of 2026-10-12 (research R20): a 429, not a 413.
+const OTPM = "Request too large for model `qwen/qwen3.8-27b` in organization `org_x` service tier `on_demand` on output tokens per minute (OTPM): Limit 1000, Requested 1679. The request's expected output tokens exceed the enforced limit; reduce max_tokens (or the request's expected output) and try again.";
+const RATE_LIMITED = 'Rate limit reached for model `openai/gpt-oss-120b` in organization `org_x` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Used 5454, Requested 4212. Please try again in 12.495s.';
 
 /** An HTTP error as the SDK raises it before the stream opens. */
 function httpError(status, { message = 'server said no', type = 'invalid_request_error', code, headers = {} } = {}) {
@@ -70,6 +73,11 @@ describe('classify', () => {
 
   it('a 429 with code rate_limit_exceeded is transient', () => {
     assert.equal(classify(httpError(429, { type: 'tokens', code: 'rate_limit_exceeded' })), 'transient');
+    assert.equal(classify(httpError(429, { message: RATE_LIMITED, type: 'tokens', code: 'rate_limit_exceeded' })), 'transient');
+  });
+
+  it('a 429 "Request too large" on output tokens (OTPM) is too-large', () => {
+    assert.equal(classify(httpError(429, { message: OTPM, type: 'tokens', code: 'rate_limit_exceeded' })), 'too-large');
   });
 
   for (const status of [400, 424]) {
@@ -202,15 +210,20 @@ describe('shortErrorMessage', () => {
 
 describe('tooLargeNumbers', () => {
   it('reads Limit and Requested from a 413', () => {
-    assert.deepEqual(tooLargeNumbers(httpError(413, { message: TOO_LARGE, type: 'tokens', code: 'rate_limit_exceeded' })), { limit: 8000, requested: 9400 });
+    assert.deepEqual(tooLargeNumbers(httpError(413, { message: TOO_LARGE, type: 'tokens', code: 'rate_limit_exceeded' })), { limit: 8000, requested: 9400, output: false });
   });
 
   it('reads them from a bare message', () => {
-    assert.deepEqual(tooLargeNumbers({ message: '413 … (TPM): Limit 6000, Requested 6294, please …' }), { limit: 6000, requested: 6294 });
+    assert.deepEqual(tooLargeNumbers({ message: '413 … (TPM): Limit 6000, Requested 6294, please …' }), { limit: 6000, requested: 6294, output: false });
+  });
+
+  it('reads them from a 429 on output tokens, marked output', () => {
+    assert.deepEqual(tooLargeNumbers(httpError(429, { message: OTPM, type: 'tokens', code: 'rate_limit_exceeded' })), { limit: 1000, requested: 1679, output: true });
   });
 
   it('is null without them', () => {
     assert.equal(tooLargeNumbers(httpError(413, { message: 'Request Entity Too Large' })), null);
+    assert.equal(tooLargeNumbers(httpError(429, { message: RATE_LIMITED })), null, 'a rate limit has Used between Limit and Requested');
     assert.equal(tooLargeNumbers(null), null);
   });
 });

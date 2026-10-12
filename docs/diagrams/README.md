@@ -24,8 +24,8 @@ grounded in the current code — read them next to the matching section.
 | 13 | `13-run-as-is-decision.mmd` | "If I run it as-is" — what works on first launch, per platform |
 | 14 | `14-career-intent-router.mmd` | How Live Answer's career intent router picks a route (company, follow-up, personal, ambiguous, general) and what each route searches. Shown in `LIVE_INSIGHTS_AND_ASK.md` §4.7 |
 | 15 | `15-anthropic-failover.mmd` | The Claude CSV failover loop: request building, first-text / idle / deadline timeouts, error kinds, cooldowns, server-side refusal fallback, second round (LLM only) |
-| 16 | `16-groq-failover.mmd` | The Groq CSV failover loop: image routing (vision models first), request building per reasoning family, first-text / idle / deadline timeouts, error kinds incl. too-large (413), cooldowns, second round (LLM only) |
-| 17 | `17-cross-provider-chain.mmd` | A model list that names several providers (e.g. Groq then Gemini): segments, skips (no key, all models cooling, no time left), the 60 s chain deadline with a 15 s reserve, images first, the `provider` reset, and the final messages |
+| 16 | `16-groq-failover.mmd` | The Groq CSV failover loop: image routing (vision models first), request building per reasoning family, first-text / idle / deadline timeouts, error kinds incl. too-large (413, or 429 on the output limit), `visionOnly`, cooldowns, second round (LLM only) |
+| 17 | `17-cross-provider-chain.mmd` | A model list that names several providers (e.g. Groq then Gemini): segments, skips (no key, all models cooling, no time left), the 60 s chain deadline with a 15 s reserve, images first and `visionOnly` (no blind answer while a later provider sees the image), the `provider` reset, and the final messages |
 
 ## Rendering
 

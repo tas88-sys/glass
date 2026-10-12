@@ -9,7 +9,9 @@
  * failover, cooldowns, rounds, timeouts and image routing.
  *
  * Plan (decided per request; skips decided when a segment's turn comes):
- *  - with an image, segments that see images go first (stable);
+ *  - with an image, segments that see images go first (stable), and a segment
+ *    with a later one (with a key) that sees images runs with visionOnly: its
+ *    text-only models do not answer without the image;
  *  - a segment whose provider has no key is skipped;
  *  - a segment whose models all cool down (modelHealth) is skipped while a
  *    later segment with a key has a healthy model;
@@ -206,15 +208,17 @@ function logRequest({ mode, answeredBy, provider, segmentsRun, ms, reordered = f
 // ---------------------------------------------------------------------------
 
 /**
- * The request's plan: segment order, and the key of each provider (the
- * active one falls back to opts.apiKey when keys does not name it).
+ * The request's plan: whether it carries an image, segment order, and the key
+ * of each provider (the active one falls back to opts.apiKey when keys does
+ * not name it).
  */
 function planRequest({ segments, keys, apiKey, adapters, input }) {
-  const { segments: ordered, reordered } = orderSegments(segments, hasImages(input), adapters);
+  const withImages = hasImages(input);
+  const { segments: ordered, reordered } = orderSegments(segments, withImages, adapters);
   const segmentKeys = { ...(keys || {}) };
   const active = segments[0]?.provider;
   if (active && !segmentKeys[active]) segmentKeys[active] = apiKey;
-  return { ordered, reordered, segmentKeys };
+  return { withImages, ordered, reordered, segmentKeys };
 }
 
 /** The model a segment will try first, for the _reset; its first model when that cannot be told. */
@@ -225,10 +229,12 @@ function firstModelOf(adapter, segment, input) {
 /**
  * Decide the turn of segment i: skip it, stop (chain deadline passed), or
  * call it with these options: the caller's options, its own key, its models,
- * and its timing (segmentTiming).
+ * its timing (segmentTiming), and visionOnly when the request carries an
+ * image that a later segment with a key sees (only Groq has models that drop
+ * images; the other providers ignore the option).
  * @returns {{ skip: string } | { deadlineHit: true } | { adapter: object, options: object }}
  */
-function decideTurn({ i, ordered, segmentKeys, adapters, base, deadlineMs, startedAt, answerStarted, now }) {
+function decideTurn({ i, withImages, ordered, segmentKeys, adapters, base, deadlineMs, startedAt, answerStarted, now }) {
   const segment = ordered[i];
   const skip = skipReason({ index: i, segments: ordered, keys: segmentKeys, isCoolingDown: health.isCoolingDown });
   if (skip) return { skip };
@@ -242,7 +248,13 @@ function decideTurn({ i, ordered, segmentKeys, adapters, base, deadlineMs, start
   if (timing.skip) return { skip: timing.skip };
   const options = { ...base, apiKey: segmentKeys[segment.provider], model: segment.models.join(',') };
   if (timing.requestDeadlineMs !== undefined) options.requestDeadlineMs = timing.requestDeadlineMs;
+  if (withImages && laterSeesImages({ i, ordered, segmentKeys, adapters })) options.visionOnly = true;
   return { adapter, options };
+}
+
+/** Whether a segment after i, with a key, sees images. */
+function laterSeesImages({ i, ordered, segmentKeys, adapters }) {
+  return ordered.slice(i + 1).some((s) => !!segmentKeys[s.provider] && !!adapters[s.provider]?.seesImages(s.models));
 }
 
 /** The final error: the last segment's (or a stand-in), with the FR-013 userMessage. */
@@ -323,7 +335,7 @@ function createChainStreamingLLM({ segments, keys, opts = {}, adapters = DEFAULT
           const mode = 'stream';
           const startedAt = now();
           const deadlineMs = chainDeadlineMs(env);
-          const { ordered, reordered, segmentKeys } = planRequest({ segments, keys, apiKey, adapters, input: messages });
+          const { withImages, ordered, reordered, segmentKeys } = planRequest({ segments, keys, apiKey, adapters, input: messages });
           const of = ordered.length;
           const ran = [];
           let lastErr = null;
@@ -334,7 +346,7 @@ function createChainStreamingLLM({ segments, keys, opts = {}, adapters = DEFAULT
 
           for (let i = 0; i < of && !cancelled; i++) {
             const segment = ordered[i];
-            const turn = decideTurn({ i, ordered, segmentKeys, adapters, base, deadlineMs, startedAt, answerStarted, now });
+            const turn = decideTurn({ i, withImages, ordered, segmentKeys, adapters, base, deadlineMs, startedAt, answerStarted, now });
             if (turn.deadlineHit) {
               deadlineHit = true;
               logSegment({ mode, index: i + 1, of, segment, outcome: 'skipped-deadline' });
@@ -449,7 +461,7 @@ function createChainLLM({ segments, keys, opts = {}, adapters = DEFAULT_ADAPTERS
     const mode = 'once';
     const startedAt = now();
     const deadlineMs = chainDeadlineMs(env);
-    const { ordered, reordered, segmentKeys } = planRequest({ segments, keys, apiKey, adapters, input });
+    const { withImages, ordered, reordered, segmentKeys } = planRequest({ segments, keys, apiKey, adapters, input });
     const of = ordered.length;
     const ran = [];
     let lastErr = null;
@@ -457,7 +469,7 @@ function createChainLLM({ segments, keys, opts = {}, adapters = DEFAULT_ADAPTERS
 
     for (let i = 0; i < of; i++) {
       const segment = ordered[i];
-      const turn = decideTurn({ i, ordered, segmentKeys, adapters, base, deadlineMs, startedAt, answerStarted: false, now });
+      const turn = decideTurn({ i, withImages, ordered, segmentKeys, adapters, base, deadlineMs, startedAt, answerStarted: false, now });
       if (turn.deadlineHit) {
         deadlineHit = true;
         logSegment({ mode, index: i + 1, of, segment, outcome: 'skipped-deadline' });

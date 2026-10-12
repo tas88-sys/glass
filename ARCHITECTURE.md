@@ -847,7 +847,7 @@ The loop is modelled on §10.2 and speaks the same protocol to the consumers.
 
 ```mermaid
 flowchart TB
-    start(["createStreamingLLM / createLLM with Groq CSV"]) --> order["orderForImages: image in the request? vision models first"]
+    start(["createStreamingLLM / createLLM with Groq CSV"]) --> order["orderForImages: image in the request? vision models first (visionOnly: only those)"]
     order --> pick["pickModel (shared modelHealth registry)"]
     pick --> attempt["attempt: streaming chat.completions.create, maxRetries 0, timeout 15 s (headers)"]
     attempt --> ok{"how did it end?"}
@@ -855,7 +855,7 @@ flowchart TB
     ok -->|"error / timeout / x_groq.error / length before text"| kind{"groqErrors.classify"}
     kind -->|"fatal 400/401/403/424"| fatal["surface: MODEL — reason"]
     kind -->|"unavailable 404 or model_ code"| next["cooldown 5 min / none for too-large / 10 s own codes and 422 / else retry-after"]
-    kind -->|"too-large 413, transient"| next
+    kind -->|"too-large 413 or 429 OTPM, transient"| next
     next --> more{"models left and deadline not hit?"}
     more -->|yes| reset["_reset {next_model, reason}"] --> pick
     more -->|no| round{"round 1 and some failed fast?"}
@@ -863,11 +863,11 @@ flowchart TB
     round -->|no| allfail["All Groq models failed (…) / No answer within 45s (…)"]
 ```
 
-- **Same shape as Anthropic:** one `runWithFailover` (`groq.js:527-648`) for `streamChat` and
+- **Same shape as Anthropic:** one `runWithFailover` (`groq.js:539-671`) for `streamChat` and
   `chat` / `generateContent`; every call streams; the SDK never retries (`SDK_MAX_RETRIES`,
-  `:236`); one more round after 2 s for fast transient failures (`joinsNextRound`, `:381`);
+  `:242`); one more round after 2 s for fast transient failures (`joinsNextRound`, `:390`);
   cancellation aborts the request or the wait.
-- **Requests** (`buildRequest`, `groq.js:154`, pure; `modelTraits`, `:22`):
+- **Requests** (`buildRequest`, `groq.js:160`, pure; `modelTraits`, `:22`):
   - Reasoning is set per family:
     - gpt-oss gets `reasoning_effort: 'low'` and `include_reasoning: false`, so the reasoning
       text never reaches the app or the logs;
@@ -875,12 +875,19 @@ flowchart TB
       at any other effort;
     - unknown models get no reasoning field at all.
   - `temperature` is passed through when it is within [0, 2].
-  - `max_completion_tokens` is the caller's cap (else 2048) plus 1024 for reasoning on models
-    that reason, capped at the model's maximum. Reasoning counts toward it. Groq does not
-    meter the declared value against the per-minute limit, only the tokens used.
+  - `max_completion_tokens` is the caller's cap (else 16,384) plus 1024 for reasoning on models
+    that reason, capped at the model's maximum. Reasoning counts toward it. Only Ask sets no
+    cap: its code and system design answers run to thousands of tokens (4,204 measured), and
+    an Ask answer must not stop mid-way. Groq does not meter the declared value against the
+    per-minute limit, only the tokens used, with one exception: on a key with a separate
+    output limit (OTPM), Qwen refuses before running a request whose expected output, which
+    Groq derives from the declared cap, is over that limit (research R20).
   - Images go only to a model that sees them, at most 3. A request with an image tries those
-    models first (`orderForImages`, `:133`; log `order=vision-first`), then text-only models
-    without the image (`images=dropped:N`).
+    models first (`orderForImages`, `:139`; log `order=vision-first`), then text-only models
+    without the image (`images=dropped:N`). With `visionOnly`, which the chain sets when a
+    later provider sees the image (§10.4), only the models that see it are tried. When they
+    fail, or the list has none (`NO_VISION_MODEL`, no request sent), the request fails rather
+    than answer without the image.
 - **Stream reading:**
   - The attempt stops at the chunk that carries `finish_reason` and closes the connection.
     groq-sdk keeps reading past `[DONE]` until the server closes it.
@@ -888,17 +895,17 @@ flowchart TB
   - A chunk with `x_groq.error` fails the attempt (`STREAM_ERROR`). The string itself is
     never logged.
 - **Errors** (`groqErrors.js`). groq-sdk keeps the whole body on HTTP errors and the inner
-  object on stream errors. `classify` (`:62`) reads both:
+  object on stream errors. `classify` (`:68`) reads both:
 
   | Kind | What triggers it | Cooldown |
   |---|---|---|
   | transient | 408/409/429/498/5xx, network, mid-stream `{"error"}` | `retry-after`, else 60 s, clamped to 5 s–5 min |
   | transient (short) | first-text or idle timeout, `length` before any text, `x_groq.error`, 422 | 10 s |
   | unavailable | 404, or any `model_…` code (not found, decommissioned, blocked) | 5 min |
-  | too-large | 413 "Request too large … (TPM): Limit L, Requested R" | none; never retried in round 2 |
+  | too-large | 413 "Request too large … (TPM): Limit L, Requested R", or 429 "Request too large … (OTPM)" (output tokens per minute) | none; never retried in round 2 |
   | fatal-request | 400/424 | none; surfaces at once |
   | fatal-auth | 401/403 | none; surfaces at once |
-- **Timeouts:** first text within 15 s (`firstTextTimeoutMs`, `:199`); 15 s idle once text
+- **Timeouts:** first text within 15 s (`firstTextTimeoutMs`, `:205`); 15 s idle once text
   streams; an answer must start within 45 s.
 - **Rate limits:** a Free-plan key has 8K tokens per minute and 200K per day **per model**.
   Cached tokens do not count, and Live Answer and Live Insights share the fixed ~2.4K-token
@@ -906,18 +913,24 @@ flowchart TB
   2.5K, so a one-hour interview uses about 240K of the 400K the two text models share
   (estimate in the spec's research R5): one interview fits, two in a day probably do not. The list
   spreads load across models. Each attempt logs `tpm_left` (`x-ratelimit-remaining-tokens`), and a
-  413 tells the user the request is over the limit.
+  413 tells the user the request is over the limit. Since October 2026 the console also splits
+  the 8K of Qwen and gpt-oss-120b into 7K in / 1K out. Only Qwen enforces the 1K: it refuses a
+  request whose expected output is over 1,000. Groq derives that estimate from the declared
+  cap: 1,001 for 1,001, 1,168 for 16,384. So Qwen serves Live Answer (900) but not Ask
+  (16,384) or Live Insights (1,024). gpt-oss wrote 4,204 output tokens in one answer
+  (research R20).
 - **Key validation** lists models (`models.list()`). Keys start with `gsk_`.
 - **Diagnostics:** grep `[Groq Provider]`, e.g. `attempt 1/3 stream model=openai/gpt-oss-120b
   outcome=ok ttft=310ms last=1900ms total=1910ms chunks=42 stop=stop effort=low
   tokens=in:6100,out:520,reasoning:180,cached:2300 queue=90ms tpm_left=1400 request_id=req_…`.
-  No log line carries prompt, answer or reasoning text.
+  A request-too-large refusal adds `limit=L requested=R`, which the 160-character `error=`
+  cuts off. No log line carries prompt, answer or reasoning text.
 - **Tuning (`.env`, all optional):**
 
   | Variable | Default | Effect |
   |---|---|---|
   | `GROQ_REASONING_EFFORT` | gpt-oss `low`, qwen3 `none` | gpt-oss: `low`/`medium`/`high`; qwen3: `none`/`default`/`low`/`medium`/`high` |
-  | `GROQ_MAX_TOKENS` | 2048 | Answer budget when the caller gives none |
+  | `GROQ_MAX_TOKENS` | 16384 | Answer budget when the caller gives none (Ask) |
   | `GROQ_REASONING_TOKENS` | 1024 | Extra budget on models that reason |
   | `GROQ_FIRST_TEXT_TIMEOUT_MS` | 15000 | Per-attempt wait for the first text |
   | `GROQ_REQUEST_DEADLINE_MS` | 45000 | Wait for an answer to start; `0` disables |
@@ -954,7 +967,7 @@ The order of the list is the order of priority, left to right.
 flowchart TB
     split(["factory.splitByProvider: runs of one provider's IDs"]) --> n{"segments?"}
     n -->|"0 or 1"| today["the provider, exactly as before"]
-    n -->|"2+"| order["image in the request? segments that see images first"]
+    n -->|"2+"| order["image in the request? segments that see images first; visionOnly for a segment with a later one that sees it"]
     order --> turn["next segment's turn"]
     turn --> skip{"no key / all models cooling (a later one healthy) / no time left before a later one?"}
     skip -->|yes| logskip["outcome=skipped-…"] --> turn
@@ -972,8 +985,9 @@ flowchart TB
   Ollama lists never are. An interleaved list (`groq, gemini, groq`) gives three segments.
 - **Composition, not a new loop.** `providerChain.js` calls each segment's provider through its
   public `createStreamingLLM` / `createLLM`, so every provider keeps its own failover, cooldowns,
-  rounds, timeouts and image routing (§10.1–10.3). The providers are unchanged. The module never
-  calls an SDK, and loads a provider only when one of its segments runs.
+  rounds, timeouts and image routing (§10.1–10.3). The only option the chain adds is
+  `visionOnly` (see Images below). The module never calls an SDK, and loads a provider only when
+  one of its segments runs.
 - **Stream protocol.** The running segment's events pass through unchanged: deltas, its own
   `_reset`s and `_final_model`. Its `[DONE]` becomes the chain's `[DONE]`. When a segment fails
   and another can run, the chain sends `{ _reset: true, next_model, reason: 'provider' }`, where
@@ -993,7 +1007,8 @@ flowchart TB
   | Fast failures on every Groq model (5xx, network, a per-minute 429 whose `retry-after` fits in 2 s) | Groq waits its 2 s and gives them a second round. Only if they fail again does the next provider take over |
   | Daily 429 (budget spent) | No second round: the hint is minutes. The next provider takes over in under a second |
   | Timeouts on every Groq model | No second round (a timeout already cost seconds). The next provider takes over |
-  | 413, request too large | Groq's next model (no cooldown), then the next provider |
+  | 413, or a 429 on output tokens (OTPM): request too large | Groq's next model (no cooldown), then the next provider |
+  | A screenshot, and a later provider sees images | Groq tries only Qwen (`visionOnly`). If Qwen is refused, e.g. over its 1K output limit, the next provider answers with the image; gpt-oss never answers without it |
   | 401, 403, 400 (bad key or request) | Groq stops at once, since every model shares the key and the rules. The next provider takes over; without the chain this would end in an error |
   | Groq started answering, then failed | The partial answer is discarded (`_reset`), and the next provider answers from scratch with no chain deadline |
   | The stream ended without `[DONE]` | Treated as a failure: the next provider |
@@ -1005,7 +1020,7 @@ flowchart TB
   - a timeout or a 422: 10 s;
   - a 503 or a network error with no hint: 60 s;
   - a daily 429, or a model not available to the key: 5 min (the registry's ceiling);
-  - a 413: none.
+  - a 413, or a 429 on output tokens (OTPM): none.
 
   While **every** Groq model is cooling down, later requests go straight to the next provider
   with no Groq request (`skipped-cooling`). If only some are, Groq runs and uses the healthy ones.
@@ -1037,6 +1052,15 @@ flowchart TB
 - **Images.** With an image in the request, segments that see images go first (stable order).
   A Groq segment sees images only when it has `qwen/qwen3.8-27b`; Gemini and Anthropic segments
   always do. The request line then carries `order=images-first`.
+  - A segment followed by another one (with a key) that sees images runs with `visionOnly`
+    (`decideTurn`, `providerChain.js:237`). Groq then tries only its models that see the image, and
+    fails rather than let a text-only model answer without it, so the image reaches the next
+    provider. Gemini and Anthropic ignore the option.
+  - Without a later segment that sees images, a Groq segment keeps its own fallback: a
+    text-only model answers without the image (`images=dropped:N`).
+  - Why: since October 2026 Qwen refuses Ask's 16,384-token cap on its 1K output limit (§10.3).
+    Before `visionOnly`, gpt-oss then answered every screenshot blind and Gemini was never
+    tried (future-work item 6).
 - **Order and position.** Consecutive IDs of one provider form one segment. The provider tries
   them in the order typed, with its own failover. The chain moves to the next segment only when
   every model of the current one fails.

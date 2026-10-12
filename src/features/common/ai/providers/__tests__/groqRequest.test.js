@@ -168,16 +168,16 @@ describe('buildRequest: max_completion_tokens (FR-009)', () => {
     assert.equal(build({ modelId: 'openai/gpt-oss-20b', maxTokens: 70_000 }).params.max_completion_tokens, 65_536);
   });
 
-  it('default 2048, plus the allowance when reasoning (E15)', () => {
-    assert.equal(build({ modelId: 'qwen/qwen3.8-27b' }).params.max_completion_tokens, 2048);
-    assert.equal(build({ modelId: 'openai/gpt-oss-120b' }).params.max_completion_tokens, 3072);
-    assert.equal(build({ modelId: 'acme/foo-1' }).params.max_completion_tokens, 2048);
+  it('default 16,384, plus the allowance when reasoning (E15)', () => {
+    assert.equal(build({ modelId: 'qwen/qwen3.8-27b' }).params.max_completion_tokens, 16_384);
+    assert.equal(build({ modelId: 'openai/gpt-oss-120b' }).params.max_completion_tokens, 17_408);
+    assert.equal(build({ modelId: 'acme/foo-1' }).params.max_completion_tokens, 16_384);
   });
 
   it('GROQ_MAX_TOKENS and GROQ_REASONING_TOKENS override; invalid values ignored', () => {
     assert.equal(build({ modelId: 'openai/gpt-oss-120b', env: { GROQ_MAX_TOKENS: '4000', GROQ_REASONING_TOKENS: '0' } }).params.max_completion_tokens, 4000);
     assert.equal(build({ modelId: 'openai/gpt-oss-120b', maxTokens: 900, env: { GROQ_MAX_TOKENS: '4000' } }).params.max_completion_tokens, 1924, 'the caller cap wins');
-    assert.equal(build({ modelId: 'openai/gpt-oss-120b', env: { GROQ_MAX_TOKENS: 'lots', GROQ_REASONING_TOKENS: '-5' } }).params.max_completion_tokens, 3072);
+    assert.equal(build({ modelId: 'openai/gpt-oss-120b', env: { GROQ_MAX_TOKENS: 'lots', GROQ_REASONING_TOKENS: '-5' } }).params.max_completion_tokens, 17_408);
   });
 
   it('unknown models are not capped', () => {
@@ -185,7 +185,7 @@ describe('buildRequest: max_completion_tokens (FR-009)', () => {
   });
 
   it('the mode does not change the budget', () => {
-    assert.equal(build({ modelId: 'openai/gpt-oss-120b', mode: 'once' }).params.max_completion_tokens, 3072);
+    assert.equal(build({ modelId: 'openai/gpt-oss-120b', mode: 'once' }).params.max_completion_tokens, 17_408);
   });
 });
 

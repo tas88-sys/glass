@@ -467,6 +467,40 @@ The user ran `npm start` on the branch with the Free-plan key saved in Settings 
   How Groq reserves the declared budget therefore stays unknown, and R17's warning about it is a possibility, not an observed effect. `tpm_left` in real sessions remains the measure.
 - **Quickstart §4 coverage:** check 1 (valid key only), 2 (on Qwen only), 4 and 5 passed. Still open are 3 and 9 (Live Answer, needs system audio), 6 and 7 (unknown model), 8 (cancel), 10 (Settings normalization), 11 (timeout) and 12 (429 failover). The automated suite and the local real-SDK check (R18) cover the code paths behind 6–8, 11 and 12; the open checks confirm them in the app.
 
+## R20: The output-token limit (OTPM) and the Ask budget (live, 2026-10-12, later the same day)
+
+Later on 2026-10-12, an Ask with a screenshot got `429 rate_limit_exceeded` from Qwen, "Request too large … on output tokens per minute (OTPM)", with `tpm_left=8000`. gpt-oss then answered without the image (`images=dropped:1`). This was recorded as future-work item 6. These probes ran on the same Free-plan key, with streamed one-word prompts unless noted:
+
+- **Qwen enforces 1,000 output tokens per minute against the expected output of a request, before it runs.**
+  - `max_completion_tokens` 2048 → 429 "Limit 1000, Requested 1679. The request's expected output tokens exceed the enforced limit; reduce max_tokens …".
+  - 1001 → 429 "Limit 1000, Requested 1001".
+  - 1000 → 200.
+
+  "Requested" is Groq's expected output, derived from the declared cap, not the cap itself. With the screenshot-like request after the fix (1×1 PNG, 16,384 declared) it was 1,168. A cap over 1,000 has so far always given an estimate over 1,000.
+
+  The headers carry no output limit: only `x-ratelimit-limit-tokens: 8000`, untouched by the refusal. Groq's rate-limits page says only that "some organizations" have separate ITPM / OTPM limits. It says nothing on the declared cap, on 413 vs 429, or on headers.
+- **gpt-oss is not held to it.**
+  - gpt-oss-120b and gpt-oss-20b accepted 20,000 declared.
+  - The real `pickle_glass_system_design` prompt ("Design a URL shortener like bit.ly.", no image, effort `low`) produced **4,204 output tokens** in one request on gpt-oss-120b: `stop`, 9.9 s, prompt 3,841, reasoning 18. A one-word request right after was accepted.
+  - The real `pickle_glass_code` prompt on an easy problem (longest substring without repeating characters) produced 864.
+- **The declared cap still does not count against TPM.** A 12,000-declared request in a spent minute was refused with "Limit 8000, Used 5454, Requested 4212" (prompt plus an estimate, not the 12,000).
+- **What it meant for the code before this change:**
+  - Ask passes no cap, so Groq declared its default, 2048 (3072 with gpt-oss's reasoning allowance). Qwen therefore refused every Ask.
+  - The 4,204-token system design answer would also have been cut at about 3,050 on gpt-oss, OTPM or not. That breaks the Ask rule of `591f971`: an answer must not stop mid-way.
+  - Retrying Qwen with the limit as the cap (the first idea in item 6) would cut code and system design answers at 1,000 tokens.
+
+**Decisions:**
+- The default cap (only Ask uses it) becomes **16,384**: about 4× the largest answer measured, and Qwen's maximum.
+- A 429 "Request too large" is `too-large`: no cooldown, `limit=L requested=R` in the log, and "asks for up to R output tokens; this key allows L per minute" as the message.
+- The cross-provider chain passes `visionOnly` to a segment when the request has an image and a later segment with a key sees images. Groq then tries only Qwen, and fails rather than answer blind, so the screenshot reaches Gemini or Claude whole.
+- A Groq-only list keeps today's fallback, since nothing after it sees the image.
+
+**Checked after the change**, with the real `groq.js` and the user's Groq list (`openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b`) on a request with an image and no cap, as Ask sends it:
+- With `visionOnly`: one attempt, `model=qwen/qwen3.8-27b outcome=too-large status=429 … limit=1000 requested=1168`, 219 ms. The request failed with "qwen/qwen3.8-27b — asks for up to 1168 output tokens; this key allows 1000 per minute."; gpt-oss was not called.
+- Without it: the same refusal, then gpt-oss-120b answered with `images=dropped:1`.
+
+The Gemini step after the refusal was not run live: the Gemini key is stored encrypted in the app. `providerChain.integration.test.js` covers it, and the app check in future-work item 6 confirms it.
+
 ---
 
 ## Summary of Decisions
@@ -491,3 +525,4 @@ The user ran `npm start` on the branch with the Free-plan key saved in Settings 
 | R17 | Live probe (T006): usage on the finish chunk, request ids in chunks and header, no reasoning chunks, per-model windows that reserve prompt + declared budget, `model_not_found` 404s, Qwen at `none` streams at once; gpt-oss rejects array content |
 | R18 | The provider ran with the real SDK against a local fake API under Node and Electron: 7/7 |
 | R19 | First app session: 4 Asks with a screenshot on Qwen (ttft 0.75–1.3 s) and 1 Live Insights on 120B (ttft 0.73 s), all first-attempt; Live Answer not yet exercised (needs system audio) |
+| R20 | Qwen refuses a request whose expected output (from the declared cap) is over its 1K output limit (429 OTPM); gpt-oss is not held to it (4,204 tokens in one answer); default cap 16,384 for Ask; the 429 is `too-large`; the chain's `visionOnly` sends a screenshot past Groq's text-only models to a provider that sees it |

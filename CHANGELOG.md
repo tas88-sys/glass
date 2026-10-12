@@ -6,6 +6,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 
 ## [Unreleased]
 
+### Groq: screenshots reach a model that sees them, and Ask answers are not cut (branch `2026-10-12-groq-otpm-images`)
+
+#### Fixed
+
+- **An Ask screenshot is no longer answered blind when Gemini or Claude follows Groq in the list.**
+  - On this key Groq limits Qwen, its only model that sees images, to 1,000 output tokens per minute (OTPM). It refuses any request whose cap is over that limit.
+  - Qwen therefore refused every Ask. gpt-oss then answered without the screenshot, and Gemini was never tried.
+  - Now the chain passes `visionOnly` to a segment when a later one sees images. Groq tries only Qwen and, if it is refused, leaves the request to Gemini with the image.
+  - A Groq-only list keeps today's fallback.
+- **Long Ask answers on Groq are no longer cut.** The default cap for a caller without one (only Ask) goes from 2,048 to 16,384. A system design answer measured 4,204 tokens, over the 3,072 gpt-oss got. The declared cap is not metered against the per-minute limit.
+- **Qwen's OTPM refusal is read as `too-large`, not as a rate limit.**
+  - The model gets no 60 s cooldown, so Live Answer (900) can still use it.
+  - The log line carries `limit=L requested=R`.
+  - The message reads "asks for up to R output tokens; this key allows L per minute".
+
+#### Docs
+
+- `specs/2026-10-12-groq-otpm-images/` holds the spec set for this fix: spec, research (the incident, the live probes, the options), plan, data model, contracts, edge cases, quickstart, tasks and acceptance tests.
+- `specs/2026-10-12-groq-provider/research.md` R20 records the live probes: the OTPM refusal, gpt-oss not held to it, and answer sizes per Ask mode.
+- `ARCHITECTURE.md` §10.3, §10.4 and diagrams 16 and 17 cover the new default cap, the `too-large` 429 and `visionOnly`.
+- `docs/future-work.md` item 6 is marked done. A notice for Groq-only lists (screenshot not sent) is still open.
+
 ### Live panels: Live Answer, Live Insights or both (branch `2026-10-12-live-features-toggle`)
 
 #### Added

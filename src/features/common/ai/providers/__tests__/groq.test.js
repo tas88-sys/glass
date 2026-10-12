@@ -134,6 +134,9 @@ function streamError(type = 'server_error', message = 'Service unavailable') {
 
 const TOO_LARGE = 'Request too large for model `openai/gpt-oss-120b` in organization `org_x` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Requested 9400, please reduce your message size and try again.';
 const tooLarge = (message = TOO_LARGE) => httpError(413, { message, type: 'tokens', code: 'rate_limit_exceeded' });
+// The live refusal of 2026-10-12 (research R20): over the output tokens per minute, as a 429.
+const OTPM = "Request too large for model `qwen/qwen3.8-27b` in organization `org_x` service tier `on_demand` on output tokens per minute (OTPM): Limit 1000, Requested 1679. The request's expected output tokens exceed the enforced limit; reduce max_tokens (or the request's expected output) and try again.";
+const outputTooLarge = () => httpError(429, { message: OTPM, type: 'tokens', code: 'rate_limit_exceeded' });
 const rateLimited = (headers = {}) => httpError(429, { message: 'rate limited', type: 'tokens', code: 'rate_limit_exceeded', headers });
 
 /** Script by model ID: each entry is a plan, an Error to throw, or a list used in call order. */
@@ -388,6 +391,25 @@ describe('streamChat: failover', () => {
     assert.equal(error.userMessage, `${A} — Request Entity Too Large`);
   });
 
+  test('429 on output tokens (OTPM) on the vision model: _reset too-large, no cooldown, the numbers logged', async (t) => {
+    const logs = captureLogs(t);
+    script = byModel({ [Q]: outputTooLarge(), [A]: answer(A, 'blind') });
+    const { events, text } = await readAll(await stream(`${A},${Q}`).streamChat(askWithScreen));
+    assert.deepEqual(calls.map(c => c.params.model), [Q, A], 'without visionOnly the text-only model still answers');
+    assert.deepEqual(resets(events), [{ _reset: true, next_model: A, reason: 'too-large' }]);
+    assert.equal(text, 'blind');
+    assert.equal(health.pickModel([Q, A]), Q, 'a request with a smaller cap may fit');
+    assert.ok(logs.some(l => l.includes(`model=${Q} outcome=too-large status=429 code=rate_limit_exceeded`) && l.includes('limit=1000 requested=1679')), logs.join('\n'));
+  });
+
+  test('429 OTPM on the only model: the output-token message, no second round', async (t) => {
+    captureLogs(t);
+    script = byModel({ [Q]: outputTooLarge() });
+    const { error } = await readAll(await stream(Q).streamChat(ask));
+    assert.equal(calls.length, 1);
+    assert.equal(error.userMessage, `${Q} — asks for up to 1679 output tokens; this key allows 1000 per minute.`);
+  });
+
   for (const [status, code] of [[400, undefined], [401, 'invalid_api_key'], [403, undefined]]) {
     test(`${status} on model 1 of 2: error at once, model 2 never called (E32, E33)`, async (t) => {
       captureLogs(t);
@@ -609,6 +631,51 @@ describe('streamChat: images (FR-010, FR-011)', () => {
   });
 });
 
+describe('streamChat: visionOnly (a later provider sees the image)', () => {
+  test('with an image only the vision model is tried, and it answers with the image', async (t) => {
+    captureLogs(t);
+    script = byModel({ [Q]: answer(Q, 'I see it') });
+    const { text } = await readAll(await stream(`${A},${B},${Q}`, { visionOnly: true }).streamChat(askWithScreen));
+    assert.deepEqual(calls.map(c => c.params.model), [Q]);
+    assert.equal(hasImage(calls[0].params), true);
+    assert.equal(text, 'I see it');
+  });
+
+  test('when the vision model is refused (OTPM), the request fails without a text-only answer', async (t) => {
+    captureLogs(t);
+    script = byModel({ [Q]: outputTooLarge(), [A]: answer(A, 'blind'), [B]: answer(B, 'blind') });
+    const { events, error, text } = await readAll(await stream(`${A},${B},${Q}`, { visionOnly: true }).streamChat(askWithScreen));
+    assert.deepEqual(calls.map(c => c.params.model), [Q]);
+    assert.equal(resets(events).length, 0);
+    assert.equal(text, '');
+    assert.equal(error.userMessage, `${Q} — asks for up to 1679 output tokens; this key allows 1000 per minute.`);
+  });
+
+  test('with an image and no vision model: NO_VISION_MODEL before any call', async (t) => {
+    const logs = captureLogs(t);
+    script = byModel({ [A]: answer(A, 'blind') });
+    const { error } = await readAll(await stream(`${A},${B}`, { visionOnly: true }).streamChat(askWithScreen));
+    assert.equal(calls.length, 0);
+    assert.equal(error.code, 'NO_VISION_MODEL');
+    assert.equal(error.userMessage, 'No Groq model in the list sees images.');
+    assert.ok(logs.some(l => l.includes(`request stream answered_by=none attempts=0 no model sees images: ${A},${B}`)), logs.join('\n'));
+  });
+
+  test('without an image it changes nothing', async (t) => {
+    captureLogs(t);
+    script = byModel({ [A]: answer(A, 'ok') });
+    const { text } = await readAll(await stream(`${A},${Q}`, { visionOnly: true }).streamChat(ask));
+    assert.deepEqual(calls.map(c => c.params.model), [A]);
+    assert.equal(text, 'ok');
+  });
+
+  test('chat with an image and no vision model rejects with NO_VISION_MODEL, no call', async (t) => {
+    captureLogs(t);
+    await assert.rejects(once(A, { visionOnly: true }).chat(askWithScreen), (err) => err.code === 'NO_VISION_MODEL');
+    assert.equal(calls.length, 0);
+  });
+});
+
 describe('streamChat: cancellation (FR-018)', () => {
   test('cancel during an attempt: signal aborted within one turn, no failover, no error (SC-004, E49)', async (t) => {
     const logs = captureLogs(t);
@@ -704,7 +771,7 @@ describe('chat and generateContent (FR-022)', () => {
       assert.equal(call.params.stream, true);
       assert.equal(call.params.temperature, 0.7);
     }
-    assert.equal(calls[1].params.max_completion_tokens, 3072, '2048 + the reasoning allowance');
+    assert.equal(calls[1].params.max_completion_tokens, 17_408, '16,384 + the reasoning allowance');
   });
 
   test('429 on the first model: the second answers, _modelUsed names it', async (t) => {

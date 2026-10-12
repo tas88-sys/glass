@@ -9,7 +9,7 @@ flowchart TB
     lane(["Ask / Live Answer / Live Insights<br/>getCurrentModelInfo('llm') -> provider, model, apiKey, keys"]) --> split["factory.splitByProvider(model, provider)<br/>runs of one provider's IDs (prefix rule);<br/>an unknown ID joins the current run;<br/>only anthropic, gemini and groq lists are cut"]
     split --> segs{"how many segments?"}
     segs -->|"0 or 1"| today["today's path: the provider's own<br/>createStreamingLLM / createLLM<br/>(options minus keys)"]
-    segs -->|"2 or more"| plan["providerChain: plan the request<br/>image in the request? segments that see images first<br/>(Groq only with qwen/qwen3.8-27b; log order=images-first)"]
+    segs -->|"2 or more"| plan["providerChain: plan the request<br/>image in the request? segments that see images first<br/>(Groq only with qwen/qwen3.8-27b; log order=images-first)<br/>a segment with a later one (with a key) that sees images<br/>runs visionOnly: no answer without the image"]
 
     plan --> turn["next segment's turn"]
     turn --> nokey{"its provider has a key?"}
@@ -24,7 +24,7 @@ flowchart TB
     announce --> run["run the segment: own key only, its models joined;<br/>pass its SSE events through unchanged<br/>(deltas, its own _resets, _final_model)"]
     run --> ended{"how did it end?"}
     ended -->|"[DONE]"| answered["chain sends [DONE]<br/>outcome=ok answered_by=MODEL"]
-    ended -->|"the provider gave up after its own failover<br/>(other models, second round): any kind,<br/>429, 503, timeout, 401, 400, 413; or no [DONE]"| failed["outcome=failed error=userMessage"]
+    ended -->|"the provider gave up after its own failover<br/>(other models, second round): any kind,<br/>429, 503, timeout, 401, 400, 413, OTPM; or no [DONE]"| failed["outcome=failed error=userMessage"]
     failed --> more{"another segment can run?"}
     more -->|yes| turn
     more -->|"no, one ran"| own["its own userMessage"]

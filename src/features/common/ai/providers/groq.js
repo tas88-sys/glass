@@ -35,7 +35,13 @@ const REASONING_EFFORTS = {
   'gpt-oss': { accepted: ['low', 'medium', 'high'], fallback: 'low' },
   qwen3: { accepted: ['none', 'default', 'low', 'medium', 'high'], fallback: 'none' },
 };
-const DEFAULT_MAX_TOKENS = 2048;
+// The cap for a caller that sets none, which today is only Ask. A code or
+// system design answer runs to thousands of tokens (4,204 measured on
+// gpt-oss-120b, research R20), and an Ask answer must not stop mid-way. The
+// declared value is not metered against the per-minute limit (R5, R20). The
+// exception is Qwen on a key with a 1K output limit, which refuses it as
+// too-large; an image then goes to a later provider (visionOnly).
+const DEFAULT_MAX_TOKENS = 16_384;
 // Reasoning tokens count toward max_completion_tokens, so a caller's cap (Live
 // Answer passes 900) could end inside the reasoning. The declared value is not
 // metered against the per-minute limit (research R5), so the allowance is free.
@@ -145,7 +151,7 @@ function orderForImages(models, messages) {
  * @param {object} input
  * @param {string} input.modelId
  * @param {Array} input.messages - Glass messages ({ role, content })
- * @param {number} [input.maxTokens] - caller cap; else GROQ_MAX_TOKENS; else 2048
+ * @param {number} [input.maxTokens] - caller cap; else GROQ_MAX_TOKENS; else 16,384
  * @param {number} [input.temperature] - sent when within [0, 2]
  * @param {string} [input.effort] - reasoning effort; else GROQ_REASONING_EFFORT; else the family default
  * @param {object} [input.env=process.env]
@@ -354,6 +360,9 @@ function logAttempt({ mode, attempt, of, modelId, outcome, stats, err }) {
   }
   const tpmLeft = stats.tpmLeft ?? headerOf(err?.headers, 'x-ratelimit-remaining-tokens');
   if (tpmLeft != null) parts.push(`tpm_left=${tpmLeft}`);
+  // The numbers come late in Groq's message, past the cut of error= below.
+  const tooLarge = err ? tooLargeNumbers(err) : null;
+  if (tooLarge) parts.push(`limit=${tooLarge.limit} requested=${tooLarge.requested}`);
   if (stats.servedBy && stats.servedBy !== modelId) parts.push(`served_by=${stats.servedBy}`);
   const requestId = stats.requestId || headerOf(err?.headers, 'x-request-id');
   if (requestId) parts.push(`request_id=${requestId}`);
@@ -405,6 +414,7 @@ function describeFailure(modelId, err, kind) {
   if (kind === 'unavailable') return `${modelId} is not available to this API key (decommissioned, blocked or not found). Pick a current model in Settings.`;
   if (kind === 'too-large') {
     const n = tooLargeNumbers(err);
+    if (n?.output) return `${modelId} — asks for up to ${n.requested} output tokens; this key allows ${n.limit} per minute.`;
     if (n) return `${modelId} — request needs ${n.requested} tokens; this key allows ${n.limit} per minute. This request alone is over the limit: shorten the context or use a higher Groq tier.`;
   }
   return `${modelId} — ${shortErrorMessage(err)}`;
@@ -518,17 +528,30 @@ async function runAttempt({ client, modelId, messages, maxTokens, temperature, e
  * @param {number} [o.maxTokens]
  * @param {number} [o.temperature]
  * @param {string} [o.effort]
+ * @param {boolean} [o.visionOnly] - with an image, only the models that see images may answer
  * @param {object} o.timing - firstTextTimeoutMs / requestDeadlineMs / idleTimeoutMs overrides, retryRoundDelayMs
  * @param {object} o.sink - text(t) → false once the consumer is gone; reset({ next_model, reason })
  * @param {object} o.control - cancelled() → boolean; track(abortController) / untrack(abortController)
  * @returns {Promise<{ modelId: string, servedBy: string, stats: object } | null>} null when cancelled
- * @throws the last error, carrying a short userMessage
+ * @throws the last error, carrying a short userMessage; NO_VISION_MODEL, before any attempt,
+ *   when visionOnly leaves no model
  */
-async function runWithFailover({ client, model, mode, messages, maxTokens, temperature, effort, timing, sink, control }) {
+async function runWithFailover({ client, model, mode, messages, maxTokens, temperature, effort, visionOnly, timing, sink, control }) {
   let listed = health.parseModelList(model);
   if (listed.length === 0) listed = [DEFAULT_MODEL];
   let remaining = orderForImages(listed, messages);
   const reordered = remaining.some((m, i) => m !== listed[i]);
+  // A later provider sees the image (providerChain): a text-only model here
+  // would answer without it, so it is left to that provider.
+  if (visionOnly && hasImages(messages)) {
+    remaining = remaining.filter((m) => modelTraits(m).vision);
+    if (remaining.length === 0) {
+      console.warn(`[Groq Provider] request ${mode} answered_by=none attempts=0 no model sees images: ${listed.join(',')}`);
+      const err = providerError('NO_VISION_MODEL', 'no model in the list sees images');
+      err.userMessage = 'No Groq model in the list sees images.';
+      throw err;
+    }
+  }
   // Planned attempts for the "attempt i/n" log; grows when a second round starts.
   let plannedAttempts = remaining.length;
   let retryable = []; // models of this round worth another try (joinsNextRound)
@@ -663,15 +686,17 @@ function makeClient(apiKey) {
  * @param {object} opts
  * @param {string} opts.apiKey
  * @param {string} [opts.model='openai/gpt-oss-120b'] - one Groq ID or a CSV list, tried in order (image-capable models first for images)
- * @param {number} [opts.maxTokens] - default GROQ_MAX_TOKENS, else 2048; plus the reasoning allowance on models that reason
+ * @param {number} [opts.maxTokens] - default GROQ_MAX_TOKENS, else 16,384; plus the reasoning allowance on models that reason
  * @param {number} [opts.temperature] - sent when within [0, 2]
  * @param {string} [opts.effort] - reasoning effort (default GROQ_REASONING_EFFORT, else low for gpt-oss and none for qwen3)
+ * @param {boolean} [opts.visionOnly] - a request with an image goes only to the models that see images
+ *   (set by providerChain when a later provider sees it); the request fails instead of dropping the image
  * @param {number} [opts.firstTextTimeoutMs] - overrides firstTextTimeoutMs() for every model
  * @param {number|null} [opts.requestDeadlineMs] - overrides requestDeadlineMs(); null disables
  * @param {number|null} [opts.idleTimeoutMs] - overrides idleTimeoutMs(); null disables
  * @param {number} [opts.retryRoundDelayMs] - wait before the second round (default 2 s)
  */
-function createLLM({ apiKey, model = DEFAULT_MODEL, maxTokens, temperature, effort, firstTextTimeoutMs: firstTextOverride, requestDeadlineMs: deadlineOverride, idleTimeoutMs: idleOverride, retryRoundDelayMs = RETRY_ROUND_DELAY_MS }) {
+function createLLM({ apiKey, model = DEFAULT_MODEL, maxTokens, temperature, effort, visionOnly, firstTextTimeoutMs: firstTextOverride, requestDeadlineMs: deadlineOverride, idleTimeoutMs: idleOverride, retryRoundDelayMs = RETRY_ROUND_DELAY_MS }) {
   const client = makeClient(apiKey);
   const timing = { firstTextTimeoutMs: firstTextOverride, requestDeadlineMs: deadlineOverride, idleTimeoutMs: idleOverride, retryRoundDelayMs };
   // No consumer can cancel a non-streaming call.
@@ -681,7 +706,7 @@ function createLLM({ apiKey, model = DEFAULT_MODEL, maxTokens, temperature, effo
     let text = '';
     // A failed attempt's partial text is dropped before the next attempt.
     const sink = { text: (t) => { text += t; return true; }, reset: () => { text = ''; } };
-    const { servedBy, stats } = await runWithFailover({ client, model, mode: 'once', messages, maxTokens, temperature, effort, timing, sink, control });
+    const { servedBy, stats } = await runWithFailover({ client, model, mode: 'once', messages, maxTokens, temperature, effort, visionOnly, timing, sink, control });
     const raw = {
       model: servedBy,
       choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: stats.finishReason }],
@@ -717,7 +742,7 @@ function createLLM({ apiKey, model = DEFAULT_MODEL, maxTokens, temperature, effo
  *
  * @param {object} opts - as createLLM
  */
-function createStreamingLLM({ apiKey, model = DEFAULT_MODEL, maxTokens, temperature, effort, firstTextTimeoutMs: firstTextOverride, requestDeadlineMs: deadlineOverride, idleTimeoutMs: idleOverride, retryRoundDelayMs = RETRY_ROUND_DELAY_MS }) {
+function createStreamingLLM({ apiKey, model = DEFAULT_MODEL, maxTokens, temperature, effort, visionOnly, firstTextTimeoutMs: firstTextOverride, requestDeadlineMs: deadlineOverride, idleTimeoutMs: idleOverride, retryRoundDelayMs = RETRY_ROUND_DELAY_MS }) {
   const client = makeClient(apiKey);
   const timing = { firstTextTimeoutMs: firstTextOverride, requestDeadlineMs: deadlineOverride, idleTimeoutMs: idleOverride, retryRoundDelayMs };
 
@@ -755,7 +780,7 @@ function createStreamingLLM({ apiKey, model = DEFAULT_MODEL, maxTokens, temperat
             reset: ({ next_model, reason }) => { safeEnqueue(encode({ _reset: true, next_model, reason })); },
           };
           try {
-            const result = await runWithFailover({ client, model, mode: 'stream', messages, maxTokens, temperature, effort, timing, sink, control });
+            const result = await runWithFailover({ client, model, mode: 'stream', messages, maxTokens, temperature, effort, visionOnly, timing, sink, control });
             if (!result) return;
             safeEnqueue(encode({ _final_model: result.servedBy }));
             safeEnqueue(new TextEncoder().encode('data: [DONE]\n\n'));
