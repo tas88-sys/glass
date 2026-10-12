@@ -118,3 +118,113 @@ describe('splitByProvider (spec 2026-10-12-cross-provider-failover FR-001)', () 
     });
   }
 });
+
+describe('factory routing (spec 2026-10-12-cross-provider-failover FR-002, SC-005)', () => {
+  const factory = require('../factory');
+  const providerChain = require('../providerChain');
+
+  /**
+   * Replace provider modules in require.cache with recording stubs; the
+   * factory's handlers and the chain's adapters require them lazily.
+   * Returns { calls, restore }.
+   */
+  function stubProviders(names) {
+    const calls = [];
+    const saved = [];
+    for (const name of names) {
+      const path = require.resolve(`../providers/${name}`);
+      saved.push([path, require.cache[path]]);
+      const instance = (kind, opts) => {
+        const call = { provider: name, kind, opts };
+        calls.push(call);
+        const body = () => new Response(new ReadableStream({
+          start(c) {
+            c.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ _final_model: name })}\n\ndata: [DONE]\n\n`));
+            c.close();
+          },
+        }));
+        return kind === 'stream'
+          ? { stub: name, streamChat: async () => body() }
+          : { stub: name, chat: async () => ({ content: name, raw: null, _modelUsed: name }), generateContent: async () => ({ response: { text: () => name } }) };
+      };
+      require.cache[path] = {
+        id: path, filename: path, loaded: true,
+        exports: {
+          createStreamingLLM: (opts) => instance('stream', opts),
+          createLLM: (opts) => instance('once', opts),
+          requestDeadlineMs: () => 45_000,
+          modelTraits: () => ({ vision: false }),
+          orderForImages: (models) => [...models],
+        },
+      };
+    }
+    return {
+      calls,
+      restore: () => { for (const [path, entry] of saved) { if (entry) require.cache[path] = entry; else delete require.cache[path]; } },
+    };
+  }
+
+  const KEYS = { groq: 'gsk_test', gemini: 'AIza_test' };
+  const LANE = { apiKey: 'gsk_test', temperature: 0.7, maxTokens: 900, usePortkey: false, portkeyVirtualKey: undefined };
+
+  it('a single-provider list calls its provider once with the caller\'s options minus keys; no chain (E1, E2)', (t) => {
+    const stubs = stubProviders(['groq']);
+    t.after(stubs.restore);
+    const chainStream = t.mock.method(providerChain, 'createChainStreamingLLM');
+    const chainOnce = t.mock.method(providerChain, 'createChainLLM');
+    const model = 'openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b';
+    const streaming = factory.createStreamingLLM('groq', { ...LANE, model, keys: KEYS });
+    const once = factory.createLLM('groq', { ...LANE, model, keys: KEYS });
+    assert.equal(streaming.stub, 'groq');
+    assert.equal(once.stub, 'groq');
+    assert.deepEqual(stubs.calls.map(c => [c.kind, c.opts]), [['stream', { ...LANE, model }], ['once', { ...LANE, model }]]);
+    for (const c of stubs.calls) assert.equal('keys' in c.opts, false);
+    assert.equal(chainStream.mock.callCount(), 0);
+    assert.equal(chainOnce.mock.callCount(), 0);
+  });
+
+  it('options without keys reach a single provider as they were', (t) => {
+    const stubs = stubProviders(['gemini']);
+    t.after(stubs.restore);
+    const opts = { ...LANE, apiKey: 'AIza_test', model: 'gemini-3.5-flash-lite' };
+    factory.createStreamingLLM('gemini', opts);
+    assert.deepEqual(stubs.calls[0].opts, opts);
+  });
+
+  it('a mixed list returns the chain; each provider gets its own key and never keys', async (t) => {
+    const stubs = stubProviders(['groq', 'gemini']);
+    t.after(stubs.restore);
+    const chainStream = t.mock.method(providerChain, 'createChainStreamingLLM');
+    const chainOnce = t.mock.method(providerChain, 'createChainLLM');
+    const model = 'openai/gpt-oss-120b,gemini-3.5-flash-lite';
+    const streaming = factory.createStreamingLLM('groq', { ...LANE, model, keys: KEYS });
+    const once = factory.createLLM('groq', { ...LANE, model, keys: KEYS });
+    assert.equal(streaming.stub, undefined);
+    assert.equal(chainStream.mock.callCount(), 1);
+    assert.equal(chainOnce.mock.callCount(), 1);
+    assert.deepEqual(chainStream.mock.calls[0].arguments[0].segments, [
+      { provider: 'groq', models: ['openai/gpt-oss-120b'] },
+      { provider: 'gemini', models: ['gemini-3.5-flash-lite'] },
+    ]);
+    assert.equal(stubs.calls.length, 0, 'providers are created per request');
+
+    await (await streaming.streamChat([{ role: 'user', content: 'q' }])).text();
+    assert.deepEqual(stubs.calls.map(c => [c.provider, c.opts.apiKey, c.opts.model, 'keys' in c.opts]), [['groq', 'gsk_test', 'openai/gpt-oss-120b', false]]);
+    assert.equal((await once.chat([{ role: 'user', content: 'q' }])).content, 'groq');
+  });
+
+  it('openai and ollama lists are never split (E9)', (t) => {
+    const stubs = stubProviders(['openai', 'ollama']);
+    t.after(stubs.restore);
+    const chainStream = t.mock.method(providerChain, 'createChainStreamingLLM');
+    factory.createStreamingLLM('openai', { ...LANE, apiKey: 'sk-x', model: 'gpt-4.1,gemini-3.5-flash-lite', keys: { openai: 'sk-x' } });
+    factory.createStreamingLLM('openai-glass', { ...LANE, apiKey: 'sk-x', model: 'gpt-4.1-glass,gemini-3.5-flash-lite', keys: { 'openai-glass': 'sk-x' } });
+    factory.createLLM('ollama', { ...LANE, apiKey: 'local', model: 'llama3.2:latest,library/x', keys: { ollama: 'local' } });
+    assert.equal(chainStream.mock.callCount(), 0);
+    assert.deepEqual(stubs.calls.map(c => [c.provider, c.opts.model, 'keys' in c.opts]), [
+      ['openai', 'gpt-4.1,gemini-3.5-flash-lite', false],
+      ['openai', 'gpt-4.1-glass,gemini-3.5-flash-lite', false],
+      ['ollama', 'llama3.2:latest,library/x', false],
+    ]);
+  });
+});

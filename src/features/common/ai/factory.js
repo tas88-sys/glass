@@ -1,6 +1,6 @@
 // factory.js
 
-const { CHAIN_PROVIDERS } = require('./providerChain');
+const providerChain = require('./providerChain');
 
 /**
  * @typedef {object} ModelOption
@@ -140,7 +140,7 @@ function inferProviderFromModelId(modelId) {
 function splitByProvider(modelCsv, firstProvider) {
   const ids = typeof modelCsv === 'string' ? modelCsv.split(',').map(s => s.trim()).filter(Boolean) : [];
   if (ids.length === 0) return [];
-  if (!CHAIN_PROVIDERS.includes(firstProvider)) return [{ provider: firstProvider, models: ids }];
+  if (!providerChain.CHAIN_PROVIDERS.includes(firstProvider)) return [{ provider: firstProvider, models: ids }];
   const segments = [];
   let current = firstProvider;
   for (const id of ids) {
@@ -150,6 +150,16 @@ function splitByProvider(modelCsv, firstProvider) {
     else segments.push({ provider: current, models: [id] });
   }
   return segments;
+}
+
+/**
+ * The caller's options without keys, and the keys. No provider ever receives
+ * the keys map: the chain gives each segment its own key as apiKey.
+ */
+function takeKeys(opts) {
+  if (!opts || !('keys' in opts)) return { keys: undefined, opts };
+  const { keys, ...rest } = opts;
+  return { keys, opts: rest };
 }
 
 function sanitizeModelId(model) {
@@ -171,6 +181,11 @@ function createSTT(provider, opts) {
 
 function createLLM(provider, opts) {
   if (provider === 'openai-glass') provider = 'openai';
+  const taken = takeKeys(opts);
+  opts = taken.opts;
+  // A list naming several providers runs them in turn (providerChain.js).
+  const segments = splitByProvider(opts?.model, provider);
+  if (segments.length > 1) return providerChain.createChainLLM({ segments, keys: taken.keys, opts });
 
   const handler = PROVIDERS[provider]?.handler();
   if (!handler?.createLLM) {
@@ -184,7 +199,12 @@ function createLLM(provider, opts) {
 
 function createStreamingLLM(provider, opts) {
   if (provider === 'openai-glass') provider = 'openai';
-  
+  const taken = takeKeys(opts);
+  opts = taken.opts;
+  // A list naming several providers runs them in turn (providerChain.js).
+  const segments = splitByProvider(opts?.model, provider);
+  if (segments.length > 1) return providerChain.createChainStreamingLLM({ segments, keys: taken.keys, opts });
+
   const handler = PROVIDERS[provider]?.handler();
   if (!handler?.createStreamingLLM) {
       throw new Error(`Streaming LLM not supported for provider: ${provider}`);

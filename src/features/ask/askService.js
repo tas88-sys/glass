@@ -315,6 +315,7 @@ class AskService {
             const streamingLLM = createStreamingLLM(modelInfo.provider, {
                 apiKey: modelInfo.apiKey,
                 model: modelInfo.model,
+                keys: modelInfo.keys,
                 temperature: 0.7,
                 usePortkey: modelInfo.provider === 'openai-glass',
                 portkeyVirtualKey: modelInfo.provider === 'openai-glass' ? modelInfo.apiKey : undefined,

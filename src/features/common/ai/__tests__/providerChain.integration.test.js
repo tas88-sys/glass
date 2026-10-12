@@ -142,13 +142,8 @@ for (const k of Object.keys(require.cache)) {
 }
 
 const health = require('../providers/modelHealth');
-const { splitByProvider } = require('../factory');
-const { createChainStreamingLLM, createChainLLM } = require('../providerChain');
-
-/** The chain as the factory builds it for a Groq-first list (the real adapters). */
-const chainOf = (opts) => ({ segments: splitByProvider(opts.model, 'groq'), keys: opts.keys, opts });
-const createStreamingLLM = (provider, opts) => createChainStreamingLLM(chainOf(opts));
-const createLLM = (provider, opts) => createChainLLM(chainOf(opts));
+// Through the factory, as the three lanes call it.
+const { splitByProvider, createStreamingLLM, createLLM } = require('../factory');
 
 // ---------------------------------------------------------------------------
 // Scripts
@@ -363,6 +358,16 @@ describe('chain over the real providers (SC-003)', () => {
     assert.equal(result._modelUsed, 'gemini-3.5-flash-lite');
     assert.equal(sdk.groq.calls.length, 3);
     assert.match(chainLine('request once'), /answered_by=gemini-3\.5-flash-lite provider=gemini segments_run=2 /);
+  });
+
+  it('a Groq-only list takes today\'s path: no chain line, no Gemini call (G3, SC-005)', async () => {
+    sdk.groq.script = byModel({ 'openai/gpt-oss-120b': groqAnswer('openai/gpt-oss-120b', 'Groq alone.') });
+    const { text, events } = await readAll(await createStreamingLLM('groq', laneOpts(GROQ_MODELS.join(','))).streamChat(MSGS));
+    assert.equal(text, 'Groq alone.');
+    assert.equal(events.filter(e => e.done).length, 1);
+    assert.equal(sdk.gemini.calls.length, 0);
+    assert.equal(logs.some(l => l.startsWith('[LLM Chain]')), false);
+    assert.ok(logs.some(l => l.startsWith('[Groq Provider] request stream answered_by=openai/gpt-oss-120b')));
   });
 
   it('logs carry no prompt, answer or key', async () => {
