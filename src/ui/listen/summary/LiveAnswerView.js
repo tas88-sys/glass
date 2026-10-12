@@ -169,6 +169,23 @@ export class LiveAnswerView extends LitElement {
             color: rgba(255, 255, 255, 0.4);
         }
 
+        /* Notes the answer drew on (career context). Text only, one line. */
+        .answer-sources {
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.35);
+            margin: -2px 0 4px;
+        }
+
+        /* Numbers and names the answer states that its notes do not (career context). */
+        .answer-unverified {
+            font-size: 10px;
+            color: rgba(255, 196, 0, 0.8);
+            margin-top: 4px;
+        }
+
         .answer-body {
             font-size: 12px;
             line-height: 1.5;
@@ -404,7 +421,13 @@ export class LiveAnswerView extends LitElement {
                     (a, i) => html`
                         <div class="answer-block ${i === 0 ? 'current' : 'past'}">
                             ${a.question ? html`<div class="answer-question">${a.question}</div>` : ''}
+                            ${a.sources && a.sources.length
+                                ? html`<div class="answer-sources" title="${a.sources.join('\n')}">from: ${a.sources.join(' · ')}</div>`
+                                : ''}
                             <div class="answer-body" data-answer-id="${a.id}"></div>
+                            ${a.unverified && a.unverified.length
+                                ? html`<div class="answer-unverified" title="Not in the notes or the conversation sent with this question. Check before saying it.">⚠ not in your notes: ${a.unverified.join(' · ')}</div>`
+                                : ''}
                         </div>
                     `
                 )}

@@ -525,11 +525,11 @@ flowchart TB
 ```
 
 `summaryService.js` fires analysis every time the turn count hits a multiple of 5
-(`triggerAnalysisIfNeeded`, `:305-306`). Each run feeds the **previous analysis result** plus
-the **last 30 turns** back into the prompt (`:65-68`, `:82-94`), so summaries build forward
+(`triggerAnalysisIfNeeded`, `:963-964`). Each run feeds the **previous analysis result** plus
+the **last 30 turns** back into the prompt (`:723-726`, `:739-752`), so summaries build forward
 rather than restarting. The structured output (TLDR, topic bullets, action items, suggested
-follow-ups) is parsed (`parseResponseText`, `:189-300`), pushed to `SummaryView`, and **UPSERT**ed
-into the `summaries` table — one row per `session_id` (`:157-164`).
+follow-ups) is parsed (`parseResponseText`, `:847-958`), pushed to `SummaryView`, and **UPSERT**ed
+into the `summaries` table — one row per `session_id` (`:813-826`).
 
 ---
 
@@ -781,6 +781,13 @@ token. The `default` analysis profile encodes a strict decision hierarchy (answe
 question → define proper noun → solve on-screen problem → passive acknowledgment) so the model
 behaves predictably on noisy meeting transcripts (`promptTemplates.js:238-403`).
 
+Live Answer passes career context through the same profile's `customPrompt` slot ("User-provided
+context") when the interviewer asks about the candidate and `CAREER_KB_PATH` is set. Otherwise
+the slot stays empty, as for Live Insights. When such an answer finishes, numbers and known names it
+states that the notes lack are flagged under it. See
+[`docs/LIVE_INSIGHTS_AND_ASK.md`](docs/LIVE_INSIGHTS_AND_ASK.md) §4.7, which also shows how the
+intent router picks a route ([`docs/diagrams/14-career-intent-router.mmd`](docs/diagrams/14-career-intent-router.mmd)).
+
 > Note: `ask:sendQuestionFromSummary` (the Listen "suggested action" buttons) only works in
 > `default` mode and is rejected in the other modes (`featureBridge.js:135-144`).
 
@@ -796,8 +803,11 @@ behaves predictably on noisy meeting transcripts (`promptTemplates.js:238-403`).
     `entitlements.plist`, min macOS 11.
   - **Windows** → `nsis` installer + `portable`, **x64**, code-signed.
   - **Linux** → **no target defined** (you run it from source).
-  - The macOS `SystemAudioDump` binary and `sharp` are `asarUnpack`'d (`electron-builder.yml:35-37`)
-    so they can execute from outside the asar archive.
+  - The macOS `SystemAudioDump` binary, `sharp` and `onnxruntime-node` are `asarUnpack`'d
+    (`electron-builder.yml` `asarUnpack`) so they can execute from outside the asar archive.
+  - `onnxruntime-node` (career-context embeddings) ships only the target platform's binaries, and
+    `onnxruntime-web` is excluded (`files` patterns); Intel Macs have no binary and use keyword
+    retrieval only.
 - **Deep linking**: registers the `pickleglass://` protocol for the auth callback.
 - **Auto-update**: `electron-updater` checks GitHub releases in production (`index.js:697-728`).
 
@@ -870,6 +880,7 @@ So, concretely, on first launch:
 | Ask (vision) | `src/features/ask/askService.js`, `src/ui/ask/AskView.js` |
 | Listen (audio/STT) | `src/features/listen/listenService.js`, `stt/sttService.js`, `src/ui/listen/audioCore/listenCapture.js` |
 | Summarization | `src/features/listen/summary/summaryService.js` |
+| Live Answer career context | `src/features/common/career/` (entry `index.js`), `scripts/eval-career-kb.js`, `scripts/ask-career-kb.js` |
 | AI providers / factory | `src/features/common/ai/factory.js`, `ai/providers/*.js` |
 | Gemini failover | `ai/providers/gemini.js`, `ai/providers/geminiModelRotator.js` |
 | Model & key state | `src/features/common/services/modelStateService.js` |

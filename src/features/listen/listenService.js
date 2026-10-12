@@ -5,6 +5,7 @@ const authService = require('../common/services/authService');
 const sessionRepository = require('../common/repositories/session');
 const sttRepository = require('./stt/repositories');
 const internalBridge = require('../../bridge/internalBridge');
+const careerContext = require('../common/career');
 
 class ListenService {
     constructor() {
@@ -161,6 +162,9 @@ class ListenService {
         }
 
         this.isInitializingSession = true;
+        // Live Answer career context: pick up changed notes for this session
+        // (background; never awaited, never throws).
+        careerContext.warm();
         this.sendToRenderer('session-initializing', true);
         this.sendToRenderer('update-status', 'Initializing sessions...');
 

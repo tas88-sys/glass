@@ -135,3 +135,77 @@ describe('applyLiveAnswerStatus', () => {
         assert.equal(applyLiveAnswerStatus(null, { id: 3, answer: 'a' }), null);
     });
 });
+
+// Career context (spec 2026-10-11, FR-015): note titles used for an answer.
+describe('applyLiveAnswerUpdate: sources', () => {
+    it('stores sources on create', () => {
+        const out = applyLiveAnswerUpdate([], { id: 1, question: 'Q', answer: 'A', ts: 1, sources: ['notes › Story', 'canonical facts'] });
+        assert.deepEqual(out[0].sources, ['notes › Story', 'canonical facts']);
+    });
+
+    it('preserves sources on streaming updates of the same id', () => {
+        const sources = ['notes › Story'];
+        let out = applyLiveAnswerUpdate([], { id: 1, answer: 'A', sources });
+        out = applyLiveAnswerUpdate(out, { id: 1, answer: 'AB', sources });
+        out = applyLiveAnswerUpdate(out, { id: 1, answer: 'ABC' });
+        assert.equal(out.length, 1);
+        assert.deepEqual(out[0].sources, sources);
+        assert.equal(out[0].text, 'ABC');
+    });
+
+    it('does not share the payload array with the entry', () => {
+        const sources = ['notes › Story'];
+        const out = applyLiveAnswerUpdate([], { id: 1, answer: 'A', sources });
+        sources.push('mutated');
+        assert.deepEqual(out[0].sources, ['notes › Story']);
+    });
+
+    it('entries without sources stay without (no key)', () => {
+        let out = applyLiveAnswerUpdate([], { id: 1, answer: 'A' });
+        out = applyLiveAnswerUpdate(out, { id: 1, answer: 'AB' });
+        out = applyLiveAnswerUpdate(out, { id: 2, answer: 'B', sources: [] });
+        out = applyLiveAnswerUpdate(out, { id: 3, answer: 'C', sources: 'not-an-array' });
+        for (const a of out) assert.ok(!('sources' in a), `entry ${a.id}`);
+    });
+
+    it('sources of one answer never land on another id', () => {
+        let out = applyLiveAnswerUpdate([], { id: 1, answer: 'A', sources: ['notes › Story'] });
+        out = applyLiveAnswerUpdate(out, { id: 2, answer: 'B' });
+        assert.ok(!('sources' in out[0]));
+        assert.deepEqual(out[1].sources, ['notes › Story']);
+    });
+});
+
+// Career context (spec 2026-10-11, FR-021): numbers and names the notes do not have.
+describe('applyLiveAnswerUpdate: unverified', () => {
+    it('stores unverified from the last payload of a streamed answer', () => {
+        let out = applyLiveAnswerUpdate([], { id: 1, answer: 'A', sources: ['notes › Story'] });
+        out = applyLiveAnswerUpdate(out, { id: 1, answer: 'AB' });
+        out = applyLiveAnswerUpdate(out, { id: 1, answer: 'AB', unverified: ['40%', 'Bridge'] });
+        assert.equal(out.length, 1);
+        assert.deepEqual(out[0].unverified, ['40%', 'Bridge']);
+        assert.deepEqual(out[0].sources, ['notes › Story']);
+        assert.equal(out[0].text, 'AB');
+    });
+
+    it('stores unverified on create and keeps it on later payloads', () => {
+        let out = applyLiveAnswerUpdate([], { id: 1, answer: 'A', unverified: ['7'] });
+        out = applyLiveAnswerUpdate(out, { id: 1, answer: 'A' });
+        assert.deepEqual(out[0].unverified, ['7']);
+    });
+
+    it('does not share the payload array with the entry', () => {
+        const unverified = ['40%'];
+        const out = applyLiveAnswerUpdate([], { id: 1, answer: 'A', unverified });
+        unverified.push('mutated');
+        assert.deepEqual(out[0].unverified, ['40%']);
+    });
+
+    it('entries without it stay without (no key), and it never lands on another id', () => {
+        let out = applyLiveAnswerUpdate([], { id: 1, answer: 'A', unverified: ['40%'] });
+        out = applyLiveAnswerUpdate(out, { id: 2, answer: 'B', unverified: [] });
+        out = applyLiveAnswerUpdate(out, { id: 3, answer: 'C', unverified: 'not-an-array' });
+        assert.ok(!('unverified' in out[0]) && !('unverified' in out[1]));
+        assert.deepEqual(out[2].unverified, ['40%']);
+    });
+});

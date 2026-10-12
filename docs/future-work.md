@@ -57,7 +57,7 @@ These are recorded in `specs/2026-05-30-interview-live-answer/spec.md` (§ Out o
 | Item | Notes |
 |------|-------|
 | **Manual override (v2)** | A "answer now / re-roll" affordance with its own Listen-pane hotkey/button (explicitly **not** Ask's `Cmd/Ctrl+1`), including de-dup against an in-flight auto call. |
-| **Personalized answers (v2)** | Wire the candidate's résumé/bio into the prompt's currently-empty `customPrompt` slot (`promptBuilder.js` injects "User-provided context"; today it's empty → behavioral answers are generic "User context unavailable"). Unlocks personalized behavioral/statement answers. |
+| **Personalized answers (v2)** | **Shipped** as career context (spec `2026-10-11-live-answer-career-context`, `docs/LIVE_INSIGHTS_AND_ASK.md` §4.7). Still open from that spec: a settings UI (toggle, folder picker, active company, rebuild, status); story rotation within a call; reuse in Ask and Live Insights; a semantic fallback in the router; letting technical Q&A banks feed general answers; unloading the embedding model between Listen sessions. |
 | **Persistence (cross-session)** | A newest-first **in-session** answer history now ships (renderer memory, cleared on Stop / new session — see CHANGELOG "Live Answer is now a newest-first history"). Still open: persisting answers to the session DB so they survive an app restart (the summary lane's `summaryRepository.saveSummary` path is deliberately not extended). |
 | **Ask transcript wiring** | Make Ask receive the live transcript — a separate, pre-existing gap that the design doc and prompts brief raise but leave open. |
 
@@ -173,3 +173,72 @@ These are recorded in `specs/2026-05-30-interview-live-answer/spec.md` (§ Out o
   can point your proctoring system at?
 
 ✻ Cogitated for 37s
+
+---
+
+## 4. Live Answer career context — answer-quality test
+
+**Status:** Pending. Agreed on 2026-10-11, not started.
+**Spec:** `specs/2026-10-11-live-answer-career-context/` (task T032)
+
+### Summary
+
+The eval (`scripts/eval-career-kb.js`) checks whether the right note reaches the prompt, not whether the answer built from it is good. The live check (FR-021) flags numbers and known names the notes lack while the app runs. Nothing measures the rest: claims the notes do not support, answers that miss the question, the wrong language or format.
+
+### Proposed
+
+- For each personal item in `<KB>/glass-eval/questions.jsonl`, build the messages `makeLiveAnswer` sends (same route, block, addendum and user message) and get the answer from the configured model.
+- Score each answer:
+
+| Check | How | Target |
+|-------|-----|--------|
+| Invented numbers and known names | `findUnsupported` (FR-021), no model | 0 |
+| Claims backed by the notes | A judge model lists each claim and marks it supported or not | ≥ 95% of claims |
+| Answers the question | Judge score, 1 to 5 | Average ≥ 4 |
+| Form | Code: first person, the question's language, a headline then bullets | 100% |
+
+- Calibrate the judge: the candidate rates about 20 answers, and the judge is kept only if it agrees with those ratings most of the time.
+- Answers contain personal data: store them in the KB repo next to the eval set, and report counts only in this repo (spec C5).
+- Run it before changing the prompt, the model, retrieval or the block size.
+
+### Open decision
+
+Which key and model to use. One run is about 120 model calls (an answer and a judgment per item), above Gemini Flash's free tier (20 requests a day): a paid key, or a different judge model.
+
+### Acceptance
+
+- [ ] A script (or an `--answers` mode of the eval) prints the four checks for the full set and the holdout.
+- [ ] Judge agreement with the candidate's ratings is reported.
+- [ ] The targets are recorded in the spec as success criteria.
+
+---
+
+## 5. Live Answer career context — open routing and retrieval items
+
+**Status:** Pending. Found on 2026-10-11 while comparing questions in English and Portuguese; not started.
+**Spec:** `specs/2026-10-11-live-answer-career-context/` (research R15 to R17)
+
+### Summary
+
+Four gaps are still open after T038 to T040. Each was measured with the eval, `scripts/ask-career-kb.js` or a set of questions written for the check. The questions and notes stay in the private notes repo; the examples below are invented.
+
+| Item | What happens | Example |
+|------|--------------|---------|
+| **Live-coding talk routed personal** | Older experience cues also match a turn about the code on screen. The answer then gets notes and the first-person addendum. | "Have you created the index on that column?" (`experience:you-past`), "Conte sobre uma estrutura de dados que você conhece" (`experience:pt-voce-habito`), "Have you handled the nil case?" (`experience:have-you`) |
+| **English questions about the candidate that still route general** | No cue matches, so no notes are sent. These six were R16's held-out misses; they are no longer held out. | "What's pushing you to look for something new?", "When could you join if we made an offer?", "Is there something you'd like to add that we didn't ask about?", "What's the reason behind your job search?", "What was it like working at a startup?", "Would you be comfortable working with Python?" |
+| **English question, note written in Portuguese** | The route is right, but the note ranks too low: its words do not match and the vectors match across languages less surely. | "Have you ever built a system from scratch?" (the story's note ranks 8th, not sent); "What's the biggest thing you've built from the ground up?" (not in the top 40); one eval item hits in Portuguese and misses in English |
+| **Ambiguous gate just under the threshold** | A turn routed ambiguous sends nothing when its closest note scores just under the 0.35 gate. The threshold is not calibrated yet (T027). | Before R17, "Conte sobre um lançamento que deu certo" routed ambiguous and its closest note scored 0.349. R17 routes that one personal, but any other ambiguous turn can fall just under. |
+
+### Proposed
+
+- **Live-coding talk.** Collect 30 to 50 turns an interviewer says about code on screen, in both languages, and route them through `classifyCareerIntent`. Then try a guard: an experience verb followed by a definite object about code ("the index", "this function", "that error") routes general or ambiguous. Keep it only if R16's and R17's held-out sets do not lose questions about the candidate.
+- **English questions still general.** Write general patterns (the reason behind a job search, a start date with "when could you join", "that we didn't ask about"), not one cue per question. Measure on a new held-out set written before the change.
+- **English question, Portuguese note.** Measured on 2026-10-12 (R15 to R17): of the 169 sections the eval expects, 50 reach the model when the questions are asked in Portuguese and 54 in English; 6 are still lost in English, in 5 notes. An English summary line inside a long Portuguese section did not help (52). A subsection with its own English heading did (54), since the title weighs 3 in the keyword search and has its own vectors; done for three answers in the notes repo. Left: the other answers lost in English (only one section per note file is sent, and three of the lost ones share a file), and the technology list in the skills note, which needs the candidate's review.
+- **Ambiguous gate.** Part of T027: label turns "should inject" or "should not" and set the threshold from them.
+
+### Acceptance
+
+- [ ] A live-coding turn set exists, and its turns routed personal are counted before and after any guard.
+- [ ] On a new English held-out set, questions about the candidate routed general are counted before and after.
+- [ ] The eval's Portuguese questions asked in English send the right note as often as in Portuguese, or the gap is explained.
+- [ ] The ambiguous threshold is set from labeled turns (T027).

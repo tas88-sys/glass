@@ -4,6 +4,7 @@ const { createLLM, createStreamingLLM } = require('../../common/ai/factory');
 const sessionRepository = require('../../common/repositories/session');
 const summaryRepository = require('./repositories');
 const modelStateService = require('../../common/services/modelStateService');
+const careerContext = require('../../common/career');
 
 // Verbose live-answer trace logging — gated behind LIVE_ANSWER_DEBUG=1 so it
 // stays out of normal runs but can be re-enabled for diagnosis. NEVER logs the
@@ -209,21 +210,34 @@ function parseAnswerOrPassive(prefix) {
 // Decision-only: does not manage debounce or abort — orchestrator does that.
 // Returns false when:
 //   - speaker is not 'them' (case-insensitive mic gate)
-//   - text is not a likely question
+//   - text is not a likely question, and carries no career cue
 //   - normalized tail equals lastAnsweredTail (de-dup same question)
 // Returns true otherwise (including when inFlight with new tail — the caller
 // is responsible for aborting the in-flight request).
+//
+// hasCareerCue (optional) widens the question heuristic for statement-form
+// career prompts ("your biggest weakness", career FR-007). The career module
+// returns false while it is disabled, so the gate is then exactly today's.
 // ---------------------------------------------------------------------------
 function normalizeTail(text) {
     if (!text) return '';
     return text.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-function shouldTriggerAnswer(speaker, text, lastAnsweredTail, inFlight) {
+function hasCue(hasCareerCue, text) {
+    if (typeof hasCareerCue !== 'function') return false;
+    try {
+        return hasCareerCue(text) === true;
+    } catch {
+        return false;
+    }
+}
+
+function shouldTriggerAnswer(speaker, text, lastAnsweredTail, inFlight, hasCareerCue) {
     // Speaker gate
     if (typeof speaker !== 'string' || speaker.toLowerCase() !== 'them') return false;
-    // Question heuristic
-    if (!isLikelyQuestion(text)) return false;
+    // Question heuristic, widened by career cues (career FR-007)
+    if (!isLikelyQuestion(text) && !hasCue(hasCareerCue, text)) return false;
     // De-dup: same normalized tail as last answered
     const tail = normalizeTail(text);
     if (lastAnsweredTail !== null && lastAnsweredTail !== undefined && tail === lastAnsweredTail) return false;
@@ -283,6 +297,13 @@ class SummaryService {
         // question. Lets the renderer coalesce streaming deltas into one history
         // entry vs. pushing a new one (in-session answer history).
         this.answerSeq = 0;
+
+        // Career context (spec 2026-10-11): the module (replaceable in tests),
+        // the last answered personal/company question for follow-ups, and the
+        // interviewer's company once named in the session. Reset per session.
+        this.career = careerContext;
+        this.careerPrev = null;
+        this.activeCompany = null;
     }
 
     setCallbacks({ onAnalysisComplete, onStatusUpdate }) {
@@ -321,9 +342,15 @@ class SummaryService {
         // renderer can build an in-session history (newest-first).
         const answerId = meta.id != null ? meta.id : Date.now();
         const question = meta.question || '';
+        // Career context (career FR-014): used only when it carries a block. With
+        // no block (feature off, general route, nothing found) the messages are
+        // byte-identical to today's (career SC-005). Its note titles ride on
+        // this answer's payloads as `sources` (career FR-015).
+        const career = meta.career && meta.career.block ? meta.career : null;
+        const extra = career && Array.isArray(career.sources) && career.sources.length ? { sources: career.sources } : {};
 
         const recent = this.formatConversationForPrompt(conversationTexts, 30);
-        const basePrompt = getSystemPrompt('pickle_glass_analysis', '', false);
+        const basePrompt = getSystemPrompt('pickle_glass_analysis', career?.block || '', false);
         const systemPrompt = basePrompt.replace('{{CONVERSATION_HISTORY}}', recent);
 
         const messages = [
@@ -336,7 +363,8 @@ class SummaryService {
                     'When there are supporting points, format them as a markdown bullet list ' +
                     '(each point on its own line beginning with "- "). ' +
                     'Do not fabricate bullets for a trivial one-line answer. ' +
-                    'If there is no clear question or nothing useful to answer, reply EXACTLY: PASSIVE',
+                    'If there is no clear question or nothing useful to answer, reply EXACTLY: PASSIVE' +
+                    (career && career.addendum ? `\n\n${career.addendum}` : ''),
             },
         ];
 
@@ -439,6 +467,7 @@ class SummaryService {
                                         question,
                                         answer: fullResponse,
                                         ts: Date.now(),
+                                        ...extra,
                                     });
                                 }
                             }
@@ -451,6 +480,7 @@ class SummaryService {
                                 question,
                                 answer: fullResponse,
                                 ts: Date.now(),
+                                ...extra,
                             });
                         }
                     }
@@ -472,7 +502,7 @@ class SummaryService {
                 passiveSuppressed = true;
             } else if (decision.flush) {
                 fullResponse += decision.flush;
-                this.sendToRenderer('live-answer-update', { id: answerId, question, answer: fullResponse, ts: Date.now() });
+                this.sendToRenderer('live-answer-update', { id: answerId, question, answer: fullResponse, ts: Date.now(), ...extra });
             }
         }
 
@@ -496,6 +526,21 @@ class SummaryService {
         laDebug(`[live-answer] answer stream complete — ${streamedChars} chars emitted to renderer`);
         this.hadFallback = hadFallback;
         const ts = Date.now();
+
+        // Live check (career FR-021): numbers and known names the answer states
+        // but nothing the model was given contains ride on one last payload as
+        // `unverified`, and the panel marks them.
+        if (career && !(signal && signal.aborted) && this.career && typeof this.career.checkAnswer === 'function') {
+            let unverified = [];
+            try {
+                unverified = this.career.checkAnswer(fullResponse, career, `${question}\n${recent}`) || [];
+            } catch {
+                /* the check never blocks an answer */
+            }
+            if (unverified.length) {
+                this.sendToRenderer('live-answer-update', { id: answerId, question, answer: fullResponse, ts, ...extra, unverified });
+            }
+        }
         return { answer: fullResponse, ts };
     }
 
@@ -511,10 +556,33 @@ class SummaryService {
      * 4. De-dup + abort-or-suppress in the debounce callback (FR-004)
      */
     triggerAnswerIfNeeded(speaker, text) {
-        const willTrigger = shouldTriggerAnswer(speaker, text, this.lastAnsweredTail, this.inFlight);
+        const fromThem = typeof speaker === 'string' && speaker.toLowerCase() === 'them';
+        // Career FR-011: the interviewer's company is the first one named in a
+        // them turn (CAREER_KB_COMPANY, when set, wins inside the module).
+        if (fromThem && !this.activeCompany) {
+            try {
+                const company = this.career.detectCompany(text);
+                if (company) {
+                    this.activeCompany = company;
+                    laDebug('[live-answer] active company detected from the conversation');
+                }
+            } catch {
+                /* the career module is optional */
+            }
+        }
+
+        const willTrigger = shouldTriggerAnswer(speaker, text, this.lastAnsweredTail, this.inFlight, t => this.career.hasCareerCue(t));
         // [diagnostic] trigger-gate trace — decision metadata only, never answer text
         laDebug(`[live-answer] trigger gate: speaker=${speaker} likelyQuestion=${isLikelyQuestion(text)} inFlight=${this.inFlight} → willTrigger=${willTrigger}`);
         if (!willTrigger) return;
+
+        // Career FR-009: start the query embedding now so it is ready when the
+        // debounce fires (a no-op while the module is disabled or BM25-only).
+        try {
+            this.career.prefetch(text, { prev: this.careerPrev });
+        } catch {
+            /* the career module is optional */
+        }
 
         // (Re)set debounce timer — coalesces multi-segment questions
         if (this.answerDebounceTimer) {
@@ -548,15 +616,24 @@ class SummaryService {
             // Record tail at debounce-fire time (same-question-in-flight suppression)
             this.lastAnsweredTail = currentTail;
             this.inFlight = true;
-            this.inFlightController = new AbortController();
-            const signal = this.inFlightController.signal;
+            const controller = new AbortController();
+            this.inFlightController = controller;
+            const signal = controller.signal;
 
             // New id per accepted answer — the renderer keys its history on this.
             const answerId = ++this.answerSeq;
             const question = extractQuestion(text);
 
             try {
-                await this.makeLiveAnswer(this.conversationHistory, signal, { id: answerId, question });
+                // Career context is resolved after the controller exists, so a newer
+                // question or a session reset can cancel this answer meanwhile (career E22).
+                const career = await this.resolveCareerContext(text, question);
+                if (signal.aborted) return;
+                // Follow-ups stick only to the last answered personal/company question (career FR-006, E17).
+                this.careerPrev = career && (career.route === 'personal' || career.route === 'company')
+                    ? { route: career.route, queryTerms: career.queryTerms || [], anchorText: career.anchorText || '', ts: Date.now() }
+                    : null;
+                await this.makeLiveAnswer(this.conversationHistory, signal, { id: answerId, question, career });
             } catch (err) {
                 if (signal.aborted) {
                     // Expected control flow on abort-and-replace — swallow (FR-009)
@@ -574,10 +651,31 @@ class SummaryService {
                     ts: Date.now(),
                 });
             } finally {
-                this.inFlight = false;
-                this.inFlightController = null;
+                // A newer question may own the lane by now (abort-and-replace);
+                // only clear the state this answer set.
+                if (this.inFlightController === controller) {
+                    this.inFlight = false;
+                    this.inFlightController = null;
+                }
             }
         }, 800);
+    }
+
+    /**
+     * Career context for the turn that fired the debounce (career FR-014).
+     * The module is total and returns null while disabled; the guard keeps any
+     * failure from blocking the answer (career FR-017).
+     */
+    async resolveCareerContext(text, question) {
+        try {
+            return await this.career.getCareerContext(text, {
+                prev: this.careerPrev,
+                activeCompany: this.activeCompany,
+                question,
+            });
+        } catch {
+            return null;
+        }
     }
 
     addConversationTurn(speaker, text) {
@@ -617,6 +715,8 @@ class SummaryService {
         this.inFlight = false;
         this.hadFallback = false;
         this.lastAnswerTs = 0;
+        this.careerPrev = null;
+        this.activeCompany = null;
         console.log('[live-answer] resetLiveAnswer — debounce cleared, in-flight aborted');
     }
 

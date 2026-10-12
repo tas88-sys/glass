@@ -26,6 +26,7 @@ const askService = require('./features/ask/askService');
 const settingsService = require('./features/settings/settingsService');
 const sessionRepository = require('./features/common/repositories/session');
 const modelStateService = require('./features/common/services/modelStateService');
+const careerContext = require('./features/common/career');
 const featureBridge = require('./bridge/featureBridge');
 const windowBridge = require('./bridge/windowBridge');
 
@@ -229,6 +230,10 @@ app.whenReady().then(async () => {
             'A critical error occurred during startup. Some features might be disabled. Please restart the application.'
         );
     }
+
+    // Live Answer career context: index the notes in the background. Inert
+    // unless CAREER_KB_PATH is set; never awaited, never throws.
+    careerContext.warm();
 
     // initAutoUpdater should be called after auth is initialized
     initAutoUpdater();
