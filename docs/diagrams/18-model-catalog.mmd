@@ -1,0 +1,34 @@
+%% 18 - Model catalog
+%% What each Groq, Gemini and Anthropic model can do, and which provider an ID
+%% belongs to, read from each provider's models API instead of tables keyed by
+%% model name (spec 2026-10-12-model-catalog).
+%% Source: modelCatalog.js + groq.js / anthropic.js / gemini.js (listModels, getModel,
+%% normalizeModel) + modelStateService.js + repositories/modelCatalog + SettingsView.js
+flowchart TB
+    subgraph sources["Where a value comes from (first that has one)"]
+        o1["1. override set in Settings<br/>(sees images, reasoning: Auto / Yes / No;<br/>max output: a number)"]
+        o2["2. the provider's models API<br/>Groq: input_modalities, max_completion_tokens, supported_features<br/>Anthropic: capabilities.image_input / thinking / effort, max_tokens<br/>Gemini: outputTokenLimit, thinking (no input modalities)"]
+        o3["3. provider default, one rule per provider<br/>Groq: no images; Gemini, Anthropic: images"]
+    end
+
+    subgraph learned["Learned from refusals"]
+        l1["Groq 429 OTPM: the key's output tokens per minute (L)<br/>kept 24 h; cleared when the key changes"]
+        l2["Anthropic 400 on the fallback beta, accepted without it:<br/>the model does not take the beta"]
+    end
+
+    sources --> cat["modelCatalog (in memory)<br/>capabilities(provider, id) · providerOf(id, field)<br/>every read synchronous"]
+    learned --> cat
+    cat <-->|"load at startup / upsert each change"| table[("SQLite model_catalog<br/>(provider, model_id) PK")]
+
+    subgraph refresh["When the lists are read"]
+        r1["startup: every provider with a key (background)"]
+        r2["key saved: that provider (and its learned limits cleared)"]
+        r3["list saved: stale lists, then a lookup of each unknown ID<br/>(5 s at most, so Settings shows the result)"]
+        r4["a request names an unknown ID: ensureKnown,<br/>2 s at most, then the defaults; a list over 24 h old: background"]
+    end
+    refresh -->|"listModels / getModel (alias or missing ID)<br/>a failed read keeps what is known"| cat
+
+    cat --> u1["factory.inferProviderFromModelId / splitByProvider<br/>the provider whose list has the ID; else the prefix (logged once)"]
+    cat --> u2["providerChain: a segment sees images when one of its models does;<br/>visionOnly for a segment with a later one that sees the image"]
+    cat --> u3["providers: images only to models that see them;<br/>cap never over the model max; Groq reasoning dialect when it reasons;<br/>Anthropic effort levels; Groq skips a model over the key's limit"]
+    cat --> u4["Settings: one line per model of the active list<br/>(provider, what it can do, the source; warnings: no such model,<br/>key output limit, answers may stop at N); Edit; Refresh"]

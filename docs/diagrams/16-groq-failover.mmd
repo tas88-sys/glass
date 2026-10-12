@@ -3,12 +3,16 @@
 %%   openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b
 %% One loop serves streamChat and chat/generateContent (both stream on the wire).
 %% The SDK never retries (maxRetries: 0); every wait is the loop's.
-%% Source: groq.js (runWithFailover / runAttempt) + groqErrors.js + modelHealth.js
+%% What each model takes (sees images, max output, reasons) comes from the model
+%% catalog (modelCatalog.js), filled from GET /openai/v1/models.
+%% Source: groq.js (runWithFailover / runAttempt) + groqErrors.js + modelHealth.js + modelCatalog.js
 flowchart TB
     start(["createStreamingLLM / createLLM with model CSV"]) --> parse["parseModelList(csv)<br/>trim, drop empties"]
-    parse --> order["orderForImages<br/>image in the request? models that see images first<br/>(log order=vision-first)<br/>visionOnly (set by the chain): only those;<br/>none in the list: NO_VISION_MODEL, no request"]
-    order --> pick["pickModel(remaining)<br/>first healthy in order;<br/>if all cooling, soonest-to-recover"]
-    pick --> attempt["attempt: buildRequest (temperature passed;<br/>gpt-oss effort low + include_reasoning false;<br/>qwen3 effort none; cap + 1024 when reasoning;<br/>images only to vision models)<br/>chat.completions.create stream, maxRetries 0, timeout 15s (headers)"]
+    parse --> learn["modelCatalog.ensureKnown<br/>a model the catalog does not know is looked up (2 s at most)"]
+    learn --> order["orderForImages<br/>image in the request? models that see images (catalog:<br/>input_modalities has image) first (log order=vision-first)<br/>visionOnly (set by the chain): only those;<br/>none in the list: NO_VISION_MODEL, no request"]
+    order --> limit["key output limit learned from an OTPM refusal (catalog, 24 h):<br/>a model whose declared cap is over it is skipped, no call<br/>(log skip reason=key-output-limit); none left: KEY_OUTPUT_LIMIT"]
+    limit --> pick["pickModel(remaining)<br/>first healthy in order;<br/>if all cooling, soonest-to-recover"]
+    pick --> attempt["attempt: buildRequest (temperature passed;<br/>reasoning dialect by family, unless the catalog says it does not reason:<br/>gpt-oss effort low + include_reasoning false; qwen3 effort none;<br/>cap + 1024 when reasoning, never over max_completion_tokens;<br/>images only to models that see them)<br/>chat.completions.create stream, maxRetries 0, timeout 15s (headers)"]
     attempt --> chunks["read chunks until finish_reason<br/>first text within 15s; then 15s idle limit;<br/>close at finish_reason (the SDK reads past [DONE])"]
     chunks --> ok{"outcome?"}
 
@@ -19,7 +23,7 @@ flowchart TB
     kind -->|"fatal-auth 401/403"| fatal["controller.error / throw<br/>userMessage 'MODEL — server reason'"]
     kind -->|"fatal-request 400/424"| fatal
     kind -->|"unavailable 404 or model_ code"| unav["cooldown 5 min<br/>_reset reason unavailable"]
-    kind -->|"too-large 413 (over the key's TPM)<br/>or 429 OTPM (cap over the output limit)"| large["no cooldown<br/>_reset reason too-large<br/>log limit=L requested=R"]
+    kind -->|"too-large 413 (over the key's TPM)<br/>or 429 OTPM (cap over the output limit)"| large["no cooldown<br/>_reset reason too-large<br/>log limit=L requested=R<br/>OTPM: the catalog keeps L for the model"]
     kind -->|"transient 408/409/422/429/498/5xx,<br/>stream error, network, timeouts"| cool["cooldown: own codes and 422 10s;<br/>else retry-after, default 60s, [5s, 300s]<br/>_reset reason timeout / transient"]
 
     unav --> more{"models left and deadline not hit?"}

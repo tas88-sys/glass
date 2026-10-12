@@ -7,10 +7,10 @@
 flowchart TB
     start(["createStreamingLLM / createLLM with model CSV"]) --> parse["parseModelList(csv)<br/>trim, drop empties -> remaining[]"]
     parse --> pick["pickModel(remaining)<br/>first healthy in order;<br/>if all cooling, soonest-to-recover"]
-    pick --> attempt["attempt: buildRequest (no temperature; effort low;<br/>max_tokens >= 4096 on models that think)<br/>messages.create stream, maxRetries 0, timeout 15s (headers)"]
-    attempt --> beta{"Opus / Sonnet 5.5?"}
-    beta -->|yes| fb["beta.messages.create + fallbacks: 'default'<br/>(400 naming the beta: resend without, off for the process)"]
-    beta -->|no| events
+    pick --> attempt["attempt: buildRequest from the model catalog (no temperature;<br/>effort low, only to models whose capabilities.effort lists levels;<br/>max_tokens >= 4096 on models that think, never over the model max;<br/>no images to a model set not to see them)<br/>messages.create stream, maxRetries 0, timeout 15s (headers)"]
+    attempt --> beta{"catalog: the API refused the beta for this model?"}
+    beta -->|no| fb["beta.messages.create + fallbacks: 'default'<br/>(a 400: resend once without the beta; accepted:<br/>the catalog marks the model, kept across restarts)"]
+    beta -->|yes| events
     fb --> events["read events until message_stop<br/>first text within 20s Haiku / 45s others;<br/>then 30s idle limit; close at message_stop"]
     events --> ok{"outcome?"}
 

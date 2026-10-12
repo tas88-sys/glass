@@ -6,10 +6,11 @@
 %% provider keeps its own failover (diagrams 11, 15, 16).
 %% Source: factory.js (splitByProvider, routing) + providerChain.js + modelHealth.js (isCoolingDown)
 flowchart TB
-    lane(["Ask / Live Answer / Live Insights<br/>getCurrentModelInfo('llm') -> provider, model, apiKey, keys"]) --> split["factory.splitByProvider(model, provider)<br/>runs of one provider's IDs (prefix rule);<br/>an unknown ID joins the current run;<br/>only anthropic, gemini and groq lists are cut"]
+    lane(["Ask / Live Answer / Live Insights<br/>getCurrentModelInfo('llm') -> provider, model, apiKey, keys"]) --> split["factory.splitByProvider(model, provider)<br/>runs of one provider's IDs (an ID's provider: the one whose<br/>models list has it, else its prefix);<br/>an unknown ID joins the current run;<br/>only anthropic, gemini and groq lists are cut"]
     split --> segs{"how many segments?"}
     segs -->|"0 or 1"| today["today's path: the provider's own<br/>createStreamingLLM / createLLM<br/>(options minus keys)"]
-    segs -->|"2 or more"| plan["providerChain: plan the request<br/>image in the request? segments that see images first<br/>(Groq only with qwen/qwen3.8-27b; log order=images-first)<br/>a segment with a later one (with a key) that sees images<br/>runs visionOnly: no answer without the image"]
+    segs -->|"2 or more"| learn["modelCatalog.ensureKnown for every segment with a key<br/>(in parallel, 2 s at most)"]
+    learn --> plan["providerChain: plan the request<br/>image in the request? segments that see images first<br/>(a model that sees images, by the catalog; log order=images-first)<br/>a segment with a later one (with a key) that sees images<br/>runs visionOnly: no answer without the image"]
 
     plan --> turn["next segment's turn"]
     turn --> nokey{"its provider has a key?"}

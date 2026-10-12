@@ -264,6 +264,7 @@ Four gaps are still open after T038 to T040. Each was measured with the eval, `s
 - **Ask's budget:** Groq's default cap is 16,384 (only Ask uses it), so a long answer is not cut.
 - **The refusal:** a 429 "Request too large" is `too-large`. There is no cooldown, the log adds `limit=L requested=R`, and the message reads "asks for up to R output tokens; this key allows L per minute".
 - **Screenshots:** the cross-provider chain passes `visionOnly` to a segment when a later segment (with a key) sees images. Groq then tries only Qwen and fails rather than answer blind, so the screenshot reaches Gemini whole.
+- **Later the same day** (spec `2026-10-12-model-catalog`): the refusal's limit is kept for the model, so the next screenshot skips Qwen with no Groq request; which models see images comes from Groq's models API instead of a table by name.
 
 ### Still open
 
@@ -297,3 +298,30 @@ The Live panels button in Settings picks Answer + Insights, Answer only or Insig
 - [ ] The bar toggle and the Settings button show the same mode after either one changes it.
 - [ ] With the cadence set to N, the analysis runs at multiples of N only, and turning it on mid-session starts no analysis at once.
 - [ ] With a per-lane list, each lane's provider request lines name its own models.
+
+---
+
+## 8. Model catalog — what it leaves out
+
+**Status:** Deferred by the spec (out of its scope).
+**Spec:** `specs/2026-10-12-model-catalog/`
+
+### Summary
+
+Since 2026-10-12 what a Groq, Gemini or Anthropic model can do comes from its provider's models API (`modelCatalog.js`, `ARCHITECTURE.md` §9.1). These were left out:
+
+- **OpenAI and Ollama** have no catalog. Neither joins a cross-provider list today. Ollama's `/api/show` reports `capabilities` (`vision` among them), so the catalog could read it; OpenAI's `/v1/models` reports no capabilities.
+- **Timeouts chosen by name.** Gemini's first-chunk timeout and hedge (`isLiteModel`, "lite" in the ID) and Claude's first-text timeout (Haiku 20 s, others 45 s) are latency tuning, not capabilities. Each is overridable by env (`GEMINI_FIRST_CHUNK_TIMEOUT_MS`, `GEMINI_HEDGE_DELAY_MS`, `ANTHROPIC_FIRST_TEXT_TIMEOUT_MS`). A per-model setting in Settings would replace the name rules.
+- **A notice when an Ask answer is cut.** Caps never go over the model maximum and Ask declares 16,384 on Groq, so a cut answer is unlikely (the longest measured is 4,204 tokens). When it happens the provider logs `stop=length` (Groq) or `stop=max_tokens` (Anthropic), but the Ask window shows nothing.
+
+Found while sweeping for model-name rules, not related to the catalog:
+
+- `gemini.js` sends every Ask screenshot as `mimeType: "image/png"`, but Ask captures JPEG.
+- `askService._isMultimodalError` (retry text-only when a provider rejects the image) never fires for Groq, Gemini, Anthropic or the chain: their `streamChat` resolves at once and reports errors inside the stream.
+- `ollama.js` `generateContent` joins image objects into the text, so an image becomes `[object Object]`.
+
+### Acceptance (when implemented)
+
+- [ ] An Ollama model whose `/api/show` lists `vision` gets the screenshot; one without it gets the question only.
+- [ ] A per-model first-text timeout set in Settings applies without an env override.
+- [ ] An Ask answer that stops on the model's cap shows a short "answer cut" note.
