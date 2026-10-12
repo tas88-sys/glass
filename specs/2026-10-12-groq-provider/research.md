@@ -382,16 +382,16 @@ Groq serves `whisper-large-v3` and `whisper-large-v3-turbo` through `/audio/tran
 
 ## R18: Real SDK check (found in implementation)
 
-groq.js ran with the real groq-sdk 1.6.0 against a local HTTP server that played the Groq API. GROQ_BASE_URL pointed the SDK at it. It ran under Node 24.17 and under Electron 30.5.1 (Node 20.16), and all 7 checks passed on both:
-- **Failover.** A 503 on the first model failed over with exactly one call per model, with retry-count 0, so the SDK did not retry.
-- **Request fields.** The request carried ,  and the Bearer key.
-- **Connection close.** The server kept the connection open after , and the client closed it at .
-- **Images.** A request with an image went first to , with the image and .
+`groq.js` ran with the real `groq-sdk` 1.6.0 against a local HTTP server that played the Groq API. `GROQ_BASE_URL` pointed the SDK at it. It ran under Node 24.17 and under Electron 30.5.1 (Node 20.16), and all 7 checks passed on both:
+- **Failover.** A 503 on the first model failed over with exactly one call per model, with `x-stainless-retry-count: 0`, so the SDK did not retry.
+- **Request fields.** The request carried `include_reasoning: false`, `reasoning_effort: 'low'` and the Bearer key.
+- **Connection close.** The server kept the connection open after `[DONE]`, and the client closed it at `finish_reason`.
+- **Images.** A request with an image went first to `qwen/qwen3.8-27b`, with the image and `reasoning_effort: 'none'`.
 - **Cancel** closed the HTTP connection.
 - **413.** A 413 on the only model gave the user message with the numbers.
-- **** failed over and joined the text.
-- **Key validation.**  sent .
-- **Logs.** The lines carried , from  or , and , with no answer text.
+- **`chat()`** failed over and joined the text.
+- **Key validation.** `models.list()` sent `GET /openai/v1/models`.
+- **Logs.** The lines carried `request_id`, from `x_groq.id` or `x-request-id`, and `tpm_left`, with no answer text.
 
 The live probe (T006) still decides R17 V1–V6 against the real API.
 
