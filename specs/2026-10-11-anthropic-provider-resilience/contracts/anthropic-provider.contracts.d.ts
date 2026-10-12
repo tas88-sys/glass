@@ -36,6 +36,9 @@ export interface ModelHealth {
   markSucceeded(modelId: string): void;
   /** @internal test helper */
   resetHealth(): void;
+  DEFAULT_COOLDOWN_MS: 60000;
+  MIN_COOLDOWN_MS: 5000;
+  MAX_COOLDOWN_MS: 300000;
 }
 
 // ---------------------------------------------------------------------------
@@ -67,6 +70,8 @@ export interface AnthropicErrors {
   classify(err: unknown): AnthropicErrorKind;
   /** retry-after-ms, then retry-after (seconds or HTTP date), else 60 000; clamped to [5 000, 300 000]. */
   retryAfterMs(err: unknown): number;
+  /** The server's hint unclamped, or null (decides whether a 429 joins the second round). */
+  retryAfterHeaderMs(err: unknown): number | null;
   /** Server reason without SDK noise, at most 160 characters. */
   shortErrorMessage(err: unknown): string;
 }
@@ -91,7 +96,8 @@ export interface AnthropicRequestParams {
   max_tokens: number;
   messages: AnthropicMessageParam[];
   system?: string;
-  stream?: boolean;
+  /** Always true: every call streams, chat() and generateContent() included (research R13). */
+  stream: true;
   output_config?: { effort: Effort };
   /** Only on the beta method, only for claude-opus-5-5 and claude-sonnet-5-5. */
   betas?: ['server-side-fallback-2026-07-01'];
@@ -104,7 +110,10 @@ export interface BuildRequestInput {
   messages: GlassMessage[];
   maxTokens?: number;
   effort?: string;
-  stream: boolean;
+  /** Picks the default max_tokens: 16000 for streamChat, 8192 for chat/generateContent. Default 'stream'. */
+  mode?: 'stream' | 'once';
+  /** False once the API rejected the server-side fallback beta in this process. Default true. */
+  serverFallback?: boolean;
   /** process.env by default; injectable for tests. */
   env?: Record<string, string | undefined>;
 }
@@ -134,6 +143,12 @@ export interface CreateLLMOptions {
   temperature?: number;
   /** Wait before the second round; default 2000 (FR-018). */
   retryRoundDelayMs?: number;
+  /** Overrides firstTextTimeoutMs(modelId) for every model. */
+  firstTextTimeoutMs?: number;
+  /** Overrides requestDeadlineMs(); null disables. */
+  requestDeadlineMs?: number | null;
+  /** Overrides idleTimeoutMs(); null disables. */
+  idleTimeoutMs?: number | null;
 }
 
 /** Options passed to every SDK call (FR-018): the SDK never retries; the loop owns every wait. */
@@ -143,17 +158,12 @@ export interface SdkCallOptions {
   signal: AbortSignal;
 }
 
-export interface CreateStreamingLLMOptions extends CreateLLMOptions {
-  /** Overrides firstTextTimeoutMs(modelId) for every model. */
-  firstTextTimeoutMs?: number;
-  /** Overrides requestDeadlineMs(); null disables. */
-  requestDeadlineMs?: number | null;
-  /** Overrides idleTimeoutMs(); null disables. */
-  idleTimeoutMs?: number | null;
-}
+/** Same options; streamChat defaults max_tokens to 16000. */
+export type CreateStreamingLLMOptions = CreateLLMOptions;
 
 export interface LLM {
-  generateContent(parts: GlassGeneratePart[]): Promise<{ response: { text(): string }; _modelUsed: string }>;
+  /** Streams internally and joins the text (D12). _modelUsed is the model that finished. */
+  generateContent(parts: GlassGeneratePart[]): Promise<{ response: { text(): string }; raw: unknown; _modelUsed: string }>;
   chat(messages: GlassMessage[]): Promise<{ content: string; raw: unknown; _modelUsed: string }>;
 }
 
@@ -170,11 +180,13 @@ export interface AnthropicModule {
   buildRequest(input: BuildRequestInput): BuiltRequest;
   acceptsEffort(modelId: string): boolean;
   /** 20 000 for the Haiku family, 45 000 otherwise; ANTHROPIC_FIRST_TEXT_TIMEOUT_MS overrides. */
-  firstTextTimeoutMs(modelId: string): number;
+  firstTextTimeoutMs(modelId: string, env?: Record<string, string | undefined>): number;
   /** 60 000; ANTHROPIC_REQUEST_DEADLINE_MS overrides; 0 → null (disabled). */
-  requestDeadlineMs(): number | null;
+  requestDeadlineMs(env?: Record<string, string | undefined>): number | null;
   /** 30 000; ANTHROPIC_IDLE_TIMEOUT_MS overrides; 0 → null (disabled). */
-  idleTimeoutMs(): number | null;
+  idleTimeoutMs(env?: Record<string, string | undefined>): number | null;
+  /** @internal test helper: turn the server-side fallback back on. */
+  resetServerFallback(): void;
 }
 
 // ---------------------------------------------------------------------------

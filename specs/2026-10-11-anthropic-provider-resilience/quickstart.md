@@ -39,27 +39,28 @@ ANTHROPIC_SERVER_FALLBACK=
 ```bash
 # SDK loads and streams under Electron's Node 20.16 (T005; plain `npm test` runs a newer Node and would not catch it)
 node -e "require('child_process').execFileSync(require('electron'),['scripts/smoke-anthropic-sdk.js'],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1'},stdio:'inherit'})"
-npm test                                   # whole suite, incl. anthropic*.test.js, factory.test.js, gemini*.test.js
-node --test src/features/common/ai/providers/__tests__/anthropic.test.js   # the failover loop only
+npm test                                   # whole suite, incl. anthropic*.test.js, modelHealth.test.js, factory.test.js, gemini*.test.js
+node --test src/features/common/ai/providers/__tests__/anthropic.test.js   # the failover loop only (streaming and chat())
 npm run build:renderer                     # Settings view compiles
 npx -p typescript@5.4.5 tsc -p specs/2026-10-11-anthropic-provider-resilience/contracts/tsconfig.json
 ```
 
 ## 3. Manual verification (running app, live key)
 
-`npm start`. Each check spends a few cents. Watch the main-process log for `[Anthropic Provider]` lines.
+`npm start`. Each check spends a few cents (check 10 spends nothing). Watch the main-process log for `[Anthropic Provider]` lines.
 
 | # | Do | Expect | Covers |
 |---|----|--------|--------|
 | 1 | Save a valid key; then save `sk-ant-invalid` | First accepted; second shows "Invalid Anthropic API key." | FR-004 |
 | 2 | Pick each preset in turn; ask in Ask with a screenshot | An answer each time; the log shows `outcome=ok`, `stop=end_turn`, no 400 | FR-001, FR-005, SC-001 |
 | 3 | Start Listen with `claude-haiku-5-5,claude-sonnet-5-5`; let the interviewer ask a question | Live Answer streams; the log line shows `ttft` | SC-001 |
-| 4 | Let Live Insights run one cycle | A summary appears (non-streaming path) | FR-021, SC-001 |
+| 4 | Let Live Insights run one cycle | A summary appears (`chat()`, which streams internally); the log line reads `once` | FR-021, SC-001 |
 | 5 | Set the list to `claude-nonexistent-1,claude-haiku-5-5`; ask in Ask | Brief "Trying claude-haiku-5-5…", then the answer; log `outcome=unavailable status=404` | FR-011, FR-012 |
 | 6 | Set the list to `claude-nonexistent-1` only; ask | "claude-nonexistent-1 is not available to this API key (retired or not enabled). Pick a current model in Settings." | FR-019 |
 | 7 | Ask a long question, then ask a new one before the first finishes | The first request log ends `cancelled`; no error shown | FR-017 |
 | 8 | Set `ANTHROPIC_FIRST_TEXT_TIMEOUT_MS=1` with two models; ask; unset it after | Both attempts log `outcome=timeout`; one `_reset reason=timeout` between them; the error reads "All Claude models failed (2 attempts). Last: … no text after …" | FR-013, FR-019 |
 | 9 | Collect 20 Live Answers on the chosen list | Record p50/p95 of `ttft` in `research.md` (R11) | SC-006 |
+| 10 | In Settings, save `claude-haiku-5-5, ,claude-sonnet-5-5`; reopen Settings; then try `claude-haiku-5-5,gemini-3-flash-preview` | The field shows `claude-haiku-5-5,claude-sonnet-5-5` and the model list shows it as "(custom)"; the second is rejected, naming `gemini-3-flash-preview` | FR-003, E37, E38 |
 
 A refusal and the server-side fallback cannot be triggered on purpose with ordinary content. Their handling is covered by automated tests (E28–E32, E41). The live check is that Opus 5.5 and Sonnet 5.5 requests succeed with the beta header (check 2). If they fail with a 400 naming `anthropic-beta`, the log shows the one-time "server-side fallback disabled" line, and the next request succeeds.
 

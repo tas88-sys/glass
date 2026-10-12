@@ -1,0 +1,39 @@
+%% 15 - Anthropic (Claude) LLM failover
+%% User supplies a comma-separated Claude model list in Settings, e.g.
+%%   claude-haiku-5-5,claude-sonnet-5-5
+%% One loop serves streamChat and chat/generateContent (both stream on the wire).
+%% The SDK never retries (maxRetries: 0); every wait is the loop's.
+%% Source: anthropic.js (runWithFailover / runAttempt) + anthropicErrors.js + modelHealth.js
+flowchart TB
+    start(["createStreamingLLM / createLLM with model CSV"]) --> parse["parseModelList(csv)<br/>trim, drop empties -> remaining[]"]
+    parse --> pick["pickModel(remaining)<br/>first healthy in order;<br/>if all cooling, soonest-to-recover"]
+    pick --> attempt["attempt: buildRequest (no temperature; effort low;<br/>max_tokens >= 4096 on models that think)<br/>messages.create stream, maxRetries 0, timeout 15s (headers)"]
+    attempt --> beta{"Opus / Sonnet 5.5?"}
+    beta -->|yes| fb["beta.messages.create + fallbacks: 'default'<br/>(400 naming the beta: resend without, off for the process)"]
+    beta -->|no| events
+    fb --> events["read events until message_stop<br/>first text within 20s Haiku / 45s others;<br/>then 30s idle limit; close at message_stop"]
+    events --> ok{"outcome?"}
+
+    ok -->|"end_turn, or max_tokens after text"| done["markSucceeded<br/>emit _final_model (model that finished,<br/>after any server-side fallback block) + [DONE]"]
+    ok -->|"error, timeout, refusal,<br/>max_tokens before text"| classify["anthropicErrors.classify(err)<br/>own code -> status -> error type -> fail-open"]
+    classify --> kind{"kind?"}
+
+    kind -->|"fatal-auth 401/402/403"| fatal["controller.error / throw<br/>userMessage 'MODEL — server reason'"]
+    kind -->|"fatal-request 400/413/422"| fatal
+    kind -->|"unavailable 404"| unav["cooldown 5 min<br/>_reset reason unavailable"]
+    kind -->|refusal| refusal["no cooldown<br/>_reset reason refusal"]
+    kind -->|"transient 408/409/429/5xx/529, stream error,<br/>network, timeouts, empty max_tokens"| cool["cooldown: timeouts / empty 10s;<br/>else retry-after, default 60s, [5s, 300s]<br/>_reset reason timeout / transient"]
+
+    unav --> more{"models left and deadline not hit?"}
+    refusal --> more
+    cool --> more
+    more -->|yes| pick
+    more -->|no| round{"round 1 and some failed fast?<br/>(not timeout / refusal / 404;<br/>429 only if retry-after <= 2s)"}
+    round -->|yes| retry["emit {_reset, reason: retry}<br/>wait 2s (cancellable), retry those models once"]
+    retry --> pick
+    round -->|no| allfail["userMessage: 'All Claude models failed (n attempts[, 2 rounds]). Last: …'<br/>or 'No answer within 60s …'<br/>or 'MODEL is not available to this API key …'"]
+
+    deadline["60s request deadline until an answer starts<br/>(each attempt gets at most what is left;<br/>no second round without time for it)"]
+    pick -.-> deadline
+    cancel["cancel(): aborts the in-flight request or the wait;<br/>no failover, no error, request log 'cancelled'"]
+    events -.-> cancel

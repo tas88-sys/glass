@@ -4,8 +4,8 @@
 meta:
   spec_id: 2026-10-11-anthropic-provider-resilience
   spec_name: anthropic-provider-resilience
-  status: draft          # draft | in-progress | approved | completed
-  phase: tasks           # specify | clarify | plan | tasks | preflight | feature-start | implement | verify
+  status: in-progress    # draft | in-progress | approved | completed
+  phase: implement          # specify | clarify | plan | tasks | preflight | feature-start | implement | verify
   created: 2026-10-11
   updated: 2026-10-11
 
@@ -33,6 +33,7 @@ summary:
     - {id: D8, decision: "Key validation lists models (GET /v1/models, limit 1) through the SDK", rationale: "Free, names no model, so it cannot break the next time a model retires. Today's check calls a retired model (research R1, R9)"}
     - {id: D9, decision: "Presets become claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5. Any ID or list starting with 'claude-' maps to Anthropic and can be typed in Settings, as 'gemini-' does for Gemini", rationale: "The only preset today, claude-3-5-sonnet-20241022, retired on 2025-10-28; there is no way to pick a current model without a code change (research R1)"}
     - {id: D10, decision: "Timeouts: first text within 20 s (Haiku family) or 45 s (others); an answer must start within 60 s for the whole request; once text streams, 30 s without a stream event aborts the attempt. Each one has an env override", rationale: "Mirrors Gemini's first-chunk timeout and request deadline. The SDK's timeout stops counting when headers arrive, so a body that goes silent is otherwise unbounded (research R3)"}
+    - {id: D12, decision: "chat() and generateContent() stream internally through the same loop as streamChat and join the text", rationale: "Found in implementation: a non-streaming response sends its headers only once the whole answer is written, so the 15 s SDK timeout (D4) would cut any Live Insights call longer than that. Streaming also gives the non-streaming lanes the first-text, idle and deadline timeouts (research R13)"}
     - {id: D11, decision: "Upgrade @anthropic-ai/sdk to ^0.133.0 as the first task, in its own commit, before any provider change; verified by loading it and streaming a canned response under Electron's Node 20.16", rationale: "User decision 2026-10-11. The rewrite and its fake SDK are then written against the version that ships: error type on every APIError (0.81.0), released abort listeners (0.73.0, 0.115.0), current models and parameters known to the SDK. No advisory against either version (research R10)"}
 
 # CRITICAL REQUIREMENTS - Must verify during implementation
@@ -71,6 +72,8 @@ critical_requirements:
 - Q: Should the failover engine be shared with Gemini? → A: Not in this spec. `anthropic.js` gets its own loop modelled on Gemini's, and only the cooldown registry is shared (D2, D3). Unifying the engines is follow-up work once the Anthropic path has run in real sessions.
 - Q: Should the SDK be upgraded to the latest version? → A: Yes (user, 2026-10-11). It is the first task, on its own, before any provider change (D11, research R10).
 - Q: Should the SDK retry inside an attempt? → A: No. Assessing the upgrade showed the SDK waits out `retry-after` inside the attempt, with a 59 s cap that cannot be cancelled in 0.56.0 and no cap in 0.133.0. Retries move into the loop: immediate failover, then one more round after 2 s (D4, research R12). Approved with the upgrade (user, 2026-10-11).
+
+- Q: (Implementation, 2026-10-11) Can the non-streaming calls keep the 15 s SDK timeout? → A: Only if they stream. A non-streaming response sends its headers at the end, so the timeout would cover the whole answer. `chat()` and `generateContent()` now stream internally and join the text (D12, research R13).
 
 **Deferred (default chosen, not blocking)**:
 - Which model list to use for interviews. Default: the presets are listed Opus 5.5, Sonnet 5.5, Haiku 5.5, and the user types the list in Settings. `quickstart.md` §1 lists the trade-offs.
@@ -134,11 +137,11 @@ See `contracts/EDGE_CASES.md` for the full list.
 - **FR-018**: Every SDK call MUST pass `maxRetries: 0` and `timeout: 15000`. When every model of the first round has failed, the models whose failure was transient and fast MUST get one more round after 2 s, announced with `_reset` `reason: 'retry'`. "Fast" excludes timeouts, `unavailable`, `refusal`, and a 429 whose `retry-after` is longer than the 2 s wait. The round is skipped when the request deadline leaves less than the wait. Cancelling during the wait stops it, with no new attempt and no error.
 
 **Errors and logs**
-- **FR-019**: The error raised at the end MUST carry `userMessage`: `<model> — <reason>` for fatal errors; `All Claude models failed (<n> attempts[, 2 rounds]). Last: <model> — <reason>` when the list is exhausted; `No answer within <s> (<n> attempts). Last: …` when the deadline is hit; and for `unavailable`, `<model> is not available to this API key (retired or not enabled). Pick a current model in Settings.` Reasons are the server's message with SDK noise removed, at most 160 characters.
+- **FR-019**: The error raised at the end MUST carry `userMessage`: `<model> — <reason>` for fatal errors; `All Claude models failed (<n> attempts[, 2 rounds]). Last: <model> — <reason>` when the list is exhausted; `No answer within <s> (<n> attempts). Last: …` when the deadline is hit; and for `unavailable`, `<model> is not available to this API key (retired or not enabled). Pick a current model in Settings.` A refusal reads `<model> declined to answer.` The `unavailable` and refusal texts stand alone after a single attempt and follow `Last:` otherwise. Reasons are the server's message with SDK noise removed, at most 160 characters.
 - **FR-020**: Each attempt MUST log one line, `[Anthropic Provider] attempt i/n <stream|once> model=… outcome=…`, with these fields when present: `status`, `ttft`, `last`, `total`, `chunks`, `stop`, `tokens=in:…,out:…,cache_read:…`, `fallback=<from>→<to>` and `request_id`. Each request MUST log a summary line `request … answered_by=… attempts=… total=…` and `cancelled` when cancelled. No log line contains prompt or answer text (C3).
 
 **Non-streaming**
-- **FR-021**: `chat()` and `generateContent()` MUST use the same list, classification, request building, second round and stop-reason rules. They MUST join the text blocks and return `_modelUsed`, as Gemini's `callWithFailover` does.
+- **FR-021**: `chat()` and `generateContent()` MUST use the same list, classification, request building, second round and stop-reason rules. They MUST join the text blocks and return `_modelUsed`, as Gemini's `callWithFailover` does. They stream internally (D12), so the SDK timeout covers only the wait for headers and the first-text, idle and deadline timeouts apply to them too. A failed attempt's partial text is dropped.
 
 **SDK**
 - **FR-023**: `package.json` MUST depend on `@anthropic-ai/sdk` `^0.133.0`, with the lockfile updated in the same commit. Under Electron's Node (`ELECTRON_RUN_AS_NODE=1`), the SDK MUST load with `require`, build a client, and stream a canned SSE response through a custom `fetch`. The existing suite MUST pass with only this change.
@@ -307,4 +310,4 @@ docs/…                                              EDIT  provider docs and di
 ## Next Steps
 
 - The user picks the model list for interviews (quickstart §1) and approves the plan.
-- Implementation starts at T005 (SDK upgrade, alone), then T010 (tests first). Manual checks (T-VERIFY-MANUAL) need the user's key and a live session.
+- Implemented on the branch through T025 (tasks.json has the evidence). What remains is T-VERIFY-MANUAL: quickstart §3 with the user's key, and the SC-006 latency numbers.

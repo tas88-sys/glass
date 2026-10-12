@@ -214,9 +214,9 @@ happening when there is no answer to show:
 
 | Payload | Sent when | Panel |
 |---|---|---|
-| `{ id, question, status: 'retrying', model }` | each Gemini `_reset` (failover, timeout, retry round); `model` is its `next_model` | "Trying <model>…" |
+| `{ id, question, status: 'retrying', model }` | each Gemini or Anthropic `_reset` (failover, timeout, refusal, retry round); `model` is its `next_model` | "Trying <model>…" |
 | `{ id, status: 'idle' }` | that answer's stream ends after a `retrying` | clears its "Trying …" (same `id` only) |
-| `{ id, question, status: 'error', error }` | the stream fails (`error` = the provider's `userMessage`, e.g. `All Gemini models failed …`) or ends with no text | "No answer — <error>" until an answer starts |
+| `{ id, question, status: 'error', error }` | the stream fails (`error` = the provider's `userMessage`, e.g. `All Gemini models failed …` or `All Claude models failed …`) or ends with no text | "No answer — <error>" until an answer starts |
 
 Aborted answers (a newer question, session reset) send no error. `liveAnswerHistory.js` keeps
 the two concerns apart: `applyLiveAnswerUpdate` ignores payloads without `answer`, and
@@ -249,7 +249,7 @@ needed). It clears the debounce timer, aborts any in-flight `AbortController`, a
 `lastAnsweredTail`, `inFlight`, `hadFallback`, and the career session state (`careerPrev`,
 `activeCompany`, §4.7).
 
-### 4.6 Gemini failover and debugging
+### 4.6 Failover (Gemini, Anthropic) and debugging
 
 With Gemini, `createStreamingLLM` (`src/features/common/ai/providers/gemini.js`) keeps one
 answer alive across model failures:
@@ -264,6 +264,8 @@ answer alive across model failures:
   Once an answer is streaming, it is never cut.
 
 When to expect 503s: [`GEMINI_503_PEAK_HOURS.md`](GEMINI_503_PEAK_HOURS.md).
+
+With Anthropic, `anthropic.js` sends the same sentinels for a list of Claude models (`claude-haiku-5-5,claude-sonnet-5-5`, typed in Settings). It fails over on overloads, rate limits and refusals, and when no text arrives in time (20 s for Haiku, 45 s for the others; `ANTHROPIC_FIRST_TEXT_TIMEOUT_MS` overrides). The SDK never retries; fast failures get a second round after 2 s, and the same 60 s deadline applies. Live Answer's `maxTokens: 900` is raised to 4096 on models that think, and no `temperature` is sent. Details in [`ARCHITECTURE.md` §10.2](../ARCHITECTURE.md#102-anthropic-claude).
 
 `LIVE_ANSWER_DEBUG=1` (env or `.env`) logs the lane's decisions: the trigger gate, the
 provider/model in use, the PASSIVE decision and the streamed character count. It never logs answer

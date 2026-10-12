@@ -250,6 +250,9 @@ See spec § Error Handling and `data-model.md` (error kinds, cooldowns). Rule: *
 | UI | Renderer cannot `require` the factory | `SettingsView` keeps a two-line copy of the prefix rule; manual check + `npm run build:renderer` | Y (T024) |
 | Verify | `npm run lint` cannot run (eslint not installed) | `node --check` on changed main-process files + `npm run build:renderer` | Y (T-FINAL) |
 | Verify | Live checks cost money and need the user's key | Manual tasks only, run by or with the user | Y (T-VERIFY-MANUAL) |
+| Core (found in implementation) | The 15 s SDK timeout would cut a non-streaming `chat()` call, since its headers come only at the end | Every call streams; `chat()` joins the text (D12, research R13) | Y (T021, done) |
+| Verify (found in implementation) | `liveAnswer.test.js` sometimes fails under the parallel `npm test` with the runner error "Unable to deserialize cloned data" | Seen on `main` too under extra load, so it predates this branch; the new test files add load. It is not an assertion failure. Rerun the suite | N |
+| Docs (found in implementation) | Current Mermaid reads `call` as a keyword; `docs/diagrams/11-gemini-failover.mmd` and its copy in `ARCHITECTURE.md` §10.1 use it as a node ID and fail to render | The new diagram 15 avoids it; diagram 11 is left for a separate fix | N |
 
 ## Prior Lessons Applied
 

@@ -6,6 +6,47 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 
 ## [Unreleased]
 
+### Anthropic provider resilience (branch `2026-10-11-anthropic-provider-resilience`)
+
+#### Fixed
+
+- **Claude models work again.** Before, every Anthropic request failed before a model answered:
+  - key validation called a retired model and read its 404 as a bad key;
+  - the only preset and the default (`claude-3-5-sonnet-20241022`) were retired;
+  - no other Claude model could be selected;
+  - every lane sent `temperature: 0.7`, which Opus, Sonnet and Haiku 5.5 reject with a 400.
+- **`chat()` read `content[0]`**, which is a thinking block on current models. It now joins the text blocks.
+- **Abandoned answers kept generating.** Cancelling an Ask or Live Answer stream now aborts the HTTP request.
+
+#### Added
+
+- **Presets `claude-opus-5-5` (default), `claude-sonnet-5-5` and `claude-haiku-5-5`.** An "Anthropic LLM Model ID" field in Settings takes a comma-separated list of `claude-…` IDs, tried in order, as Gemini's does.
+- **Failover modelled on Gemini's** (`anthropic.js`), for Ask, Live Answer and Live Insights:
+  - cooldowns per model;
+  - `_reset` / `_final_model`;
+  - a first-text timeout (20 s for Haiku, 45 s for others), a 30 s idle timeout once text streams, and a 60 s deadline for an answer to start;
+  - a second round after 2 s for fast failures;
+  - a short `userMessage`, and one log line per attempt with no prompt or answer text.
+- **The SDK never retries** (`maxRetries: 0`), so no wait happens inside an attempt. No hedged requests.
+- **Error classifier `anthropicErrors.js`.** A 404 means the model is not available to the key: 5 min cooldown and a message to pick another model. Refusals move to the next model.
+- **Server-side refusal fallback** (`fallbacks: 'default'`) on Opus and Sonnet 5.5. It turns itself off for the session if the API rejects the beta.
+- **Requests send no sampling parameters.** `output_config.effort` (`low` by default) goes only to models that accept it, and `max_tokens` is at least 4096 on models that think.
+- **Optional tuning:** `ANTHROPIC_EFFORT`, `ANTHROPIC_MIN_MAX_TOKENS`, `ANTHROPIC_FIRST_TEXT_TIMEOUT_MS`, `ANTHROPIC_REQUEST_DEADLINE_MS`, `ANTHROPIC_IDLE_TIMEOUT_MS`, `ANTHROPIC_SERVER_FALLBACK`.
+- **`scripts/smoke-anthropic-sdk.js`** checks that the SDK loads and streams under Electron's Node.
+
+#### Changed
+
+- **`@anthropic-ai/sdk` 0.56.0 → 0.133.0.**
+- **Key validation lists one model** (free, names no model) instead of calling one.
+- **`chat()` and `generateContent()` stream internally.** A non-streaming response sends its headers only when the whole answer is written.
+- **The cooldown registry moved from `geminiModelRotator.js` to `modelHealth.js`**, shared by both providers. Gemini re-exports it unchanged.
+
+#### Docs
+
+- `ARCHITECTURE.md` §10 is now "Gemini and Anthropic failover". It has a new §10.2 and the new provider rows.
+- New `docs/diagrams/15-anthropic-failover.mmd`. Diagram 10 now shows the `claude-` prefix and the shared registry.
+- `docs/LIVE_INSIGHTS_AND_ASK.md` §4.6, `docs/AUDIO_AND_STT.md` and the README name the new presets.
+
 ### Live Answer career context (branch `2026-10-11-live-answer-career-context`)
 
 #### Added

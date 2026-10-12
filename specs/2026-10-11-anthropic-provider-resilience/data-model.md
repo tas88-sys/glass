@@ -51,21 +51,23 @@ Inspection order: our own codes → HTTP `status` → error type (`err.type`, wh
 
 `shortErrorMessage(err)`: `err.error.error.message` if present, else `err.message` with the leading status and any JSON envelope removed; at most 160 characters.
 
+`retryAfterHeaderMs(err)`: the server's hint, unclamped (`retry-after-ms`, then `retry-after` in seconds or as an HTTP date), or `null`. `retryAfterMs(err)` is that hint, else 60 s, clamped to 5 s – 5 min.
+
 ### Request params (`buildRequest`, pure)
 
-Input: `{ modelId, messages, maxTokens?, effort?, stream, env }`. Output: `{ method: 'messages' | 'beta', params }`.
+Input: `{ modelId, messages, maxTokens?, effort?, mode, serverFallback, env }`. Output: `{ method: 'messages' | 'beta', params }`.
 
 | Field | Rule |
 |-------|------|
 | `model` | `modelId` |
 | `system` | Text of the `system` message(s), joined with a blank line; omitted when empty |
 | `messages` | Non-system messages mapped to Anthropic blocks; consecutive same-role messages merged |
-| `max_tokens` | Caller value, else 16000 (stream) or 8192; raised to the floor (4096, `ANTHROPIC_MIN_MAX_TOKENS`) when `acceptsEffort(modelId)` |
+| `max_tokens` | Caller value, else 16000 (`mode: 'stream'`) or 8192 (`'once'`); raised to the floor (4096, `ANTHROPIC_MIN_MAX_TOKENS`) when `acceptsEffort(modelId)` |
 | `output_config.effort` | Only when `acceptsEffort(modelId)`. `effort` → `ANTHROPIC_EFFORT` → `low`; invalid values ignored |
 | `temperature`, `top_p`, `top_k` | Never |
 | `thinking` | Never (model default) |
-| `stream` | `true` for `streamChat` |
-| `betas`, `fallbacks` | `['server-side-fallback-2026-07-01']`, `'default'` when `modelId` is `claude-opus-5-5` or `claude-sonnet-5-5` and `ANTHROPIC_SERVER_FALLBACK` ≠ `off`; then `method` is `beta` |
+| `stream` | Always `true`: `chat()` and `generateContent()` stream internally too (research R13) |
+| `betas`, `fallbacks` | `['server-side-fallback-2026-07-01']`, `'default'` when `modelId` is `claude-opus-5-5` or `claude-sonnet-5-5`, `ANTHROPIC_SERVER_FALLBACK` ≠ `off`, and `serverFallback` is true (false once the API rejected the beta in this process); then `method` is `beta` |
 
 `acceptsEffort(modelId)`: the family number after `claude-(fable|mythos|opus|sonnet|haiku)-` is ≥ 5, or the ID is `claude-opus-4-5` … `claude-opus-4-8` or `claude-sonnet-4-6` (any suffix).
 
@@ -92,8 +94,8 @@ Content mapping:
 |-------|-------|
 | `MAX_ROUNDS` | 2 |
 | `RETRY_ROUND_DELAY_MS` | 2000 (`opts.retryRoundDelayMs` overrides, for tests) |
-| Joins round 2 | Kind `transient` from an HTTP or stream error (not a timeout, not `EMPTY_MAX_TOKENS`); a 429 only when `retryAfterMs(err)` ≤ the delay |
-| Stays out | Timeouts, `EMPTY_MAX_TOKENS`, `unavailable`, `refusal`, a 429 with a longer `retry-after` |
+| Joins round 2 | Kind `transient` from an HTTP or stream error (not a timeout, not `EMPTY_MAX_TOKENS`); a 429 (or a stream `rate_limit_error`) only when the server's unclamped hint `retryAfterHeaderMs(err)` ≤ the delay |
+| Stays out | Timeouts, `EMPTY_MAX_TOKENS`, `unavailable`, `refusal`, a 429 with a longer `retry-after` or none |
 | Skipped | When no model joins, or the request deadline leaves ≤ the delay |
 | Announced | `_reset` with `reason: 'retry'` and `next_model` = first model of the round |
 
@@ -102,14 +104,14 @@ Content mapping:
 | Field | Set when |
 |-------|----------|
 | `startedAt` | attempt starts |
-| `firstTextAt`, `lastEventAt`, `chunks` | text deltas arrive |
-| `stopReason` | `message_delta.delta.stop_reason` |
+| `firstTextAt`, `lastTextAt`, `chunks` | text deltas arrive (the idle timer restarts on every event once text started) |
+| `stopReason`, `refusalCategory` | `message_delta.delta.stop_reason`, `.stop_details.category` |
 | `usage` | `message_start.message.usage` (input, cache) merged with `message_delta.usage` (output) |
 | `servedBy` | `message_start.message.model`, replaced by `fallback` block `to.model` |
 | `fallbackFrom` | `fallback` block `from.model` |
 | `timedOut` | first-text or idle timer fired |
 | `aborted` | consumer cancelled or stopped reading |
-| `requestId` | `err.requestID` on errors |
+| `requestId` | `withResponse().request_id` once headers arrive; `err.requestID` on errors |
 
 ### Stream protocol (unchanged, C1)
 

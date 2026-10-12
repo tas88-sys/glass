@@ -29,7 +29,7 @@ below and also renderable to SVG via `docs/diagrams/render.sh` / `render.ps1`.
 - [7. The Listen (audio / STT) feature](#7-the-listen-audio--stt-feature)
 - [8. Incremental summarization](#8-incremental-summarization)
 - [9. AI provider abstraction & model state](#9-ai-provider-abstraction--model-state)
-- [10. Gemini failover](#10-gemini-failover)
+- [10. Gemini and Anthropic failover](#10-gemini-and-anthropic-failover)
 - [11. Data, persistence & auth](#11-data-persistence--auth)
 - [12. Local AI (Ollama + Whisper)](#12-local-ai-ollama--whisper)
 - [13. Prompts & Ask modes](#13-prompts--ask-modes)
@@ -540,7 +540,7 @@ flowchart TB
     subgraph registry["factory.js PROVIDERS (single source of truth)"]
         r1["openai · openai-glass (Portkey)"]
         r3["gemini (LLM CSV failover)"]
-        r4["anthropic (LLM only)"]
+        r4["anthropic (LLM CSV failover)"]
         r5["deepgram (STT only, nova-3)"]
         r6["ollama (LLM, local, dynamic)"]
         r7["whisper (STT, local, main only)"]
@@ -556,13 +556,15 @@ flowchart TB
     settingsui["SettingsView (renders one key field per provider)"] --> keys
 ```
 
-- The **registry** `PROVIDERS` (`factory.js:20-96`) declares each provider's `llmModels` and
+- The **registry** `PROVIDERS` (`factory.js:20-98`) declares each provider's `llmModels` and
   `sttModels`. The factory exposes `createSTT` / `createLLM` / `createStreamingLLM`
-  (`factory.js:102-139`), normalizing the `-glass` suffix via `sanitizeModelId` (`:98-100`).
+  (`factory.js:118-155`), normalizing the `-glass` suffix via `sanitizeModelId` (`:114-116`).
 - **`modelStateService`** is the single arbiter of *which* model and key are live. It stores
   keys + selections in the `provider_settings` table, auto-selects a valid model when keys
   change (`_autoSelectAvailableModels`, `:142-179`), maps a model ID back to its provider
-  (`getProviderForModel`, `:286-311`), and returns the runtime triple via `getCurrentModelInfo`
+  (`getProviderForModel`, `:286-311`: presets, then installed Ollama models, then a typed ID or CSV
+  list by prefix through `inferProviderFromModelId` (`factory.js:106`): `gemini-` → Gemini,
+  `claude-` → Anthropic, LLM only), and returns the runtime triple via `getCurrentModelInfo`
   (`:377-389`).
 - **Configuration gate**: `areProvidersConfigured` (`:437-455`) requires **both** a working LLM
   key and a working STT key — so an STT-only provider (Deepgram) or LLM-only provider
@@ -573,14 +575,16 @@ flowchart TB
 | OpenAI | ✅ `gpt-4.1` | ✅ `gpt-4o-mini-transcribe` | Realtime STT; 60 s keep-alive |
 | OpenAI (Glass) | ✅ | ✅ | Pickle-hosted key via Portkey |
 | Gemini | ✅ `gemini-3-flash-preview` | ✅ `gemini-3.8-live` | LLM supports CSV failover; STT does not |
-| Anthropic | ✅ `claude-3-5-sonnet` | ❌ | LLM only |
+| Anthropic | ✅ `claude-opus-5-5` · `claude-sonnet-5-5` · `claude-haiku-5-5` | ❌ | LLM only; supports CSV failover |
 | Deepgram | ❌ | ✅ `nova-3` | STT only (pinned to nova-3) |
 | Whisper (local) | ❌ | ✅ tiny/base/small/medium | Main process only |
 | Ollama (local) | ✅ (dynamic) | ❌ | LLM only |
 
 ---
 
-## 10. Gemini failover
+## 10. Gemini and Anthropic failover
+
+### 10.1 Gemini
 
 A headline feature of this fork (full design in
 [`specs/2026-05-26-gemini-failover-design/`](specs/2026-05-26-gemini-failover-design/)). The
@@ -611,16 +615,17 @@ flowchart TB
     round -->|no| allfail["controller.error(lastErr)"]
 ```
 
-- The health registry is an **in-memory singleton** `Map` (`geminiModelRotator.js:14`) — one
+- The health registry is an **in-memory singleton** `Map` (`modelHealth.js:15`, shared with the
+  Anthropic provider and re-exported by `geminiModelRotator.js`) — one
   shared rate-limit view per process; it resets on restart (cooldowns are clamped to ≤ 300 s, so
   nothing meaningful is lost).
-- `classifyError` (`geminiModelRotator.js:95-131`) inspects HTTP status → `errorDetails[]`
+- `classifyError` (`geminiModelRotator.js:33-69`) inspects HTTP status → `errorDetails[]`
   `ErrorInfo.reason` → message-text heuristics, defaulting **fail-open** to `transient` so the
   loop keeps trying on unknown errors. `transient` = 408/429/5xx, network, `RESOURCE_EXHAUSTED` /
   `UNAVAILABLE` / `DEADLINE_EXCEEDED`; `fatal-request` = 400/`INVALID_ARGUMENT` (catches CSV
   typos); `fatal-auth` = 401/403/`API_KEY_INVALID`.
 - Cooldown honors `Retry-After` / `retryDelay`, defaults to 60 s, clamped to `[5 s, 300 s]`
-  (`parseRetryAfter`, `:149-192`; constants `:16-18`).
+  (`parseRetryAfter`, `:87-130`; constants `modelHealth.js:17-19`).
 - **Streaming** emits a `_reset` sentinel so the Ask consumer discards the partial answer before
   the next model streams in, then a `_final_model` sentinel (`gemini.js:663-804`); the Ask
   consumer applies both through the pure reducer `applyAskSseEvent` (`askStreamState.js:42-70`),
@@ -703,6 +708,102 @@ flowchart TB
   (`gemini.js:38-40`), because a persistent live STT session has no clean rotation semantics
   (locked decision #3 in the spec).
 
+### 10.2 Anthropic (Claude)
+
+Since 2026-10-11 the Anthropic provider has the same failover contract (full design in
+[`specs/2026-10-11-anthropic-provider-resilience/`](specs/2026-10-11-anthropic-provider-resilience/);
+diagram [`docs/diagrams/15-anthropic-failover.mmd`](docs/diagrams/15-anthropic-failover.mmd)).
+Settings has an **Anthropic LLM Model ID** field under the Anthropic key, which takes a
+comma-separated list of `claude-…` IDs (e.g. `claude-haiku-5-5,claude-sonnet-5-5`). The presets
+are `claude-opus-5-5` (the default), `claude-sonnet-5-5` and `claude-haiku-5-5`. The consumers
+are unchanged: they read the same `_reset`, `_final_model`, `[DONE]` and `userMessage`.
+
+```mermaid
+flowchart TB
+    start(["createStreamingLLM / createLLM with Claude CSV"]) --> pick["pickModel (shared modelHealth registry)"]
+    pick --> attempt["attempt: streaming messages.create, maxRetries 0, timeout 15 s (headers)"]
+    attempt --> ok{"how did it end?"}
+    ok -->|"end_turn, or max_tokens after text"| done["markSucceeded; _final_model; [DONE]"]
+    ok -->|"error / timeout / refusal / max_tokens before text"| kind{"anthropicErrors.classify"}
+    kind -->|"fatal 400/401/402/403/413/422"| fatal["surface: MODEL — reason"]
+    kind -->|"unavailable 404"| next["cooldown 5 min / none for refusal / 10 s timeout / else retry-after"]
+    kind -->|"refusal, transient"| next
+    next --> more{"models left and deadline not hit?"}
+    more -->|yes| reset["_reset {next_model, reason}"] --> pick
+    more -->|no| round{"round 1 and some failed fast?"}
+    round -->|yes| retry["_reset reason retry; wait 2 s; retry those"] --> pick
+    round -->|no| allfail["All Claude models failed (…) / No answer within 60s (…)"]
+```
+
+- **One loop, both shapes:** `runWithFailover` (`anthropic.js:546-664`) serves `streamChat` and
+  `chat` / `generateContent`. Every Messages call **streams**, the non-streaming lanes included:
+  a non-streaming response sends its headers only when the whole answer is written, so the SDK's
+  15 s timeout would cut it. `chat()` joins the text and returns `_modelUsed`.
+- **The SDK never retries** (`maxRetries: 0`, `anthropic.js:215`). It would wait out the
+  server's `retry-after` inside the attempt, however long. A transient failure moves to the next
+  model at once. When every model has failed fast, they get one more round after
+  `RETRY_ROUND_DELAY_MS` (2 s, `:286`), announced with `_reset` `reason: 'retry'`. Timeouts,
+  refusals and 404s stay out of it, and so does a 429 whose `retry-after` is longer than the wait
+  (`joinsNextRound`, `:369`). The round is skipped when the request deadline leaves less than the
+  wait.
+- **Requests** (`buildRequest`, `anthropic.js:135`, pure):
+  - It never sends `temperature`, `top_p`, `top_k` or `thinking`. Every lane passes
+    `temperature: 0.7`, and Opus, Sonnet and Haiku 5.5 reject a non-default value with a 400.
+  - `output_config.effort` defaults to `low` and is sent only to models that accept it
+    (`acceptsEffort`, `:28`).
+  - On those models `max_tokens` is at least 4096, since thinking counts toward it and Live
+    Answer passes 900.
+  - Consecutive messages with the same role are merged.
+  - `generateContent` never promotes a "You are…" string to the system prompt.
+- **Server-side refusal fallback:** requests to `claude-opus-5-5` and `claude-sonnet-5-5` go
+  through `beta.messages.create` with `fallbacks: 'default'` (beta
+  `server-side-fallback-2026-07-01`). A `fallback` block mid-stream is not a failure: no
+  `_reset`, and `_final_model` names the model that finished. If the API rejects the beta
+  (a 400 naming it), the attempt is resent once without it, and it is not sent again in the
+  process. A final `stop_reason: refusal` fails over to the next model in the list, with no
+  cooldown.
+- **Errors** (`anthropicErrors.js`). `classify` (`:44`) checks the provider's own codes first,
+  then the HTTP status, then the error type (`err.type`, also set on stream `error` events),
+  and treats anything unknown as transient (fail-open):
+
+  | Kind | What triggers it | Cooldown |
+  |---|---|---|
+  | transient | 408/409/429/5xx/529, network, mid-stream `overloaded_error` | `retry-after`, else 60 s, clamped to 5 s–5 min |
+  | transient (provider's own) | first-text or idle timeout, `max_tokens` before any text | 10 s |
+  | unavailable | 404 (retired, or not enabled for the key) | 5 min |
+  | refusal | `stop_reason: refusal` | none |
+  | fatal-request | 400/413/422 | none; surfaces at once |
+  | fatal-auth | 401/402/403 | none; surfaces at once |
+- **Timeouts:**
+  - First text within `firstTextTimeoutMs` (`:177`): 20 s for the Haiku family, 45 s for the
+    others. Thinking streams silently, and the SDK drops pings.
+  - Once text streams, 30 s without any stream event aborts the attempt.
+  - An answer must start within the 60 s request deadline, counted across all attempts. Once
+    it has started, the deadline no longer applies.
+  - The attempt stops reading at `message_stop` and closes the connection.
+  - The SDK ends an aborted stream without throwing, so a timeout is read from the attempt's
+    own flag.
+- **Cancellation:** `cancel()` aborts the in-flight request or the wait between rounds, with no
+  failover and no error (`outcome=cancelled`, `request … cancelled`).
+- **Key validation** lists one model (`models.list({ limit: 1 })`). It costs nothing and names no
+  model, so a retirement cannot break it.
+- **Diagnostics:** grep `[Anthropic Provider]`, e.g. `attempt 2/2 stream model=claude-haiku-5-5
+  outcome=ok ttft=840ms last=2100ms total=2110ms chunks=31 stop=end_turn
+  tokens=in:1200,out:310,cache_read:0 request_id=req_…`. The line adds `fallback=<from>→<to>` or
+  `served_by=` when another model answered, and `category=` on a refusal. No log line carries
+  prompt or answer text.
+- **Tuning (`.env`, all optional):**
+
+  | Variable | Default | Effect |
+  |---|---|---|
+  | `ANTHROPIC_EFFORT` | `low` | Effort level: `low`, `medium`, `high`, `xhigh` or `max` |
+  | `ANTHROPIC_MIN_MAX_TOKENS` | 4096 | `max_tokens` floor on models that think |
+  | `ANTHROPIC_FIRST_TEXT_TIMEOUT_MS` | 20000 (Haiku) / 45000 | Per-attempt wait for the first text |
+  | `ANTHROPIC_REQUEST_DEADLINE_MS` | 60000 | Wait for an answer to start; `0` disables |
+  | `ANTHROPIC_IDLE_TIMEOUT_MS` | 30000 | Silence allowed once text streams; `0` disables |
+  | `ANTHROPIC_SERVER_FALLBACK` | on | `off` stops the server-side refusal fallback |
+- **STT:** Anthropic has none. Pair it with Gemini, Deepgram, OpenAI or Whisper for Listen.
+
 ---
 
 ## 11. Data, persistence & auth
@@ -752,9 +853,9 @@ Glass can run fully local — no cloud, no API key:
   in the `ollama_models` table; the selected model is warmed up in the background at startup
   (`index.js:209-216`) and on selection (`modelStateService.js:342-344`). Ollama's `llmModels`
   list in the registry is empty and **populated dynamically** from installed models
-  (`factory.js:71`, `modelStateService.getAvailableModels` `:360-362`).
+  (`factory.js:73`, `modelStateService.getAvailableModels` `:360-362`).
 - **Whisper** (local STT) runs **only in the main process** — the factory returns a stub in the
-  renderer (`factory.js:74-95`). Models (tiny/base/small/medium) are downloaded with SHA-256
+  renderer (`factory.js:76-97`). Models (tiny/base/small/medium) are downloaded with SHA-256
   verification from the manifest in `checksums.js`. STT output is filtered for noise tokens like
   `[BLANK_AUDIO]` (`sttService.js:175-205`).
 - `localAIManager` periodically syncs service health and, if a local service goes down,
@@ -882,7 +983,8 @@ So, concretely, on first launch:
 | Summarization | `src/features/listen/summary/summaryService.js` |
 | Live Answer career context | `src/features/common/career/` (entry `index.js`), `scripts/eval-career-kb.js`, `scripts/ask-career-kb.js` |
 | AI providers / factory | `src/features/common/ai/factory.js`, `ai/providers/*.js` |
-| Gemini failover | `ai/providers/gemini.js`, `ai/providers/geminiModelRotator.js` |
+| Gemini failover | `ai/providers/gemini.js`, `ai/providers/geminiModelRotator.js`, `ai/providers/modelHealth.js` |
+| Anthropic failover | `ai/providers/anthropic.js`, `ai/providers/anthropicErrors.js`, `ai/providers/modelHealth.js` |
 | Model & key state | `src/features/common/services/modelStateService.js` |
 | Auth / encryption | `src/features/common/services/{authService,encryptionService,migrationService}.js` |
 | Persistence | `src/features/common/repositories/**`, `src/features/common/config/schema.js` |

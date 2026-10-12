@@ -13,9 +13,9 @@ spec_name: "anthropic-provider-resilience"
 # --- Staleness Detection (v2 required) ---
 generation_context:
   generated_at: "2026-10-11T00:00:00Z"
-  spec_hash: "d8012b40edfe66fb2616eb0942fa3a77725e27becaa13fcb16faa910202a1b47"
-  plan_hash: "c5eb28c87028eafd79f44d56531345df0ea8d53008add6599422ec784d635d92"
-  tasks_hash: "7a1c27301f071c955eb2232dfcaad91c95c69293ab3c2c700d293b0795b85d5c"
+  spec_hash: "8609d85289f762fdfccf604e5ccea342bdcb5eb6ed2a3ea6904c660d0e4652d5"
+  plan_hash: "1c556434af66e17f5fc6ca8fb8de08d2d5e896b6f3555d2dc33fc96ee6be0106"
+  tasks_hash: "fb9b1fe55ec46a71a6037b825319aea8a564b8b921be387efe5ff3832f6eff51"
 
 # --- Drift Detection (v2 required) ---
 _references:
@@ -44,7 +44,7 @@ cli_tests:
   - id: "AT-CLI-001"
     requirement: "FR-005..FR-009, FR-013, FR-014, contracts"
     environments: [local]
-    command: "node -e \"const m=require('./src/features/common/ai/providers/anthropic.js');const need=['AnthropicProvider','createSTT','createLLM','createStreamingLLM','buildRequest','acceptsEffort','firstTextTimeoutMs','requestDeadlineMs','idleTimeoutMs'];const miss=need.filter(k=>!m[k]);const e=require('./src/features/common/ai/providers/anthropicErrors.js');for(const k of ['classify','retryAfterMs','shortErrorMessage'])if(typeof e[k]!=='function')miss.push('anthropicErrors.'+k);if(miss.length){console.error('missing: '+miss.join(','));process.exit(1)}\""
+    command: "node -e \"const m=require('./src/features/common/ai/providers/anthropic.js');const need=['AnthropicProvider','createSTT','createLLM','createStreamingLLM','buildRequest','acceptsEffort','firstTextTimeoutMs','requestDeadlineMs','idleTimeoutMs','resetServerFallback'];const miss=need.filter(k=>!m[k]);const e=require('./src/features/common/ai/providers/anthropicErrors.js');for(const k of ['classify','retryAfterMs','retryAfterHeaderMs','shortErrorMessage'])if(typeof e[k]!=='function')miss.push('anthropicErrors.'+k);if(miss.length){console.error('missing: '+miss.join(','));process.exit(1)}\""
     expected_exit_code: 0
     description: "The provider and classifier export the contract surface."
     severity: critical
@@ -52,9 +52,9 @@ cli_tests:
   - id: "AT-CLI-002"
     requirement: "SC-005, FR-005, C5"
     environments: [local]
-    command: "node -e \"const {buildRequest}=require('./src/features/common/ai/providers/anthropic.js');const ids=['claude-opus-5-5','claude-sonnet-5-5','claude-haiku-5-5','claude-haiku-4-5'];const msgs=[{role:'system',content:'s'},{role:'user',content:'q'}];let bad=[];for(const id of ids)for(const stream of [true,false]){const {params}=buildRequest({modelId:id,messages:msgs,maxTokens:900,stream,env:{}});for(const k of ['temperature','top_p','top_k','thinking'])if(k in params)bad.push(id+':'+k);if(id==='claude-haiku-4-5'&&params.output_config)bad.push(id+':effort');if(id==='claude-haiku-5-5'&&params.fallbacks)bad.push(id+':fallbacks')}if(bad.length){console.error(bad.join(','));process.exit(1)}\""
+    command: "node -e \"const {buildRequest}=require('./src/features/common/ai/providers/anthropic.js');const ids=['claude-opus-5-5','claude-sonnet-5-5','claude-haiku-5-5','claude-haiku-4-5'];const msgs=[{role:'system',content:'s'},{role:'user',content:'q'}];let bad=[];for(const id of ids)for(const mode of ['stream','once']){const {params}=buildRequest({modelId:id,messages:msgs,maxTokens:900,mode,env:{}});if(params.stream!==true)bad.push(id+':'+mode+':not-streaming');for(const k of ['temperature','top_p','top_k','thinking'])if(k in params)bad.push(id+':'+k);if(id==='claude-haiku-4-5'&&params.output_config)bad.push(id+':effort');if(id==='claude-haiku-5-5'&&params.fallbacks)bad.push(id+':fallbacks')}if(bad.length){console.error(bad.join(','));process.exit(1)}\""
     expected_exit_code: 0
-    description: "No request carries sampling parameters or thinking; effort is not sent to Haiku 4.5; fallbacks are not sent to Haiku 5.5."
+    description: "No request carries sampling parameters or thinking; every request streams (research R13); effort is not sent to Haiku 4.5; fallbacks are not sent to Haiku 5.5."
     severity: critical
 
   - id: "AT-CLI-003"
@@ -178,9 +178,9 @@ negative_assertions:
     requirement: "FR-018, D4"
     environments: [local]
     check_type: "cli"
-    command: "node -e \"const s=require('fs').readFileSync('src/features/common/ai/providers/anthropic.js','utf8');process.stdout.write(String((s.match(/maxRetries\\s*:\\s*(?!0\\b)[^,}\\s]+/g)||[]).length))\""
+    command: "node -e \"const s=require('fs').readFileSync('src/features/common/ai/providers/anthropic.js','utf8');const bad=(s.match(/maxRetries\\s*:\\s*[^,}\\s]+/g)||[]).filter(m=>!/:\\s*(0|SDK_MAX_RETRIES)$/.test(m)).length;const pinned=/const SDK_MAX_RETRIES = 0;/.test(s)?0:1;process.stdout.write(String(bad+pinned))\""
     expected_result: "0"
-    description: "The provider never lets the SDK retry: every maxRetries it sets is 0."
+    description: "The provider never lets the SDK retry: every maxRetries it sets is 0 or SDK_MAX_RETRIES, which is defined as 0."
     severity: critical
 
 # =============================================================================
@@ -249,6 +249,14 @@ manual_tests:
     manual_verification: true
     verification_command: "npm start"
     description: "A 1 ms first-text timeout fails both models with outcome=timeout and the 'All Claude models failed' message (quickstart #8)."
+    severity: warning
+
+  - id: "AT-MANUAL-010"
+    requirement: "FR-003, E37, E38"
+    environments: [local]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Settings normalizes a typed Claude list, shows it as (custom), and rejects a non-claude entry by name (quickstart #10)."
     severity: warning
 
   - id: "AT-MANUAL-009"

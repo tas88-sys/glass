@@ -3,7 +3,7 @@
 **Spec**: `2026-10-11-anthropic-provider-resilience`
 **Date**: 2026-10-11
 
-Findings come from reading the repo, the installed SDK (`node_modules/@anthropic-ai/sdk`, 0.56.0), the latest SDK package (0.133.0, unpacked from npm for reading only: changelog and source), and Anthropic's model and error reference (cached 2026-10-06). Nothing here was checked against the live API, and 0.133.0 was not run. The live checks are T-VERIFY-MANUAL, and the Electron load test is T005.
+Findings come from reading the repo, the installed SDK (`node_modules/@anthropic-ai/sdk`, 0.56.0), the latest SDK package (0.133.0, unpacked from npm for reading only: changelog and source), and Anthropic's model and error reference (cached 2026-10-06). Nothing here was checked against the live API; the live checks are T-VERIFY-MANUAL. 0.133.0 was run in T005 (the Electron load test) and, with the finished provider, against a local fake API (R13).
 
 ---
 
@@ -194,6 +194,32 @@ For a real-time answer, the right reaction to "retry in 40 s" is to try another 
 
 ---
 
+## R13: Non-streaming calls and the SDK timeout (found in implementation)
+
+**Finding**: The SDK's `timeout` covers only the wait for response headers (R3). A non-streaming Messages response sends its headers when the whole answer is written. With `timeout: 15000` (FR-018), any `chat()` call that thinks and writes for longer than 15 s would end in `APIConnectionTimeoutError`, fail over, and probably time out again. Live Insights calls `chat()` with thinking on.
+
+**Decision**: Every Messages call streams (D12).
+- `chat()` and `generateContent()` run the same loop as `streamChat` (`runWithFailover`) and join the text deltas.
+- A failed attempt's partial text is dropped before the next attempt.
+- They keep their return shapes, plus `_modelUsed`, and they get the first-text, idle and deadline timeouts too.
+- `buildRequest` takes `mode` (`stream` | `once`) instead of `stream`. It picks only the default `max_tokens` (16000 or 8192), and `params.stream` is always `true`.
+
+**Alternative considered**: A longer SDK timeout for non-streaming calls (60 s or more). That is one more number to tune, and a stalled call would still hold Live Insights for the whole wait with no sign of progress.
+
+**Also settled in implementation**:
+- **429 in the second round.** A 429 joins the second round only when the server's own retry hint is at most the 2 s wait. `retryAfterMs` clamps to at least 5 s for cooldowns, so the rule reads the unclamped header through `retryAfterHeaderMs`. A 429 without the header stays out, as Gemini's do.
+- **Request ids.** Every attempt reads the request id through `withResponse()`, so timeouts and successes log `request_id` too, not only errors.
+- **Real SDK check.** The provider was run with the real SDK 0.133.0 against a local HTTP server that played the Messages API, under Node 24.17 and under Electron 30.5.1 (Node 20.16). Checked:
+  - failover on a 529, with exactly one call per model, so the SDK did not retry;
+  - the beta header and `fallbacks` on Sonnet 5.5;
+  - the connection closed by the client after `message_stop`;
+  - cancel closing the HTTP connection;
+  - `chat()` failover and text join;
+  - `models.list` validation;
+  - request ids in the logs, with no answer text.
+
+---
+
 ## Summary of Decisions
 
 | # | Decision |
@@ -210,3 +236,4 @@ For a real-time answer, the right reaction to "retry in 40 s" is to try another 
 | R10 | Upgrade the SDK to 0.133.0 first, alone, with a load test under Electron's Node |
 | R11 | Measure TTFT in a real session before choosing the default list |
 | R12 | `maxRetries: 0`; immediate failover, then one more round after 2 s within the deadline |
+| R13 | Every call streams, the non-streaming lanes included; a 429 joins round 2 only on its unclamped `retry-after` |

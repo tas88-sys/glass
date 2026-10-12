@@ -32,7 +32,7 @@
 | E26 | Text started, then 30 s without any event | Attempt aborted, transient; `_reset` if a model remains | FR-014 |
 | E27 | `message_stop` arrives but the connection stays open | Reading stops; connection aborted; success | FR-015 |
 | E28 | `stop_reason: refusal` with partial text, model 1 of 2 | `_reset reason: 'refusal'`; no cooldown; m2 answers | FR-011, FR-015 |
-| E29 | `stop_reason: refusal` on the last model | Error "<model> declined to answer"; the partial text already shown stays under the error (consumers keep it, as for any mid-stream error) | FR-019 |
+| E29 | `stop_reason: refusal` on the last model | Error "<model> declined to answer." (alone on a one-model list, after "All Claude models failed (n attempts). Last:" otherwise); the partial text already shown stays under the error (consumers keep it, as for any mid-stream error) | FR-019 |
 | E30 | `stop_reason: max_tokens`, no text | Failure (`EMPTY_MAX_TOKENS`, 10 s cooldown), failover | FR-015 |
 | E31 | `stop_reason: max_tokens` with text | Success; logged `stop=max_tokens` | FR-015 |
 | E32 | Server-side fallback block mid-stream | No `_reset`; text continues; `_final_model` = `to.model`; log `fallback=from→to` | FR-016 |
@@ -49,3 +49,7 @@
 | E43 | 429 with `retry-after: 1` on the only model | Joins the second round; tried again after 2 s | FR-018 |
 | E44 | Every model failed fast, but the deadline leaves less than 2 s | No second round; "No answer within 60s …" | FR-013, FR-018 |
 | E45 | Consumer cancels during the wait between rounds | No new attempt, no stream error; request log `cancelled` | FR-017, FR-018 |
+| E46 | `chat()` whose answer takes longer than 15 s | Not cut: the call streams, so the SDK timeout ends at the headers (research R13) | FR-021, D12 |
+| E47 | 429 without `retry-after` on the only model | No second round; error at once | FR-018 |
+| E48 | Stream ends without `message_stop` and without an error | Transient (`stream ended before message_stop`), failover | FR-011, FR-015 |
+| E49 | Response headers never arrive | The first-text timer aborts the request; counted as a first-text timeout, `_reset reason: 'timeout'` | FR-013 |

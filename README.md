@@ -69,7 +69,7 @@ npm run setup
 **Currently Supporting:**
 - OpenAI (LLM + STT): Get OpenAI API Key [here](https://platform.openai.com/api-keys)
 - Gemini (LLM + STT): Get Gemini API Key [here](https://aistudio.google.com/apikey)
-- Anthropic Claude (LLM): Get Anthropic API Key [here](https://console.anthropic.com/settings/keys)
+- Anthropic Claude (LLM — Opus, Sonnet and Haiku 5.5, with failover across a model list like Gemini): Get Anthropic API Key [here](https://console.anthropic.com/settings/keys)
 - Deepgram (STT): Get Deepgram API Key [here](https://console.deepgram.com/)
 - Local: Ollama (LLM) & Whisper (STT)
 
@@ -100,7 +100,7 @@ See [`docs/AUDIO_AND_STT.md` §3](docs/AUDIO_AND_STT.md#3-stt--llm-provider-matr
 A technical walkthrough of what actually happens when you use Glass. Useful for contributors and anyone trying to understand the runtime behavior.
 
 > 📐 For the full, code-verified architecture — process/window topology, IPC, the Ask & Listen
-> pipelines, the AI provider layer, Gemini failover, persistence, and a "what works if I run it
+> pipelines, the AI provider layer, Gemini and Anthropic failover, persistence, and a "what works if I run it
 > as-is" breakdown — see **[`ARCHITECTURE.md`](ARCHITECTURE.md)** and the diagram suite in
 > **[`docs/diagrams/`](docs/diagrams/)**. Audio-specific deep dives live in
 > [`docs/AUDIO_AND_STT.md`](docs/AUDIO_AND_STT.md) and
