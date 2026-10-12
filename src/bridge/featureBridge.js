@@ -10,6 +10,7 @@ const presetRepository = require('../features/common/repositories/preset');
 const localAIManager = require('../features/common/services/localAIManager');
 const askService = require('../features/ask/askService');
 const listenService = require('../features/listen/listenService');
+const { LIVE_FEATURES, liveFeaturesState } = require('../features/listen/liveFeatures');
 const permissionService = require('../features/common/services/permissionService');
 const encryptionService = require('../features/common/services/encryptionService');
 
@@ -128,6 +129,30 @@ module.exports = {
     ipcMain.handle('settings:setPreferredCodeLanguage', async (event, value) => {
         await settingsService.saveSettings({ preferredCodeLanguage: (value || '').trim() });
         return { success: true };
+    });
+
+    // Live features (spec 2026-10-12-live-features-toggle): which Listen lanes run
+    ipcMain.handle('settings:getLiveFeatures', async () => {
+        const s = await settingsService.getSettings();
+        return liveFeaturesState(s.liveFeatures);
+    });
+
+    ipcMain.handle('settings:setLiveFeatures', async (event, mode) => {
+        if (!LIVE_FEATURES.includes(mode)) {
+            console.error('[FeatureBridge] settings:setLiveFeatures refused an invalid mode');
+            return { success: false, error: 'Invalid live features mode.' };
+        }
+        const saved = await settingsService.saveSettings({ liveFeatures: mode });
+        if (!saved || !saved.success) return saved;
+        listenService.setLiveFeatures(mode);
+        const state = liveFeaturesState(mode);
+        // Push to the listen window via windowPool (it is not a settings-updated target)
+        const windowManager = require('../window/windowManager');
+        const listenWin = windowManager.windowPool.get('listen');
+        if (listenWin && !listenWin.isDestroyed()) {
+            listenWin.webContents.send('listen:liveFeaturesChanged', state);
+        }
+        return { success: true, ...state };
     });
 
     // Ask

@@ -1,7 +1,7 @@
 {
   "spec_id": "2026-10-12-live-features-toggle",
   "spec_name": "live-features-toggle",
-  "updated": "2026-10-12T17:02:51Z",
+  "updated": "2026-10-12T17:06:04Z",
   "anthropic_patterns": [
     "Ralph looping",
     "JSON task state"
@@ -124,7 +124,7 @@
       "description": "summaryService.js, additions only (FR-005..FR-009, D4, D5, D11): require liveFeatures.js; this.liveFeatures = DEFAULT_LIVE_FEATURES in the constructor; setLiveFeatures(mode) (normalize, log '[Live] features=<mode>', pauseLiveAnswer() when Answer goes from on to off); pauseLiveAnswer() (clear answerDebounceTimer, abort inFlightController, inFlight = false; keep lastAnsweredTail, careerPrev, activeCompany); an early 'if (!answerEnabled(this.liveFeatures)) return;' as the first statement of triggerAnswerIfNeeded and an early 'if (!insightsEnabled(this.liveFeatures)) return;' as the first statement of triggerAnalysisIfNeeded. makeLiveAnswer, makeOutlineAndRequests, addConversationTurn, resetLiveAnswer and the debounce body are not edited."
     },
     {
-      "status": "pending",
+      "status": "completed",
       "parallel": false,
       "target_file": "src/bridge/featureBridge.js",
       "gate": "T013",
@@ -134,8 +134,8 @@
       "gate_type": null,
       "scope": null,
       "block_on": null,
-      "completed_at": null,
-      "evidence": null,
+      "completed_at": "2026-10-12T17:06:04Z",
+      "evidence": "node --check ok on featureBridge.js, settingsService.js, listenService.js, preload.js; the three new require paths resolve; AT-CLI-005 and AT-CLI-006 pass; diffs add only (featureBridge +25, listenService +15, settingsService +1, preload +7/-1: the trailing comma on removeOnSessionStateChanged); a failed save is returned as is and the mode is not applied (spec error registry); npm test 1089/1089. The npm start check (a mode change logs [Live] features=...) needs the Settings button and runs with T018",
       "evidence_type": null,
       "auto_skill": null,
       "auto_skill_timing": null,

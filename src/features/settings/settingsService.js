@@ -218,6 +218,7 @@ function getDefaultSettings() {
         // ── NEW: Ask mode shortcuts ──
         askMode: 'default',                // 'default' | 'code' | 'debug' | 'system_design'
         preferredCodeLanguage: 'go',       // free-text; empty → infer from screenshot
+        liveFeatures: 'both',              // 'both' | 'answer' | 'insights' — which Listen lanes run
     };
 }
 
