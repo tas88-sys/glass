@@ -17,8 +17,8 @@
 | E11 | `claude-sonnet-5-5` with `ANTHROPIC_SERVER_FALLBACK` unset | `beta.messages.create` with `betas` and `fallbacks: 'default'` | FR-009 |
 | E12 | `claude-haiku-5-5` | `messages.create`, no `fallbacks` | FR-009, C5 |
 | E13 | Every model in the list is cooling down | The one that recovers first is tried anyway | FR-010 |
-| E14 | 529 before the stream opens on model 1 of 2 | SDK called with `maxRetries: 1`; after it fails: `_reset {next_model: m2, reason: 'transient'}`; m2 answers | FR-011, FR-012, FR-018, SC-003 |
-| E15 | 529 on the last model | SDK called with `maxRetries: 2`; then the error with "All Claude models failed …" | FR-018, FR-019 |
+| E14 | 529 before the stream opens on model 1 of 2 | Every SDK call has `maxRetries: 0`, `timeout: 15000` and a signal; `_reset {next_model: m2, reason: 'transient'}` at once; m2 answers | FR-011, FR-012, FR-018, SC-003 |
+| E15 | 529 on the only model, twice | `_reset {reason: 'retry'}`, a 2 s wait, one more attempt; then "All Claude models failed (2 attempts, 2 rounds). Last: …" | FR-018, FR-019 |
 | E16 | 429 with `retry-after: 30` | Model cooled down 30 s | FR-011 |
 | E17 | Stream `error` event (`overloaded_error`) after some text, model 1 of 2 | `_reset` (partial discarded by the consumer); m2 answers | FR-011, FR-012 |
 | E18 | 404 on model 1 of 2 | 5 min cooldown; `_reset reason: 'unavailable'`; m2 answers | FR-011 |
@@ -45,3 +45,7 @@
 | E39 | Stored retired `claude-3-5-sonnet-20241022` after upgrade | Shown as "(custom)" in the model list; requests fail per E19 until the user picks another | FR-002, FR-019 |
 | E40 | Gemini request while Anthropic models are cooling down | Unaffected; separate IDs in the shared registry | FR-022, G3 |
 | E41 | The server-side fallback beta is rejected (400 naming `anthropic-beta` or `fallbacks`) | Same attempt resent once without it; never sent again in this process; one log line | FR-009 |
+| E42 | 429 with `retry-after: 30` on every model | No second round (the wait would not cover it); error at once with the server's rate-limit reason | FR-018, FR-019 |
+| E43 | 429 with `retry-after: 1` on the only model | Joins the second round; tried again after 2 s | FR-018 |
+| E44 | Every model failed fast, but the deadline leaves less than 2 s | No second round; "No answer within 60s …" | FR-013, FR-018 |
+| E45 | Consumer cancels during the wait between rounds | No new attempt, no stream error; request log `cancelled` | FR-017, FR-018 |

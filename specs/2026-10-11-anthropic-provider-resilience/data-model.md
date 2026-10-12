@@ -33,7 +33,7 @@ Cooldowns used by the Anthropic provider:
 
 ### Error kind (`anthropicErrors.classify(err)`)
 
-Inspection order: our own codes → HTTP `status` → stream error type (`err.error.error.type`) → SDK class → fail-open.
+Inspection order: our own codes → HTTP `status` → error type (`err.type`, which SDK 0.81.0 and later set on every `APIError`, including stream `error` events; else `err.error.error.type`) → SDK class → fail-open.
 
 | Input | Kind |
 |-------|------|
@@ -44,8 +44,8 @@ Inspection order: our own codes → HTTP `status` → stream error type (`err.er
 | status 404 | `unavailable` |
 | status 400, 413, 422 | `fatal-request` |
 | status 401, 402, 403 | `fatal-auth` |
-| status undefined, `error.error.type` in `overloaded_error`, `api_error`, `rate_limit_error`, `timeout_error` | `transient` |
-| status undefined, `error.error.type` = `invalid_request_error` | `fatal-request` |
+| status undefined, type in `overloaded_error`, `api_error`, `rate_limit_error`, `timeout_error` | `transient` |
+| status undefined, type = `invalid_request_error` | `fatal-request` |
 | `APIConnectionError` / `APIConnectionTimeoutError` | `transient` |
 | anything else | `transient` (fail-open, as Gemini) |
 
@@ -78,6 +78,25 @@ Content mapping:
 | `{ type: 'image_url', image_url: { url: 'data:<mime>;base64,<b64>' } }` | `{ type: 'image', source: { type: 'base64', media_type: <mime or image/jpeg>, data: <b64> } }` |
 | `{ inlineData: { mimeType, data } }` (`generateContent`) | `{ type: 'image', source: { type: 'base64', media_type: mimeType, data } }` |
 
+### SDK call options (every Messages and Models call)
+
+| Option | Value | Why |
+|--------|-------|-----|
+| `maxRetries` | `0` | The SDK would wait out `retry-after` inside the attempt (research R12) |
+| `timeout` | `15000` | Time until response headers only; the body is bounded by our timers |
+| `signal` | the attempt's `AbortController.signal` | Cancel, first-text, idle and deadline aborts |
+
+### Rounds
+
+| Field | Value |
+|-------|-------|
+| `MAX_ROUNDS` | 2 |
+| `RETRY_ROUND_DELAY_MS` | 2000 (`opts.retryRoundDelayMs` overrides, for tests) |
+| Joins round 2 | Kind `transient` from an HTTP or stream error (not a timeout, not `EMPTY_MAX_TOKENS`); a 429 only when `retryAfterMs(err)` ≤ the delay |
+| Stays out | Timeouts, `EMPTY_MAX_TOKENS`, `unavailable`, `refusal`, a 429 with a longer `retry-after` |
+| Skipped | When no model joins, or the request deadline leaves ≤ the delay |
+| Announced | `_reset` with `reason: 'retry'` and `next_model` = first model of the round |
+
 ### Attempt stats (one per attempt, for the log line)
 
 | Field | Set when |
@@ -97,7 +116,7 @@ Content mapping:
 | Line | When |
 |------|------|
 | `data: {"choices":[{"delta":{"content":"…"}}]}` | each `text_delta` |
-| `data: {"_reset":true,"next_model":"…","reason":"transient|timeout|unavailable|refusal"}` | before the next model, only if one remains |
+| `data: {"_reset":true,"next_model":"…","reason":"transient|timeout|unavailable|refusal|retry"}` | before the next attempt, only if one follows (`retry` = second round) |
 | `data: {"_final_model":"…"}` | after a successful attempt (the model that finished, after any server-side fallback) |
 | `data: [DONE]` | last line on success |
 | stream error with `userMessage` | fatal error, list exhausted, or deadline |
@@ -108,7 +127,9 @@ Content mapping:
 start ──► pick model ──► attempt
 attempt ──text…message_stop──► success ──► _final_model, [DONE], close
 attempt ──transient/timeout/unavailable/refusal──► markFailed? ──► models left and deadline not hit? ──► _reset ──► pick model
-                                                                         └─ no ──► error(userMessage)
+                                                                         └─ no ──► round 1 and fast failures and time for the wait?
+                                                                                     ├─ yes ──► _reset(retry) ──► wait 2 s ──► round 2
+                                                                                     └─ no ──► error(userMessage)
 attempt ──fatal-request/fatal-auth──► error(userMessage)
 any state ──consumer cancel──► abort in-flight, log "cancelled", end (no error)
 ```

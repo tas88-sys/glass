@@ -13,9 +13,9 @@ spec_name: "anthropic-provider-resilience"
 # --- Staleness Detection (v2 required) ---
 generation_context:
   generated_at: "2026-10-11T00:00:00Z"
-  spec_hash: "569101a531814741c6d21d92937e8242ed5ffd9b8678ddc5a8d7ae2a9ce6117c"
-  plan_hash: "f5028ad0961493f13e0fd8168a8bb0dbaad46aff3867ac7f40b30e4fa1e918e7"
-  tasks_hash: "70a22af1bc44320f2e0e5ac9e7f39d6a4701ef7ac1ceba93dd5ebe14be5ed988"
+  spec_hash: "d8012b40edfe66fb2616eb0942fa3a77725e27becaa13fcb16faa910202a1b47"
+  plan_hash: "c5eb28c87028eafd79f44d56531345df0ea8d53008add6599422ec784d635d92"
+  tasks_hash: "7a1c27301f071c955eb2232dfcaad91c95c69293ab3c2c700d293b0795b85d5c"
 
 # --- Drift Detection (v2 required) ---
 _references:
@@ -29,6 +29,8 @@ _references:
     - "src/features/common/ai/factory.js"
     - "src/features/common/services/modelStateService.js"
     - "src/ui/settings/SettingsView.js"
+    - "scripts/smoke-anthropic-sdk.js"
+    - "package.json"
   ecs_tasks: []
 
 # --- Supported Environments ---
@@ -85,6 +87,14 @@ cli_tests:
     command: "node -e \"const fs=require('fs');const files=['src/features/common/ai/providers/anthropic.js','src/features/common/ai/factory.js'];const hits=files.filter(f=>/claude-3[-.]/.test(fs.readFileSync(f,'utf8')));if(hits.length){console.error(hits.join(','));process.exit(1)}\""
     expected_exit_code: 0
     description: "No retired Claude 3.x model ID remains in the provider or the factory."
+    severity: critical
+
+  - id: "AT-CLI-008"
+    requirement: "FR-023, D11, C4"
+    environments: [local]
+    command: "node -e \"require('child_process').execFileSync(require('electron'),['scripts/smoke-anthropic-sdk.js'],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1'},stdio:'inherit'})\""
+    expected_exit_code: 0
+    description: "The upgraded SDK loads with require, streams a canned SSE response, and raises typed errors under Electron's Node 20.16 (npm test runs a newer Node and would not catch an incompatibility)."
     severity: critical
 
   - id: "AT-CLI-007"
@@ -160,9 +170,18 @@ negative_assertions:
     environments: [local]
     check_type: "cli"
     command: "node -e \"process.stdout.write(require('./package.json').dependencies['@anthropic-ai/sdk'])\""
-    expected_result: "^0.56.0"
-    description: "The SDK version is unchanged in this spec."
-    severity: warning
+    expected_result: "^0.133.0"
+    description: "The SDK is upgraded to the version the spec was written against (FR-023, D11)."
+    severity: critical
+
+  - id: "AT-NEG-006"
+    requirement: "FR-018, D4"
+    environments: [local]
+    check_type: "cli"
+    command: "node -e \"const s=require('fs').readFileSync('src/features/common/ai/providers/anthropic.js','utf8');process.stdout.write(String((s.match(/maxRetries\\s*:\\s*(?!0\\b)[^,}\\s]+/g)||[]).length))\""
+    expected_result: "0"
+    description: "The provider never lets the SDK retry: every maxRetries it sets is 0."
+    severity: critical
 
 # =============================================================================
 # MANUAL VERIFICATION (quickstart.md §3)

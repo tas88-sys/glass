@@ -3,7 +3,7 @@
 **Spec**: `2026-10-11-anthropic-provider-resilience`
 **Date**: 2026-10-11
 
-Findings come from reading the repo, the installed SDK (`node_modules/@anthropic-ai/sdk`, 0.56.0), and Anthropic's model and error reference (cached 2026-10-06). Nothing here was checked against the live API. The live checks are T-VERIFY-MANUAL.
+Findings come from reading the repo, the installed SDK (`node_modules/@anthropic-ai/sdk`, 0.56.0), the latest SDK package (0.133.0, unpacked from npm for reading only: changelog and source), and Anthropic's model and error reference (cached 2026-10-06). Nothing here was checked against the live API, and 0.133.0 was not run. The live checks are T-VERIFY-MANUAL, and the Electron load test is T005.
 
 ---
 
@@ -67,7 +67,12 @@ Read in `node_modules/@anthropic-ai/sdk`:
 - **Abort**: `options.signal` aborts the fetch and the body. An abort ends the async iteration **without throwing** (`isAbortError` → return), so a timeout we trigger must be detected from our own flag.
 - **Request id**: `APIError.requestID` from the `request-id` header (`core/error.js:14`).
 
-**Consequence**: The SDK covers what Gemini's second round does (quick repeats of a fast-failing request), but only before the stream opens. Mid-stream errors, silent streams and cancellation are ours to handle (D3, D10, FR-014, FR-017).
+**Consequence**: Mid-stream errors, silent streams and cancellation are ours to handle (D3, D10, FR-014, FR-017). The SDK's own retries look like Gemini's second round, but they wait inside the attempt for as long as the server's `retry-after` asks, so the plan turns them off (R12).
+
+What changes in 0.133.0 for the points above (read in the unpacked package):
+- Same retry statuses and the same quiet return on abort (`core/streaming.js`, `client.js:708-741`).
+- The stream `error` event now sets `err.type` from the body (`core/streaming.js:122-125`), and every `APIError` carries `type` (0.81.0).
+- The wait before a retry can be cancelled through `signal` (0.126.0), and the 60 s cap on `retry-after` is gone (`client.js:744-772`; see R12).
 
 ---
 
@@ -85,14 +90,14 @@ Read in `node_modules/@anthropic-ai/sdk`:
 
 | Gemini capability (R2 #) | Port? | Reason |
 |-----------------------|-------|--------|
-| 1–6, 9, 12–14, 16–18 | Yes | Provider-neutral; the consumers already depend on 6, 17, 18 |
+| 1–6, 9, 10, 12–14, 16–18 | Yes | Provider-neutral; the consumers already depend on 6, 17, 18 |
 | 7 First-chunk timeout | Yes, as first-**text** timeout | Anthropic sends `message_start` at once, so "first chunk" says nothing; the first `text_delta` means the answer started. Haiku family 20 s (thinks little at `low`), others 45 s |
 | 8 Hedging | No | Built for a Flash-Lite stall pattern; doubles cost; no evidence of the same pattern on Anthropic |
-| 10 Second round | No | The SDK already retries 429/5xx with backoff before the stream opens (R3) |
+| 10 Second round | Yes, with a 2 s wait | Replaces the SDK's retries, which wait inside the attempt (R12). A 429 joins the round only when its `retry-after` fits in the wait |
 | 11 Short timeout cooldown | Yes | Same reasoning |
 | 15 Rejection guard | Not needed | We iterate the stream directly; there is no unused aggregate promise |
 | New: idle timeout | Yes | R3: nothing bounds a silent body once text started |
-| New: SDK retries per attempt | Yes | With a model waiting, one SDK retry, not two (D4) |
+| New: SDK retries off | Yes | `maxRetries: 0` on every call, so every wait is under our timers (D4, R12) |
 
 ---
 
@@ -112,7 +117,7 @@ From Anthropic's model reference:
 - On current models a policy decline is HTTP 200 with `stop_reason: refusal`, before any output or mid-stream. Anthropic's guidance is to discard partial output in that case.
 - **Server-side fallback** (beta): `fallbacks: 'default'` with `anthropic-beta: server-side-fallback-2026-07-01`. On a decline the API runs a fallback model inside the same request. On a stream, a `fallback` content block marks the switch and the text continues. Anthropic recommends opting in by default for `claude-opus-5-5` and `claude-sonnet-5-5`. `claude-haiku-5-5` has no server-side fallback (a list returns 400).
 - **Decision**: opt in on Opus 5.5 and Sonnet 5.5 (D7, FR-009), with `ANTHROPIC_SERVER_FALLBACK=off` to disable. A final `refusal` (any model) is a per-model failure, and the next model in the list is tried (FR-011).
-- **Risk**: the beta is newer than SDK 0.56.0. The SDK sends `betas` as the `anthropic-beta` header and passes `fallbacks` in the body unchanged (`resources/beta/messages/messages.js:28-43`). T-VERIFY-MANUAL confirms it against the live API.
+- **Risk**: the beta is newer than SDK 0.56.0. Both versions send `betas` as the `anthropic-beta` header and pass `fallbacks` in the body (0.56.0: `resources/beta/messages/messages.js:28-43`); 0.133.0 also types it (changelog 0.115.0: "add server-side fallbacks default option"). T-VERIFY-MANUAL confirms it against the live API.
 
 ---
 
@@ -138,13 +143,28 @@ Applying Gemini's `classifyError` to Anthropic errors would give the wrong answe
 
 ---
 
-## R10: Stay on SDK 0.56.0?
+## R10: Upgrade the SDK from 0.56.0 to 0.133.0?
 
-**Decision**: Yes, for this spec.
+**Decision**: Yes, as the first task, alone in its own commit, before any provider change (D11, FR-023). User decision 2026-10-11.
 
-**Evidence**: `messages.create` posts the body as given (`resources/messages/messages.js:16-29`), so `output_config` reaches the API although 0.56.0 does not type it. `beta.messages.create` turns `betas` into the `anthropic-beta` header (`resources/beta/messages/messages.js:28-43`). `models.list` exists. We read raw stream events, so new block types (`thinking` with empty text, `fallback`) need no SDK support.
+**Not required**: 0.56.0 would work. `messages.create` posts the body as given (`resources/messages/messages.js:16-29`), so `output_config` reaches the API although 0.56.0 does not type it. `beta.messages.create` turns `betas` into the `anthropic-beta` header (`resources/beta/messages/messages.js:28-43`). `models.list` exists. We read raw stream events, so new block types (`thinking` with empty text, `fallback`) need no SDK support.
 
-**Alternative considered**: upgrade to 0.133.0 (latest on 2026-10-09). That is 77 minor versions of a 0.x package, with possible breaking changes, for no feature this spec needs. Deferred.
+**Why upgrade anyway** (changelog of 0.133.0, released 2026-10-09):
+
+| Version | Change | Use here |
+|---------|--------|----------|
+| 0.73.0, 0.115.0 | Abort-signal listeners released when requests settle; no more leaks | Every attempt passes a signal (FR-017) |
+| 0.81.0 | `type` on every `APIError`; set from the body on stream `error` events | Simpler, sturdier `classify` (data-model) |
+| 0.126.0 | The wait before a retry stops as soon as the request is aborted | Moot with `maxRetries: 0` (R12), but removes a trap if retries are ever turned back on |
+| 0.103.0 – 0.133.0 | Current models, `output_config`, `fallbacks` (0.115.0), `stop_details`, refusal categories; warnings for deprecated models | Editor hints only (plain JS), plus a runtime warning when a deprecated model is named |
+| 77 minor versions | Staying this far behind makes every later change harder | — |
+
+**Costs and checks**:
+- **Size**: runtime `.js` goes from 0.2 MB to 1.3 MB, and the package from 3 MB to 18 MB on disk (source maps, typings and TypeScript sources). Two new dependencies arrive. `standardwebhooks` is loaded with the beta namespace at client construction (`resources/beta/beta.js:18` → `webhooks.js:5`). `json-schema-to-ts` is not required by any runtime `.js`; it serves the typings. `zod` is an optional peer and is not needed. Trimming the extra files from the installer is out of scope.
+- **Breaking changes**: possible in any 0.x release. The removals in the changelog (retired model types in 0.116.0 and earlier, `OutputFormat` exports in 0.72.1, `betas` deprecated on GA methods in 0.129.0) do not touch what Glass uses: the client constructor, `messages.create({stream})`, `beta.messages.create`, `models.list`, and the error classes. `require('@anthropic-ai/sdk').Anthropic` is still exported (`index.js:6`), and the package is still `type: commonjs`.
+- **Node 20.16 (Electron 30.5.1)**: a search of the runtime `.js` for Node 22+ APIs found only `promiseWithResolvers`, which is the SDK's own fallback for `Promise.withResolvers`. The package declares no `engines`. A load test under Electron's Node is still required (FR-023, T005).
+- **Security**: `npm audit` (2026-10-11) reports no advisory against `@anthropic-ai/sdk` or its new dependencies.
+- **Rollback**: one commit (`package.json` + lockfile).
 
 ---
 
@@ -154,18 +174,39 @@ There are no measurements yet. What is known: Live Answer streams with `maxToken
 
 ---
 
+## R12: Where do retries live?
+
+**Decision**: In the loop, not the SDK. Every SDK call passes `maxRetries: 0`. A transient failure moves to the next model at once. When every model has failed, the ones that failed fast get one more round after 2 s, within the request deadline (D4, FR-018).
+
+**Evidence**: The SDK retries inside the attempt and first waits for what the server's `retry-after` (or `retry-after-ms`) asks:
+- **0.56.0** (`client.js:372-400`): it honours values under 60 s and uses its own backoff above that. The wait is a plain `setTimeout` (`internal/utils/sleep.js:5`), so aborting the request does not end it. A 429 with `retry-after: 40` holds the attempt 40 s, and our first-text timer cannot cut it short.
+- **0.133.0** (`client.js:744-772`): it honours any value a timer can hold (up to about 24 days). The wait now ends on abort (0.126.0), but without our own abort it lasts as long as the server says.
+
+For a real-time answer, the right reaction to "retry in 40 s" is to try another model now, not to wait inside this one.
+
+**Rules for the second round** (same shape as Gemini's `retryableNextRound`, `gemini.js:211-215`):
+- Joins: transient HTTP and stream errors (5xx, 529, network), and a 429 whose `retry-after` is at most the 2 s wait.
+- Stays out: timeouts (they already cost 20–45 s), `unavailable`, `refusal`, and a 429 with a longer `retry-after`.
+- Skipped when the deadline leaves less than the wait. Announced with `_reset` `reason: 'retry'`. A cancel during the wait stops it.
+- The wait is 2 s, where Gemini's is 3 s: the SDK's default first backoff is 0.5–1 s, and Live Answer is latency-bound.
+
+**Alternative considered**: keep SDK retries at 1 or 2 per attempt (the first draft of D4). Rejected for the reason above. It also made the behavior depend on the SDK version.
+
+---
+
 ## Summary of Decisions
 
 | # | Decision |
 |---|----------|
 | R1 | Fix the four blockers (validation, presets, prefix mapping, sampling) before any resilience work |
 | R2 | 20 Gemini capabilities inventoried; Anthropic has about 1.5 of them |
-| R3 | The SDK covers retries before the stream; mid-stream errors, silent streams and cancellation are ours |
+| R3 | Mid-stream errors, silent streams and cancellation are ours; the SDK's retries wait inside the attempt |
 | R4 | Shared `modelHealth.js`; Gemini re-exports it |
-| R5 | Port everything except hedging and the second round; add idle timeout and per-attempt SDK retries |
+| R5 | Port everything except hedging; add idle timeout; SDK retries off |
 | R6 | No sampling params; effort `low` where accepted; `max_tokens` floor 4096 |
 | R7 | Server-side fallback on Opus/Sonnet 5.5; client-side failover on refusal for all |
 | R8 | Own error classifier with an `unavailable` kind |
 | R9 | Validate with `models.list` |
-| R10 | Stay on SDK 0.56.0 |
+| R10 | Upgrade the SDK to 0.133.0 first, alone, with a load test under Electron's Node |
 | R11 | Measure TTFT in a real session before choosing the default list |
+| R12 | `maxRetries: 0`; immediate failover, then one more round after 2 s within the deadline |

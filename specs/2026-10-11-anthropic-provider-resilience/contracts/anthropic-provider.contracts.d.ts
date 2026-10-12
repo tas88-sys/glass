@@ -53,6 +53,8 @@ export interface ErrorLike {
   message?: string;
   status?: number;
   code?: ProviderErrorCode | string;
+  /** SDK ≥ 0.81.0: error type from the body ('overloaded_error', 'rate_limit_error', …), also on stream `error` events. */
+  type?: string | null;
   /** SDK APIError body; for a stream `error` event: { type: 'error', error: { type, message } } */
   error?: { type?: string; message?: string; error?: { type?: string; message?: string } };
   headers?: { get(name: string): string | null } | Record<string, string>;
@@ -130,6 +132,15 @@ export interface CreateLLMOptions {
   effort?: string;
   /** Accepted for interface compatibility with other providers; never sent (FR-005). */
   temperature?: number;
+  /** Wait before the second round; default 2000 (FR-018). */
+  retryRoundDelayMs?: number;
+}
+
+/** Options passed to every SDK call (FR-018): the SDK never retries; the loop owns every wait. */
+export interface SdkCallOptions {
+  maxRetries: 0;
+  timeout: 15000;
+  signal: AbortSignal;
 }
 
 export interface CreateStreamingLLMOptions extends CreateLLMOptions {
@@ -170,7 +181,7 @@ export interface AnthropicModule {
 // Stream protocol (unchanged; spec C1)
 // ---------------------------------------------------------------------------
 
-export type ResetReason = 'transient' | 'timeout' | 'unavailable' | 'refusal';
+export type ResetReason = 'transient' | 'timeout' | 'unavailable' | 'refusal' | 'retry';
 
 export type SseEvent =
   | { choices: [{ delta: { content: string } }] }

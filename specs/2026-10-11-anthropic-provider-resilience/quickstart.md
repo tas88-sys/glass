@@ -37,6 +37,8 @@ ANTHROPIC_SERVER_FALLBACK=
 ## 2. Automated checks
 
 ```bash
+# SDK loads and streams under Electron's Node 20.16 (T005; plain `npm test` runs a newer Node and would not catch it)
+node -e "require('child_process').execFileSync(require('electron'),['scripts/smoke-anthropic-sdk.js'],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1'},stdio:'inherit'})"
 npm test                                   # whole suite, incl. anthropic*.test.js, factory.test.js, gemini*.test.js
 node --test src/features/common/ai/providers/__tests__/anthropic.test.js   # the failover loop only
 npm run build:renderer                     # Settings view compiles

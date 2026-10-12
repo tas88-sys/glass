@@ -10,7 +10,7 @@ meta:
 # Quick Reference (for checkpoint resume)
 summary:
   tech_stack: [JavaScript (CommonJS, main process), Lit 2.7.4 (renderer), Electron 30 / Node 20.16, node:test]
-  external_deps: ["@anthropic-ai/sdk 0.56.0 (installed, unchanged)"]
+  external_deps: ["@anthropic-ai/sdk 0.56.0 → ^0.133.0 (first task, own commit)"]
   test_strategy: {unit: 45, integration: 45, contract: 0, e2e_manual: 10}
   deployment: immediate  # ships with the next Glass desktop build; Gemini users see no change
 ---
@@ -42,9 +42,10 @@ summary:
 Make Claude usable in Glass, and as resilient as the Gemini path.
 
 **Technical approach:**
+- First, alone: upgrade `@anthropic-ai/sdk` from 0.56.0 to ^0.133.0, with a load-and-stream test under Electron's Node 20.16 (research R10).
 - Fix the four blockers (research R1). Validate keys with `models.list`. Replace the retired preset with Opus 5.5, Sonnet 5.5 and Haiku 5.5. Map `claude-…` IDs and lists to Anthropic, with a Settings input like Gemini's. Stop sending `temperature`.
 - Rewrite `anthropic.js` around a pure `buildRequest` (effort only where accepted, a `max_tokens` floor for thinking, server-side refusal fallback on Opus/Sonnet 5.5).
-- Add a failover loop modelled on `gemini.js`: ordered list, shared cooldown registry, `_reset`/`_final_model`, first-text timeout, request deadline, idle timeout, cancellation that aborts the HTTP request, `userMessage`, attempt logs.
+- Add a failover loop modelled on `gemini.js`: ordered list, shared cooldown registry, `_reset`/`_final_model`, first-text timeout, request deadline, idle timeout, second round, cancellation that aborts the HTTP request, `userMessage`, attempt logs. The SDK never retries; every wait is the loop's (research R12).
 - Add an Anthropic error classifier, `anthropicErrors.js`.
 - Move the provider-neutral half of the Gemini rotator to `modelHealth.js`. Gemini re-exports it unchanged.
 
@@ -53,19 +54,20 @@ The consumers (Ask, Live Answer, Live Insights) are not edited. They already spe
 ## Technical Context
 
 **Language/Version**: JavaScript (CommonJS in main, ES modules bundled by esbuild in renderer); Electron 30 (Node 20.16).
-**Primary Dependencies**: `@anthropic-ai/sdk` 0.56.0 (installed). No new dependency.
+**Primary Dependencies**: `@anthropic-ai/sdk`, upgraded 0.56.0 → ^0.133.0 (brings `standardwebhooks` and `json-schema-to-ts`). No other new dependency.
 **Storage**: None new. In-memory cooldown registry (existing, now shared).
 **Testing**: `node --test` via `npm test`. `Module._load` intercepts `@anthropic-ai/sdk` (the pattern in `gemini.test.js`). Manual live checks with the user's key.
 **Target Platform**: Electron desktop (Windows primary; macOS must not break).
 **Performance Goals**:
-- Failover adds no wait beyond the SDK's own backoff (≤ ~0.5 s with `maxRetries: 1`).
+- Failover to the next model adds no wait. The only deliberate wait is the 2 s before a second round.
 - Cancellation aborts the HTTP request within one event-loop turn.
 - Time to first token is measured, not gated (SC-006).
 **Constraints**: spec C1–C6.
 **Scale/Scope**:
 - New: `modelHealth.js`, `anthropicErrors.js`, and 5 test files.
 - Rewritten: `anthropic.js` (~330 → ~550 lines).
-- Edited: `geminiModelRotator.js` (re-export), `factory.js`, `modelStateService.js`, `SettingsView.js`, and docs.
+- New: `scripts/smoke-anthropic-sdk.js` (SDK load-and-stream check under Electron's Node).
+- Edited: `package.json` and lockfile (SDK), `geminiModelRotator.js` (re-export), `factory.js`, `modelStateService.js`, `SettingsView.js`, and docs.
 **System Context**: Framework-internal (spec System Context).
 **Architecture Docs Read**:
 - `ARCHITECTURE.md` (provider table, `:543-576`);
@@ -93,7 +95,7 @@ The consumers (Ask, Live Answer, Live Insights) are not edited. They already spe
 | Model choice | User-configured list. Presets are the current Opus, Sonnet and Haiku. The interview default is decided from measured TTFT (SC-006) |
 | Failure posture | Every failure ends in a readable `userMessage`, or in the next model. Never a silent empty answer |
 | Safety refusals | Handled as a per-model outcome (server-side fallback where offered, then the list) |
-| Cost control | Cancellation aborts generation. SDK retries are capped per attempt. Effort defaults to `low` |
+| Cost control | Cancellation aborts generation. The SDK never retries; at most one extra round. Effort defaults to `low` |
 | Data | Same data path as Gemini today (prompt, transcript excerpt, screenshot) |
 
 ## Project Structure
@@ -126,6 +128,8 @@ src/features/common/ai/providers/
     ├── anthropicErrors.test.js   NEW
     ├── anthropicRequest.test.js  NEW  buildRequest, acceptsEffort, timeouts, validateApiKey
     └── anthropic.test.js         NEW  streaming + non-streaming failover (mocked SDK)
+package.json, package-lock.json                     EDIT  @anthropic-ai/sdk ^0.133.0 (T005, own commit)
+scripts/smoke-anthropic-sdk.js                      NEW   load + stream a canned SSE response (run under Electron's Node)
 src/features/common/ai/factory.js                   EDIT  presets; inferProviderFromModelId
 src/features/common/ai/__tests__/factory.test.js    NEW   presets, prefix mapping
 src/features/common/services/modelStateService.js   EDIT  use inferProviderFromModelId; custom Anthropic list
@@ -151,13 +155,14 @@ Consolidated in [research.md](./research.md):
 | R2 | What does Gemini do? | 20 capabilities; Anthropic has about 1.5 |
 | R3 | What does the SDK give? | Retries before the stream; nothing for mid-stream errors, silent bodies, cancel |
 | R4 | Share the registry? | Yes, `modelHealth.js` |
-| R5 | What to port? | All but hedging and the second round; add idle timeout and per-attempt retries |
+| R5 | What to port? | All but hedging; add idle timeout; SDK retries off |
 | R6 | Thinking/effort/sampling | No sampling; effort `low` where accepted; `max_tokens` floor 4096 |
 | R7 | Refusals | Server-side fallback on Opus/Sonnet 5.5; list failover for all |
 | R8 | Error taxonomy | Own classifier with `unavailable` |
 | R9 | Key validation | `models.list` |
-| R10 | SDK version | Stay on 0.56.0 |
+| R10 | SDK version | Upgrade to ^0.133.0 first, alone; load test under Electron's Node |
 | R11 | Latency | Measure in a real session (SC-006) |
+| R12 | Where retries live | In the loop: `maxRetries: 0`, immediate failover, one more round after 2 s |
 
 ### Testing Strategy
 
@@ -188,6 +193,7 @@ Single local user; no roles. N/A.
 | Pattern Area | Finding | Use |
 |--------------|---------|-----|
 | Failover loop | `gemini.js:442-815` (`streamChat`): `track()`, `inFlight`, `safeEnqueue`, `logAttempt`/`logRequest`, `timeLeft()` | Same structure in `anthropic.js`, without `raceFirstChunk` |
+| Second round | `gemini.js:198-229` (`MAX_ROUNDS`, `retryableNextRound`, `waitOrAbort`), `:701-716` | Same shape; 2 s wait; 429 joins only when its `retry-after` fits the wait |
 | Non-stream failover | `gemini.js:249-278` `callWithFailover` | Same shape, Anthropic classifier |
 | Env tuning | `GEMINI_FIRST_CHUNK_TIMEOUT_MS`, `GEMINI_HEDGE_DELAY_MS`, `GEMINI_REQUEST_DEADLINE_MS` read per call | `ANTHROPIC_*` read per call (data-model) |
 | Provider prefix | `modelStateService.js:307`, `SettingsView.js:962` (`gemini-`) | Shared `inferProviderFromModelId` in `factory.js` (main); the renderer keeps its own copy (it has no `require`) |
@@ -217,7 +223,7 @@ Single local user; no roles. N/A.
 | Item | Detail |
 |------|--------|
 | Env vars (all optional) | `ANTHROPIC_EFFORT` (`low`), `ANTHROPIC_MIN_MAX_TOKENS` (4096), `ANTHROPIC_FIRST_TEXT_TIMEOUT_MS` (20 s Haiku / 45 s), `ANTHROPIC_REQUEST_DEADLINE_MS` (60 s; 0 disables), `ANTHROPIC_IDLE_TIMEOUT_MS` (30 s; 0 disables), `ANTHROPIC_SERVER_FALLBACK` (`off` disables). Documented in T025 |
-| Dependency | None new. `@anthropic-ai/sdk` stays at 0.56.0 |
+| Dependency | `@anthropic-ai/sdk` 0.56.0 → ^0.133.0 in T005, its own commit; `npm install` runs the existing `postinstall` (native rebuild for Electron). Package on disk 3 → 18 MB; trimming it from the installer is out of scope |
 | DB migrations | None. A stored retired ID shows as "(custom)" and fails with a clear message (E39) |
 | Rollout | Ships with the next build. Users on Gemini see no change |
 | Rollback | Revert the branch. No data to migrate back |
@@ -233,7 +239,10 @@ See spec § Error Handling and `data-model.md` (error kinds, cooldowns). Rule: *
 | Core | An aborted SDK stream ends the `for await` quietly, so a timeout looks like a normal end with no `message_stop` | Every attempt keeps `timedOut`/`aborted` flags and checks them after the loop; no `message_stop` and no flag = transient error (`stream ended early`) | Y (T018/T019) |
 | Core | Fake SDK too lenient: tests pass, production differs | The fake uses the real SDK error classes and the real quiet-abort behavior; one test feeds a raw stream `error` body through `APIError` | Y (T018) |
 | Core | Idle timer fires during silent thinking (pings are invisible) | Idle timer starts only after the first text delta; before that the first-text timeout governs | Y (T018/T019) |
-| Core | SDK retries stack on top of failover and blow the deadline | `maxRetries` 1 when a model remains; the SDK `timeout` is 15 s; the deadline check runs before each attempt | Y (T019) |
+| SDK | The upgraded SDK fails to load or stream under Electron's Node 20.16 (`npm test` runs plain Node 24 and would not notice) | T005 runs `scripts/smoke-anthropic-sdk.js` with `ELECTRON_RUN_AS_NODE=1` before any other task; if it fails, stop and report, and the rest of the plan works on 0.56.0 (research R10) | Y (T005) |
+| SDK | A 0.x upgrade quietly changes behavior the rewrite relies on | The upgrade lands alone with the current suite green; the fake SDK in the new tests re-exports the real 0.133.0 error classes | Y (T005, T018) |
+| Core | The SDK waits out `retry-after` inside an attempt (59 s, not cancellable in 0.56.0; no cap in 0.133.0) | `maxRetries: 0` on every call; failover and the second round are ours; a test asserts the option on every call | Y (T018/T019) |
+| Core | Second round repeats requests that cannot succeed soon | Only fast transient failures join; 429 only when its `retry-after` ≤ 2 s; skipped when the deadline leaves less than the wait | Y (T018/T019) |
 | Core | Server-side fallback beta rejected for this org → every Opus/Sonnet call 400s | Detect a 400 naming `anthropic-beta`/`fallbacks`, resend once without, disable for the process (FR-009, E41) | Y (T018/T019) |
 | Core | Mid-stream server fallback misread as failure | A `fallback` block is not an error and sends no `_reset`; only the final `stop_reason` counts | Y (T018) |
 | Shared | Moving rotator functions changes Gemini behavior | Pure move plus re-export; `gemini.test.js` and `geminiModelRotator.test.js` must pass unedited (AT-NEG-001) | Y (T010/T011) |
@@ -250,22 +259,24 @@ See spec § Error Handling and `data-model.md` (error kinds, cooldowns). Rule: *
 | Server keeps the connection open after the last chunk (`fix/gemini-stream-end-and-retry`) | Stop at `message_stop` (FR-015) |
 | A request can be accepted and then stall (`feat/gemini-hedged-requests`) | First-text timeout + deadline + idle timeout (FR-013, FR-014) |
 | Unknown errors should not stop failover (gemini-failover spec) | Fail-open `transient` for unknown errors (data-model) |
+| Brief 503 bursts pass within seconds (`fix/gemini-stream-end-and-retry`) | Second round after 2 s for fast transient failures (FR-018) |
 | Peak-hour 503 bursts (`docs/GEMINI_503_PEAK_HOURS.md`) | A model list across Anthropic tiers, which have separate rate limits |
 
 ## Phase 1: Design & Contracts
 
 1. **[data-model.md](./data-model.md)** covers the model list, health entry and cooldowns, error kinds, request params, content mapping, attempt stats, stream protocol and state transitions.
 2. **[contracts/anthropic-provider.contracts.d.ts](./contracts/anthropic-provider.contracts.d.ts)** gives the module surfaces of `modelHealth`, `anthropicErrors`, `anthropic` and the factory additions. Type-checked: PASS.
-3. **[contracts/EDGE_CASES.md](./contracts/EDGE_CASES.md)** lists 41 edge cases mapped to FRs.
+3. **[contracts/EDGE_CASES.md](./contracts/EDGE_CASES.md)** lists 45 edge cases mapped to FRs.
 4. **[quickstart.md](./quickstart.md)** covers setup, automated checks and 9 manual checks mapped to FRs and SCs.
 
 ## Phase 2: Task Planning Approach
 
-Strategy: tests before implementation for each module. The shared registry move comes first (lowest risk, guards Gemini). Then the pure pieces (classifier, request builder), then the loops, then wiring and UI, then docs and the live checks.
+Strategy: the SDK upgrade comes first and alone, so everything after it is written against the version that ships. Then tests before implementation for each module. The shared registry move comes next (lowest risk, guards Gemini). Then the pure pieces (classifier, request builder), then the loops, then wiring and UI, then docs and the live checks.
 
 | Group | Tasks | Gate |
 |-------|-------|------|
-| Shared registry | T010–T011 | none |
+| SDK upgrade | T005 | none (stop the plan and report if the Electron load test fails) |
+| Shared registry | T010–T011 | T005 |
 | Pure core | T012–T015 | T011 |
 | Key validation | T016–T017 | T015 |
 | Stream loop | T018–T019 | T013, T015 |
