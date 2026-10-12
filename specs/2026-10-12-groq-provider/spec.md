@@ -344,7 +344,6 @@ docs/…                                              EDIT  provider docs and di
 
 - The user approves the plan and the model list (quickstart §2), and decides whether T006 may spend fractions of a cent on one live streamed request.
 - With a Free-plan key (C7), decide whether cross-provider lists are the next spec.
-- Implemented on the branch through T-DOC-GATE (tasks.json has the evidence). What remains:
-  - T006, the live probe, which needs GROQ_API_KEY in .env;
-  - T-VERIFY-MANUAL: quickstart §4 with the user's key, and the SC-006 latency numbers;
+- Implemented on the branch through T-DOC-GATE, and T006 is done (tasks.json has the evidence). What remains:
+  - the rest of T-VERIFY-MANUAL: quickstart §4 checks 3, 6–12, and the SC-006 latency numbers, which need Live Answer on system audio. Checks 1, 2, 4 and 5 passed in the first app session (research R19);
   - T-FINAL.

@@ -357,6 +357,8 @@ Same finding and decision as Anthropic R13. The SDK timeout ends at the response
 
 The user's key is on the Free plan (R5). The list carries about two Live Answers a minute and 50–60 a day. Groq is the fast first choice; for a long interview, another provider behind it is what keeps answers coming once the daily budget is spent. That needs cross-provider lists (Out of Scope, first follow-up).
 
+**First numbers** (R19, not SC-006): Ask with a screenshot on Qwen ttft 0.75–1.3 s; Live Insights on 120B ttft 0.73 s.
+
 **TTFT measurement (SC-006)**: to be recorded here after T-VERIFY-MANUAL, as p50 and p95 of `ttft`, with `queue` and `tpm_left`, over 20 Live Answers.
 
 ---
@@ -407,7 +409,7 @@ Groq serves `whisper-large-v3` and `whisper-large-v3-turbo` through `/audio/tran
 | V1 | **Yes.** Three chunks per answer on every model. The last carries `finish_reason: 'stop'`, `x_groq.id`, `x_groq.usage` and a top-level `usage`. Groq closed the connection right after `[DONE]` (the iteration ended 1–2 ms after `finish_reason`) | None. Usage arrives on the finish chunk, so the plan's fallback of waiting up to 250 ms is not needed. Stopping at `finish_reason` still guards a connection that stays open (R4) |
 | V2 | **Yes.** `x_groq.id` is in the first and the last chunk, and the `x-request-id` header is sent (`req_01m4qy5bf6e84s6cfsyze4mbq9`, …) | None |
 | V3 | **No.** No `delta.reasoning` chunk arrived with `include_reasoning: false` | None |
-| V4 | **Per model.** `x-ratelimit-limit-tokens: 8000` and `x-ratelimit-limit-requests: 1000` (RPD) on all three models. After a call to `gpt-oss-20b`, `gpt-oss-120b` still showed its own full window. **New:** `x-ratelimit-remaining-tokens` drops by exactly the prompt plus the declared `max_completion_tokens` (8000 − 7858 = 78 + 64 on gpt-oss; 8000 − 7917 = 19 + 64 on Qwen). So the declared budget is reserved against the minute's headroom when the request starts. A request declaring 60,000 on this same key was still not refused (R5) | The reservation can turn a second call in the same minute into a 429 earlier than the tokens actually used would. Failover covers it (the next model has its own window). The 1024-token reasoning allowance (D5) adds to it. It stays until real-session logs (`tpm_left`) show 429s that a smaller allowance would avoid. Whether the reservation is released when the answer is shorter is not visible from single requests |
+| V4 | **Per model.** `x-ratelimit-limit-tokens: 8000` and `x-ratelimit-limit-requests: 1000` (RPD) on all three models. After a call to `gpt-oss-20b`, `gpt-oss-120b` still showed its own full window. **New:** `x-ratelimit-remaining-tokens` drops by exactly the prompt plus the declared `max_completion_tokens` (8000 − 7858 = 78 + 64 on gpt-oss; 8000 − 7917 = 19 + 64 on Qwen). So the declared budget is reserved against the minute's headroom when the request starts. A request declaring 60,000 on this same key was still not refused (R5) | The reservation can turn a second call in the same minute into a 429 earlier than the tokens actually used would. Failover covers it (the next model has its own window). The 1024-token reasoning allowance (D5) adds to it. It stays until real-session logs (`tpm_left`) show 429s that a smaller allowance would avoid. Whether the reservation is released when the answer is shorter is not visible from single requests. Real calls in the app did not follow the exact rule (R19) |
 | V5 | An unknown model and a retired one (`llama-3.3-70b-versatile`) both return **404 `invalid_request_error` `model_not_found`**: "The model `…` does not exist or you do not have access to it." | None. Classified `unavailable` by status and by code |
 | V6 | **Yes.** Qwen at `none` sent its first content at 242 ms (headers at 241 ms) and no reasoning | None |
 
@@ -434,6 +436,39 @@ The live probe (T006) still decides R17 V1–V6 against the real API.
 
 ---
 
+## R19: First session in the app (partial T-VERIFY-MANUAL, 2026-10-12)
+
+The user ran `npm start` on the branch with the Free-plan key saved in Settings and the list `openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b`. STT was Deepgram. From the main-process log (`[Groq Provider]` lines):
+
+- **Setup.** The key was accepted (`setApiKey for groq`, no validation error). The list was saved and mapped to Groq (`Selected llm model: … (provider: groq)`).
+- **Ask with a screenshot, 4 requests.** Every one went to `qwen/qwen3.8-27b` with the image (`images=sent:1`, request line `order=vision-first`). Each answered on the first attempt: no failover, no error.
+
+  | # | ttft | total | queue | tokens in / out | tpm_left |
+  |---|------|-------|-------|-----------------|----------|
+  | 1 | 753 ms | 835 ms | 267 ms | 2,975 / 45 | 3,033 |
+  | 2 | 1,177 ms | 1,338 ms | 514 ms | 2,977 / 83 | 2,441 |
+  | 3 | 1,298 ms | 1,492 ms | 710 ms | 2,976 / 97 | — |
+  | 4 | 782 ms | 2,421 ms | 276 ms | 2,859 / 850 | — |
+
+  About 2K of each input is the screenshot. The 850-token answer streamed in about 1.6 s, roughly 520 tokens/s.
+- **Live Insights, 1 call.** It ran after 5 turns on `openai/gpt-oss-120b` (no image, so the list order held), mode `once`, on the first attempt:
+  - ttft 727 ms, total 1,088 ms, queue 308 ms;
+  - tokens in 2,241, out 251, of which 69 were reasoning at `effort=low`;
+  - `cached:0`, as expected for the session's first gpt-oss call;
+  - `tpm_left` 5,034.
+
+  The summary was produced and saved.
+- **Live Answer.** It did not trigger, as designed. Every turn came from the microphone (`speaker=Me`), and Live Answer answers only the other side (`Them`). Even "Hello?", detected as a question, logged `willTrigger=false`. Testing it needs the question on system audio, for example a mock-interview video played while Listen runs.
+- **Shutdown** was graceful, with no error. The other log noise (circular-dependency warnings, DevTools `Autofill.enable`, the Ollama health check with Ollama not installed) predates this branch.
+- **Rate-limit headroom.** The T006 probe saw `x-ratelimit-remaining-tokens` drop by exactly prompt + declared budget on tiny requests (R17 V4). Real calls do not follow that exactly:
+  - Live Insights dropped it by 2,966, below prompt + declared (2,241 + 2,048 = 4,289);
+  - the first Ask dropped it by 4,967, near 2,975 + 2,048 = 5,023.
+
+  How Groq reserves the declared budget therefore stays unknown, and R17's warning about it is a possibility, not an observed effect. `tpm_left` in real sessions remains the measure.
+- **Quickstart §4 coverage:** check 1 (valid key only), 2 (on Qwen only), 4 and 5 passed. Still open are 3 and 9 (Live Answer, needs system audio), 6 and 7 (unknown model), 8 (cancel), 10 (Settings normalization), 11 (timeout) and 12 (429 failover). The automated suite and the local real-SDK check (R18) cover the code paths behind 6–8, 11 and 12; the open checks confirm them in the app.
+
+---
+
 ## Summary of Decisions
 
 | # | Decision |
@@ -455,3 +490,4 @@ The live probe (T006) still decides R17 V1–V6 against the real API.
 | R16 | No STT |
 | R17 | Live probe (T006): usage on the finish chunk, request ids in chunks and header, no reasoning chunks, per-model windows that reserve prompt + declared budget, `model_not_found` 404s, Qwen at `none` streams at once; gpt-oss rejects array content |
 | R18 | The provider ran with the real SDK against a local fake API under Node and Electron: 7/7 |
+| R19 | First app session: 4 Asks with a screenshot on Qwen (ttft 0.75–1.3 s) and 1 Live Insights on 120B (ttft 0.73 s), all first-attempt; Live Answer not yet exercised (needs system audio) |

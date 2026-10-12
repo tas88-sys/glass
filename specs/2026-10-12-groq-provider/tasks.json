@@ -437,7 +437,7 @@
       "scope": null,
       "block_on": null,
       "completed_at": null,
-      "evidence": null,
+      "evidence": "Partial (2026-10-12, research R19): checks 1 (valid key), 2 (Qwen), 4 and 5 passed in the app. Open: 3, 6-12 and SC-006 (Live Answer needs system audio)",
       "evidence_type": "execution",
       "auto_skill": null,
       "auto_skill_timing": null,
