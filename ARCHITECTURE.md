@@ -63,7 +63,7 @@ the only image sent. The model does **not** recall earlier screenshots. Glass *s
 Q&A in the `ai_messages` table, but that history powers the transcript UI, **not** the next
 prompt: `sendMessage(userPrompt, conversationHistoryRaw=[])` accepts a history argument
 (`askService.js:219`), yet the IPC handlers that call it never pass one
-(`featureBridge.js:134`, `:135-144`). So each Ask is independent from the LLM's perspective.
+(`featureBridge.js:159`, `:160-169`). So each Ask is independent from the LLM's perspective.
 
 **Does it take several screenshots?**
 No — **exactly one per Ask press**. There is no screenshot queue and no background capture
@@ -278,9 +278,9 @@ flowchart LR
 
 - **`preload.js`** exposes a namespaced, audited surface on `window.api` — `platform`,
   `common`, plus per-view objects like `askView`, `listenCapture`, `settingsView`, `mainHeader`
-  (`preload.js:4-324`). Renderers call `ipcRenderer.invoke(...)`; they never see `require`.
+  (`preload.js:4-331`). Renderers call `ipcRenderer.invoke(...)`; they never see `require`.
 - **`featureBridge.js`** registers all the feature `ipcMain.handle(...)` endpoints and
-  fans service events back out to every window (`featureBridge.js:16-290`).
+  fans service events back out to every window (`featureBridge.js:17-315`).
 - **`windowBridge.js`** handles window geometry/visibility invokes.
 - **`internalBridge.js`** is an in-process `EventEmitter` (`internalBridge.js`) used between
   services and `windowManager` — e.g. `internalBridge.emit('window:requestVisibility', …)`. It
@@ -385,7 +385,7 @@ Key behaviors, all in `askService.js`:
 **Statelessness (important).** `sendMessage(userPrompt, conversationHistoryRaw=[])` would format
 the last 30 turns (`_formatConversationForPrompt`, `:207-212`) — but the IPC handlers
 `ask:sendQuestionFromAsk` and `ask:sendQuestionFromSummary` call it with **only the prompt**
-(`featureBridge.js:134`, `:143`). So the LLM gets *system prompt + your text + one screenshot*
+(`featureBridge.js:159`, `:168`). So the LLM gets *system prompt + your text + one screenshot*
 and nothing else. No prior questions, answers, or screenshots are replayed.
 
 ---
@@ -488,7 +488,7 @@ stateDiagram-v2
     Failed --> [*]
 ```
 
-- **Init retry**: up to **10×** at 300 ms on listen start (`listenService.js:174-194`).
+- **Init retry**: up to **10×** at 300 ms on listen start (`listenService.js:189-209`).
 - **Keep-alive**: every **60 s**, OpenAI only (`sttService.js:478`, `:501-512`); Gemini's SDK
   self-heartbeats.
 - **Proactive renewal**: every **20 min** both sessions are recreated with a **2 s overlap** so
@@ -513,7 +513,9 @@ Each finalized utterance lands in the `transcripts` table tagged with `session_i
 ```mermaid
 flowchart TB
     turn["handleTranscriptionComplete(speaker, text)"] --> add["addConversationTurn() push 'me:/them: text'"]
-    add --> gate{"length >= 5 AND length % 5 == 0 ?"}
+    add --> on{"Live Insights on? (Live panels setting)"}
+    on -->|no: Answer only| off["return: no call, no summary saved"]
+    on -->|yes| gate{"length >= 5 AND length % 5 == 0 ?"}
     gate -->|no| wait["wait"]
     gate -->|yes| build["makeOutlineAndRequests()"]
     build --> ctx["system('pickle_glass_analysis') + last 30 turns + PREVIOUS summary"]
@@ -525,11 +527,23 @@ flowchart TB
 ```
 
 `summaryService.js` fires analysis every time the turn count hits a multiple of 5
-(`triggerAnalysisIfNeeded`, `:963-964`). Each run feeds the **previous analysis result** plus
-the **last 30 turns** back into the prompt (`:723-726`, `:739-752`), so summaries build forward
+(`triggerAnalysisIfNeeded`, `:1024`). Each run feeds the **previous analysis result** plus
+the **last 30 turns** back into the prompt (`:780-783`, `:793-806`), so summaries build forward
 rather than restarting. The structured output (TLDR, topic bullets, action items, suggested
-follow-ups) is parsed (`parseResponseText`, `:847-958`), pushed to `SummaryView`, and **UPSERT**ed
-into the `summaries` table — one row per `session_id` (`:813-826`).
+follow-ups) is parsed (`parseResponseText`, `:905-1016`), pushed to `SummaryView`, and **UPSERT**ed
+into the `summaries` table — one row per `session_id` (`:871-884`).
+
+**The Live panels setting.** Settings → "Live panels" picks Answer + Insights (default), Answer
+only or Insights only. It is stored as `liveFeatures` in the per-user settings store
+(`settingsService.js:221`) and read through `src/features/listen/liveFeatures.js`.
+`triggerAnalysisIfNeeded` returns before the every-5-turns test when Insights is off (`:1023`):
+no call and no summary saved. `triggerAnswerIfNeeded` returns first when Answer is off (`:581`).
+Turning Answer off mid-question also aborts the streaming answer (`pauseLiveAnswer`, `:727`).
+The Settings window calls `settings:getLiveFeatures` / `settings:setLiveFeatures`
+(`featureBridge.js:135-156`). The setter saves the mode, applies it to the running session through
+`listenService.setLiveFeatures`, and sends `listen:liveFeaturesChanged` to the Listen window, which
+hides the pane of a lane that is off. A new session reads the saved mode before its first turn.
+Details: [`docs/LIVE_INSIGHTS_AND_ASK.md`](docs/LIVE_INSIGHTS_AND_ASK.md) §3.6 and §4.8.
 
 ---
 
@@ -1126,7 +1140,7 @@ Glass can run fully local — no cloud, no API key:
 
 Prompt text lives in `promptTemplates.js` (`profilePrompts`) and is assembled by
 `promptBuilder.getSystemPrompt(profile, history, …)`. Ask has **four modes**, chosen from the
-`mode-picker` window and stored in settings (`featureBridge.js:82` `VALID_ASK_MODES`):
+`mode-picker` window and stored in settings (`featureBridge.js:83` `VALID_ASK_MODES`):
 
 | Ask mode | Prompt profile | Purpose |
 |---|---|---|
@@ -1148,7 +1162,7 @@ states that the notes lack are flagged under it. See
 intent router picks a route ([`docs/diagrams/14-career-intent-router.mmd`](docs/diagrams/14-career-intent-router.mmd)).
 
 > Note: `ask:sendQuestionFromSummary` (the Listen "suggested action" buttons) only works in
-> `default` mode and is rejected in the other modes (`featureBridge.js:135-144`).
+> `default` mode and is rejected in the other modes (`featureBridge.js:160-169`).
 
 ---
 
@@ -1211,7 +1225,7 @@ So, concretely, on first launch:
 ## 16. Known limitations & gotchas
 
 - **Listen → Ask context is not wired.** `listenService.getConversationHistory()` exists
-  (`listenService.js:266`) but no path passes the live transcript into `askService.sendMessage`.
+  (`listenService.js:281`) but no path passes the live transcript into `askService.sendMessage`.
   Pressing Ask during a meeting sends only your text + the current screenshot, not the
   conversation. Wiring it is a small change in `featureBridge.js`.
 - **Ask is stateless across presses** (§6) — by current wiring, not a model limitation.
@@ -1239,6 +1253,7 @@ So, concretely, on first launch:
 | Ask (vision) | `src/features/ask/askService.js`, `src/ui/ask/AskView.js` |
 | Listen (audio/STT) | `src/features/listen/listenService.js`, `stt/sttService.js`, `src/ui/listen/audioCore/listenCapture.js` |
 | Summarization | `src/features/listen/summary/summaryService.js` |
+| Live panels setting (which Listen lanes run) | `src/features/listen/liveFeatures.js`, `src/ui/settings/SettingsView.js`, `src/ui/listen/ListenView.js` |
 | Live Answer career context | `src/features/common/career/` (entry `index.js`), `scripts/eval-career-kb.js`, `scripts/ask-career-kb.js` |
 | AI providers / factory | `src/features/common/ai/factory.js`, `ai/providers/*.js` |
 | Gemini failover | `ai/providers/gemini.js`, `ai/providers/geminiModelRotator.js`, `ai/providers/modelHealth.js` |

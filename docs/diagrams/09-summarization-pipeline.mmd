@@ -1,10 +1,13 @@
 %% 09 - Incremental summarization (Listen)
 %% Source: summaryService.js. Fires every 5th conversation turn; each run feeds the
 %% previous summary + last 30 turns back in, so summaries build forward.
+%% With Settings -> Live panels set to "Answer only", the lane returns before the gate.
 flowchart TB
     turn["handleTranscriptionComplete(speaker, text)"]
     turn --> add["summaryService.addConversationTurn()<br/>push 'me:/them: text' to conversationHistory"]
-    add --> gate{"length >= 5<br/>AND length % 5 == 0 ?"}
+    add --> on{"Live Insights on?<br/>(Settings: Live panels)"}
+    on -->|"no: Answer only"| off["return<br/>no call, no summary saved"]
+    on -->|yes| gate{"length >= 5<br/>AND length % 5 == 0 ?"}
     gate -->|no| wait["wait for more turns"]
     gate -->|yes| build["makeOutlineAndRequests()"]
 

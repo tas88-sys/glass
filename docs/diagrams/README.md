@@ -17,7 +17,7 @@ grounded in the current code — read them next to the matching section.
 | 06 | `06-listen-audio-pipeline.mmd` | Dual-channel audio capture → AEC → two STT sessions → transcripts |
 | 07 | `07-speaker-attribution.mmd` | Why "Me vs Them" is **source attribution, not voice diarization**, per platform |
 | 08 | `08-stt-session-lifecycle.mmd` | STT init-retry, 60 s keep-alive, 20 min renewal, and the no-failover drop gap |
-| 09 | `09-summarization-pipeline.mmd` | Incremental summary every 5 turns, building on the previous summary |
+| 09 | `09-summarization-pipeline.mmd` | Incremental summary every 5 turns, building on the previous summary; skipped when Live Insights is off |
 | 10 | `10-provider-factory-and-model-state.mmd` | The `PROVIDERS` registry + `modelStateService` resolution of `{provider, model, apiKey}` (+ `keys` for an LLM list), the `gemini-` / `claude-` / `vendor/model` (Groq) prefix rule, the routing of a list that names several providers to the chain, and the shared cooldown registry |
 | 11 | `11-gemini-failover.mmd` | The Gemini CSV failover loop, error classification, and cooldown (LLM only) |
 | 12 | `12-data-persistence-and-auth.mmd` | Dual SQLite/Firebase repository pattern, schema, and auth-driven storage switching |

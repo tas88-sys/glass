@@ -189,9 +189,14 @@ contextBridge.exposeInMainWorld('api', {
     // Window Management
     adjustWindowHeight: (winName, height) => ipcRenderer.invoke('adjust-window-height', { winName, height }),
     
+    // Live features — which panes show (spec 2026-10-12-live-features-toggle)
+    getLiveFeatures: () => ipcRenderer.invoke('settings:getLiveFeatures'),
+
     // Listeners
     onSessionStateChanged: (callback) => ipcRenderer.on('session-state-changed', callback),
-    removeOnSessionStateChanged: (callback) => ipcRenderer.removeListener('session-state-changed', callback)
+    removeOnSessionStateChanged: (callback) => ipcRenderer.removeListener('session-state-changed', callback),
+    onLiveFeaturesChanged: (callback) => ipcRenderer.on('listen:liveFeaturesChanged', callback),
+    removeOnLiveFeaturesChanged: (callback) => ipcRenderer.removeListener('listen:liveFeaturesChanged', callback)
   },
 
   // src/ui/listen/stt/SttView.js
@@ -252,6 +257,8 @@ contextBridge.exposeInMainWorld('api', {
     getPresets: () => ipcRenderer.invoke('settings:getPresets'),
     getAutoUpdate: () => ipcRenderer.invoke('settings:get-auto-update'),
     setAutoUpdate: (isEnabled) => ipcRenderer.invoke('settings:set-auto-update', isEnabled),
+    getLiveFeatures: () => ipcRenderer.invoke('settings:getLiveFeatures'),
+    setLiveFeatures: (mode) => ipcRenderer.invoke('settings:setLiveFeatures', mode),
     getContentProtectionStatus: () => ipcRenderer.invoke('get-content-protection-status'),
     toggleContentProtection: () => ipcRenderer.invoke('toggle-content-protection'),
     getCurrentShortcuts: () => ipcRenderer.invoke('settings:getCurrentShortcuts'),

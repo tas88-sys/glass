@@ -29,7 +29,7 @@
  */
 
 import { html, css, LitElement } from '../../assets/lit-core-2.7.4.min.js';
-import { applyLiveAnswerUpdate, applyLiveAnswerStatus } from './liveAnswerHistory.js';
+import { applyLiveAnswerUpdate, applyLiveAnswerStatus, answersToText } from './liveAnswerHistory.js';
 
 export class LiveAnswerView extends LitElement {
     static styles = css`
@@ -211,6 +211,18 @@ export class LiveAnswerView extends LitElement {
         .lane-status.error {
             color: rgba(255, 196, 120, 0.95);
         }
+
+        /* Same as SummaryView's .empty-state: shown with Insights off, before
+           the first question (live features FR-015). */
+        .empty-state {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100px;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 12px;
+            font-style: italic;
+        }
     `;
 
     static properties = {
@@ -220,6 +232,8 @@ export class LiveAnswerView extends LitElement {
         isVisible: { type: Boolean },
         /** Reactive: null | { kind: 'retrying'|'error', id, model?, message? } (applyLiveAnswerStatus). */
         laneStatus: { type: Object },
+        /** Reactive: show "Waiting for a question..." while empty; set by ListenView when Insights is off. */
+        showEmptyState: { type: Boolean },
     };
 
     constructor() {
@@ -227,6 +241,7 @@ export class LiveAnswerView extends LitElement {
         this.answers = [];
         this.isVisible = true;
         this.laneStatus = null;
+        this.showEmptyState = false;
 
         // Markdown/sanitizer library handles (mirroring SummaryView pattern)
         this.marked = null;
@@ -267,6 +282,11 @@ export class LiveAnswerView extends LitElement {
         this.answers = [];
         this.laneStatus = null;
         this.requestUpdate();
+    }
+
+    /** Live features FR-014: the answers as text, for the copy button when only Answer is on. */
+    getAnswerText() {
+        return answersToText(this.answers);
     }
 
     /**
@@ -411,6 +431,13 @@ export class LiveAnswerView extends LitElement {
     }
 
     render() {
+        if (this.isVisible && this.showEmptyState && this.answers.length === 0 && !this.laneStatus) {
+            return html`
+                <div class="live-answer-container">
+                    <div class="empty-state">Waiting for a question...</div>
+                </div>
+            `;
+        }
         if (!this.isVisible || (this.answers.length === 0 && !this.laneStatus)) return html``;
 
         return html`

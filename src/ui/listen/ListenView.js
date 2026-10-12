@@ -2,6 +2,13 @@ import { html, css, LitElement } from '../assets/lit-core-2.7.4.min.js';
 import './stt/SttView.js';
 import './summary/SummaryView.js';
 import './summary/LiveAnswerView.js';
+import {
+    DEFAULT_LIVE_FEATURES,
+    normalizeLiveFeatures,
+    answerEnabled,
+    insightsEnabled,
+    viewLabels,
+} from '../../features/listen/liveFeatures.js';
 
 export class ListenView extends LitElement {
     static styles = css`
@@ -450,6 +457,8 @@ export class ListenView extends LitElement {
         captureStartTime: { type: Number },
         isSessionActive: { type: Boolean },
         hasCompletedRecording: { type: Boolean },
+        /** Which lanes run: 'both' | 'answer' | 'insights' (live features FR-011). */
+        liveFeatures: { type: String },
     };
 
     constructor() {
@@ -457,6 +466,8 @@ export class ListenView extends LitElement {
         this.isSessionActive = false;
         this.hasCompletedRecording = false;
         this.viewMode = 'insights';
+        this.liveFeatures = DEFAULT_LIVE_FEATURES;
+        this.handleLiveFeaturesChanged = this.handleLiveFeaturesChanged.bind(this);
         this.isHovering = false;
         this.isAnimating = false;
         this.elapsedTime = '00:00';
@@ -477,9 +488,15 @@ export class ListenView extends LitElement {
             this.startTimer();
         }
         if (window.api) {
+            // Live features FR-011: read the saved mode now, at each session start
+            // (the signed-in user may have changed) and on every change.
+            this.loadLiveFeatures();
+            window.api.listenView.onLiveFeaturesChanged(this.handleLiveFeaturesChanged);
+
             window.api.listenView.onSessionStateChanged((event, { isActive }) => {
                 const wasActive = this.isSessionActive;
                 this.isSessionActive = isActive;
+                if (isActive) this.loadLiveFeatures();
 
                 if (!wasActive && isActive) {
                     this.hasCompletedRecording = false;
@@ -515,6 +532,23 @@ export class ListenView extends LitElement {
         if (this.copyTimeout) {
             clearTimeout(this.copyTimeout);
         }
+        if (window.api) {
+            window.api.listenView.removeOnLiveFeaturesChanged(this.handleLiveFeaturesChanged);
+        }
+    }
+
+    /** Reads the saved mode; on failure keeps the current one ('both' until a read succeeds). */
+    async loadLiveFeatures() {
+        try {
+            const state = await window.api.listenView.getLiveFeatures();
+            if (state) this.liveFeatures = normalizeLiveFeatures(state.mode);
+        } catch (err) {
+            console.error('[Live] could not read the mode:', err && err.message);
+        }
+    }
+
+    handleLiveFeaturesChanged(event, state) {
+        if (state) this.liveFeatures = normalizeLiveFeatures(state.mode);
     }
 
     startTimer() {
@@ -611,6 +645,10 @@ export class ListenView extends LitElement {
         if (this.viewMode === 'transcript') {
             const sttView = this.shadowRoot.querySelector('stt-view');
             textToCopy = sttView ? sttView.getTranscriptText() : '';
+        } else if (!insightsEnabled(this.liveFeatures)) {
+            // Only Answer is on: copy the answers (live features FR-014)
+            const liveAnswerView = this.shadowRoot.querySelector('live-answer-view');
+            textToCopy = liveAnswerView ? liveAnswerView.getAnswerText() : '';
         } else {
             const summaryView = this.shadowRoot.querySelector('summary-view');
             textToCopy = summaryView ? summaryView.getSummaryText() : '';
@@ -653,7 +691,8 @@ export class ListenView extends LitElement {
     updated(changedProperties) {
         super.updated(changedProperties);
 
-        if (changedProperties.has('viewMode')) {
+        // A pane shown or hidden by the live features mode changes the height too
+        if (changedProperties.has('viewMode') || changedProperties.has('liveFeatures')) {
             this.adjustWindowHeight();
         }
     }
@@ -669,12 +708,13 @@ export class ListenView extends LitElement {
     }
 
     render() {
+        const labels = viewLabels(this.liveFeatures);
         const displayText = this.isHovering
             ? this.viewMode === 'transcript'
                 ? 'Copy Transcript'
-                : 'Copy Glass Analysis'
+                : labels.copyHover
             : this.viewMode === 'insights'
-            ? `Live insights`
+            ? labels.title
             : `Glass is Listening ${this.elapsedTime}`;
 
         return html`
@@ -698,7 +738,7 @@ export class ListenView extends LitElement {
                                           <path d="M9 11l3 3L22 4" />
                                           <path d="M22 12v7a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h11" />
                                       </svg>
-                                      <span>Show Insights</span>
+                                      <span>${labels.showButton}</span>
                                   `}
                         </button>
                         <button
@@ -725,12 +765,13 @@ export class ListenView extends LitElement {
 
                 <div class="insights-pane">
                     <live-answer-view
-                        .isVisible=${this.viewMode === 'insights'}
+                        .isVisible=${this.viewMode === 'insights' && answerEnabled(this.liveFeatures)}
+                        .showEmptyState=${!insightsEnabled(this.liveFeatures)}
                         @live-answer-updated=${this.handleSttMessagesUpdated}
                     ></live-answer-view>
 
                     <summary-view
-                        .isVisible=${this.viewMode === 'insights'}
+                        .isVisible=${this.viewMode === 'insights' && insightsEnabled(this.liveFeatures)}
                         .hasCompletedRecording=${this.hasCompletedRecording}
                         @summary-updated=${this.handleSttMessagesUpdated}
                     ></summary-view>

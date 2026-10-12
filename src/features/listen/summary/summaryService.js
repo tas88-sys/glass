@@ -5,6 +5,7 @@ const sessionRepository = require('../../common/repositories/session');
 const summaryRepository = require('./repositories');
 const modelStateService = require('../../common/services/modelStateService');
 const careerContext = require('../../common/career');
+const { DEFAULT_LIVE_FEATURES, normalizeLiveFeatures, answerEnabled, insightsEnabled } = require('../liveFeatures');
 
 // Verbose live-answer trace logging — gated behind LIVE_ANSWER_DEBUG=1 so it
 // stays out of normal runs but can be re-enabled for diagnosis. NEVER logs the
@@ -304,6 +305,11 @@ class SummaryService {
         this.career = careerContext;
         this.careerPrev = null;
         this.activeCompany = null;
+
+        // Which live lanes run (spec 2026-10-12-live-features-toggle): 'both',
+        // 'answer' or 'insights'. Set by listenService at session start and
+        // when the user changes it in Settings.
+        this.liveFeatures = DEFAULT_LIVE_FEATURES;
     }
 
     setCallbacks({ onAnalysisComplete, onStatusUpdate }) {
@@ -313,6 +319,20 @@ class SummaryService {
 
     setSessionId(sessionId) {
         this.currentSessionId = sessionId;
+    }
+
+    /**
+     * Live features FR-005/FR-006: a lane that is off makes no LLM call from
+     * the next turn on. Turning Answer off also stops the question pending or
+     * streaming now (D5). Logs the mode name only.
+     */
+    setLiveFeatures(mode) {
+        const wasAnswering = answerEnabled(this.liveFeatures);
+        this.liveFeatures = normalizeLiveFeatures(mode);
+        console.log(`[Live] features=${this.liveFeatures}`);
+        if (wasAnswering && !answerEnabled(this.liveFeatures)) {
+            this.pauseLiveAnswer();
+        }
     }
 
     sendToRenderer(channel, data) {
@@ -557,6 +577,8 @@ class SummaryService {
      * 4. De-dup + abort-or-suppress in the debounce callback (FR-004)
      */
     triggerAnswerIfNeeded(speaker, text) {
+        // Live features FR-007: Answer off → no company detection, prefetch or call.
+        if (!answerEnabled(this.liveFeatures)) return;
         const fromThem = typeof speaker === 'string' && speaker.toLowerCase() === 'them';
         // Career FR-011: the interviewer's company is the first one named in a
         // them turn (CAREER_KB_COMPANY, when set, wins inside the module).
@@ -693,6 +715,25 @@ class SummaryService {
 
     getConversationHistory() {
         return this.conversationHistory;
+    }
+
+    /**
+     * Live features D5 — Answer turned off mid-session: clears the debounce
+     * timer and aborts the in-flight stream (the abort-and-replace path), so
+     * no more answer text is sent. Unlike resetLiveAnswer it keeps the session
+     * memory (last answered question, career follow-up, company), so turning
+     * Answer back on later in the call carries on from there.
+     */
+    pauseLiveAnswer() {
+        if (this.answerDebounceTimer) {
+            clearTimeout(this.answerDebounceTimer);
+            this.answerDebounceTimer = null;
+        }
+        if (this.inFlightController) {
+            this.inFlightController.abort();
+            this.inFlightController = null;
+        }
+        this.inFlight = false;
     }
 
     /**
@@ -978,6 +1019,8 @@ Keep all points concise and build upon previous analysis if provided.`,
      * Triggers analysis when conversation history reaches 5 texts.
      */
     async triggerAnalysisIfNeeded() {
+        // Live features FR-008: Insights off → no analysis call and no summary saved (D10).
+        if (!insightsEnabled(this.liveFeatures)) return;
         if (this.conversationHistory.length >= 5 && this.conversationHistory.length % 5 === 0) {
             console.log(`Triggering analysis - ${this.conversationHistory.length} conversation texts accumulated`);
 

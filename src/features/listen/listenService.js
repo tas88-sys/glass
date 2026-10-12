@@ -97,6 +97,11 @@ class ListenService {
         }
     }
 
+    /** Live features FR-010: which Listen lanes run, from Settings or the saved value. */
+    setLiveFeatures(mode) {
+        this.summaryService.setLiveFeatures(mode);
+    }
+
     async handleTranscriptionComplete(speaker, text) {
         console.log(`[ListenService] Transcription complete: ${speaker} - ${text}`);
         
@@ -143,6 +148,16 @@ class ListenService {
             // Set session ID for summary service
             this.summaryService.setSessionId(this.currentSessionId);
             
+            // Live features FR-010: the saved mode applies from the first turn
+            try {
+                const settingsService = require('../settings/settingsService');
+                const settings = await settingsService.getSettings();
+                this.setLiveFeatures(settings.liveFeatures);
+            } catch (err) {
+                console.error('[Live] could not read the saved mode:', err.message);
+                this.setLiveFeatures('both');
+            }
+
             // Reset conversation history
             this.summaryService.resetConversationHistory();
 
