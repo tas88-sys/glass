@@ -288,6 +288,24 @@ Each provider's own limits (defaults; env overrides exist):
 
 ---
 
+## R16: What the real providers showed under the chain (T018)
+
+`providerChain.integration.test.js` runs the shipping `groq.js`, `gemini.js` and `anthropic.js` under the chain, with their SDKs mocked through `Module._load`. The Groq and Anthropic fakes use the real SDKs' error classes. All 11 cases passed on the first run; `providerChain.js` needed no fix (T019).
+
+What it confirmed:
+- **A spent Groq fails in one pass.** The daily 429 with `retry-after: 371` gives three attempts, one per model, and no second round: the hint (371 s) does not fit the 0 ms round wait the chain passes. The consumer sees Groq's two `transient` resets, then the chain's `provider` reset naming `gemini-3.5-flash-lite`. Each Groq model then cools down for 5 min (the registry's clamp).
+- **The next request costs Groq nothing.** It logs `outcome=skipped-cooling`, makes no Groq SDK call and sends no `_reset`.
+- **`retryRoundDelayMs: 0` works in Groq's loop.** A 503 on every model gives the second round at once (`retry round 2 in 0ms`), six SDK calls in all, then Gemini. The whole request took well under 1.5 s.
+- **Fatal errors move on.** A Groq 401 (`invalid_api_key`) ends Groq's own request after one attempt, and Gemini answers.
+- **A Gemini 429 gets no second round** (`retryableNextRound`), so a spent Gemini also fails fast. The user then reads "All providers failed (groq → gemini). Last: All Gemini models failed (1 attempt). Last: gemini-3.5-flash-lite — …".
+- **Cancel reaches the SDK in the same turn.** Cancelling the chain's stream aborts the Groq SDK request's signal before `cancel()` returns, and no Gemini call is made.
+- **Each provider gets its own key.** Groq gets `gsk_…`, Gemini `AIza_…` and Anthropic `sk-ant-…`.
+- **The screenshot reaches the model that sees it.** For a list with no Groq vision model, it goes to Gemini as `inlineData`.
+
+One protocol note, found with the fake providers (T015): a `ReadableStream` that errors drops the chunks still queued in it. A provider that enqueued events and errored in the same turn would lose them for any reader, chain or not. The three providers error only after network I/O, by which time the reader has taken the queue, so nothing is lost in practice. The fake providers now error one turn later, as the real ones do.
+
+---
+
 ## Summary of Decisions
 
 | # | Topic | Decision |
@@ -305,3 +323,4 @@ Each provider's own limits (defaults; env overrides exist):
 | R11 | Stream | Pass-through plus one `_reset` `reason: 'provider'` per switch |
 | R12 | Settings | Mixed list in the first provider's field; first entry its own; others need a saved key |
 | R13 | List | `openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b,gemini-3.5-flash-lite,gemini-3.1-flash-lite` (+ `claude-haiku-5-5` optional) |
+| R16 | Real providers under the chain | A spent Groq fails in one pass (three attempts, no second round); the next request skips it; `retryRoundDelayMs: 0` works; cancel reaches the SDK in the same turn; no chain fix needed |
