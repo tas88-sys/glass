@@ -195,9 +195,9 @@ negative_assertions:
     environments: [local]
     check_type: "cli"
     command: |-
-      node -e "const {execSync}=require('child_process');const d=execSync('git diff origin/main...HEAD -U0 -- src',{encoding:'utf8',maxBuffer:100000000});const bad=d.split(/\r?\n/).filter(l=>l.startsWith('+')&&!l.startsWith('+++')&&l.includes('[Live]')&&!/\[Live\] features=.{0,24}$/.test(l)&&!/(error|err)\.message/.test(l));process.stdout.write(String(bad.length))"
+      node -e "const {execSync}=require('child_process');const d=execSync('git diff origin/main...HEAD -U0 -- src',{encoding:'utf8',maxBuffer:100000000});let file='';const bad=d.split(/\r?\n/).filter(l=>{if(l.startsWith('+++'))file=l;return l.startsWith('+')&&!l.startsWith('+++')&&!file.includes('/__tests__/')&&l.includes('[Live]')&&!/\[Live\] features=.{0,24}$/.test(l)&&!/(error|err)\.message/.test(l)});process.stdout.write(String(bad.length))"
     expected_result: "0"
-    description: "Every added [Live] log line carries only the mode name or an error message, never prompt, answer or transcript text."
+    description: "Every added [Live] log line in the source carries only the mode name or an error message, never prompt, answer or transcript text. Test files are skipped: they quote the log line to assert it."
     severity: critical
 
   - id: "AT-NEG-006"
