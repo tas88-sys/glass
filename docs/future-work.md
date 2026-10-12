@@ -320,8 +320,17 @@ Found while sweeping for model-name rules, not related to the catalog:
 - `askService._isMultimodalError` (retry text-only when a provider rejects the image) never fires for Groq, Gemini, Anthropic or the chain: their `streamChat` resolves at once and reports errors inside the stream.
 - `ollama.js` `generateContent` joins image objects into the text, so an image becomes `[object Object]`.
 
+### Pending (found after the merge of PR #17)
+
+- **The Groq log cuts the OTPM message** before `Limit`, `Used` and `Requested` (`OTPM): Li`) on a passing rate limit. Only the `Request too large` refusal logs `limit=` and `requested=`. The numbers matter: on 2026-10-12 `Requested` was the size of the previous answer (938, 2,727), not the 16,384 Ask declares, and `Used` is what tells a passing limit from a cap that is too low.
+- **The Anthropic side was never run live.** The test install had no Anthropic key, so the Models API shape (`capabilities.image_input`, `capabilities.effort`, `max_tokens`) comes from the SDK types (`fixtures/anthropic-models.json` is not a recording), and the per-model learning of the server-side fallback beta is covered by tests only.
+- **Not yet seen in the app log:** the `skip … reason=key-output-limit` line on the Ask after the limit is stored (seen in tests and in a live probe, not in the app).
+
 ### Acceptance (when implemented)
 
 - [ ] An Ollama model whose `/api/show` lists `vision` gets the screenshot; one without it gets the question only.
 - [ ] A per-model first-text timeout set in Settings applies without an env override.
 - [ ] An Ask answer that stops on the model's cap shows a short "answer cut" note.
+- [ ] The Groq log shows `limit`, `used` and `requested` for every OTPM refusal, passing or not.
+- [ ] With an Anthropic key saved, Settings shows the capabilities of a Claude model from the Models API, and a model the beta refuses is learned (one resend, then no beta for it).
+- [ ] An Ask with a screenshot after a `Request too large` refusal logs `skip … reason=key-output-limit` and goes straight to the next provider.
