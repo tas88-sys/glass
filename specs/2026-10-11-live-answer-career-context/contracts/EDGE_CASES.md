@@ -26,6 +26,8 @@
 | E44 | A Portuguese turn in another verb form than the note ("discordar" against "discordei"), or with "precisou" ("had to") | The forms share a stem and match; "precisou" and "tive" are stopwords, so they rank no note (R15) | FR-008 |
 | E45 | An English question about the candidate's present job or plans, with no past tense and no "your" ("Do you work remotely?", "Are you in other hiring processes?") | Personal (`experience:do-you-now`, `experience:are-you-now`), like its Portuguese twin; "How do you work with X?" stays ambiguous (R16) | FR-006 |
 | E46 | A technical prompt that ends in "Give an example." or speaks of "your team" | Ambiguous: notes only when one is close enough (R16) | FR-006, FR-012 |
+| E47 | A request about something that happened ("Tell me about a launch that went well", "Fale sobre uma entrega que atrasou") | Personal (R17) | FR-006 |
+| E48 | "Tell me about a …" or "Fale sobre um …" with no past event ("Tell me about a binary search tree") | Ambiguous: notes only when one is close (R17); "Tell me about the CAP theorem" stays general | FR-006, FR-012 |
 | E11 | Turn in Portuguese, best note in English | Retrieved through the vector side; answer in Portuguese | FR-009, FR-014 |
 | E12 | Turn names a tool or vendor exactly | BM25 rank carries it into the fused top k | FR-008, FR-010 |
 | E13 | "why us" with active company A; notes of B rank higher | B's chunks dropped; A's and untagged chunks kept | FR-011 |

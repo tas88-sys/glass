@@ -144,3 +144,11 @@ Two chunker rules were added; the size cap did not change.
 | `research.md` | R16: the finding, the decision and the checks before and after |
 | `docs/LIVE_INSIGHTS_AND_ASK.md` | §4.7: the twin rule under "Cues"; three rows in the examples table |
 | `docs/diagrams/14-career-intent-router.mmd` | No change: its cue examples still hold |
+
+## Update for T040 (story questions)
+
+| Document | Change |
+|----------|--------|
+| `contracts/EDGE_CASES.md` | E47, E48 |
+| `research.md` | R17: the finding, the decision and the checks before and after |
+| `docs/LIVE_INSIGHTS_AND_ASK.md` | §4.7: two rows in the examples table |

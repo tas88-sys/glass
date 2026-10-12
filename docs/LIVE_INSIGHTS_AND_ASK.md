@@ -405,10 +405,12 @@ flowchart TB
 | "Have you worked with Kafka?" | personal | `experience:have-you` |
 | "Which databases do you work with?" | personal | `experience:do-you-now` |
 | "Are you interviewing with other companies?" | personal | `experience:are-you-now` |
+| "Tell me about a launch that went well" | personal | `behavioral:tell-me-about-a-past` |
 | "How big was the team at Example Corp?" (a manifest entity) | personal | `entity` |
 | "How would you design a rate limiter?" | ambiguous | `hypothetical:how-would-you` |
 | "How do you usually handle conflict?" | ambiguous | `habitual:how-do-you` |
 | "Your team needs to process a million events a second." | ambiguous | `habitual:your-team` |
+| "Tell me about a binary search tree" | ambiguous | `open:tell-me-about-a` |
 | "What is a B-tree?" | general | none |
 | "And what was the outcome?", 1 minute after a personal answer | personal | `follow-up` |
 | "And what was the outcome?", with no previous question or 6 minutes later | general | none |

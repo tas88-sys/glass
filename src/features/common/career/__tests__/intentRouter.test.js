@@ -84,6 +84,10 @@ table('personal (English twins of the Portuguese present-tense and job cues)', '
     "Is there a topic we haven't covered where you'd do well?",
     'Do you have an example of a scope change you handled?',
     'Can you share an example of having to adapt on a project?',
+    'Have you set up linting for Go projects?',
+    'How much faster do you deliver with AI?',
+    "What's your workflow with AI agents?",
+    'Tell me about a launch that went well.',
 ]);
 
 table('personal (Portuguese, implied subject and habits)', 'personal', [
@@ -135,6 +139,8 @@ table('personal (Portuguese)', 'personal', [
     'Já aconteceu de identificar cedo um problema e agir antes?',
     'O que é uma boa conduta profissional? Dê um exemplo.',
     'Tem algum tema que não abordamos em que você mandaria bem?',
+    'Conte sobre um lançamento que deu certo.',
+    'Fale sobre uma entrega que atrasou.',
 ]);
 
 table('personal (employer/project names from the CV)', 'personal', [
@@ -181,6 +187,8 @@ table('ambiguous (hypothetical, habitual, opinion)', 'ambiguous', [
     "What's a closure? Give an example.",
     'Your team needs to process a million events per second.',
     'How would you work with a legacy codebase?',
+    'Tell me about a migration from a monolith to microservices.',
+    'Fale sobre um algoritmo de ordenação.',
 ]);
 
 table('general (no second-person background cue)', 'general', [
@@ -217,6 +225,10 @@ table('general (no second-person background cue)', 'general', [
     "What's the reason for using a buffered channel here?",
     'Are you able to see my screen?',
     'Give an example of a deadlock.',
+    'Have you set the timeout on the context?',
+    'Do you test this function with a table?',
+    "What's your stack trace showing?",
+    'Tell me about the actor model.',
     '',
 ]);
 

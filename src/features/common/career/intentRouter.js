@@ -46,7 +46,7 @@ const PERSONAL_CUES = [
     ['background:tell-me-about-your', /\b(?:tell|walk|talk) (?:me|us) (?:\w+ )?(?:about|through) your\b/],
     ['background:what-you-do', /\bwhat (?:do|are) you (?:do|doing|working on|currently|building|focused on)\b|\bwhat (?:kind|type) of (?:work|projects|role) (?:do|did|are) you\b/],
     ['background:fragment', /^(?:and |so )?(?:any|some|much|prior|previous|professional|hands on) (?:experience|exposure|background) (?:with|in|on|using)\b|^(?:and |so )?(?:current|expected|desired) (?:salary|compensation|role|company|employer|stack|location)\b/],
-    ['background:your-career', /\byour (?:background|career|resume|cv|experience|journey|trajectory|track record|professional|story|path)\b/],
+    ['background:your-career', /\byour (?:background|career|resume|cv|experience|journey|trajectory|track record|professional|story|path|workflow|workflows|routine|tooling|stack(?! trace))\b/],
     ['background:your-role', /\byour (?:\w+ )?(?:current|previous|last|past|former|first|main|day to day|daily) (?:role|job|position|company|employer|team|project|manager|work|responsibilities|duties)\b|\byour (?:\w+ )?(?:responsibilities|duties|tech stack)\b/],
     ['background:your-trait', /\byour (?:biggest|greatest|main|key|top|best|worst|proudest|major) (?:weakness|weaknesses|strength|strengths|achievement|achievements|accomplishment|challenge|failure|mistake|win|contribution|lesson|regret|impact|project|projects)\b/],
     ['background:your-strengths', /\byour (?:strengths|weaknesses|strong points|weak points|achievements|accomplishments)\b/],
@@ -62,20 +62,22 @@ const PERSONAL_CUES = [
     ['background:logistics', /\b(?:salary|compensation|pay) (?:expectation|expectations|range|requirement|requirements)\b|\bnotice period\b|\bwhen (?:can|could) you start\b/],
     ['background:where-based', /\bwhere (?:are you|do you) (?:based|located|from|live)\b/],
     // Experience (second person, past or perfect)
-    ['experience:have-you', /\bhave you (?:\w+ )?(?:worked|used|led|built|managed|designed|implemented|handled|dealt|had|done|seen|faced|run|shipped|owned|migrated|written|mentored|deployed|scaled|introduced|tried|been)\b/],
+    ['experience:have-you', /\bhave you (?:\w+ )?(?:worked|used|led|built|managed|designed|implemented|handled|dealt|had|done|seen|faced|run|shipped|owned|migrated|written|mentored|deployed|scaled|introduced|tried|been|set up|adopted|automated|maintained|integrated|launched|contributed|coached|hired|interviewed|taught|trained|supported|architected|standardized|standardised)\b/],
     ['experience:did-you', /\b(?:did|were) you (?!know\b|understand\b|hear\b|see\b|catch\b|get (?:that|it|me)\b|mean\b|say\b)\w+/],
     ['experience:you-past', /\byou (?:have |had )?(?:worked|led|built|managed|designed|implemented|handled|faced|chose|decided|learned|learnt|delivered|shipped|owned|migrated|created|wrote|mentored|solved|resolved|fixed|improved|reduced|increased|joined|left|started|dealt|convinced|disagreed|failed|ran|drove|introduced|proposed|influenced|debugged|scaled|optimized|optimised|launched|deployed|architected|refactored|onboarded|hired|received|spent|had to|were (?:responsible|in charge|the))\b/],
     ['experience:do-you-have', /\b(?:do|did) you have (?:\w+ ){0,3}(?:experience|exposure|background|knowledge)\b|\byears of experience\b|\bhow (?:much|many years of) experience\b|\bare you familiar with\b/],
     // English twins of the Portuguese present-tense and job cues below ("Do you work
     // remotely?", "Are you interviewing elsewhere?"). "How do you work with X?" asks for an
     // approach, an ambiguous cue, as in Portuguese.
-    ['experience:do-you-now', /(?<!\bhow )\bdo you (?:currently |still |now |also |usually |normally |actually )?(?:work|live|lead|manage|speak|report|code|program)\b|(?<!\b(?:do|does|did|would|could|will|should|can|might|to) )\byou (?:currently |now |still )?work (?:with|on|for|at|in)\b|\breport(?:s|ing)? to you\b/],
+    ['experience:do-you-now', /(?<!\bhow )\bdo you (?:currently |still |now |also |usually |normally |actually )?(?:work|live|lead|manage|speak|report|code|program|deliver|ship|mentor)\b|(?<!\b(?:do|does|did|would|could|will|should|can|might|to) )\byou (?:currently |now |still )?work (?:with|on|for|at|in)\b|\breport(?:s|ing)? to you\b/],
     ['experience:are-you-now', /\bare you (?:currently |still |also |actively |now |already )?(?:interviewing|working|looking|applying|talking|speaking|open|available|willing|planning|participating|leading|managing|based|employed|in (?:other|any|another|a) (?:\w+ )?process(?:es)?)\b/],
     ['experience:how-long', /\bhow long (?:have|had|did) you\b|\byou\b.*\bfor how long\b/],
     ['background:your-people', /\byour (?:\w+ )?(?:company|employer|manager|managers|boss|peers|colleagues|teammates|coworkers|co workers|tech lead|reports|direct reports)\b|\bat work\b/],
     ['background:why-change', /\b(?:reason|reasons|motivation)(?: why)? (?:that )?you\b(?: \w+){0,4} (?:leav|chang|mov|switch|quit|look\w* (?:for|around|elsewhere)|open to)\w*|\bwhat (?:would|could|might|made|makes|is making) (?:make )?you\b(?: \w+){0,3} (?:leav|chang|mov|switch|quit|look\w* (?:for|around|elsewhere)|open to)\w*/],
     ['background:start-date', /\bhow (?:soon|quickly|long|much time) (?:would|could|will|can|do) you (?:\w+ ){0,4}(?:start|join|be available)\b|\b(?:after|once) (?:you )?(?:get|getting|receive|receiving|accept|accepting) (?:an|the|our) offer\b/],
     ['background:do-well', /\byou (?:would|could|will|might) (?:do|perform) (?:\w+ )?(?:well|great|best)\b|\byou (?:would|could|will) (?:shine|excel|stand out)\b|\bwe (?:have not|did not) (?:yet )?(?:covered|discussed|talked about|asked (?:you )?about)\b/],
+    // "Tell me about a launch that went well": a request about something that happened.
+    ['behavioral:tell-me-about-a-past', /\b(?:tell|talk) (?:me|us) (?:\w+ )?about (?:a|an|one|some) (?:\w+ ){1,4}(?:that|which) (?:\w+ )?(?:went|worked|failed|succeeded|broke|shipped|launched|happened|turned out|saved|changed|grew|scaled)\b/],
     ['behavioral:example-having-to', /\bexample (?:of )?(?:having to|having had to|you had to|you needed to)\b|\b(?:do|did) you have (?:an|a|any|one|some) (?:\w+ )?(?:example|story|situation|instance)s?\b/],
     // Portuguese
     ['behavioral:pt-uma-vez', /\b(?:uma|alguma) (?:vez|situacao|ocasiao|experiencia|historia) (?:em que|que|onde|na qual|quando)\b/],
@@ -83,6 +85,7 @@ const PERSONAL_CUES = [
     ['behavioral:pt-de-um-exemplo', /\b(?:me )?(?:de|da) um exemplo(?: (?:de quando|em que|seu|sua|real|pessoal|pratico|concreto)\b|$)/],
     ['behavioral:pt-ja-aconteceu', /\bja aconteceu (?:de|com voce|com vc)\b/],
     ['background:pt-fale-de-voce', new RegExp(`\\b(?:fale|fala|conte|conta)(?: (?:um pouco|mais))? (?:sobre|de) (?:${YOU}|sua|seu|suas|seus|tua|teu)\\b`)],
+    ['behavioral:pt-conte-sobre-um-passado', new RegExp(`\\b(?:conte|conta|fale|fala)(?: um pouco| mais)? (?:sobre|de) (?:um|uma|algum|alguma) (?:\\w+ ){1,4}que (?:${YOU} )?(?:ja )?(?:\\w+ou|\\w+eu|\\w+iu|deu|fez|foi|teve|trouxe|disse|quis|veio|pos|soube)\\b`)],
     ['background:pt-apresente', /\b(?:se apresent\w*|apresente se|apresenta se)\b/],
     ['background:pt-sua-trajetoria', /\b(?:sua|tua) (?:experiencia|trajetoria|carreira|historia|jornada|formacao|funcao|rotina|stack|maior|principal|ultima|atual)\b/],
     ['background:pt-seu-momento', /\b(?:seu|teu) (?:momento|maior|principal|ultimo|atual|trabalho|emprego|cargo|papel|time|projeto|perfil|curriculo|background|ponto|pacote)\b/],
@@ -125,7 +128,7 @@ const AMBIGUOUS_CUES = [
     ['hypothetical:how-you-would', /\bhow you would\b/],
     ['hypothetical:if-you', /\bif you (?:were|had to|could|need to|needed to|join|joined)\b/],
     ['hypothetical:imagine', /\b(?:imagine|suppose|assume) (?:that )?you\b|\blet (?:is|us) say\b|\blets say\b/],
-    ['habitual:how-do-you', /\bhow do you (?:\w+ )?(?:approach|handle|deal|manage|decide|prioritize|prioritise|ensure|keep|structure|organize|organise|balance|measure|review|onboard|mentor|go about|think about|adapt|stay|learn|grow|motivate|communicate|explain|give|receive|resolve|estimate|plan|lead|work with|make sure|raise|grow|develop|level up|upskill|coach|support|help|teach|train|share|spread)\b/],
+    ['habitual:how-do-you', /\bhow do you (?:\w+ )?(?:approach|handle|deal|manage|decide|prioritize|prioritise|ensure|keep|structure|organize|organise|balance|measure|review|onboard|mentor|go about|think about|adapt|stay|learn|grow|motivate|communicate|explain|give|receive|resolve|estimate|plan|lead|work with|make sure|raise|develop|level up|upskill|coach|support|help|teach|train|share|spread)\b/],
     // "Give an example." closing a turn, and "your team", also open technical prompts
     // ("What's a closure? Give an example.", "Your team needs to process...").
     ['habitual:give-an-example', /\b(?:give|share) (?:me |us )?(?:an|one|a|some) (?:real |concrete |specific |practical |personal )?examples?$/],
@@ -136,6 +139,11 @@ const AMBIGUOUS_CUES = [
     ['hypothetical:pt-se-voce', new RegExp(`\\bse (?:${YOU} )?\\w+(?:asse|esse|isse)\\b|\\bse (?:${YOU}) (?:fosse|tivesse|pudesse|precisasse)\\b`)],
     ['habitual:pt-como-voce', new RegExp(`\\bcomo (?:que )?${YOU}\\b`)],
     ['opinion:pt-opiniao', new RegExp(`\\b(?:qual|qual e) (?:a )?(?:sua|tua) (?:opiniao|visao|abordagem|preferencia)\\b|\\bna (?:sua|tua) (?:opiniao|visao)\\b|\\bo que ${YOU} acha\\b|\\b${YOU} prefere\\b`)],
+    // "Tell me about a migration you…" usually means one the candidate lived, but "a" plus
+    // any noun also opens technical asks ("tell me about a hash map"): notes only if close.
+    // "Tell me about the CAP theorem" stays general.
+    ['open:tell-me-about-a', /\b(?:tell|talk) (?:me|us) (?:\w+ )?about (?:a|an|one|some) \w+/],
+    ['open:pt-conte-sobre-um', /\b(?:conte|conta|fale|fala)(?: um pouco| mais)? (?:sobre|de) (?:um|uma|algum|alguma) \w+/],
 ];
 
 const FOLLOW_UP_MARKERS = [

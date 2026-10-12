@@ -418,6 +418,47 @@ the habitual verbs.
 - The eval asks each item in its own language, so its numbers do not move. R15's script with the
   hand translations measures this.
 
+## R17: Questions about the main stories that routed general
+
+**Question** (T040): once the notes repo's story file had an English line in each story, which
+questions about those stories still got none of them?
+
+**Finding.** 27 natural questions about seven stories, in English and Portuguese, written before
+measuring. 22 got the story through some note (the pitch, the study banks, the prep notes). The
+5 that did not all routed general: "have you set up", "do you deliver", "your workflow",
+"tell me about a migration…" and "conte sobre um lançamento que deu certo".
+
+**Decision.**
+- More experience verbs after "have you" (set up, adopted, automated, maintained, integrated,
+  launched, contributed, coached, hired, interviewed, taught, trained, supported, architected,
+  standardized) and after "do you" (deliver, ship, mentor). Verbs common in live-coding talk
+  stay out ("Have you set the timeout?", "Do you test this function?").
+- "Your workflow, routine, tooling, stack" (not "stack trace").
+- A request about something that happened is personal: "Tell me about a launch that went well",
+  "Fale sobre uma entrega que atrasou".
+- Any other "tell me about a …" or "fale sobre um …" is ambiguous: notes only when one is close.
+  "Tell me about the CAP theorem" stays general.
+
+**Result.**
+
+| Check | Before | After |
+|---|---|---|
+| 27 story questions: the story in what is sent | 22 | 27 |
+| 10 new questions about the candidate, written before measuring: routed personal | 3 | 10 |
+| 10 new technical or live-coding turns: routed personal | 2 | 2, the same two |
+| R16's held-out sets: about the candidate / technical, routed personal | 17 of 24 / 0 of 25 | 18 of 24 / 0 of 25 |
+| Study-bank question titles routed personal | 22 | 23 |
+| Eval: routing, general routed personal, injected recall | 96.6%, 0%, 86.8% | unchanged |
+
+- The 27 story questions found these gaps, so their 27 is not a fair figure; the 10 written
+  before measuring are.
+- R16's held-out "Do you mentor junior developers?" now routes personal through a verb added
+  after seeing it, so the fair figure there stays 17 of 24.
+- The new study-bank title routed personal asks about the candidate's own workflow.
+- The two technical turns still routed personal ("Conte sobre uma estrutura de dados que você
+  conhece", "Have you created the index on that column?") come from older cues ("você conhece",
+  "you created"). Live-coding talk that reuses experience verbs stays open.
+
 ---
 
 ## Summary of Decisions
@@ -440,3 +481,4 @@ the habitual verbs.
 | R14 | The ambiguous gate passes when any section about to be sent clears it | High (eval) |
 | R15 | Portuguese "had to" is a stopword; Portuguese verb forms share the infinitive stem | Medium (eval +1 item, BM25-only +3.8 pts) |
 | R16 | English twins of the Portuguese present-tense and job cues; three that open technical prompts route ambiguous | High (held-out checks) |
+| R17 | More experience verbs; past-event requests personal; other "tell me about a …" ambiguous | Medium (held-out checks of 10 and 10) |
