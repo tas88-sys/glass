@@ -53,7 +53,9 @@ const PROVIDERS = {
       name: 'Anthropic',
       handler: () => require("./providers/anthropic"),
       llmModels: [
-          { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet' },
+          { id: 'claude-opus-5-5', name: 'Claude Opus 5.5' },
+          { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5' },
+          { id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5' },
       ],
       sttModels: [],
   },
@@ -94,6 +96,20 @@ const PROVIDERS = {
       ],
   },
 };
+
+/**
+ * Provider of a model ID typed in Settings, or of a comma-separated list of
+ * them (the first entry decides): 'claude-…' → anthropic, 'gemini-…' → gemini.
+ * @param {string|null|undefined} modelId
+ * @returns {'anthropic'|'gemini'|null}
+ */
+function inferProviderFromModelId(modelId) {
+  if (typeof modelId !== 'string') return null;
+  const first = modelId.split(',').map(s => s.trim()).find(Boolean) || '';
+  if (first.startsWith('claude-')) return 'anthropic';
+  if (first.startsWith('gemini-')) return 'gemini';
+  return null;
+}
 
 function sanitizeModelId(model) {
   return (typeof model === 'string') ? model.replace(/-glass$/, '') : model;
@@ -182,4 +198,5 @@ module.exports = {
   createStreamingLLM,
   getProviderClass,
   getAvailableProviders,
+  inferProviderFromModelId,
 };

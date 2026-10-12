@@ -1,6 +1,6 @@
 const { EventEmitter } = require('events');
 const Store = require('electron-store');
-const { PROVIDERS, getProviderClass } = require('../ai/factory');
+const { PROVIDERS, getProviderClass, inferProviderFromModelId } = require('../ai/factory');
 const encryptionService = require('./encryptionService');
 const providerSettingsRepository = require('../repositories/providerSettings');
 const authService = require('./authService');
@@ -304,9 +304,9 @@ class ModelStateService extends EventEmitter {
             const installedModels = ollamaModelRepository.getInstalledModels();
             if (installedModels.some(m => m.name === modelId)) return 'ollama';
         }
-        if (typeof modelId === 'string' && modelId.startsWith('gemini-')) {
-            return 'gemini';
-        }
+        // A typed ID or CSV list: 'gemini-…' (LLM or STT), 'claude-…' (LLM only).
+        const inferred = inferProviderFromModelId(modelId);
+        if (inferred === 'gemini' || (inferred === 'anthropic' && type === 'llm')) return inferred;
         return null;
     }
 
@@ -360,7 +360,7 @@ class ModelStateService extends EventEmitter {
             if (providerId === 'ollama' && type === 'llm') {
                 const installed = ollamaModelRepository.getInstalledModels();
                 available.push(...installed.map(m => ({ id: m.name, name: m.name })));
-            } else if (providerId === 'gemini' && PROVIDERS[providerId]?.[modelListKey]) {
+            } else if ((providerId === 'gemini' || providerId === 'anthropic') && PROVIDERS[providerId]?.[modelListKey]) {
                 const presets = PROVIDERS[providerId][modelListKey];
                 const customId = type === 'llm' ? setting.selected_llm_model : setting.selected_stt_model;
                 if (customId && !presets.some(m => m.id === customId)) {
