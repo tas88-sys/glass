@@ -59,6 +59,16 @@ const PROVIDERS = {
       ],
       sttModels: [],
   },
+  'groq': {
+      name: 'Groq',
+      handler: () => require("./providers/groq"),
+      llmModels: [
+          { id: 'openai/gpt-oss-120b', name: 'GPT-OSS 120B (Groq)' },
+          { id: 'openai/gpt-oss-20b', name: 'GPT-OSS 20B (Groq)' },
+          { id: 'qwen/qwen3.8-27b', name: 'Qwen 3.8 27B, vision (Groq, preview)' },
+      ],
+      sttModels: [], // Groq's Whisper is batch-only; Glass needs real-time STT
+  },
   'deepgram': {
     name: 'Deepgram',
     handler: () => require("./providers/deepgram"),
@@ -99,15 +109,19 @@ const PROVIDERS = {
 
 /**
  * Provider of a model ID typed in Settings, or of a comma-separated list of
- * them (the first entry decides): 'claude-…' → anthropic, 'gemini-…' → gemini.
+ * them (the first entry decides): 'claude-…' → anthropic, 'gemini-…' → gemini,
+ * '<vendor>/<model>' → groq (every current Groq chat model is namespaced; no
+ * other provider uses a slash). Installed Ollama models are matched before
+ * this rule by the callers.
  * @param {string|null|undefined} modelId
- * @returns {'anthropic'|'gemini'|null}
+ * @returns {'anthropic'|'gemini'|'groq'|null}
  */
 function inferProviderFromModelId(modelId) {
   if (typeof modelId !== 'string') return null;
   const first = modelId.split(',').map(s => s.trim()).find(Boolean) || '';
   if (first.startsWith('claude-')) return 'anthropic';
   if (first.startsWith('gemini-')) return 'gemini';
+  if (/^[^\s/]+\/\S+$/.test(first)) return 'groq';
   return null;
 }
 
@@ -172,6 +186,7 @@ function getProviderClass(providerId) {
         'openai': 'OpenAIProvider',
         'anthropic': 'AnthropicProvider',
         'gemini': 'GeminiProvider',
+        'groq': 'GroqProvider',
         'deepgram': 'DeepgramProvider',
         'ollama': 'OllamaProvider',
         'whisper': 'WhisperProvider'

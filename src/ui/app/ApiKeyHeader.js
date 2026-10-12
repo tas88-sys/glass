@@ -2067,7 +2067,7 @@ export class ApiKeyHeader extends LitElement {
                 </div>
 
                 <div class="footer">
-                    Get your API key from: OpenAI | Google | Anthropic
+                    Get your API key from: OpenAI | Google | Anthropic | Groq
                     <br />
                     Glass does not collect your personal data —
                     <span class="footer-link" @click=${this.openPrivacyPolicy}>See details</span>
