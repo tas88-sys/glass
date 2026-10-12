@@ -54,6 +54,31 @@ describe('textNormalize', () => {
         assert.equal(stem('apis'), 'api');
     });
 
+    it('cuts Portuguese verb forms to the infinitive stem', () => {
+        for (const w of ['discordei', 'discordou', 'discordamos', 'discordaram', 'discordando', 'discordava', 'discordado']) {
+            assert.equal(stem(w), stem('discordar'), w);
+        }
+        assert.equal(stem('liderou'), stem('liderar'));
+        assert.equal(stem('aprendi'), stem('aprender'));
+        assert.equal(stem('aprendeu'), stem('aprender'));
+        assert.equal(stem('decidiu'), stem('decidir'));
+        assert.equal(stem('decidindo'), stem('decidir'));
+        assert.equal(stem('trabalhei'), stem('trabalho'));
+        assert.equal(stem('resultados'), stem('results'));
+    });
+
+    it('keeps short words whole under the verb rules', () => {
+        assert.equal(stem('java'), 'java');
+        assert.equal(stem('multi'), 'multi');
+        assert.equal(stem('demos'), stem('demo'));
+        assert.equal(stem('cada'), 'cada');
+    });
+
+    it('drops Portuguese "had to" (precisou, tive) like English "had"', () => {
+        assert.deepEqual(tokenize('vc precisou discordar de um colega'), ['discord', 'coleg']);
+        assert.deepEqual(tokenize('tive que decidir'), ['decid']);
+    });
+
     it('slugify keeps alphanumerics only (FR-005)', () => {
         assert.equal(slugify('Café Labs'), 'cafelabs');
         assert.equal(slugify('A&B'), 'ab');
@@ -68,9 +93,9 @@ describe('textNormalize', () => {
     });
 
     it('drops the Portuguese filler "aí" but keeps "AI"', () => {
-        assert.deepEqual(tokenize('e aí, o deploy funcionou?'), ['deploy', 'funcionou']);
+        assert.deepEqual(tokenize('e aí, o deploy funcionou?'), ['deploy', 'funcion']);
         assert.deepEqual(tokenize('AI tools and ai agents'), ['ai', 'tool', 'ai', 'agent']);
-        assert.deepEqual(tokenize('Aí a IA ajudou'), ['ia', 'ajudou']);
+        assert.deepEqual(tokenize('Aí a IA ajudou'), ['ia', 'ajud']);
     });
 
     it('never throws on non-strings', () => {
@@ -99,6 +124,15 @@ describe('buildBm25 / search', () => {
         const hits = idx.search(tokenize('migracao legado'), 2);
         assert.equal(hits.length, 1);
         assert.equal(hits[0].idx, 0);
+    });
+
+    it('finds a past-tense note from an infinitive question, not one sharing "precisou"', () => {
+        const idx = buildBm25([
+            chunk('banco › Conte uma situação em que você precisou liderar', 'Liderei a migração.'),
+            chunk('banco › Discordei do tech lead', 'Quando discordei, levei dados.'),
+        ]);
+        const hits = idx.search(tokenize('vc precisou discordar de um colega'), 2);
+        assert.equal(hits[0].idx, 1);
     });
 
     it('weights the title (3) above the body (1)', () => {

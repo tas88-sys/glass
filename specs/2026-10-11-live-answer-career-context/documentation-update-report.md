@@ -125,3 +125,12 @@ Two chunker rules were added; the size cap did not change.
 | `contracts/EDGE_CASES.md` | E43 |
 | `research.md` | R14: the finding, the decision and the eval before and after |
 | `docs/LIVE_INSIGHTS_AND_ASK.md` | §4.7 "Close enough": any section that would be sent |
+
+## Update for T038 (Portuguese verb forms)
+
+| Document | Change |
+|----------|--------|
+| `spec.md` | FR-008: Portuguese verb forms cut to the infinitive stem |
+| `contracts/EDGE_CASES.md` | E44 |
+| `research.md` | R15: the finding, the decision and the eval for each change and both |
+| `docs/LIVE_INSIGHTS_AND_ASK.md` | No change: it does not describe tokenization |

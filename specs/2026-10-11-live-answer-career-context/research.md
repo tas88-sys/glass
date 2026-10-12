@@ -340,6 +340,44 @@ coverage in BM25-only mode). Which sections are sent does not change, only wheth
   close section for most technical questions. Calibrating it with turns labeled "should inject"
   or "should not" stays open (T027).
 
+## R15: The same question found different notes in Portuguese and English
+
+**Question** (T038, from a check by hand): "Tell me about a time you disagreed with a teammate"
+sent six sections on the theme. Its Portuguese version sent four, with the best one third. Why?
+
+**Finding.**
+- Most notes on the theme are titled in English. The Portuguese words reached them only through
+  the vectors, which are less sure across languages (cosine 0.45 against 0.62 in English).
+- "precisou" ("had to") was not a stopword. It ranked first a note that shared only that word.
+- The stemmer did not join Portuguese verb forms: "discordei" and "discordou" never met
+  "discordar".
+
+**Decision.**
+- Notes repo: a Portuguese translation, in parentheses, beside each English question title in
+  the two study banks (118 titles). The English text stays, so eval anchors still match.
+- Code: Portuguese "had to" (precisou, tive and their inflections) joins the stopwords. The
+  stemmer cuts Portuguese past tense, imperfect, gerund and participle endings to the infinitive
+  stem, each with a minimum stem length so short words stay whole ("java", "cada"). Over the
+  notes' vocabulary this joins 72 groups of words; the few loose pairs ("parte", "partida") are
+  harmless at this size.
+
+**Result** (full eval, each change alone and both):
+
+| Measure | Before | Titles only | Code only | Both |
+|---|---|---|---|---|
+| Hybrid injected recall (53 personal items) | 84.9% | 84.9% | 84.9% | 86.8% |
+| Portuguese items (40) | 80.0% | 80.0% | 80.0% | 82.5% |
+| BM25-only injected recall | 50.9% | 50.9% | 52.8% | 54.7% |
+
+- "Before" is today's notes. R14's 77.4% rose to 84.9% through edits in the notes repo
+  (Portuguese beside English headings, "not used" lines in the skills note, a few facts).
+- The code alone swaps one item for another; with both, no item is lost. Routing and latency are
+  unchanged, and the overfit check no longer flags (gap 3.9 points).
+- On the original question the best section moves from third to first, as in English.
+- Translating the question to English as an extra query (above, under R5) was re-measured on
+  today's notes: net zero (two items gained, two lost), and 0.7 s typical, 1.3 s at p95 before
+  the search can start. Not adopted.
+
 ---
 
 ## Summary of Decisions
@@ -360,3 +398,4 @@ coverage in BM25-only mode). Which sections are sent does not change, only wheth
 | R12 | Keep 1,200-character chunks; merge short intros into their subsection; repeat table headers | Medium (eval within noise) |
 | R13 | A local ask script to check retrieval by hand; shares the app's vector cache | High |
 | R14 | The ambiguous gate passes when any section about to be sent clears it | High (eval) |
+| R15 | Portuguese "had to" is a stopword; Portuguese verb forms share the infinitive stem | Medium (eval +1 item, BM25-only +3.8 pts) |
