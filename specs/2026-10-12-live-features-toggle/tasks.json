@@ -1,7 +1,7 @@
 {
   "spec_id": "2026-10-12-live-features-toggle",
   "spec_name": "live-features-toggle",
-  "updated": "2026-10-12T17:14:22Z",
+  "updated": "2026-10-12T17:21:30Z",
   "anthropic_patterns": [
     "Ralph looping",
     "JSON task state"
@@ -239,7 +239,7 @@
       "description": "Render check: render the real ListenView (with LiveAnswerView, SummaryView) and SettingsView on a local page (127.0.0.1) with a stubbed window.api in the three modes: pane visibility, titles and button texts, the 'Waiting for a question...' line with no answers, a pushed listen:liveFeaturesChanged re-layout, the copy text in answer-only mode with two stub answers, the Settings button cycle and its disabled state during a slow stubbed call. Record what was checked and the window heights reported to adjustWindowHeight."
     },
     {
-      "status": "pending",
+      "status": "completed",
       "parallel": false,
       "target_file": "docs/LIVE_INSIGHTS_AND_ASK.md",
       "gate": "T018",
@@ -249,8 +249,8 @@
       "gate_type": null,
       "scope": null,
       "block_on": null,
-      "completed_at": null,
-      "evidence": null,
+      "completed_at": "2026-10-12T17:21:30Z",
+      "evidence": "Every live doc that describes the two lanes now names the setting: LIVE_INSIGHTS_AND_ASK.md (§1 row + note, §3.3, new §3.6, §4.1, new §4.8, file map), ARCHITECTURE.md (§8 diagram + paragraph, §17 row), AUDIO_AND_STT.md §6, README.md, CHANGELOG.md [Unreleased], diagram 09 + diagrams README, future-work.md item 7. Diagram 09 and the ARCHITECTURE §8 diagram render with npx @mermaid-js/mermaid-cli mmdc (both SVGs contain the new decision). 36 line references this branch moved were shifted by the lines inserted before them (ARCHITECTURE 8, AUDIO_AND_STT 7, LIVE_INSIGHTS_AND_ASK 19, runbook 2); cited lines for the new text checked against the files",
       "evidence_type": null,
       "auto_skill": null,
       "auto_skill_timing": null,
@@ -262,7 +262,7 @@
       "description": "Docs: docs/LIVE_INSIGHTS_AND_ASK.md (§1 table gains a 'Can be turned off' row and a note under the one-sentence version; §3 and §4 each say how the lane is turned off; the file map gets liveFeatures.js); ARCHITECTURE.md §8 (the gate before the every-5-turns test, the setting, the two settings:* channels and the listen:liveFeaturesChanged push; §4 has no channel table and needs no change; the file map row); docs/diagrams/09-summarization-pipeline.mmd (an 'Insights enabled?' decision before the gate; README of diagrams if it lists contents); README.md (feature line); CHANGELOG.md [Unreleased]; docs/future-work.md (the deferred Listen-bar toggle, the every-N-turns Insights setting and a per-lane model list)."
     },
     {
-      "status": "pending",
+      "status": "completed",
       "parallel": false,
       "target_file": null,
       "gate": "T019",
@@ -272,8 +272,8 @@
       "gate_type": "doc-eval",
       "scope": "changed",
       "block_on": "Status: DRIFT_DETECTED in documentation-update-report.md",
-      "completed_at": null,
-      "evidence": null,
+      "completed_at": "2026-10-12T17:21:30Z",
+      "evidence": "specs/2026-10-12-live-features-toggle/documentation-update-report.md, Status: PASS (by hand; no reconciliation agent on this machine)",
       "evidence_type": null,
       "auto_skill": null,
       "auto_skill_timing": null,

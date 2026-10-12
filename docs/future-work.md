@@ -291,3 +291,24 @@ An Ask with a screenshot declares `max_completion_tokens` 2048 on Qwen. That is 
 - [ ] An Ask with a screenshot under a 1K OTPM answers on Qwen with the image (`images=sent:1`, `outcome=ok`), after at most one retry.
 - [ ] A test in `groq.test.js` replays the OTPM 429 and checks the retry's `max_completion_tokens` and the absence of a cooldown.
 - [ ] `groqErrors.test.js` covers a 429 "Request too large" read as `too-large`.
+
+---
+
+## 7. Live panels — a Listen-bar toggle, less frequent Insights, a per-lane model list
+
+**Status:** Deferred by the spec (defaults chosen, not blocking).
+**Spec:** `specs/2026-10-12-live-features-toggle/`
+
+### Summary
+
+The Live panels button in Settings picks Answer + Insights, Answer only or Insights only. Three related options were left out:
+
+- **A toggle in the Listen window's top bar**, to change the mode in the middle of a call without opening Settings. The setting already applies from the next turn and the Listen window already follows `listen:liveFeaturesChanged`. A bar control would call `settings:setLiveFeatures` the same way the Settings button does.
+- **Less frequent Live Insights**, for example every 10 turns instead of 5, as a middle step between both lanes and Answer only. Today the cadence is fixed at 5 (`triggerAnalysisIfNeeded`).
+- **A per-lane model list**, for example Insights on a cheaper model while Live Answer keeps the fast one. Today both lanes use the one LLM list.
+
+### Acceptance (when implemented)
+
+- [ ] The bar toggle and the Settings button show the same mode after either one changes it.
+- [ ] With the cadence set to N, the analysis runs at multiples of N only, and turning it on mid-session starts no analysis at once.
+- [ ] With a per-lane list, each lane's provider request lines name its own models.

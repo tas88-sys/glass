@@ -6,6 +6,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 
 ## [Unreleased]
 
+### Live panels: Live Answer, Live Insights or both (branch `2026-10-12-live-features-toggle`)
+
+#### Added
+
+- **A "Live panels" button in Settings**, below Automatic Updates: Answer + Insights (default) → Answer only → Insights only. It is stored per user like the Ask mode, applies from the next turn of the running session, and a new session starts with it.
+- **A lane that is off does no work.** With Answer only, no analysis call is made every 5 turns and no summary is saved for the session. With Insights only, no answer is streamed and no company detection or note prefetch runs. Turning Answer off mid-question stops the answer streaming now and keeps the follow-up and company memory for when it is turned back on.
+- **The Listen window shows the panes that run.** With Answer only it is titled "Live answer", its toggle reads "Show Answer", it says "Waiting for a question..." until the first one, and the copy button copies the answers, each under its question. The other two modes keep today's labels.
+- `src/features/listen/liveFeatures.js` holds the rule, the cycle and the labels, with no dependencies, so the main process and the renderer bundle load the same file. Two IPC handlers, `settings:getLiveFeatures` and `settings:setLiveFeatures`, and the `listen:liveFeaturesChanged` push.
+
+#### Unchanged
+
+- The transcript, Ask and the default mode behave exactly as before. The Answer + Insights mode makes the same calls and sends the same payloads (a test compares it with a service that never sets the mode).
+
+#### Docs
+
+- `docs/LIVE_INSIGHTS_AND_ASK.md` §3.6 and §4.8, `ARCHITECTURE.md` §8 and diagram 09 describe the setting. Line references that this branch moved were updated in `ARCHITECTURE.md`, `docs/AUDIO_AND_STT.md` and `docs/LIVE_INSIGHTS_AND_ASK.md`.
+- `docs/future-work.md` item 7: a Listen-bar toggle, less frequent Live Insights and a per-lane model list.
+
 ### Cross-provider failover (branch `2026-10-12-cross-provider-failover`)
 
 #### Added

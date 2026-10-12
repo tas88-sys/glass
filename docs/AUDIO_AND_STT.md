@@ -22,7 +22,7 @@ This is **source attribution, not speaker diarization**.
   loopback pipelines in `listenCapture.js` feed `sendMicAudioContent` (`:331`) and
   `sendSystemAudioContent` (`:398`) respectively.
 - Each finalized utterance is persisted to the `transcripts` table with its `speaker`
-  tag (`listenService.js:118`).
+  tag (`listenService.js:123`).
 
 **Practical consequence:** the clean "interviewer vs. me" split works because the other
 party arrives through the **system-audio** channel (Zoom/Meet/Teams output). If two people
@@ -96,12 +96,12 @@ Deepgram is a fully-wired, selectable STT provider — no code change required.
 
 **Enable it:**
 1. Open **Settings**. The API-key section renders one input per registered provider
-   (`SettingsView.js:1329` loops `Object.entries(this.providerConfig)`), so a
+   (`SettingsView.js:1375` loops `Object.entries(this.providerConfig)`), so a
    **"Deepgram API Key"** field appears automatically.
 2. Paste your key and **Save**. This calls `setApiKey('deepgram', key)`, which validates
    against `https://api.deepgram.com/v1/projects` (`deepgram.js:15-37`) before storing.
 3. **Change STT Model** → pick **"Nova-3 (General)"** (appears in `getAvailableModels('stt')`
-   once the key is saved — `SettingsView.js:1513`).
+   once the key is saved — `SettingsView.js:1559`).
 
 **How it streams:** `createSTT` (`deepgram.js:39-94`) opens a WebSocket to
 `wss://api.deepgram.com/v1/listen` configured `encoding=linear16, sample_rate=24000,
@@ -149,7 +149,7 @@ or Whisper). The provider is whatever is selected in Settings, and it stays ther
 
 | Mechanism | Where | Behavior |
 |---|---|---|
-| **Init retry** | `listenService.js:174-194` | Retries `initializeSttSessions` up to **10×** at 300 ms intervals on session start. Same model each time. |
+| **Init retry** | `listenService.js:189-209` | Retries `initializeSttSessions` up to **10×** at 300 ms intervals on session start. Same model each time. |
 | **Proactive session renewal** | `sttService.js:482-491`, `renewSessions` `:518-545` | Every **20 min** (`SESSION_RENEW_INTERVAL_MS`) tears down and recreates both sessions to dodge provider hard-timeouts, with a **2 s overlap** (`SOCKET_OVERLAP_MS`) so no audio is dropped. |
 | **Keep-alive heartbeat** | `sttService.js:476-480`, `:501-512` | Every **60 s** (`KEEP_ALIVE_INTERVAL_MS`); OpenAI only (Gemini SDK self-heartbeats). |
 
@@ -168,16 +168,18 @@ Building real STT failover/reconnect-on-drop would mean wrapping those callbacks
 ## 6. From transcript to insights & answers (the next hop)
 
 STT's job ends at a **finalized, speaker-tagged transcript turn**. That turn is then forwarded
-to two consumers at once by `listenService.handleTranscriptionComplete` (`listenService.js:99-107`):
+to two consumers at once by `listenService.handleTranscriptionComplete` (`listenService.js:105-112`):
 
 1. **Persistence** → `sttRepository.addTranscript()` writes it to the `transcripts` table
-   (`listenService.js:118`).
+   (`listenService.js:123`).
 2. **Live Insights** → `summaryService.addConversationTurn()` feeds the rolling-summary engine
-   (`listenService.js:106`), which produces the **"Live insights"** panel.
+   (`listenService.js:111`), which produces the **"Live insights"** panel.
 
 The insights panel starts every session showing **"No insights yet…"** and only fills after the
 **5th** finalized turn (then refreshes every 5 turns). And critically, the **Ask** feature does
 **not** receive this transcript — pressing Ask sends only your typed text + a fresh screenshot.
+Settings → **Live panels** can turn Live Insights or Live Answer off; the transcript is captured
+and saved the same way in every mode.
 
 The full story of how a live conversation becomes insights and answers — including the
 "interviewer asks a question, how do I get an answer?" walkthrough — is documented separately:

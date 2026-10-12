@@ -24,7 +24,7 @@ top-down — the cheapest checks are first.
 |---|---|---|
 | Providers configured? | Settings shows a selected STT **and** LLM model | Add an STT key (OpenAI/Gemini/Deepgram/Whisper) **and** an LLM key (or sign in / install Ollama). STT-only or LLM-only is not enough. |
 | Mic permission | OS mic permission for Glass | Grant it; on macOS use the in-app permission flow. |
-| STT session actually started? | Logs: `✅ Both STT sessions initialized successfully.` (`sttService.js:474`) | If you see 10 failed init attempts (`listenService.js:179-192`), the STT key/model is bad or the provider is unreachable. |
+| STT session actually started? | Logs: `✅ Both STT sessions initialized successfully.` (`sttService.js:474`) | If you see 10 failed init attempts (`listenService.js:194-207`), the STT key/model is bad or the provider is unreachable. |
 | Right model selected | Settings → STT model | A model whose provider has no key won't be auto-selected (`_autoSelectAvailableModels`). |
 
 ---
@@ -83,7 +83,7 @@ This is the AEC (acoustic echo cancellation) path failing to subtract speaker bl
 | Log line | Meaning | Source |
 |---|---|---|
 | `✅ Both STT sessions initialized successfully.` | STT up | `sttService.js:474` |
-| `[ListenService] STT init attempt N failed` | retrying init (max 10) | `listenService.js:185` |
+| `[ListenService] STT init attempt N failed` | retrying init (max 10) | `listenService.js:200` |
 | `SystemAudioDump started with PID:` | macOS system audio up | `sttService.js:653` |
 | `Windows native loopback audio capture started` | Windows `"Them"` up | `listenCapture.js:558` |
 | `🔊 No system audio for AEC reference` | no echo reference (no `"Them"`) | `listenCapture.js:325` |

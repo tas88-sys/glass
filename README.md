@@ -172,6 +172,8 @@ On **Linux**, system-audio loopback is disabled (`getDisplayMedia({audio:false})
 - Output is parsed into TLDR, bullet points, action items, and suggested follow-up questions
 - Persisted with UPSERT to the `summaries` table (one row per session)
 
+**Live panels** (Settings, below Automatic Updates): run **Answer + Insights** (the default), **Answer only** or **Insights only**. A panel that is off makes no LLM call, so on a tight quota (such as Groq's free plan) Answer only saves the summary calls. With Insights off, no summary is saved for the session. The transcript and Ask work the same in every mode. Details: [`docs/LIVE_INSIGHTS_AND_ASK.md`](docs/LIVE_INSIGHTS_AND_ASK.md) §4.8.
+
 **Career context for Live Answer (optional)** (`src/features/common/career/`):
 
 - When the interviewer asks about your own background, Live Answer can answer in first person from a local folder of your career notes (markdown or text).

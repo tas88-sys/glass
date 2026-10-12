@@ -25,11 +25,17 @@ to understanding the interview scenario in §5.
 | Engine | `summaryService.js` (analysis lane) | `summaryService.js` (answer lane — additive, independent) | `askService.js` |
 | UI | `SummaryView` (the "Live insights" tab) | `LiveAnswerView` (above `<summary-view>` in insights pane) | `AskView` (separate window) |
 | Safety | n/a | Answer rendered ONLY in the content-protected listen window; never logged | n/a |
+| Can be turned off | Yes — Settings → **Live panels: Answer only** (§3.6) | Yes — Settings → **Live panels: Insights only** (§4.8) | No |
 
 > **The one-sentence version:** *Live Insights summarizes; Live Answer directly answers. Both
 > "hear" the room. Ask answers what you type or what's on your screen.* The answer lane and the
 > insights lane share the conversation history but no mutable state — deleting either leaves the
 > other unchanged (FR-017).
+
+> **Either lane can be off.** Settings → **Live panels** cycles Answer + Insights (default) →
+> Answer only → Insights only. A lane that is off makes no LLM call, sends nothing to the window
+> and its pane is hidden; the change applies from the next turn. The transcript and Ask work the
+> same in every mode.
 
 ---
 
@@ -37,7 +43,7 @@ to understanding the interview scenario in §5.
 
 Each finalized utterance (after the 2 s completion debounce — see
 [`AUDIO_AND_STT.md` §1](AUDIO_AND_STT.md)) fires the STT callback, which `listenService`
-forwards two places at once (`listenService.js:99-107`):
+forwards two places at once (`listenService.js:105-112`):
 
 ```
 sttService  ──onTranscriptionComplete(speaker, text)──►  listenService.handleTranscriptionComplete
@@ -50,7 +56,7 @@ sttService  ──onTranscriptionComplete(speaker, text)──►  listenService
 ```
 
 So **every** `"Me"`/`"Them"` turn that lands in the transcript is also pushed into the insights
-engine as a string `"me: …"` / `"them: …"` (`summaryService.js:666-676`).
+engine as a string `"me: …"` / `"them: …"` (`summaryService.js:688-698`).
 
 ---
 
@@ -58,9 +64,9 @@ engine as a string `"me: …"` / `"them: …"` (`summaryService.js:666-676`).
 
 ### 3.1 What the panel is
 
-The Listen window opens on the **"Live insights"** view by default (`ListenView.js:436`,
+The Listen window opens on the **"Live insights"** view by default (`ListenView.js:443`,
 label at `:632`), with a toggle button to **"Show Transcript"** / **"Show Insights"**
-(`ListenView.js:546-549`, `:642-658`). The insights view is the `SummaryView` Lit component
+(`ListenView.js:580-583`, `:680-697`). The insights view is the `SummaryView` Lit component
 (`src/ui/listen/summary/SummaryView.js`); the transcript view is `SttView`.
 
 ### 3.2 Why it says "No insights yet…"
@@ -80,13 +86,14 @@ ${!hasAnyContent
 
 The component starts with empty arrays (`SummaryView.js:244-249`) and is reset to empty at the
 start of every new Listen session (`resetAnalysis()`, `:281-289`, called from
-`ListenView.js:469`). So **"No insights yet…" is the normal state at the start of every
+`ListenView.js:480`). So **"No insights yet…" is the normal state at the start of every
 session** — it is not an error.
 
 ### 3.3 When it gets filled — the every-5-turns rule
 
 Insights are produced by `summaryService.triggerAnalysisIfNeeded()`, which runs after **every**
-conversation turn but only *fires an analysis* on multiples of 5 (`summaryService.js:963-964`):
+conversation turn but only *fires an analysis* on multiples of 5 (`summaryService.js:1024`).
+With Live Insights off it returns before this test (`:1023`, §3.6):
 
 ```js
 if (this.conversationHistory.length >= 5 && this.conversationHistory.length % 5 === 0) {
@@ -118,10 +125,10 @@ manual "analyze now"** button — the cadence is purely turn-count driven.
 
 ### 3.4 What populates each section
 
-`makeOutlineAndRequests()` (`summaryService.js:728-845`) builds the prompt and calls the LLM:
+`makeOutlineAndRequests()` (`summaryService.js:769-886`) builds the prompt and calls the LLM:
 
 1. **Prompt** = the `pickle_glass_analysis` system profile with its `{{CONVERSATION_HISTORY}}`
-   token replaced by the **last 30 turns** (`summaryService.js:751-752`,
+   token replaced by the **last 30 turns** (`summaryService.js:792-793`,
    `formatConversationForPrompt`, `:723-726`), plus the **previous analysis** folded back in for
    continuity (`:739-749`), plus a hardcoded user message that requests this exact shape
    (`:772-792`):
@@ -134,7 +141,7 @@ manual "analyze now"** button — the cadence is purely turn-count driven.
    ```
 
 2. **LLM call** is **non-streaming** — `createLLM(provider).chat(messages)`
-   (`summaryService.js:798-807`) — unlike Ask, which streams.
+   (`summaryService.js:839-848`) — unlike Ask, which streams.
 
 3. **Parse** — `parseResponseText()` (`:847-958`) turns the markdown into
    `{ summary, topic{header,bullets}, actions, followUps }` and always appends the default
@@ -151,17 +158,37 @@ The rendered sections (`SummaryView.render`, `:455-547`):
 | **Current Summary** | `data.summary` | up to 5 bullets |
 | **Key Topic: …** | `data.topic` | header + up to 3 bullets |
 | **Actions** | `data.actions` | suggested questions + the two default prompts |
-| **Follow-Ups** | `data.followUps` | only shown **after** the session ends (`hasCompletedRecording`, `ListenView.js:474`, `SummaryView.js:528`) |
+| **Follow-Ups** | `data.followUps` | only shown **after** the session ends (`hasCompletedRecording`, `ListenView.js:485`, `SummaryView.js:528`) |
 
 ### 3.5 Insights are clickable → they forward into Ask
 
 Every summary / topic / action line is clickable. Clicking one calls
 `handleRequestClick()` → `window.api.summaryView.sendQuestionFromSummary(text)`
-(`SummaryView.js:406-425`, `preload.js:207`), which routes to
-`ask:sendQuestionFromSummary` → `askService.sendMessage(text)` (`featureBridge.js:135-144`).
+(`SummaryView.js:406-425`, `preload.js:212`), which routes to
+`ask:sendQuestionFromSummary` → `askService.sendMessage(text)` (`featureBridge.js:160-169`).
 **This is the only built-in bridge from the transcript world into Ask** — and even then, only
 the **clicked text** crosses over (see §4). It is **rejected unless Ask is in `default` mode**
-(`featureBridge.js:136-142`); the error is surfaced to the user (`SummaryView.js:413-419`).
+(`featureBridge.js:161-167`); the error is surfaced to the user (`SummaryView.js:413-419`).
+
+### 3.6 Turning Live Insights off
+
+Settings → **Live panels: Answer only** turns this lane off (the setting is described in §4.8).
+From the next turn:
+
+- `triggerAnalysisIfNeeded` returns before the every-5-turns test (`summaryService.js:1023`): no
+  `llm.chat()` call, no `summary-update`, and **no summary is saved** for the session. The web
+  Activity page shows the transcript and no summary block, as it does today for a session shorter
+  than 5 turns.
+- The Summary pane is hidden. The Listen window is titled **"Live answer"**, its toggle reads
+  **"Show Answer"**, and until the first answer the pane says *"Waiting for a question..."*
+  (`LiveAnswerView.js:437`). The copy button copies the answers, each under its question, newest
+  first (`ListenView.js:651`); its hover text is "Copy Glass Answer".
+- An analysis already waiting on its call when Insights goes off still finishes and is shown.
+- Turned back on, the next analysis runs at the next multiple of 5 turns, not at once.
+
+This takes about a quarter of a typical hour's LLM tokens off the bill (spec
+`2026-10-12-live-features-toggle`, research R2), and on a per-minute token limit (Groq's free
+plan) it leaves the minute to the answers.
 
 ---
 
@@ -174,7 +201,8 @@ deleting either leaves the other unchanged.
 ### 4.1 How it triggers
 
 After every `addConversationTurn(speaker, text)` call, `triggerAnswerIfNeeded` runs beside
-`triggerAnalysisIfNeeded`. Four gates decide whether an answer stream starts:
+`triggerAnalysisIfNeeded`. With Live Answer off it returns at once (`summaryService.js:581`,
+§4.8). Otherwise four gates decide whether an answer stream starts:
 
 1. **Speaker gate** — `speaker.toLowerCase() !== 'them'` → skip. Only the interviewer's turns trigger answers (FR-001).
 2. **Question heuristic** — `isLikelyQuestion(text)` (FR-002). A turn counts as a question when any of these holds:
@@ -468,6 +496,46 @@ Both scripts read `CAREER_KB_PATH` from `.env` and use the app's vector cache
 
 **Rollback.** Unset `CAREER_KB_PATH`.
 
+### 4.8 Turning Live Answer off (the Live panels setting)
+
+Settings → **Live panels** (below Automatic Updates, `SettingsView.js:1765`) cycles three modes.
+Each press saves the next one:
+
+| Button | Live Answer | Live Insights |
+|---|---|---|
+| **Answer + Insights** (default) | runs | runs |
+| **Answer only** | runs | off (§3.6) |
+| **Insights only** | off | runs |
+
+**Insights only.** `triggerAnswerIfNeeded` returns as its first statement
+(`summaryService.js:581`): no company detection, no prefetch, no debounce, no stream, no
+`live-answer-update`. The answer pane is hidden; the window keeps its "Live insights" labels.
+The career notes still warm up at session start (`listenService.js:182`); that work is local and
+spends no tokens, so the lane is ready if it is turned back on mid-call.
+
+**Turned off mid-question.** `setLiveFeatures` calls `pauseLiveAnswer()`
+(`summaryService.js:727`): the pending debounce is cleared and a streaming answer is aborted
+through the abort-and-replace path. The cut answer stays in the pane as far as it got, and no more
+answer text, `unverified` payload or error follows; only `status: 'idle'` may follow, to clear a
+"Trying …" line. Unlike `resetLiveAnswer()` (§4.5), the pause keeps `lastAnsweredTail`,
+`careerPrev` and `activeCompany`. Turned back on, the next question answers.
+
+**Where the mode lives.**
+
+- Stored as `liveFeatures` (`'both' | 'answer' | 'insights'`) in the per-user settings store,
+  default `'both'` (`settingsService.js:221`). Any other value reads as `'both'`. No database
+  change.
+- `src/features/listen/liveFeatures.js` holds the rule, the cycle and the labels. It has no
+  dependencies, so the main process and the renderer bundle load the same file.
+- `settings:getLiveFeatures` returns `{ mode, answer, insights }`. `settings:setLiveFeatures`
+  refuses a mode outside the three. Otherwise it saves the mode, applies it to the running
+  session and pushes `listen:liveFeaturesChanged` to the Listen window (`featureBridge.js:135-156`).
+  A failed save changes nothing.
+- A new session reads the saved mode before its first turn (`listenService.js:151-159`). The
+  Listen window reads it when it opens, at each session start and on every push.
+- A change applies from the next turn, with no restart and no new session. Each change logs
+  `[Live] features=<mode>` (the mode name only).
+
 ---
 
 ## 5. Ask — and why it does not hear the interviewer
@@ -479,7 +547,7 @@ matters most for the interview scenario:
 > conversationHistoryRaw=[])` (`askService.js:219`) *can* accept conversation history and would
 > format the last 30 turns (`_formatConversationForPrompt`, `:207-212`) — but **every** caller
 > passes only the prompt: `ask:sendQuestionFromAsk` and `ask:sendQuestionFromSummary` both call
-> `askService.sendMessage(userPrompt)` with no second argument (`featureBridge.js:134`, `:143`),
+> `askService.sendMessage(userPrompt)` with no second argument (`featureBridge.js:159`, `:168`),
 > and the screenshot-only path passes `[]` explicitly (`askService.js:154`).
 
 So when you press Ask, the model receives exactly: **the system prompt + your typed text + one
@@ -555,7 +623,7 @@ Pick based on what kind of question it is:
    (or paste it), press Enter. This is the most reliable way to get a direct answer to a
    *specific* spoken question, because you're handing the model the exact text. Choose the Ask
    **mode** to match: `default` for general, `code` for a coding problem, `debug` to fix code on
-   screen, `system_design` for a design prompt (`featureBridge.js:82`,
+   screen, `system_design` for a design prompt (`featureBridge.js:83`,
    [`../ARCHITECTURE.md` §13](../ARCHITECTURE.md)).
 
 4. **Screenshot-only Ask (when the question is on the screen).** If the interviewer's prompt is
@@ -585,16 +653,16 @@ Pick based on what kind of question it is:
   `getSystemPrompt('pickle_glass_analysis', conversationHistory, false)` (`askService.js:288`),
   which places the (empty) history in the *"User-provided context"* slot but does **not** replace
   the profile's trailing `{{CONVERSATION_HISTORY}}` token (`promptTemplates.js:402`) — only the
-  *summary* path calls `.replace('{{CONVERSATION_HISTORY}}', …)` (`summaryService.js:752`). So in
+  *summary* path calls `.replace('{{CONVERSATION_HISTORY}}', …)` (`summaryService.js:793`). So in
   `default` Ask mode the literal string `{{CONVERSATION_HISTORY}}` reaches the model. Cosmetic
   today (models ignore it); it would matter if/when Listen→Ask history is wired.
 - **Insights are non-streaming; Ask streams.** The panel updates in one shot per analysis
-  (`summaryService.js:807`); Ask renders token-by-token (`askService._processStream`,
+  (`summaryService.js:848`); Ask renders token-by-token (`askService._processStream`,
   `:401-474`).
 - **One summary row per session.** The `summaries` table is UPSERTed, not appended
-  (`summaryService.js:813-826`) — the panel reflects the latest rolling analysis, not a history.
+  (`summaryService.js:854-867`) — the panel reflects the latest rolling analysis, not a history.
 - **Follow-Ups appear only after Stop.** They're gated on `hasCompletedRecording`
-  (`ListenView.js:473-477`, `SummaryView.js:528`), so they show up once the session ends, not
+  (`ListenView.js:484-488`, `SummaryView.js:528`), so they show up once the session ends, not
   mid-conversation.
 
 ---
@@ -608,6 +676,8 @@ Pick based on what kind of question it is:
 | Live Insights UI ("No insights yet…") | `src/ui/listen/summary/SummaryView.js` |
 | Live Answer UI (streamed markdown, above `<summary-view>`) | `src/ui/listen/summary/LiveAnswerView.js` |
 | Live Answer tests (pure helpers + integration) | `src/features/listen/summary/__tests__/liveAnswer.test.js`, `liveAnswerCareer.test.js` |
+| Live panels setting (which lanes run, the cycle, the window labels) | `src/features/listen/liveFeatures.js` (tests `src/features/listen/__tests__/liveFeatures.test.js`; lane gates `src/features/listen/summary/__tests__/summaryService.liveFeatures.test.js`) |
+| Live panels button | `src/ui/settings/SettingsView.js` |
 | Career context (router, retrieval, context block, embedder) | `src/features/common/career/` (entry point `index.js`) |
 | Career context eval | `scripts/eval-career-kb.js` |
 | Career retrieval for one question | `scripts/ask-career-kb.js` |
@@ -615,7 +685,7 @@ Pick based on what kind of question it is:
 | Ask answer engine | `src/features/ask/askService.js` |
 | Ask UI | `src/ui/ask/AskView.js` |
 | Prompt profiles | `src/features/common/prompts/promptTemplates.js`, `promptBuilder.js` |
-| IPC wiring (incl. `live-answer-update` channel) | `src/bridge/featureBridge.js`, `src/preload.js` |
+| IPC wiring (incl. `live-answer-update`, `settings:getLiveFeatures` / `settings:setLiveFeatures`, `listen:liveFeaturesChanged`) | `src/bridge/featureBridge.js`, `src/preload.js` |
 | Ask hotkey | `src/features/shortcuts/shortcutsService.js` (`:213-214`) |
 
 ---
