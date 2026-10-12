@@ -6,6 +6,43 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 
 ## [Unreleased]
 
+### Groq provider (branch `2026-10-12-groq-provider`)
+
+#### Added
+
+- **Groq as an LLM provider** (`groq.js`, through the official `groq-sdk`).
+  - Presets: `openai/gpt-oss-120b` (default), `openai/gpt-oss-20b` and `qwen/qwen3.8-27b`.
+  - A "Groq LLM Model ID" field in Settings takes a comma-separated list of `vendor/model` IDs, tried in order.
+  - Any `vendor/model` ID maps to Groq. Installed Ollama models are matched first.
+- **Failover modelled on the Anthropic provider's**, for Ask, Live Answer and Live Insights:
+  - cooldowns per model, `_reset` / `_final_model`;
+  - a 15 s first-text timeout, a 15 s idle timeout once text streams, and a 45 s deadline for an answer to start;
+  - a second round after 2 s for fast failures; the SDK never retries;
+  - a short `userMessage`, and one log line per attempt with the tokens left this minute (`tpm_left`) and no prompt, answer or reasoning text.
+- **Groq-specific handling:**
+  - The attempt stops at `finish_reason` and closes the connection, because groq-sdk reads past `[DONE]` until the server closes it.
+  - `x_groq.error` fails the attempt.
+  - A 413 "request too large" (one request over the key's per-minute limit) moves to the next model with no cooldown, and the message gives the numbers.
+- **Image routing.** Only `qwen/qwen3.8-27b` sees images. An Ask with a screenshot tries it first; text-only models get the question without the image.
+- **Reasoning per family.**
+  - gpt-oss runs at `low` effort with `include_reasoning: false`, so the reasoning text is never sent back.
+  - qwen3 runs in instruct mode (`none`).
+  - Reasoning gets 1024 tokens on top of the caller's cap.
+- **Error classifier `groqErrors.js`**, which reads both body shapes groq-sdk keeps. Its kinds are `transient`, `unavailable` (404 or a `model_…` code), `too-large`, `fatal-request` and `fatal-auth`.
+- **Optional tuning:** `GROQ_REASONING_EFFORT`, `GROQ_MAX_TOKENS`, `GROQ_REASONING_TOKENS`, `GROQ_FIRST_TEXT_TIMEOUT_MS`, `GROQ_REQUEST_DEADLINE_MS`, `GROQ_IDLE_TIMEOUT_MS`.
+- **Scripts.** `scripts/smoke-groq-sdk.js` checks that the SDK loads and streams under Electron's Node. `scripts/probe-groq-stream.js` prints the shape of one live streamed answer, with no text.
+
+#### Changed
+
+- **New dependency `groq-sdk` ^1.6.0**, which has no transitive dependencies.
+- **"Remove all API keys" removes the Groq key too.** The onboarding footer names Groq.
+
+#### Docs
+
+- `ARCHITECTURE.md` §10 is now "Gemini, Anthropic and Groq failover", with a new §10.3 and the Groq provider rows.
+- New `docs/diagrams/16-groq-failover.mmd`. Diagram 10 now shows the Groq entry and the `vendor/model` rule.
+- `docs/LIVE_INSIGHTS_AND_ASK.md` §4.6, `docs/AUDIO_AND_STT.md` and the README name Groq.
+
 ### Anthropic provider resilience (branch `2026-10-11-anthropic-provider-resilience`)
 
 #### Fixed

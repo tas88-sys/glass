@@ -13,7 +13,7 @@ flowchart TB
             svc["Services<br/>askService · listenService · sttService<br/>summaryService · settingsService<br/>modelStateService · authService"]
             bridges["IPC Bridges<br/>featureBridge · windowBridge · internalBridge"]
             repos["Repository Factory<br/>(SQLite ⇆ Firebase adapter)"]
-            ai["AI Provider Factory<br/>(OpenAI · Gemini · Anthropic · Deepgram · Ollama · Whisper)"]
+            ai["AI Provider Factory<br/>(OpenAI · Gemini · Anthropic · Groq · Deepgram · Ollama · Whisper)"]
             winmgr["windowManager<br/>(window pool + content protection)"]
         end
 
@@ -45,7 +45,7 @@ flowchart TB
         firebase[("Firebase Auth + Firestore")]
         functions["Cloud Functions<br/>pickleGlassAuthCallback"]
         vkey["Pickle virtual-key API<br/>(Portkey-routed OpenAI)"]
-        providers["LLM/STT provider APIs<br/>OpenAI · Gemini · Anthropic · Deepgram"]
+        providers["LLM/STT provider APIs<br/>OpenAI · Gemini · Anthropic · Groq · Deepgram"]
     end
 
     user <--> header

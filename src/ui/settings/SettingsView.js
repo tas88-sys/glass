@@ -515,7 +515,7 @@ export class SettingsView extends LitElement {
         //////// after_modelStateService ////////
         this.shortcuts = {};
         this.firebaseUser = null;
-        this.apiKeys = { openai: '', gemini: '', anthropic: '', whisper: '' };
+        this.apiKeys = { openai: '', gemini: '', anthropic: '', groq: '', whisper: '' };
         this.providerConfig = {};
         this.isLoading = true;
         this.isContentProtectionOn = true;
@@ -810,6 +810,34 @@ export class SettingsView extends LitElement {
         }
     }
 
+    async handleSaveGroqModels() {
+        const llmInput = this.shadowRoot.querySelector('#groq-llm-model-input');
+        // Trim and normalise: split on ',', trim each entry, drop empties, rejoin
+        const llmRaw = llmInput ? llmInput.value : '';
+        const llmTokens = llmRaw.split(',').map(s => s.trim()).filter(s => s.length > 0);
+        const llmValue = llmTokens.join(',');
+
+        // Every entry must be a Groq model: vendor/model (Groq has no real-time STT)
+        for (const token of llmTokens) {
+            if (token.startsWith('claude-') || token.startsWith('gemini-') || !/^[^\s/]+\/\S+$/.test(token)) {
+                alert(`Invalid Groq LLM model ID: "${token}". Groq IDs are vendor/model, e.g. openai/gpt-oss-120b.`);
+                return;
+            }
+        }
+        if (!llmValue) return;
+
+        this.saving = true;
+        try {
+            await window.api.settingsView.setSelectedModel({ type: 'llm', modelId: llmValue });
+            await this.refreshModelData();
+        } catch (err) {
+            console.error('[SettingsView] Failed to save Groq models:', err);
+            alert(`Failed to save Groq models: ${err.message || err}`);
+        } finally {
+            this.saving = false;
+        }
+    }
+
     async refreshModelData() {
         const [availableLlm, availableStt, selected, storedKeys] = await Promise.all([
             window.api.settingsView.getAvailableModels({ type: 'llm' }),
@@ -993,6 +1021,11 @@ export class SettingsView extends LitElement {
         // Same rule as inferProviderFromModelId in factory.js (the renderer cannot require it).
         if (type === 'llm' && typeof modelId === 'string' && modelId.trim().startsWith('claude-')) {
             return 'anthropic';
+        }
+        // 'vendor/model' is Groq, unless it names an installed Ollama model.
+        if (type === 'llm' && typeof modelId === 'string' && !this.ollamaModels?.some(m => m.name === modelId)) {
+            const first = modelId.split(',').map(s => s.trim()).find(Boolean) || '';
+            if (/^[^\s/]+\/\S+$/.test(first)) return 'groq';
         }
         return null;
     }
@@ -1358,6 +1391,9 @@ export class SettingsView extends LitElement {
                         const anthropicLlmValue = (id === 'anthropic' && this.getProviderForModel('llm', this.selectedLlm) === 'anthropic')
                             ? this.selectedLlm
                             : '';
+                        const groqLlmValue = (id === 'groq' && this.getProviderForModel('llm', this.selectedLlm) === 'groq')
+                            ? this.selectedLlm
+                            : '';
                         return html`
                         <div class="provider-key-group">
                             <label for="key-input-${id}">${config.name} API Key</label>
@@ -1402,6 +1438,21 @@ export class SettingsView extends LitElement {
                                 </p>
                                 <div class="key-buttons">
                                     <button class="settings-button" @click=${() => this.handleSaveAnthropicModels()}>Save Anthropic Models</button>
+                                </div>
+                            ` : ''}
+                            ${id === 'groq' ? html`
+                                <label for="groq-llm-model-input" style="margin-top: 8px;">Groq LLM Model ID</label>
+                                <input type="text" id="groq-llm-model-input"
+                                    placeholder="e.g. openai/gpt-oss-120b"
+                                    .value=${groqLlmValue}
+                                >
+                                <p style="font-size: 11px; opacity: 0.6; margin: 4px 0 8px 0; line-height: 1.4;">
+                                    Comma-separated list for failover. Groq IDs are vendor/model.
+                                    Rate limits, overloads and timeouts skip to the next; screenshots go first to models that see images.
+                                    Example: <code style="font-size: 10px;">openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b</code>
+                                </p>
+                                <div class="key-buttons">
+                                    <button class="settings-button" @click=${() => this.handleSaveGroqModels()}>Save Groq Models</button>
                                 </div>
                             ` : ''}
                         </div>

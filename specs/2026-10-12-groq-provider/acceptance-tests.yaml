@@ -1,0 +1,303 @@
+# Acceptance Tests Manifest (v2)
+# Feature: Groq Provider.
+# Hand-authored in the /tasks format (SpecKit not installed on this machine).
+# Deterministic checks cover structure, scope guards and the test suite.
+# Live API behavior (SC-001, SC-006) is manual and needs the user's Groq key,
+# so it is tagged environment local-key.
+
+# --- Root Fields ---
+_version: 2
+spec_id: "2026-10-12-groq-provider"
+spec_name: "groq-provider"
+
+# --- Staleness Detection (v2 required) ---
+generation_context:
+  generated_at: "2026-10-12T00:00:00Z"
+  spec_hash: "00b67645ebb2b565ee66574af3b7adce0ba96f9e010df7cd9a0142bc5b4c664b"
+  plan_hash: "69a615542fa2cd569222d12a11139a8397c59c0c2d65c44debbba02f04ccd242"
+  tasks_hash: "9a4e790faa3fec855c1e9568ea59d4eb81bc89e485c6aa3d2bd139fd57158a74"
+
+# --- Drift Detection (v2 required) ---
+_references:
+  tables: []
+  routes: []
+  files:
+    - "src/features/common/ai/providers/groq.js"
+    - "src/features/common/ai/providers/groqErrors.js"
+    - "src/features/common/ai/providers/modelHealth.js"
+    - "src/features/common/ai/factory.js"
+    - "src/features/common/services/modelStateService.js"
+    - "src/features/settings/settingsService.js"
+    - "src/ui/settings/SettingsView.js"
+    - "src/ui/app/ApiKeyHeader.js"
+    - "scripts/smoke-groq-sdk.js"
+    - "scripts/probe-groq-stream.js"
+    - "package.json"
+  ecs_tasks: []
+
+# --- Supported Environments ---
+# local: repo only. local-key: repo + a valid Groq API key in Settings (live calls cost money and use rate limits).
+environments: [local, local-key]
+
+# =============================================================================
+# CLI TESTS (deterministic)
+# =============================================================================
+cli_tests:
+  - id: "AT-CLI-001"
+    requirement: "FR-006..FR-011, FR-015, FR-016, contracts"
+    environments: [local]
+    command: "node -e \"const m=require('./src/features/common/ai/providers/groq.js');const need=['GroqProvider','createSTT','createLLM','createStreamingLLM','modelTraits','buildRequest','orderForImages','firstTextTimeoutMs','requestDeadlineMs','idleTimeoutMs'];const miss=need.filter(k=>!m[k]);const e=require('./src/features/common/ai/providers/groqErrors.js');for(const k of ['classify','retryAfterMs','retryAfterHeaderMs','shortErrorMessage','tooLargeNumbers','errorCode'])if(typeof e[k]!=='function')miss.push('groqErrors.'+k);if(miss.length){console.error('missing: '+miss.join(','));process.exit(1)}\""
+    expected_exit_code: 0
+    description: "The provider and classifier export the contract surface."
+    severity: critical
+
+  - id: "AT-CLI-002"
+    requirement: "SC-005, FR-006, FR-008, FR-009, FR-010, C5, C7"
+    environments: [local]
+    command: "node -e \"const {buildRequest}=require('./src/features/common/ai/providers/groq.js');const ids=['openai/gpt-oss-120b','openai/gpt-oss-20b','qwen/qwen3.8-27b','acme/foo-1'];const img={type:'image_url',image_url:{url:'data:image/jpeg;base64,AAAA'}};const msgs=[{role:'system',content:'s'},{role:'user',content:[{type:'text',text:'q'},img]}];const banned=['max_tokens','top_p','logprobs','logit_bias','top_logprobs','n','stream_options','service_tier','tools','response_format'];const bad=[];for(const id of ids)for(const mode of ['stream','once']){const {params:p}=buildRequest({modelId:id,messages:msgs,maxTokens:900,temperature:0.7,mode,env:{}});if(p.stream!==true)bad.push(id+':stream');if(!(p.max_completion_tokens>0))bad.push(id+':budget');for(const k of banned)if(k in p)bad.push(id+':'+k);if('include_reasoning' in p&&'reasoning_format' in p)bad.push(id+':both');const hasImg=JSON.stringify(p.messages).includes('image_url');if(id!=='qwen/qwen3.8-27b'&&hasImg)bad.push(id+':image');if(id==='qwen/qwen3.8-27b'&&!hasImg)bad.push(id+':no-image');if(id==='acme/foo-1'&&('reasoning_effort' in p||'include_reasoning' in p||'reasoning_format' in p))bad.push(id+':reasoning');if(id.startsWith('openai/')&&(p.include_reasoning!==false||p.reasoning_effort!=='low'||p.max_completion_tokens!==1924))bad.push(id+':gpt-oss');if(id==='qwen/qwen3.8-27b'&&(p.reasoning_effort!=='none'||p.max_completion_tokens!==900))bad.push(id+':qwen');if(p.temperature!==0.7)bad.push(id+':temperature');if(p.messages.some(x=>'name' in x))bad.push(id+':name')}if(bad.length){console.error(bad.join(','));process.exit(1)}\""
+    expected_exit_code: 0
+    description: "Every request streams with the caller's cap plus the reasoning allowance (900 + 1024 on gpt-oss, 900 on Qwen at none); no forbidden field; reasoning fields only for their family and never both forms; images only to the vision model; temperature passed through."
+    severity: critical
+
+  - id: "AT-CLI-003"
+    requirement: "FR-001, D10"
+    environments: [local]
+    command: "node -e \"const {PROVIDERS}=require('./src/features/common/ai/factory.js');const g=PROVIDERS.groq;const ids=g?g.llmModels.map(m=>m.id).join(','):'';if(ids!=='openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b'||g.name!=='Groq'||g.sttModels.length!==0){console.error(ids);process.exit(1)}\""
+    expected_exit_code: 0
+    description: "Groq is registered with exactly the three active chat models, in order, and no STT model."
+    severity: critical
+
+  - id: "AT-CLI-004"
+    requirement: "FR-002, D2, FR-024"
+    environments: [local]
+    command: "node -e \"const {inferProviderFromModelId:f}=require('./src/features/common/ai/factory.js');const ok=f('openai/gpt-oss-120b,openai/gpt-oss-20b')==='groq'&&f(' qwen/qwen3.8-27b')==='groq'&&f('claude-haiku-5-5,claude-sonnet-5-5')==='anthropic'&&f('gemini-3-flash-preview')==='gemini'&&f('llama-3.3-70b-versatile')===null&&f('gpt-4.1')===null&&f('a b/c')===null&&f('')===null&&f(null)===null;process.exit(ok?0:1)\""
+    expected_exit_code: 0
+    description: "vendor/model IDs and lists map to Groq; Claude and Gemini mapping unchanged; anything else to none."
+    severity: critical
+
+  - id: "AT-CLI-005"
+    requirement: "FR-001"
+    environments: [local]
+    command: "node -e \"const f=require('./src/features/common/ai/factory.js');const {GroqProvider}=require('./src/features/common/ai/providers/groq.js');process.exit(f.getProviderClass('groq')===GroqProvider&&typeof GroqProvider.validateApiKey==='function'?0:1)\""
+    expected_exit_code: 0
+    description: "The factory resolves the Groq provider class (key validation in Settings depends on it)."
+    severity: critical
+
+  - id: "AT-CLI-006"
+    requirement: "FR-001, R2"
+    environments: [local]
+    command: "node -e \"const fs=require('fs');const files=['src/features/common/ai/providers/groq.js','src/features/common/ai/factory.js'];const re=/llama-3\\.[13]-|qwen3-32b|qwen3\\.6-|llama-4-|kimi-k2|groq\\/compound/;const hits=files.filter(f=>re.test(fs.readFileSync(f,'utf8')));if(hits.length){console.error(hits.join(','));process.exit(1)}\""
+    expected_exit_code: 0
+    description: "No Groq model retired for free and developer tiers is named in the provider or the factory."
+    severity: critical
+
+  - id: "AT-CLI-009"
+    requirement: "FR-005, E59"
+    environments: [local]
+    command: "node -e \"const s=require('fs').readFileSync('src/features/settings/settingsService.js','utf8');process.exit(/providers = \\[[^\\]]*'groq'/.test(s)?0:1)\""
+    expected_exit_code: 0
+    description: "'Remove all API keys' removes the Groq key too."
+    severity: warning
+
+  - id: "AT-CLI-008"
+    requirement: "FR-023, D13, C4"
+    environments: [local]
+    command: "node -e \"require('child_process').execFileSync(require('electron'),['scripts/smoke-groq-sdk.js'],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1'},stdio:'inherit'})\""
+    expected_exit_code: 0
+    description: "groq-sdk loads with require, streams a canned SSE response, raises typed errors and ends quietly on abort under Electron's Node 20.16 (npm test runs a newer Node and would not catch an incompatibility)."
+    severity: critical
+
+  - id: "AT-CLI-007"
+    requirement: "Contracts"
+    environments: [local]
+    command: "npx -p typescript@5.4.5 tsc -p specs/2026-10-12-groq-provider/contracts/tsconfig.json"
+    expected_exit_code: 0
+    description: "The contracts file type-checks."
+    severity: warning
+
+# =============================================================================
+# TEST GATES
+# =============================================================================
+test_gates:
+  - id: "AT-GATE-001"
+    requirement: "All FRs, SC-002..SC-005"
+    environments: [local]
+    command: "npm test"
+    expected_exit_code: 0
+    description: "Full node:test suite green: the new Groq tests, the factory additions, and the pre-existing Anthropic, Gemini, modelHealth and liveAnswer tests."
+    severity: critical
+
+  - id: "AT-GATE-002"
+    requirement: "Code quality"
+    environments: [local]
+    command: "node -e \"const {execSync}=require('child_process');const fs=require('fs');const files=execSync('git diff --name-only origin/main...HEAD',{encoding:'utf8'}).split(String.fromCharCode(10)).map(s=>s.trim()).filter(f=>f.endsWith('.js')&&!f.startsWith('src/ui/')&&fs.existsSync(f));for(const f of files)execSync('node --check \\\"'+f+'\\\"');console.log(files.length+' files ok')\" && npm run build:renderer"
+    expected_exit_code: 0
+    description: "Syntax gate. eslint is not installed in this repo, so npm run lint cannot run. Main-process files changed on the branch pass node --check, and the renderer (src/ui, ES modules) builds with esbuild."
+    severity: warning
+
+# =============================================================================
+# NEGATIVE ASSERTIONS (scope and invariant guards)
+# =============================================================================
+negative_assertions:
+  - id: "AT-NEG-001"
+    requirement: "C2, G3, FR-024"
+    environments: [local]
+    check_type: "cli"
+    command: "node -e \"const {execSync}=require('child_process');const out=execSync('git diff --name-only origin/main...HEAD',{encoding:'utf8'});const p='src/features/common/ai/providers/';const guarded=['gemini.js','geminiModelRotator.js','anthropic.js','anthropicErrors.js','modelHealth.js','__tests__/gemini.test.js','__tests__/geminiModelRotator.test.js','__tests__/anthropic.test.js','__tests__/anthropicErrors.test.js','__tests__/anthropicRequest.test.js','__tests__/modelHealth.test.js'].map(f=>p+f);process.stdout.write(String(out.split(/\\r?\\n/).filter(f=>guarded.includes(f)).length))\""
+    expected_result: "0"
+    description: "The Gemini and Anthropic providers, the shared registry and their tests are not modified."
+    severity: critical
+
+  - id: "AT-NEG-002"
+    requirement: "C1"
+    environments: [local]
+    check_type: "cli"
+    command: "node -e \"const {execSync}=require('child_process');const out=execSync('git diff --name-only origin/main...HEAD',{encoding:'utf8'});const guarded=['src/features/ask/askService.js','src/features/ask/askStreamState.js','src/features/listen/summary/summaryService.js'];process.stdout.write(String(out.split(/\\r?\\n/).filter(f=>guarded.includes(f)).length))\""
+    expected_result: "0"
+    description: "The consumers of the stream protocol are not modified."
+    severity: critical
+
+  - id: "AT-NEG-003"
+    requirement: "C3, FR-021"
+    environments: [local]
+    check_type: "cli"
+    command: "node -e \"const fs=require('fs');let n=0;for(const f of ['groq.js','groqErrors.js']){for(const l of fs.readFileSync('src/features/common/ai/providers/'+f,'utf8').split(/\\r?\\n/)){if(/console\\.(log|warn|error|info)\\(/.test(l)&&/(\\.text\\b|delta\\b|content\\b|reasoning\\b|fullText|chunkText|messages\\b|system\\b)/.test(l))n++}}process.stdout.write(String(n))\""
+    expected_result: "0"
+    description: "No log statement in the Groq provider references answer text, deltas, content, reasoning, messages or the system prompt."
+    severity: critical
+
+  - id: "AT-NEG-004"
+    requirement: "C4, FR-004"
+    environments: [local]
+    check_type: "cli"
+    command: "node -e \"const s=require('fs').readFileSync('src/features/common/ai/providers/groq.js','utf8');process.stdout.write(String((s.match(/\\bfetch\\(|api\\.groq\\.com/g)||[]).length))\""
+    expected_result: "0"
+    description: "No raw HTTP to the Groq API; everything goes through the SDK."
+    severity: critical
+
+  - id: "AT-NEG-005"
+    requirement: "C4, R3"
+    environments: [local]
+    check_type: "cli"
+    command: "node -e \"process.stdout.write(String(require('./package.json').dependencies['groq-sdk']))\""
+    expected_result: "^1.6.0"
+    description: "groq-sdk is the version the spec was written against (FR-023, D13)."
+    severity: critical
+
+  - id: "AT-NEG-006"
+    requirement: "FR-019, D4"
+    environments: [local]
+    check_type: "cli"
+    command: "node -e \"const s=require('fs').readFileSync('src/features/common/ai/providers/groq.js','utf8');const bad=(s.match(/maxRetries\\s*:\\s*[^,}\\s]+/g)||[]).filter(m=>!/:\\s*(0|SDK_MAX_RETRIES)$/.test(m)).length;const pinned=/const SDK_MAX_RETRIES = 0;/.test(s)?0:1;process.stdout.write(String(bad+pinned))\""
+    expected_result: "0"
+    description: "The provider never lets the SDK retry: every maxRetries it sets is 0 or SDK_MAX_RETRIES, which is defined as 0."
+    severity: critical
+
+  - id: "AT-NEG-007"
+    requirement: "FR-024"
+    environments: [local]
+    check_type: "cli"
+    command: "node -e \"const {execSync}=require('child_process');const out=execSync('git diff --numstat origin/main...HEAD -- src/features/common/ai/__tests__/factory.test.js',{encoding:'utf8'}).trim();process.stdout.write(out?out.split(/\\s+/)[1]:'0')\""
+    expected_result: "0"
+    description: "factory.test.js only gains lines: no existing Claude or Gemini assertion is removed or rewritten."
+    severity: critical
+
+# =============================================================================
+# MANUAL VERIFICATION (quickstart.md §4)
+# =============================================================================
+manual_tests:
+  - id: "AT-MANUAL-001"
+    requirement: "FR-004"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Valid key accepted; an invalid one shows 'Invalid Groq API key.' (quickstart #1)."
+    severity: critical
+
+  - id: "AT-MANUAL-002"
+    requirement: "FR-001, FR-006..FR-010, SC-001"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Ask with a screenshot answers on each preset; images dropped on gpt-oss, sent on Qwen; no 400 (quickstart #2)."
+    severity: critical
+
+  - id: "AT-MANUAL-003"
+    requirement: "SC-001"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Live Answer streams from the recommended list; log shows ttft, queue, tpm_left and effort=low (quickstart #3)."
+    severity: critical
+
+  - id: "AT-MANUAL-004"
+    requirement: "FR-022, SC-001"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Live Insights produces a summary through chat() (quickstart #4)."
+    severity: critical
+
+  - id: "AT-MANUAL-005"
+    requirement: "FR-011"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "With the recommended list, an Ask with a screenshot is answered by Qwen first (quickstart #5)."
+    severity: critical
+
+  - id: "AT-MANUAL-006"
+    requirement: "FR-013, FR-014, R17 V5"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "An unknown first model fails over with 'Trying …' and outcome=unavailable; the live error code is recorded (quickstart #6)."
+    severity: critical
+
+  - id: "AT-MANUAL-007"
+    requirement: "FR-020"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "An unknown only model shows the 'not available to this API key' message (quickstart #7)."
+    severity: warning
+
+  - id: "AT-MANUAL-008"
+    requirement: "FR-018, SC-004"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "A replaced Ask request logs 'cancelled' and shows no error (quickstart #8)."
+    severity: critical
+
+  - id: "AT-MANUAL-009"
+    requirement: "SC-006, R17 V4"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "TTFT p50/p95, queue and lowest tpm_left over 20 Live Answers recorded in research.md R14 (quickstart #9)."
+    severity: warning
+
+  - id: "AT-MANUAL-010"
+    requirement: "FR-003, E40, E55, E56"
+    environments: [local]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Settings normalizes a typed Groq list, shows it as (custom), and rejects a Claude entry and an un-namespaced ID by name (quickstart #10)."
+    severity: warning
+
+  - id: "AT-MANUAL-011"
+    requirement: "FR-015, FR-020"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "A 1 ms first-text timeout fails both models with outcome=timeout and the 'All Groq models failed' message (quickstart #11)."
+    severity: warning
+
+  - id: "AT-MANUAL-012"
+    requirement: "FR-013, FR-014, R5, R17 V4"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Spending 20B's per-minute budget gives a 429 on 20B, a _reset and the answer from 120B; the next request skips 20B while it cools down (quickstart #12)."
+    severity: warning

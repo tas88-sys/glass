@@ -304,9 +304,10 @@ class ModelStateService extends EventEmitter {
             const installedModels = ollamaModelRepository.getInstalledModels();
             if (installedModels.some(m => m.name === modelId)) return 'ollama';
         }
-        // A typed ID or CSV list: 'gemini-…' (LLM or STT), 'claude-…' (LLM only).
+        // A typed ID or CSV list: 'gemini-…' (LLM or STT), 'claude-…' and
+        // 'vendor/model' for Groq (LLM only).
         const inferred = inferProviderFromModelId(modelId);
-        if (inferred === 'gemini' || (inferred === 'anthropic' && type === 'llm')) return inferred;
+        if (inferred === 'gemini' || ((inferred === 'anthropic' || inferred === 'groq') && type === 'llm')) return inferred;
         return null;
     }
 
@@ -360,7 +361,7 @@ class ModelStateService extends EventEmitter {
             if (providerId === 'ollama' && type === 'llm') {
                 const installed = ollamaModelRepository.getInstalledModels();
                 available.push(...installed.map(m => ({ id: m.name, name: m.name })));
-            } else if ((providerId === 'gemini' || providerId === 'anthropic') && PROVIDERS[providerId]?.[modelListKey]) {
+            } else if (['gemini', 'anthropic', 'groq'].includes(providerId) && PROVIDERS[providerId]?.[modelListKey]) {
                 const presets = PROVIDERS[providerId][modelListKey];
                 const customId = type === 'llm' ? setting.selected_llm_model : setting.selected_stt_model;
                 if (customId && !presets.some(m => m.id === customId)) {
