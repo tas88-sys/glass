@@ -1,0 +1,241 @@
+# Acceptance Tests Manifest (v2)
+# Feature: Anthropic Provider Resilience.
+# Hand-authored in the /tasks format (SpecKit not installed on this machine).
+# Deterministic checks cover structure, scope guards and the test suite.
+# Live API behavior (SC-001, SC-006) is manual and needs the user's Anthropic
+# key, so it is tagged environment local-key.
+
+# --- Root Fields ---
+_version: 2
+spec_id: "2026-10-11-anthropic-provider-resilience"
+spec_name: "anthropic-provider-resilience"
+
+# --- Staleness Detection (v2 required) ---
+generation_context:
+  generated_at: "2026-10-11T00:00:00Z"
+  spec_hash: "569101a531814741c6d21d92937e8242ed5ffd9b8678ddc5a8d7ae2a9ce6117c"
+  plan_hash: "f5028ad0961493f13e0fd8168a8bb0dbaad46aff3867ac7f40b30e4fa1e918e7"
+  tasks_hash: "70a22af1bc44320f2e0e5ac9e7f39d6a4701ef7ac1ceba93dd5ebe14be5ed988"
+
+# --- Drift Detection (v2 required) ---
+_references:
+  tables: []
+  routes: []
+  files:
+    - "src/features/common/ai/providers/anthropic.js"
+    - "src/features/common/ai/providers/anthropicErrors.js"
+    - "src/features/common/ai/providers/modelHealth.js"
+    - "src/features/common/ai/providers/geminiModelRotator.js"
+    - "src/features/common/ai/factory.js"
+    - "src/features/common/services/modelStateService.js"
+    - "src/ui/settings/SettingsView.js"
+  ecs_tasks: []
+
+# --- Supported Environments ---
+# local: repo only. local-key: repo + a valid Anthropic API key in Settings (live calls cost money).
+environments: [local, local-key]
+
+# =============================================================================
+# CLI TESTS (deterministic)
+# =============================================================================
+cli_tests:
+  - id: "AT-CLI-001"
+    requirement: "FR-005..FR-009, FR-013, FR-014, contracts"
+    environments: [local]
+    command: "node -e \"const m=require('./src/features/common/ai/providers/anthropic.js');const need=['AnthropicProvider','createSTT','createLLM','createStreamingLLM','buildRequest','acceptsEffort','firstTextTimeoutMs','requestDeadlineMs','idleTimeoutMs'];const miss=need.filter(k=>!m[k]);const e=require('./src/features/common/ai/providers/anthropicErrors.js');for(const k of ['classify','retryAfterMs','shortErrorMessage'])if(typeof e[k]!=='function')miss.push('anthropicErrors.'+k);if(miss.length){console.error('missing: '+miss.join(','));process.exit(1)}\""
+    expected_exit_code: 0
+    description: "The provider and classifier export the contract surface."
+    severity: critical
+
+  - id: "AT-CLI-002"
+    requirement: "SC-005, FR-005, C5"
+    environments: [local]
+    command: "node -e \"const {buildRequest}=require('./src/features/common/ai/providers/anthropic.js');const ids=['claude-opus-5-5','claude-sonnet-5-5','claude-haiku-5-5','claude-haiku-4-5'];const msgs=[{role:'system',content:'s'},{role:'user',content:'q'}];let bad=[];for(const id of ids)for(const stream of [true,false]){const {params}=buildRequest({modelId:id,messages:msgs,maxTokens:900,stream,env:{}});for(const k of ['temperature','top_p','top_k','thinking'])if(k in params)bad.push(id+':'+k);if(id==='claude-haiku-4-5'&&params.output_config)bad.push(id+':effort');if(id==='claude-haiku-5-5'&&params.fallbacks)bad.push(id+':fallbacks')}if(bad.length){console.error(bad.join(','));process.exit(1)}\""
+    expected_exit_code: 0
+    description: "No request carries sampling parameters or thinking; effort is not sent to Haiku 4.5; fallbacks are not sent to Haiku 5.5."
+    severity: critical
+
+  - id: "AT-CLI-003"
+    requirement: "FR-001, D9"
+    environments: [local]
+    command: "node -e \"const {PROVIDERS}=require('./src/features/common/ai/factory.js');const ids=PROVIDERS.anthropic.llmModels.map(m=>m.id).join(',');if(ids!=='claude-opus-5-5,claude-sonnet-5-5,claude-haiku-5-5'){console.error(ids);process.exit(1)}\""
+    expected_exit_code: 0
+    description: "Anthropic presets are exactly the three current models, in order."
+    severity: critical
+
+  - id: "AT-CLI-004"
+    requirement: "FR-002"
+    environments: [local]
+    command: "node -e \"const {inferProviderFromModelId:f}=require('./src/features/common/ai/factory.js');const ok=f('claude-haiku-5-5,claude-sonnet-5-5')==='anthropic'&&f('gemini-3-flash-preview')==='gemini'&&f('gpt-4.1')===null&&f('')===null&&f(null)===null;process.exit(ok?0:1)\""
+    expected_exit_code: 0
+    description: "claude- IDs and lists map to Anthropic; gemini- to Gemini; anything else to none."
+    severity: critical
+
+  - id: "AT-CLI-005"
+    requirement: "FR-022, D2"
+    environments: [local]
+    command: "node -e \"const h=require('./src/features/common/ai/providers/modelHealth.js');const r=require('./src/features/common/ai/providers/geminiModelRotator.js');const same=['parseModelList','pickModel','markFailed','markSucceeded','resetHealth'].every(k=>typeof h[k]==='function'&&r[k]===h[k]);const kept=typeof r.classifyError==='function'&&typeof r.parseRetryAfter==='function';process.exit(same&&kept?0:1)\""
+    expected_exit_code: 0
+    description: "The Gemini rotator re-exports the shared registry functions and keeps its own classifier."
+    severity: critical
+
+  - id: "AT-CLI-006"
+    requirement: "FR-001, R1"
+    environments: [local]
+    command: "node -e \"const fs=require('fs');const files=['src/features/common/ai/providers/anthropic.js','src/features/common/ai/factory.js'];const hits=files.filter(f=>/claude-3[-.]/.test(fs.readFileSync(f,'utf8')));if(hits.length){console.error(hits.join(','));process.exit(1)}\""
+    expected_exit_code: 0
+    description: "No retired Claude 3.x model ID remains in the provider or the factory."
+    severity: critical
+
+  - id: "AT-CLI-007"
+    requirement: "Contracts"
+    environments: [local]
+    command: "npx -p typescript@5.4.5 tsc -p specs/2026-10-11-anthropic-provider-resilience/contracts/tsconfig.json"
+    expected_exit_code: 0
+    description: "The contracts file type-checks."
+    severity: warning
+
+# =============================================================================
+# TEST GATES
+# =============================================================================
+test_gates:
+  - id: "AT-GATE-001"
+    requirement: "All FRs, SC-002..SC-005"
+    environments: [local]
+    command: "npm test"
+    expected_exit_code: 0
+    description: "Full node:test suite green: the new Anthropic, modelHealth and factory tests, and the pre-existing gemini and liveAnswer tests."
+    severity: critical
+
+  - id: "AT-GATE-002"
+    requirement: "Code quality"
+    environments: [local]
+    command: "node -e \"const {execSync}=require('child_process');const fs=require('fs');const files=execSync('git diff --name-only origin/main...HEAD',{encoding:'utf8'}).split(String.fromCharCode(10)).map(s=>s.trim()).filter(f=>f.endsWith('.js')&&!f.startsWith('src/ui/')&&fs.existsSync(f));for(const f of files)execSync('node --check \\\"'+f+'\\\"');console.log(files.length+' files ok')\" && npm run build:renderer"
+    expected_exit_code: 0
+    description: "Syntax gate. eslint is not installed in this repo, so npm run lint cannot run. Main-process files changed on the branch pass node --check, and the renderer (src/ui, ES modules) builds with esbuild."
+    severity: warning
+
+# =============================================================================
+# NEGATIVE ASSERTIONS (scope and invariant guards)
+# =============================================================================
+negative_assertions:
+  - id: "AT-NEG-001"
+    requirement: "C2, G3"
+    environments: [local]
+    check_type: "cli"
+    command: "node -e \"const {execSync}=require('child_process');const out=execSync('git diff --name-only origin/main...HEAD',{encoding:'utf8'});const guarded=['src/features/common/ai/providers/gemini.js','src/features/common/ai/providers/__tests__/gemini.test.js','src/features/common/ai/providers/__tests__/geminiModelRotator.test.js'];process.stdout.write(String(out.split(/\\r?\\n/).filter(f=>guarded.includes(f)).length))\""
+    expected_result: "0"
+    description: "gemini.js and both Gemini test files are not modified."
+    severity: critical
+
+  - id: "AT-NEG-002"
+    requirement: "C1"
+    environments: [local]
+    check_type: "cli"
+    command: "node -e \"const {execSync}=require('child_process');const out=execSync('git diff --name-only origin/main...HEAD',{encoding:'utf8'});const guarded=['src/features/ask/askService.js','src/features/ask/askStreamState.js','src/features/listen/summary/summaryService.js'];process.stdout.write(String(out.split(/\\r?\\n/).filter(f=>guarded.includes(f)).length))\""
+    expected_result: "0"
+    description: "The consumers of the stream protocol are not modified."
+    severity: critical
+
+  - id: "AT-NEG-003"
+    requirement: "C3, FR-020"
+    environments: [local]
+    check_type: "cli"
+    command: "node -e \"const fs=require('fs');let n=0;for(const f of ['anthropic.js','anthropicErrors.js']){for(const l of fs.readFileSync('src/features/common/ai/providers/'+f,'utf8').split(/\\r?\\n/)){if(/console\\.(log|warn|error|info)\\(/.test(l)&&/(\\.text\\b|delta\\b|fullText|chunkText|messages\\b|system\\b)/.test(l))n++}}process.stdout.write(String(n))\""
+    expected_result: "0"
+    description: "No log statement in the Anthropic provider references answer text, deltas, messages or the system prompt."
+    severity: critical
+
+  - id: "AT-NEG-004"
+    requirement: "C4, FR-004"
+    environments: [local]
+    check_type: "cli"
+    command: "node -e \"const s=require('fs').readFileSync('src/features/common/ai/providers/anthropic.js','utf8');process.stdout.write(String((s.match(/\\bfetch\\(|api\\.anthropic\\.com/g)||[]).length))\""
+    expected_result: "0"
+    description: "No raw HTTP to the Anthropic API; everything goes through the SDK."
+    severity: critical
+
+  - id: "AT-NEG-005"
+    requirement: "C4, R10"
+    environments: [local]
+    check_type: "cli"
+    command: "node -e \"process.stdout.write(require('./package.json').dependencies['@anthropic-ai/sdk'])\""
+    expected_result: "^0.56.0"
+    description: "The SDK version is unchanged in this spec."
+    severity: warning
+
+# =============================================================================
+# MANUAL VERIFICATION (quickstart.md §3)
+# =============================================================================
+manual_tests:
+  - id: "AT-MANUAL-001"
+    requirement: "FR-004"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Valid key accepted; an invalid one shows 'Invalid Anthropic API key.' (quickstart #1)."
+    severity: critical
+
+  - id: "AT-MANUAL-002"
+    requirement: "FR-001, FR-005, FR-009, SC-001"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Ask with a screenshot answers on each preset; no 400; Opus/Sonnet 5.5 accept the server-side fallback beta (quickstart #2)."
+    severity: critical
+
+  - id: "AT-MANUAL-003"
+    requirement: "SC-001"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Live Answer streams from the chosen list; log shows ttft (quickstart #3)."
+    severity: critical
+
+  - id: "AT-MANUAL-004"
+    requirement: "FR-021, SC-001"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Live Insights produces a summary through chat() (quickstart #4)."
+    severity: critical
+
+  - id: "AT-MANUAL-005"
+    requirement: "FR-011, FR-012"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "An unknown first model fails over with 'Trying …' and outcome=unavailable (quickstart #5)."
+    severity: critical
+
+  - id: "AT-MANUAL-006"
+    requirement: "FR-019"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "An unknown only model shows the 'not available to this API key' message (quickstart #6)."
+    severity: warning
+
+  - id: "AT-MANUAL-007"
+    requirement: "FR-017, SC-004"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "A replaced Ask request logs 'cancelled' and shows no error (quickstart #7)."
+    severity: critical
+
+  - id: "AT-MANUAL-008"
+    requirement: "FR-013, FR-019"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "A 1 ms first-text timeout fails both models with outcome=timeout and the 'All Claude models failed' message (quickstart #8)."
+    severity: warning
+
+  - id: "AT-MANUAL-009"
+    requirement: "SC-006"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "TTFT p50/p95 over 20 Live Answers recorded in research.md R11 (quickstart #9)."
+    severity: warning
