@@ -29,7 +29,7 @@ below and also renderable to SVG via `docs/diagrams/render.sh` / `render.ps1`.
 - [7. The Listen (audio / STT) feature](#7-the-listen-audio--stt-feature)
 - [8. Incremental summarization](#8-incremental-summarization)
 - [9. AI provider abstraction & model state](#9-ai-provider-abstraction--model-state)
-- [10. Gemini and Anthropic failover](#10-gemini-and-anthropic-failover)
+- [10. Gemini, Anthropic and Groq failover](#10-gemini-anthropic-and-groq-failover)
 - [11. Data, persistence & auth](#11-data-persistence--auth)
 - [12. Local AI (Ollama + Whisper)](#12-local-ai-ollama--whisper)
 - [13. Prompts & Ask modes](#13-prompts--ask-modes)
@@ -80,7 +80,7 @@ your microphone is `"Me"` (`sttService.js:82`), the system/loopback audio is `"T
 "interviewer vs you" because the other person comes through system audio — but **two people
 sharing your one microphone are both tagged `"Me"`.** And nothing transcribes at all until you
 have both an LLM key and an STT key configured (`modelStateService.areProvidersConfigured`,
-`modelStateService.js:437-455`).
+`modelStateService.js:438-456`).
 
 **Does transcription + that speaker split work on Windows too?**
 **Yes.** Windows captures system audio via Electron's **native loopback** (the handler at
@@ -164,7 +164,7 @@ flowchart TB
     end
     subgraph cloud["CLOUD (only when signed in)"]
         firebase[("Firebase Auth + Firestore")]
-        providers["LLM/STT APIs: OpenAI · Gemini · Anthropic · Deepgram"]
+        providers["LLM/STT APIs: OpenAI · Gemini · Anthropic · Groq · Deepgram"]
     end
     user <--> header
     header <-->|preload IPC| main
@@ -541,6 +541,7 @@ flowchart TB
         r1["openai · openai-glass (Portkey)"]
         r3["gemini (LLM CSV failover)"]
         r4["anthropic (LLM CSV failover)"]
+        r8["groq (LLM CSV failover, vendor/model IDs)"]
         r5["deepgram (STT only, nova-3)"]
         r6["ollama (LLM, local, dynamic)"]
         r7["whisper (STT, local, main only)"]
@@ -556,19 +557,19 @@ flowchart TB
     settingsui["SettingsView (renders one key field per provider)"] --> keys
 ```
 
-- The **registry** `PROVIDERS` (`factory.js:20-98`) declares each provider's `llmModels` and
+- The **registry** `PROVIDERS` (`factory.js:20-108`) declares each provider's `llmModels` and
   `sttModels`. The factory exposes `createSTT` / `createLLM` / `createStreamingLLM`
-  (`factory.js:118-155`), normalizing the `-glass` suffix via `sanitizeModelId` (`:114-116`).
+  (`factory.js:132-169`), normalizing the `-glass` suffix via `sanitizeModelId` (`:128-130`).
 - **`modelStateService`** is the single arbiter of *which* model and key are live. It stores
   keys + selections in the `provider_settings` table, auto-selects a valid model when keys
   change (`_autoSelectAvailableModels`, `:142-179`), maps a model ID back to its provider
-  (`getProviderForModel`, `:286-311`: presets, then installed Ollama models, then a typed ID or CSV
-  list by prefix through `inferProviderFromModelId` (`factory.js:106`): `gemini-` → Gemini,
-  `claude-` → Anthropic, LLM only), and returns the runtime triple via `getCurrentModelInfo`
-  (`:377-389`).
-- **Configuration gate**: `areProvidersConfigured` (`:437-455`) requires **both** a working LLM
+  (`getProviderForModel`, `:286-312`: presets, then installed Ollama models, then a typed ID or CSV
+  list by prefix through `inferProviderFromModelId` (`factory.js:119`): `gemini-` → Gemini,
+  `claude-` → Anthropic, `vendor/model` (a slash, e.g. `openai/gpt-oss-120b`) → Groq; the last
+  two LLM only), and returns the runtime triple via `getCurrentModelInfo` (`:378-390`).
+- **Configuration gate**: `areProvidersConfigured` (`:438-456`) requires **both** a working LLM
   key and a working STT key — so an STT-only provider (Deepgram) or LLM-only provider
-  (Anthropic/Ollama) can't satisfy the app alone.
+  (Anthropic/Groq/Ollama) can't satisfy the app alone.
 
 | Provider | LLM | STT | Notes |
 |---|---|---|---|
@@ -576,13 +577,14 @@ flowchart TB
 | OpenAI (Glass) | ✅ | ✅ | Pickle-hosted key via Portkey |
 | Gemini | ✅ `gemini-3-flash-preview` | ✅ `gemini-3.8-live` | LLM supports CSV failover; STT does not |
 | Anthropic | ✅ `claude-opus-5-5` · `claude-sonnet-5-5` · `claude-haiku-5-5` | ❌ | LLM only; supports CSV failover |
+| Groq | ✅ `openai/gpt-oss-120b` · `openai/gpt-oss-20b` · `qwen/qwen3.8-27b` | ❌ | LLM only; supports CSV failover; only Qwen 3.8 sees images |
 | Deepgram | ❌ | ✅ `nova-3` | STT only (pinned to nova-3) |
 | Whisper (local) | ❌ | ✅ tiny/base/small/medium | Main process only |
 | Ollama (local) | ✅ (dynamic) | ❌ | LLM only |
 
 ---
 
-## 10. Gemini and Anthropic failover
+## 10. Gemini, Anthropic and Groq failover
 
 ### 10.1 Gemini
 
@@ -616,7 +618,7 @@ flowchart TB
 ```
 
 - The health registry is an **in-memory singleton** `Map` (`modelHealth.js:15`, shared with the
-  Anthropic provider and re-exported by `geminiModelRotator.js`) — one
+  Anthropic and Groq providers and re-exported by `geminiModelRotator.js`) — one
   shared rate-limit view per process; it resets on restart (cooldowns are clamped to ≤ 300 s, so
   nothing meaningful is lost).
 - `classifyError` (`geminiModelRotator.js:33-69`) inspects HTTP status → `errorDetails[]`
@@ -804,6 +806,98 @@ flowchart TB
   | `ANTHROPIC_SERVER_FALLBACK` | on | `off` stops the server-side refusal fallback |
 - **STT:** Anthropic has none. Pair it with Gemini, Deepgram, OpenAI or Whisper for Listen.
 
+### 10.3 Groq
+
+Since 2026-10-12 the Groq provider has the same failover contract (full design in
+[`specs/2026-10-12-groq-provider/`](specs/2026-10-12-groq-provider/); diagram
+[`docs/diagrams/16-groq-failover.mmd`](docs/diagrams/16-groq-failover.mmd)). Settings has a
+**Groq LLM Model ID** field under the Groq key. It takes a comma-separated list of `vendor/model`
+IDs, e.g. `openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b`.
+
+The presets are the three chat models active on a Free-plan key in October 2026:
+- `openai/gpt-oss-120b`, the default;
+- `openai/gpt-oss-20b`;
+- `qwen/qwen3.8-27b`, a preview model and the only one that sees images.
+
+The loop is modelled on §10.2 and speaks the same protocol to the consumers.
+
+```mermaid
+flowchart TB
+    start(["createStreamingLLM / createLLM with Groq CSV"]) --> order["orderForImages: image in the request? vision models first"]
+    order --> pick["pickModel (shared modelHealth registry)"]
+    pick --> attempt["attempt: streaming chat.completions.create, maxRetries 0, timeout 15 s (headers)"]
+    attempt --> ok{"how did it end?"}
+    ok -->|"finish_reason stop, or length after text"| done["markSucceeded; _final_model; [DONE]"]
+    ok -->|"error / timeout / x_groq.error / length before text"| kind{"groqErrors.classify"}
+    kind -->|"fatal 400/401/403/424"| fatal["surface: MODEL — reason"]
+    kind -->|"unavailable 404 or model_ code"| next["cooldown 5 min / none for too-large / 10 s own codes and 422 / else retry-after"]
+    kind -->|"too-large 413, transient"| next
+    next --> more{"models left and deadline not hit?"}
+    more -->|yes| reset["_reset {next_model, reason}"] --> pick
+    more -->|no| round{"round 1 and some failed fast?"}
+    round -->|yes| retry["_reset reason retry; wait 2 s; retry those"] --> pick
+    round -->|no| allfail["All Groq models failed (…) / No answer within 45s (…)"]
+```
+
+- **Same shape as Anthropic:** one `runWithFailover` (`groq.js:527-648`) for `streamChat` and
+  `chat` / `generateContent`; every call streams; the SDK never retries (`SDK_MAX_RETRIES`,
+  `:236`); one more round after 2 s for fast transient failures (`joinsNextRound`, `:381`);
+  cancellation aborts the request or the wait.
+- **Requests** (`buildRequest`, `groq.js:154`, pure; `modelTraits`, `:22`):
+  - Reasoning is set per family:
+    - gpt-oss gets `reasoning_effort: 'low'` and `include_reasoning: false`, so the reasoning
+      text never reaches the app or the logs;
+    - qwen3 gets `reasoning_effort: 'none'` (instruct mode), plus `reasoning_format: 'hidden'`
+      at any other effort;
+    - unknown models get no reasoning field at all.
+  - `temperature` is passed through when it is within [0, 2].
+  - `max_completion_tokens` is the caller's cap (else 2048) plus 1024 for reasoning on models
+    that reason, capped at the model's maximum. Reasoning counts toward it. Groq does not
+    meter the declared value against the per-minute limit, only the tokens used.
+  - Images go only to a model that sees them, at most 3. A request with an image tries those
+    models first (`orderForImages`, `:133`; log `order=vision-first`), then text-only models
+    without the image (`images=dropped:N`).
+- **Stream reading:**
+  - The attempt stops at the chunk that carries `finish_reason` and closes the connection.
+    groq-sdk keeps reading past `[DONE]` until the server closes it.
+  - `delta.reasoning` is ignored.
+  - A chunk with `x_groq.error` fails the attempt (`STREAM_ERROR`). The string itself is
+    never logged.
+- **Errors** (`groqErrors.js`). groq-sdk keeps the whole body on HTTP errors and the inner
+  object on stream errors. `classify` (`:62`) reads both:
+
+  | Kind | What triggers it | Cooldown |
+  |---|---|---|
+  | transient | 408/409/429/498/5xx, network, mid-stream `{"error"}` | `retry-after`, else 60 s, clamped to 5 s–5 min |
+  | transient (short) | first-text or idle timeout, `length` before any text, `x_groq.error`, 422 | 10 s |
+  | unavailable | 404, or any `model_…` code (not found, decommissioned, blocked) | 5 min |
+  | too-large | 413 "Request too large … (TPM): Limit L, Requested R" | none; never retried in round 2 |
+  | fatal-request | 400/424 | none; surfaces at once |
+  | fatal-auth | 401/403 | none; surfaces at once |
+- **Timeouts:** first text within 15 s (`firstTextTimeoutMs`, `:199`); 15 s idle once text
+  streams; an answer must start within 45 s.
+- **Rate limits:** a Free-plan key has 8K tokens per minute and 200K per day **per model**.
+  The list spreads load across models. Each attempt logs `tpm_left`
+  (`x-ratelimit-remaining-tokens`), and a 413 tells the user the request is over the limit.
+- **Key validation** lists models (`models.list()`). Keys start with `gsk_`.
+- **Diagnostics:** grep `[Groq Provider]`, e.g. `attempt 1/3 stream model=openai/gpt-oss-120b
+  outcome=ok ttft=310ms last=1900ms total=1910ms chunks=42 stop=stop effort=low
+  tokens=in:6100,out:520,reasoning:180,cached:2300 queue=90ms tpm_left=1400 request_id=req_…`.
+  No log line carries prompt, answer or reasoning text.
+- **Tuning (`.env`, all optional):**
+
+  | Variable | Default | Effect |
+  |---|---|---|
+  | `GROQ_REASONING_EFFORT` | gpt-oss `low`, qwen3 `none` | gpt-oss: `low`/`medium`/`high`; qwen3: `none`/`default`/`low`/`medium`/`high` |
+  | `GROQ_MAX_TOKENS` | 2048 | Answer budget when the caller gives none |
+  | `GROQ_REASONING_TOKENS` | 1024 | Extra budget on models that reason |
+  | `GROQ_FIRST_TEXT_TIMEOUT_MS` | 15000 | Per-attempt wait for the first text |
+  | `GROQ_REQUEST_DEADLINE_MS` | 45000 | Wait for an answer to start; `0` disables |
+  | `GROQ_IDLE_TIMEOUT_MS` | 15000 | Silence allowed once text streams; `0` disables |
+
+  `GROQ_BASE_URL`, if set, redirects the SDK; leave it unset.
+- **STT:** none. Groq's Whisper is batch-only, and Listen needs a real-time session.
+
 ---
 
 ## 11. Data, persistence & auth
@@ -851,11 +945,11 @@ Glass can run fully local — no cloud, no API key:
 
 - **Ollama** (local LLM) is managed by `ollamaService` + `localAIManager`. Models are tracked
   in the `ollama_models` table; the selected model is warmed up in the background at startup
-  (`index.js:209-216`) and on selection (`modelStateService.js:342-344`). Ollama's `llmModels`
+  (`index.js:209-216`) and on selection (`modelStateService.js:343-345`). Ollama's `llmModels`
   list in the registry is empty and **populated dynamically** from installed models
-  (`factory.js:73`, `modelStateService.getAvailableModels` `:360-362`).
+  (`factory.js:83`, `modelStateService.getAvailableModels` `:361-363`).
 - **Whisper** (local STT) runs **only in the main process** — the factory returns a stub in the
-  renderer (`factory.js:76-97`). Models (tiny/base/small/medium) are downloaded with SHA-256
+  renderer (`factory.js:88-99`). Models (tiny/base/small/medium) are downloaded with SHA-256
   verification from the manifest in `checksums.js`. STT output is filtered for noise tokens like
   `[BLANK_AUDIO]` (`sttService.js:175-205`).
 - `localAIManager` periodically syncs service health and, if a local service goes down,
@@ -985,6 +1079,7 @@ So, concretely, on first launch:
 | AI providers / factory | `src/features/common/ai/factory.js`, `ai/providers/*.js` |
 | Gemini failover | `ai/providers/gemini.js`, `ai/providers/geminiModelRotator.js`, `ai/providers/modelHealth.js` |
 | Anthropic failover | `ai/providers/anthropic.js`, `ai/providers/anthropicErrors.js`, `ai/providers/modelHealth.js` |
+| Groq failover | `ai/providers/groq.js`, `ai/providers/groqErrors.js`, `ai/providers/modelHealth.js` |
 | Model & key state | `src/features/common/services/modelStateService.js` |
 | Auth / encryption | `src/features/common/services/{authService,encryptionService,migrationService}.js` |
 | Persistence | `src/features/common/repositories/**`, `src/features/common/config/schema.js` |

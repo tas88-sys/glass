@@ -4,8 +4,8 @@
 meta:
   spec_id: 2026-10-12-groq-provider
   spec_name: groq-provider
-  status: draft    # draft | in-progress | approved | completed
-  phase: tasks          # specify | clarify | plan | tasks | preflight | feature-start | implement | verify
+  status: in-progress    # draft | in-progress | approved | completed
+  phase: implement          # specify | clarify | plan | tasks | preflight | feature-start | implement | verify
   created: 2026-10-12
   updated: 2026-10-12
 
@@ -50,7 +50,7 @@ critical_requirements:
 
 **Feature Branch**: `2026-10-12-groq-provider`
 **Created**: 2026-10-12
-**Status**: Draft
+**Status**: In progress
 **Input**: User request (2026-10-12): "The plan now is to do exactly what was implemented in the last PR, following the same steps, criteria and structure, but to implement a new provider: groq.com. Create the plan for it. If in doubt about supported models, documentation, API or payload: composio.dev or https://console.groq.com/docs/overview. Also tell me the best model to use in the app for the live interview, Ask, etc." (translated from Portuguese)
 
 ---
@@ -129,7 +129,7 @@ See `contracts/EDGE_CASES.md` for the full list.
   - any other model: no `reasoning_effort`, `reasoning_format` or `include_reasoning`.
   A value the family does not accept is ignored.
 - **FR-009**: `max_completion_tokens` MUST be the caller's `maxTokens` (else `GROQ_MAX_TOKENS`, else 2048), plus `GROQ_REASONING_TOKENS` (default 1024) when the model reasons at the resolved effort (`gpt-oss` always, `qwen3` when not `none`), capped at the model's maximum output (65,536 for `gpt-oss`, 16,384 for `qwen/qwen3.8-27b`; no cap for unknown models).
-- **FR-010**: Messages MUST map Glass shapes to chat-completions shapes. Roles `system`, `user` and `assistant` keep their order. A string or text part stays text, and empty text is dropped. An `image_url` part is kept only when `modelTraits(modelId).vision`, at most 3 per request (the first 3), and the rest are dropped and counted. `generateContent(parts)` maps strings to text parts and `inlineData` to `image_url` data URLs, all in one user message, with no "You are" promotion. A message with no content left is dropped.
+- **FR-010**: Messages MUST map Glass shapes to chat-completions shapes. Roles `system`, `user` and `assistant` keep their order. A string or text part stays text, and empty text is dropped. An `image_url` part is kept only when `modelTraits(modelId).vision`, at most 3 per request (the first 3), and the rest are dropped and counted. `generateContent(parts)` maps strings to text parts and `inlineData` to `image_url` data URLs, all in one user message, with no "You are" promotion. Content with no image left is sent as one string (text parts joined with a newline). A message with no content left is dropped.
 - **FR-011**: When the request carries at least one image, the attempt order MUST put the models that accept images first (in list order), then the others. Without images the order is the list's.
 
 **Failover and stream**
@@ -162,7 +162,7 @@ See `contracts/EDGE_CASES.md` for the full list.
   - `unavailable`: `<model> is not available to this API key (decommissioned, blocked or not found). Pick a current model in Settings.`;
   - `too-large`: `<model> — request needs <R> tokens; this key allows <L> per minute. This request alone is over the limit: shorten the context or use a higher Groq tier.` When the numbers cannot be read, it shows the server's reason instead.
   The `unavailable` and `too-large` texts stand alone after a single attempt and follow `Last:` otherwise. Reasons are the server's message with SDK noise removed, at most 160 characters.
-- **FR-021**: Each attempt MUST log one line, `[Groq Provider] attempt i/n <stream|once> model=… outcome=…`, with these fields when present: `status`, `code`, `ttft`, `last`, `total`, `chunks`, `stop`, `effort`, `images=sent:N` or `images=dropped:N`, `tokens=in:…,out:…,reasoning:…,cached:…`, `queue=<ms>`, `tpm_left` (from `x-ratelimit-remaining-tokens`) and `request_id` (`x_groq.id`, else the `x-request-id` header). Each request MUST log a summary line `request … answered_by=… attempts=… total=…`, plus `order=vision-first` when image routing changed the order and `cancelled` when cancelled. No log line contains prompt, answer or reasoning text (C3).
+- **FR-021**: Each attempt MUST log one line, `[Groq Provider] attempt i/n <stream|once> model=… outcome=…`, with these fields when present: `status`, `code`, `ttft`, `last`, `total`, `chunks`, `stop`, `effort`, `images=sent:N` or `images=dropped:N`, `tokens=in:…,out:…,reasoning:…,cached:…`, `queue=<ms>`, `tpm_left` (from `x-ratelimit-remaining-tokens`), `served_by` when the chunks name another model, and `request_id` (`x_groq.id`, else the `x-request-id` header). Each request MUST log a summary line `request … answered_by=… attempts=… total=…`, plus `order=vision-first` when image routing changed the order and `cancelled` when cancelled. No log line contains prompt, answer or reasoning text (C3).
 
 **Non-streaming**
 - **FR-022**: `chat()` and `generateContent()` MUST use the same list, image routing, classification, request building, second round and finish rules. They MUST join the text and return `_modelUsed`. They stream internally (D12). A failed attempt's partial text is dropped.
@@ -344,4 +344,7 @@ docs/…                                              EDIT  provider docs and di
 
 - The user approves the plan and the model list (quickstart §2), and decides whether T006 may spend fractions of a cent on one live streamed request.
 - With a Free-plan key (C7), decide whether cross-provider lists are the next spec.
-- Implementation starts with T005 (the dependency, alone).
+- Implemented on the branch through T-DOC-GATE (tasks.json has the evidence). What remains:
+  - T006, the live probe, which needs GROQ_API_KEY in .env;
+  - T-VERIFY-MANUAL: quickstart §4 with the user's key, and the SC-006 latency numbers;
+  - T-FINAL.

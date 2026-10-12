@@ -63,7 +63,7 @@ Audio format across all platforms: **PCM16, mono, 24 kHz**, chunked at 100 ms.
 
 ## 3. STT / LLM provider matrix
 
-Providers are declared in a single registry: `factory.js:20-98` (`PROVIDERS`). The model
+Providers are declared in a single registry: `factory.js:20-108` (`PROVIDERS`). The model
 selection layer (`modelStateService.js`) and the Settings UI are entirely **data-driven**
 from this registry — adding a model to a provider's `sttModels`/`llmModels` array is enough
 to surface it in the UI.
@@ -74,17 +74,18 @@ to surface it in the UI.
 | **OpenAI (Glass)** | ✅ | ✅ | Pickle-hosted key via Portkey; same OpenAI handler |
 | **Gemini** | ✅ `gemini-3.8-live` | ✅ `gemini-3-flash-preview` | LLM supports CSV failover; STT does **not** (see §5) |
 | **Anthropic** | ❌ | ✅ `claude-opus-5-5` · `claude-sonnet-5-5` · `claude-haiku-5-5` | LLM only — `sttModels: []`; LLM supports CSV failover |
+| **Groq** | ❌ | ✅ `openai/gpt-oss-120b` · `openai/gpt-oss-20b` · `qwen/qwen3.8-27b` | LLM only — `sttModels: []` (Groq's Whisper is batch-only); LLM supports CSV failover |
 | **Deepgram** | ✅ `nova-3` | ❌ | STT only (see §4) |
 | **Whisper (local)** | ✅ tiny/base/small/medium | ❌ | Runs in main process only |
 | **Ollama (local)** | ❌ | ✅ (dynamic) | LLM only |
 
 **How selection resolves at runtime:** `modelStateService.getCurrentModelInfo('stt')`
-(`modelStateService.js:377`) returns `{ provider, model, apiKey }` for the active STT
-provider, which `sttService` hands to `createSTT(provider, opts)` (`factory.js:118`).
+(`modelStateService.js:378`) returns `{ provider, model, apiKey }` for the active STT
+provider, which `sttService` hands to `createSTT(provider, opts)` (`factory.js:132`).
 A model ID is mapped back to its provider by `getProviderForModel()` (`modelStateService.js:286`).
 
 `areProvidersConfigured()` requires **both** a working LLM key and a working STT key
-(`modelStateService.js:437-455`) — so an STT-only provider like Deepgram cannot satisfy the
+(`modelStateService.js:438-456`) — so an STT-only provider like Deepgram cannot satisfy the
 app on its own.
 
 ---
@@ -95,12 +96,12 @@ Deepgram is a fully-wired, selectable STT provider — no code change required.
 
 **Enable it:**
 1. Open **Settings**. The API-key section renders one input per registered provider
-   (`SettingsView.js:1264` loops `Object.entries(this.providerConfig)`), so a
+   (`SettingsView.js:1329` loops `Object.entries(this.providerConfig)`), so a
    **"Deepgram API Key"** field appears automatically.
 2. Paste your key and **Save**. This calls `setApiKey('deepgram', key)`, which validates
    against `https://api.deepgram.com/v1/projects` (`deepgram.js:15-37`) before storing.
 3. **Change STT Model** → pick **"Nova-3 (General)"** (appears in `getAvailableModels('stt')`
-   once the key is saved — `SettingsView.js:1412`).
+   once the key is saved — `SettingsView.js:1513`).
 
 **How it streams:** `createSTT` (`deepgram.js:39-94`) opens a WebSocket to
 `wss://api.deepgram.com/v1/listen` configured `encoding=linear16, sample_rate=24000,
@@ -110,7 +111,7 @@ PCM16/mono/24 kHz output. Two sockets are opened (Me + Them). Messages are parse
 
 **Caveats:**
 - **STT-only.** `createLLM`/`createStreamingLLM` are stubs that throw (`deepgram.js:97-104`).
-  You still need a separate LLM provider (OpenAI / Gemini / Anthropic / Ollama) for Ask and
+  You still need a separate LLM provider (OpenAI / Gemini / Anthropic / Groq / Ollama) for Ask and
   summaries.
 - **Model pinned to `nova-3`.** `createSTT` does not read the `model` option — it hardcodes
   `model: 'nova-3'` in the query string (`deepgram.js:45-46`). Adding other Deepgram models

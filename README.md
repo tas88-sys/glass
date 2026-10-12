@@ -70,6 +70,7 @@ npm run setup
 - OpenAI (LLM + STT): Get OpenAI API Key [here](https://platform.openai.com/api-keys)
 - Gemini (LLM + STT): Get Gemini API Key [here](https://aistudio.google.com/apikey)
 - Anthropic Claude (LLM — Opus, Sonnet and Haiku 5.5, with failover across a model list like Gemini): Get Anthropic API Key [here](https://console.anthropic.com/settings/keys)
+- Groq (LLM — GPT-OSS 120B and 20B, and Qwen 3.8 27B for screenshots, with failover across a model list): Get Groq API Key [here](https://console.groq.com/keys)
 - Deepgram (STT): Get Deepgram API Key [here](https://console.deepgram.com/)
 - Local: Ollama (LLM) & Whisper (STT)
 
@@ -100,7 +101,7 @@ See [`docs/AUDIO_AND_STT.md` §3](docs/AUDIO_AND_STT.md#3-stt--llm-provider-matr
 A technical walkthrough of what actually happens when you use Glass. Useful for contributors and anyone trying to understand the runtime behavior.
 
 > 📐 For the full, code-verified architecture — process/window topology, IPC, the Ask & Listen
-> pipelines, the AI provider layer, Gemini and Anthropic failover, persistence, and a "what works if I run it
+> pipelines, the AI provider layer, Gemini, Anthropic and Groq failover, persistence, and a "what works if I run it
 > as-is" breakdown — see **[`ARCHITECTURE.md`](ARCHITECTURE.md)** and the diagram suite in
 > **[`docs/diagrams/`](docs/diagrams/)**. Audio-specific deep dives live in
 > [`docs/AUDIO_AND_STT.md`](docs/AUDIO_AND_STT.md) and
@@ -126,7 +127,7 @@ Data is persisted to **SQLite** locally, or **Firebase** when signed in (the rep
    - Windows/Linux → Electron `desktopCapturer.getSources()` at 1920×1080, JPEG quality 70
    - Image is base64-encoded and attached inline to the LLM message
 2. **Message build** (`askService.js:259-274`) — system prompt + user text + the single screenshot (multimodal `image_url` part)
-3. **Streaming call** through `createStreamingLLM(provider)` — supports Anthropic Claude, OpenAI, Gemini, Ollama, Whisper
+3. **Streaming call** through `createStreamingLLM(provider)` — supports Anthropic Claude, Groq, OpenAI, Gemini, Ollama, Whisper
 4. **Stream parsing** (`_processStream`, `askService.js:369-425`) — SSE chunks broadcast to the Ask window in real time
 5. **Persistence** — user prompt and assistant response written to the `ai_messages` table tied to a session id from `sessionRepository.getOrCreateActive('ask')`
 6. **Multimodal fallback** (`askService.js:303-338`) — if the provider rejects the image, the request is retried text-only

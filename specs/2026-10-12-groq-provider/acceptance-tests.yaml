@@ -13,9 +13,9 @@ spec_name: "groq-provider"
 # --- Staleness Detection (v2 required) ---
 generation_context:
   generated_at: "2026-10-12T00:00:00Z"
-  spec_hash: "89b0c59fcb2e12261805d39f3bd074becabf897f5584d7b1d607076a37e10284"
+  spec_hash: "aa2c75ada054ec429cb85236acfff3e8b57a374e3d88c299725f2326f20e0075"
   plan_hash: "9f2c26a126897d6a6078e6ab77b829d92bec8600995e713bde04a41baa5ba182"
-  tasks_hash: "c6fc3e227486c231698ce86f18e88df0c2e048343f6d4be7bda077a23d2095ab"
+  tasks_hash: "00f8872c20f55d77587d23231141d9fa3369d2b587e58961c71a19eb163e1d40"
 
 # --- Drift Detection (v2 required) ---
 _references:

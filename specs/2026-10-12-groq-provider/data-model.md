@@ -101,13 +101,13 @@ Content mapping:
 
 | Glass part | Chat-completions part |
 |------------|-----------------------|
-| `string` (non-empty) | message `content` string (a message with only strings stays a string) |
+| `string` (non-empty) | `{ type: 'text', text }` part |
 | `{ type: 'text', text }` (non-empty) | `{ type: 'text', text }` |
 | `{ type: 'image_url', image_url: { url } }` | kept as is when `vision`, at most 3 per request; otherwise dropped and counted |
 | `{ inlineData: { mimeType, data } }` (`generateContent`) | `{ type: 'image_url', image_url: { url: 'data:<mimeType or image/jpeg>;base64,<data>' } }`, same vision rule |
 | empty text, `null`, unknown | dropped |
 
-A message whose content ends up empty is dropped.
+Content with no image left is sent as one string, its text parts joined with a newline. A message whose content ends up empty is dropped.
 
 ### Attempt order (`orderForImages`, pure)
 

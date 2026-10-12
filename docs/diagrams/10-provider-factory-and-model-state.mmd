@@ -8,6 +8,7 @@ flowchart TB
         r2["openai-glass: hosted via Portkey virtual key"]
         r3["gemini: LLM gemini-3-flash-preview (CSV failover) · STT gemini-3.8-live"]
         r4["anthropic: LLM claude-opus-5-5 · claude-sonnet-5-5 · claude-haiku-5-5 (CSV failover) · STT none"]
+        r8["groq: LLM openai/gpt-oss-120b · openai/gpt-oss-20b · qwen/qwen3.8-27b (CSV failover) · STT none"]
         r5["deepgram: STT nova-3 · LLM none"]
         r6["ollama: LLM dynamic (local) · STT none"]
         r7["whisper: STT tiny/base/small/medium (local, main only)"]
@@ -18,7 +19,7 @@ flowchart TB
         auto["_autoSelectAvailableModels()<br/>picks a valid model when key added/removed"]
         resolve["getCurrentModelInfo('llm' | 'stt')<br/>-> {provider, model, apiKey}"]
         gate["areProvidersConfigured()<br/>requires BOTH an LLM key AND an STT key"]
-        infer["getProviderForModel(id)<br/>presets, then Ollama installs, then typed IDs / CSV:<br/>inferProviderFromModelId — gemini- → gemini, claude- → anthropic (LLM only)"]
+        infer["getProviderForModel(id)<br/>presets, then Ollama installs, then typed IDs / CSV:<br/>inferProviderFromModelId — gemini- → gemini, claude- → anthropic,<br/>vendor/model → groq (the last two LLM only)"]
     end
 
     subgraph consumers["Consumers"]
@@ -33,7 +34,7 @@ flowchart TB
     consumers --> dispatch["factory.createLLM / createStreamingLLM / createSTT<br/>sanitizeModelId strips '-glass'"]
     dispatch --> registry
 
-    settingsui["SettingsView (data-driven)<br/>renders one API-key field per provider<br/>+ Gemini and Anthropic model-list inputs"] --> keys
+    settingsui["SettingsView (data-driven)<br/>renders one API-key field per provider<br/>+ Gemini, Anthropic and Groq model-list inputs"] --> keys
     settingsui --> infer
-    health["providers/modelHealth.js<br/>one in-memory cooldown registry,<br/>shared by the Gemini and Anthropic failover loops"]
+    health["providers/modelHealth.js<br/>one in-memory cooldown registry,<br/>shared by the Gemini, Anthropic and Groq failover loops"]
     registry -.-> health

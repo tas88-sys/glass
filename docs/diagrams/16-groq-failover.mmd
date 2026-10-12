@@ -1,0 +1,37 @@
+%% 16 - Groq LLM failover
+%% User supplies a comma-separated Groq model list in Settings, e.g.
+%%   openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b
+%% One loop serves streamChat and chat/generateContent (both stream on the wire).
+%% The SDK never retries (maxRetries: 0); every wait is the loop's.
+%% Source: groq.js (runWithFailover / runAttempt) + groqErrors.js + modelHealth.js
+flowchart TB
+    start(["createStreamingLLM / createLLM with model CSV"]) --> parse["parseModelList(csv)<br/>trim, drop empties"]
+    parse --> order["orderForImages<br/>image in the request? models that see images first<br/>(log order=vision-first)"]
+    order --> pick["pickModel(remaining)<br/>first healthy in order;<br/>if all cooling, soonest-to-recover"]
+    pick --> attempt["attempt: buildRequest (temperature passed;<br/>gpt-oss effort low + include_reasoning false;<br/>qwen3 effort none; cap + 1024 when reasoning;<br/>images only to vision models)<br/>chat.completions.create stream, maxRetries 0, timeout 15s (headers)"]
+    attempt --> chunks["read chunks until finish_reason<br/>first text within 15s; then 15s idle limit;<br/>close at finish_reason (the SDK reads past [DONE])"]
+    chunks --> ok{"outcome?"}
+
+    ok -->|"stop, or length after text"| done["markSucceeded<br/>emit _final_model + [DONE]"]
+    ok -->|"error, timeout, x_groq.error,<br/>length before text"| classify["groqErrors.classify(err)<br/>own code -> model_ code -> status -> body type -> fail-open"]
+    classify --> kind{"kind?"}
+
+    kind -->|"fatal-auth 401/403"| fatal["controller.error / throw<br/>userMessage 'MODEL — server reason'"]
+    kind -->|"fatal-request 400/424"| fatal
+    kind -->|"unavailable 404 or model_ code"| unav["cooldown 5 min<br/>_reset reason unavailable"]
+    kind -->|"too-large 413 (over the key's TPM)"| large["no cooldown<br/>_reset reason too-large"]
+    kind -->|"transient 408/409/422/429/498/5xx,<br/>stream error, network, timeouts"| cool["cooldown: own codes and 422 10s;<br/>else retry-after, default 60s, [5s, 300s]<br/>_reset reason timeout / transient"]
+
+    unav --> more{"models left and deadline not hit?"}
+    large --> more
+    cool --> more
+    more -->|yes| pick
+    more -->|no| round{"round 1 and some failed fast?<br/>(not timeout / 422 / 404 / 413;<br/>429 only if retry-after <= 2s)"}
+    round -->|yes| retry["emit {_reset, reason: retry}<br/>wait 2s (cancellable), retry those models once"]
+    retry --> pick
+    round -->|no| allfail["userMessage: 'All Groq models failed (n attempts[, 2 rounds]). Last: …'<br/>or 'No answer within 45s …'<br/>or 'MODEL is not available to this API key …'<br/>or 'request needs R tokens; this key allows L per minute …'"]
+
+    deadline["45s request deadline until an answer starts<br/>(each attempt gets at most what is left;<br/>no second round without time for it)"]
+    pick -.-> deadline
+    cancel["cancel(): aborts the in-flight request or the wait;<br/>no failover, no error, request log 'cancelled'"]
+    chunks -.-> cancel
