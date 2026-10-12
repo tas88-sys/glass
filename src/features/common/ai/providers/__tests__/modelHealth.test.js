@@ -127,3 +127,53 @@ describe('geminiModelRotator', () => {
     assert.equal(typeof rotator.parseRetryAfter, 'function');
   });
 });
+
+describe('isCoolingDown (spec 2026-10-12-cross-provider-failover FR-016)', () => {
+  const { isCoolingDown } = health;
+
+  it('is false for a model with no entry', () => {
+    assert.equal(isCoolingDown('openai/gpt-oss-120b'), false);
+  });
+
+  it('is true after markFailed and false after markSucceeded', () => {
+    markFailed('openai/gpt-oss-120b', 60_000);
+    assert.equal(isCoolingDown('openai/gpt-oss-120b'), true);
+    assert.equal(isCoolingDown('gemini-3.5-flash-lite'), false);
+    markSucceeded('openai/gpt-oss-120b');
+    assert.equal(isCoolingDown('openai/gpt-oss-120b'), false);
+  });
+
+  it('turns false when the cooldown ends', (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
+    markFailed('a', 1); // clamped to 5 s
+    t.mock.timers.tick(MIN_COOLDOWN_MS - 1);
+    assert.equal(isCoolingDown('a'), true, 'still cooling just before 5 s');
+    t.mock.timers.tick(1);
+    assert.equal(isCoolingDown('a'), false, 'healthy at 5 s');
+  });
+
+  it('is false after resetHealth', () => {
+    markFailed('a', 60_000);
+    resetHealth();
+    assert.equal(isCoolingDown('a'), false);
+  });
+
+  it('reads only: never creates or changes an entry', (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
+    markFailed('a', 120_000);
+    markFailed('b', 10_000);
+    assert.equal(pickModel(['a', 'b', 'c']), 'c');
+    for (const id of ['a', 'b', 'c', 'never-seen']) isCoolingDown(id);
+    assert.equal(pickModel(['a', 'b', 'c']), 'c', 'c still has no entry');
+    assert.equal(pickModel(['a', 'b']), 'b', 'b still recovers first');
+    t.mock.timers.tick(10_000);
+    assert.equal(isCoolingDown('b'), false);
+    assert.equal(pickModel(['a', 'b']), 'b');
+    assert.equal(isCoolingDown('a'), true, 'a keeps its own cooldown');
+  });
+
+  it('is shared with the Gemini rotator registry', () => {
+    rotator.markFailed('gemini-3.5-flash-lite', 60_000);
+    assert.equal(isCoolingDown('gemini-3.5-flash-lite'), true);
+  });
+});

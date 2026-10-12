@@ -1,5 +1,7 @@
 // factory.js
 
+const { CHAIN_PROVIDERS } = require('./providerChain');
+
 /**
  * @typedef {object} ModelOption
  * @property {string} id 
@@ -125,6 +127,31 @@ function inferProviderFromModelId(modelId) {
   return null;
 }
 
+/**
+ * Segments of a model list that may name several providers: runs of
+ * consecutive IDs of one provider (inferProviderFromModelId). An ID with no
+ * inferable provider joins the current run; the first run's provider is
+ * `firstProvider`. Only Anthropic, Gemini and Groq lists are cut; any other
+ * provider's list is one segment. Trimmed, empties dropped; an empty list → [].
+ * @param {string|null|undefined} modelCsv
+ * @param {string} firstProvider - the active provider
+ * @returns {{ provider: string, models: string[] }[]}
+ */
+function splitByProvider(modelCsv, firstProvider) {
+  const ids = typeof modelCsv === 'string' ? modelCsv.split(',').map(s => s.trim()).filter(Boolean) : [];
+  if (ids.length === 0) return [];
+  if (!CHAIN_PROVIDERS.includes(firstProvider)) return [{ provider: firstProvider, models: ids }];
+  const segments = [];
+  let current = firstProvider;
+  for (const id of ids) {
+    current = inferProviderFromModelId(id) || current;
+    const last = segments[segments.length - 1];
+    if (last && last.provider === current) last.models.push(id);
+    else segments.push({ provider: current, models: [id] });
+  }
+  return segments;
+}
+
 function sanitizeModelId(model) {
   return (typeof model === 'string') ? model.replace(/-glass$/, '') : model;
 }
@@ -214,4 +241,5 @@ module.exports = {
   getProviderClass,
   getAvailableProviders,
   inferProviderFromModelId,
+  splitByProvider,
 };

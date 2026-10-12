@@ -87,3 +87,34 @@ describe('inferProviderFromModelId: Groq (spec 2026-10-12-groq-provider FR-002)'
     it(`${JSON.stringify(input)} → ${expected}`, () => assert.equal(inferProviderFromModelId(input), expected));
   }
 });
+
+describe('splitByProvider (spec 2026-10-12-cross-provider-failover FR-001)', () => {
+  const { splitByProvider } = require('../factory');
+  const cases = [
+    ['', 'groq', []],
+    ['  , ', 'groq', []],
+    [null, 'groq', []],
+    [undefined, 'groq', []],
+    ['openai/gpt-oss-120b', 'groq', [{ provider: 'groq', models: ['openai/gpt-oss-120b'] }]],
+    ['openai/gpt-oss-120b,openai/gpt-oss-20b', 'groq', [{ provider: 'groq', models: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'] }]],
+    ['openai/gpt-oss-120b,gemini-3.5-flash-lite', 'groq', [{ provider: 'groq', models: ['openai/gpt-oss-120b'] }, { provider: 'gemini', models: ['gemini-3.5-flash-lite'] }]],
+    [' openai/gpt-oss-120b , ,gemini-3.5-flash-lite ', 'groq', [{ provider: 'groq', models: ['openai/gpt-oss-120b'] }, { provider: 'gemini', models: ['gemini-3.5-flash-lite'] }]],
+    ['openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b,gemini-3.5-flash-lite,gemini-3.1-flash-lite', 'groq', [
+      { provider: 'groq', models: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'] },
+      { provider: 'gemini', models: ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'] },
+    ]],
+    ['gemini-3.5-flash-lite,custom-model', 'gemini', [{ provider: 'gemini', models: ['gemini-3.5-flash-lite', 'custom-model'] }]],
+    ['foo,gemini-y', 'gemini', [{ provider: 'gemini', models: ['foo', 'gemini-y'] }]],
+    ['openai/gpt-oss-120b,custom,gemini-y', 'groq', [{ provider: 'groq', models: ['openai/gpt-oss-120b', 'custom'] }, { provider: 'gemini', models: ['gemini-y'] }]],
+    ['a/x,gemini-y,b/z', 'groq', [{ provider: 'groq', models: ['a/x'] }, { provider: 'gemini', models: ['gemini-y'] }, { provider: 'groq', models: ['b/z'] }]],
+    ['claude-haiku-5-5,openai/gpt-oss-120b', 'anthropic', [{ provider: 'anthropic', models: ['claude-haiku-5-5'] }, { provider: 'groq', models: ['openai/gpt-oss-120b'] }]],
+    ['gemini-3.5-flash-lite,claude-haiku-5-5,claude-sonnet-5-5', 'gemini', [{ provider: 'gemini', models: ['gemini-3.5-flash-lite'] }, { provider: 'anthropic', models: ['claude-haiku-5-5', 'claude-sonnet-5-5'] }]],
+    ['gpt-4.1,gemini-y', 'openai', [{ provider: 'openai', models: ['gpt-4.1', 'gemini-y'] }]],
+    ['llama3.2:latest,library/x', 'ollama', [{ provider: 'ollama', models: ['llama3.2:latest', 'library/x'] }]],
+  ];
+  for (const [csv, first, expected] of cases) {
+    it(`${JSON.stringify(csv)} (${first}) → ${expected.map(s => s.provider).join(',') || '[]'}`, () => {
+      assert.deepEqual(splitByProvider(csv, first), expected);
+    });
+  }
+});
