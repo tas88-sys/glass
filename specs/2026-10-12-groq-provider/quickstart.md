@@ -15,9 +15,14 @@ Read on 2026-10-12 in the console (`console.groq.com/settings/limits`). The orga
 
 What that means for Glass (research R5):
 - **Each model has its own budget.** That is why the recommended list holds two text models.
-- **One Live Answer uses about 6–8K tokens**, prompt plus answer.
-- **Per minute:** each model carries about one Live Answer. With 120B then 20B, a second answer in the same minute moves to 20B, and a third in that minute fails with the rate-limit message.
-- **Per day:** about 25–30 Live Answers per model, 50–60 for the pair, shared with Live Insights. One interview a day fits. Two long ones may not, and once the budget is spent every model answers 429 until the next day.
+- **What a call uses.** Cached tokens do not count, and the app's fixed ~2.4K-token prompt is cached after the first call. One Live Answer then uses about 3.5K tokens (2–5K) and one Live Insights about 2.5K.
+- **A one-hour interview** uses about 115K (light), 240K (typical) or 390K (heavy) of the 400K a day the two text models share:
+  - one interview of about an hour fits; in the typical case 120B runs out after 40–50 minutes and 20B answers the rest;
+  - a 90-minute or heavy interview is borderline;
+  - two in one day probably do not fit.
+- **Per minute:** two Live Answers fit on 120B. A Live Insights in the same minute moves one call to 20B.
+- **When the daily budget is spent,** every model answers 429 until it renews. Live Answer shows "All Groq models failed … rate limit", and no other provider takes over.
+- **What else spends the budget:** testing the app on the day of an interview draws on the same daily budget, and an interview in Portuguese uses about 20–30% more tokens than in English.
 - **Only tokens actually used count.** The declared `max_completion_tokens` is not metered (live check), so `GROQ_MAX_TOKENS` and `GROQ_REASONING_TOKENS` do not affect the limits.
 - **Check the budget while you work.** `tpm_left` on each `[Groq Provider]` log line shows the tokens left this minute.
 

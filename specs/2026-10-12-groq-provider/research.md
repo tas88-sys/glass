@@ -160,24 +160,38 @@ The models page still lists the two Llama models as Production, priced "Contact 
 
 T006 prints the `x-ratelimit-*` headers, and T-VERIFY-MANUAL check 9 reads `tpm_left` across two models.
 
-**What a Glass request uses:**
+**What a Glass request uses** (estimated 2026-10-12 from the code, at ~4 characters per token; R15 explains the cache):
 
-| Lane | System prompt | Other input | Output | Tokens used per call |
-|------|---------------|-------------|--------|----------------------|
-| Live Answer | `pickle_glass_analysis`, 9,746 chars, about 2.4K tokens | Career block up to 9,000 chars (~2.3K tokens), plus 30 transcript turns | answer ≤ 900 + reasoning (tens to hundreds at `low`) | about 6–8K |
-| Live Insights | transcript-based prompt | — | ≤ 1,024 + reasoning | a few K |
-| Ask | `pickle_glass`, about 0.6K tokens | a screenshot (2,048 tokens on Qwen) and the question | ≤ 2,048 | about 3–5K |
+How each lane builds its prompt:
+- **Live Answer** (`summaryService.makeLiveAnswer`): the `pickle_glass_analysis` system prompt (9,746 chars). Its fixed text comes first (9,714 chars, about 2.4K tokens). The career block (up to 9,000 chars, about 2.3K tokens, only when a career route finds notes) and the last 30 transcript turns are appended at its end. A short user instruction follows, and the answer is capped at 900 plus reasoning.
+- **Live Insights** (`summaryService.makeOutlineAndRequests`): the same system prompt with no career block and the last 30 turns, plus a format instruction and the previous analysis. Output ≤ 1,024.
+- **Ask**: the `pickle_glass` prompt (2,388 chars), the question, and a screenshot that costs 2,048 tokens on Qwen.
 
-**What the Free plan carries:**
+| Lane | When it runs | Counted per call: uncached input + output | Typical |
+|------|--------------|-------------------------------------------|---------|
+| Live Answer | each detected question, plus false triggers that answer `PASSIVE` | career block 0–2.3K + transcript ~1–3K + instruction ~0.1K + answer and reasoning ~0.3–1K | ~3.5K (2–5K) |
+| Live Insights | every 5 turns (`triggerAnalysisIfNeeded`, `conversationHistory.length % 5 === 0`) | transcript ~1–2K + instruction ~0.3K + output ~0.5K | ~2.5K (2–3K) |
+| Ask with a screenshot | on demand | prompt ~0.6K + image 2K + question + answer | Qwen's own budget |
 
-| Budget | One model | `openai/gpt-oss-120b` + `openai/gpt-oss-20b` |
-|--------|-----------|----------------------------------------------|
-| Live Answers per minute (8K TPM) | about 1 | about 2 |
-| Live Answers per day (200K TPD) | about 25–30 | about 50–60, shared with Live Insights |
+The fixed 2.4K prefix is not counted once it is cached (R15), and Live Answer and Live Insights share it. Without a cache hit, the first call of a session or after about 2 hours idle, add ~2.4K.
 
-Ask with a screenshot draws on Qwen's separate budget.
+**What a one-hour interview uses on the text models:**
 
-An interview with a question every 1–2 minutes fits the per-minute budget through failover. A second answer in the same minute moves to 20B. A long interview, or two interviews in one day, can exhaust the daily budget, and then every model answers 429 until the next day.
+| Scenario | Live Answer | Live Insights | Total |
+|----------|-------------|---------------|-------|
+| Light | 30 × 2.5K | 20 × 2K | ~115K |
+| Typical | 50 × 3.5K | 25 × 2.5K | ~240K |
+| Heavy | 60 × 5K | 30 × 3K | ~390K |
+
+**What the Free plan carries.** The text budget is 400K a day: 200K on `openai/gpt-oss-120b` and 200K on `openai/gpt-oss-20b`, which takes over when 120B returns 429.
+- **One interview of about an hour fits.** In the typical case 120B runs out after 40–50 minutes and 20B answers the rest, with somewhat weaker answers. A 90-minute or heavy interview is borderline. Two interviews in one day probably do not fit.
+- **Per minute (8K TPM per model).** One Live Answer is about 3.5K, so two answers in a minute fit on 120B. A Live Insights in the same minute moves one call to 20B. Requests per day (1K) are not a constraint, at roughly 100 calls an hour.
+- **Ask with a screenshot** draws on Qwen's separate budget.
+- **Risks:**
+  - An interview in Portuguese uses about 20–30% more tokens than the same text in English.
+  - Testing the app on the day of the interview spends the same daily budget.
+  - When the daily budget is spent, every model answers 429 until it renews. Live Answer then shows "All Groq models failed … rate limit", with no automatic switch to another provider (Out of Scope; the first follow-up).
+- **These are estimates.** The first real session settles them: every `[Groq Provider]` attempt line logs `tokens=in:…,out:…,reasoning:…,cached:…`, and summing them gives the real use per interview (T-VERIFY-MANUAL check 9).
 
 **Decisions:**
 - **Budget (D5, FR-009).** The declared budget is no constraint, so the reasoning allowance is 1024, which leaves the caller's cap for the answer.
@@ -357,7 +371,15 @@ The user's key is on the Free plan (R5). The list carries about two Live Answers
 
 The cached count is in `usage.prompt_tokens_details.cached_tokens`.
 
-Glass lanes start with a fixed system prompt. Live Answer's first ~2.4K tokens are the same on every call until the career block. Caching therefore helps without any change, and it is logged as `cached:` (FR-021). No code beyond the log field.
+**Rate limits** (docs, read 2026-10-12): "Cached tokens do not count towards your rate limits." They are deducted after processing. So many large requests sent in parallel can still hit the limit before the cached part is deducted. Glass sends one Live Answer at a time.
+
+**Where Glass's prompts vary** (measured in `promptBuilder.getSystemPrompt('pickle_glass_analysis', …)`):
+- The fixed text comes first: 9,714 of 9,746 chars, about 2.4K tokens.
+- The career block (Live Answer only) and the conversation history are inserted at the very end.
+
+So every Live Answer and every Live Insights call starts with the same ~2.4K-token prefix. They share it, and after the first call of a session it costs nothing against TPM and TPD. While the history window holds fewer than 30 turns it only grows at the end, so more of it can match the previous call. Once it slides, the match ends where the history starts.
+
+Caching needs no code. It is logged as `cached:` (FR-021), and R5 counts it in the per-interview estimate.
 
 ---
 
@@ -405,7 +427,7 @@ The live probe (T006) still decides R17 V1–V6 against the real API.
 | R2 | Presets `openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `qwen/qwen3.8-27b`; slash → Groq |
 | R3 | `groq-sdk` ^1.6.0, added first and alone |
 | R4 | `maxRetries: 0`; quiet abort; stop at `finish_reason` (the SDK reads past `[DONE]`); two error-body shapes |
-| R5 | Free plan (8K TPM, 200K TPD per model; upgrades closed); declared budget not metered (live); `too-large` kind; `tpm_left` logged; cross-provider lists next |
+| R5 | Free plan (8K TPM, 200K TPD per model; upgrades closed); declared budget not metered (live); a one-hour interview uses ~115–390K (typical ~240K) of the 400K text budget: one fits, two a day probably not; `too-large` kind; `tpm_left` logged; cross-provider lists next |
 | R6 | gpt-oss `low` + `include_reasoning: false`; qwen `none` (+ `hidden` otherwise); 1024-token allowance |
 | R7 | Image-capable models first for image requests; images dropped for text-only models |
 | R8 | Own classifier: `transient`, `unavailable`, `too-large`, `fatal-request`, `fatal-auth` |
@@ -414,7 +436,7 @@ The live probe (T006) still decides R17 V1–V6 against the real API.
 | R11 | 15 s first text, 45 s deadline, 15 s idle |
 | R12–R13 | Retries in the loop; every call streams |
 | R14 | `openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b` |
-| R15 | Prompt caching is automatic; log cached tokens |
+| R15 | Prompt caching is automatic and cached tokens do not count against rate limits; the fixed ~2.4K-token prefix is shared by Live Answer and Live Insights; log cached tokens |
 | R16 | No STT |
 | R17 | Six live checks before calling it done |
 | R18 | The provider ran with the real SDK against a local fake API under Node and Electron: 7/7 |

@@ -877,8 +877,12 @@ flowchart TB
 - **Timeouts:** first text within 15 s (`firstTextTimeoutMs`, `:199`); 15 s idle once text
   streams; an answer must start within 45 s.
 - **Rate limits:** a Free-plan key has 8K tokens per minute and 200K per day **per model**.
-  The list spreads load across models. Each attempt logs `tpm_left`
-  (`x-ratelimit-remaining-tokens`), and a 413 tells the user the request is over the limit.
+  Cached tokens do not count, and Live Answer and Live Insights share the fixed ~2.4K-token
+  prefix of `pickle_glass_analysis`. One Live Answer is about 3.5K and one Live Insights about
+  2.5K, so a one-hour interview uses about 240K of the 400K the two text models share
+  (estimate in the spec's research R5): one interview fits, two in a day probably do not. The list
+  spreads load across models. Each attempt logs `tpm_left` (`x-ratelimit-remaining-tokens`), and a
+  413 tells the user the request is over the limit.
 - **Key validation** lists models (`models.list()`). Keys start with `gsk_`.
 - **Diagnostics:** grep `[Groq Provider]`, e.g. `attempt 1/3 stream model=openai/gpt-oss-120b
   outcome=ok ttft=310ms last=1900ms total=1910ms chunks=42 stop=stop effort=low

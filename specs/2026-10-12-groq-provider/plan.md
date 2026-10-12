@@ -163,7 +163,7 @@ Consolidated in [research.md](./research.md):
 | R2 | Which models? | `openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `qwen/qwen3.8-27b` (live list); slash → Groq |
 | R3 | Which SDK? | `groq-sdk` ^1.6.0, first and alone |
 | R4 | What does the SDK do? | Uncapped, uncancellable retry waits; quiet abort; reads past `[DONE]`; two error-body shapes |
-| R5 | Rate limits | Free plan, 8K TPM and 200K TPD per model; declared budget not metered (live); `too-large`; `tpm_left` |
+| R5 | Rate limits | Free plan, 8K TPM and 200K TPD per model; declared budget not metered (live); one ~1 h interview fits (~240K typical of 400K), two a day probably not; `too-large`; `tpm_left` |
 | R6 | Reasoning | gpt-oss `low` + `include_reasoning: false`; Qwen `none`; 1024 allowance |
 | R7 | Images | Vision model first; images dropped for text-only models |
 | R8 | Error taxonomy | Own classifier with `too-large` and `model_` codes |
@@ -172,7 +172,7 @@ Consolidated in [research.md](./research.md):
 | R11 | Timeouts | 15 s / 45 s / 15 s |
 | R12–R13 | Retries, streaming | In the loop; every call streams |
 | R14 | Recommended list | `openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b` |
-| R15–R16 | Caching, STT | Automatic, logged; no STT |
+| R15–R16 | Caching, STT | Automatic; cached tokens free against rate limits; shared 2.4K prefix; no STT |
 | R17 | Open questions | Six live checks (T006, T-VERIFY-MANUAL) |
 
 ### Testing Strategy
