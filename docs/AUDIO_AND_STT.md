@@ -63,7 +63,7 @@ Audio format across all platforms: **PCM16, mono, 24 kHz**, chunked at 100 ms.
 
 ## 3. STT / LLM provider matrix
 
-Providers are declared in a single registry: `factory.js:20-108` (`PROVIDERS`). The model
+Providers are declared in a single registry: `factory.js:22-110` (`PROVIDERS`). The model
 selection layer (`modelStateService.js`) and the Settings UI are entirely **data-driven**
 from this registry — adding a model to a provider's `sttModels`/`llmModels` array is enough
 to surface it in the UI.
@@ -81,11 +81,11 @@ to surface it in the UI.
 
 **How selection resolves at runtime:** `modelStateService.getCurrentModelInfo('stt')`
 (`modelStateService.js:378`) returns `{ provider, model, apiKey }` for the active STT
-provider, which `sttService` hands to `createSTT(provider, opts)` (`factory.js:132`).
+provider, which `sttService` hands to `createSTT(provider, opts)` (`factory.js:169`).
 A model ID is mapped back to its provider by `getProviderForModel()` (`modelStateService.js:286`).
 
 `areProvidersConfigured()` requires **both** a working LLM key and a working STT key
-(`modelStateService.js:438-456`) — so an STT-only provider like Deepgram cannot satisfy the
+(`modelStateService.js:459-477`) — so an STT-only provider like Deepgram cannot satisfy the
 app on its own.
 
 ---
@@ -128,8 +128,9 @@ PCM16/mono/24 kHz output. Two sockets are opened (Me + Them). Messages are parse
 
 The Gemini CSV failover feature (`callWithFailover`, the model rotator, the
 `_reset`/`_final_model` SSE sentinels) is wired **only** into `createLLM` /
-`createStreamingLLM` — the Ask/answer path. STT never touches it. `createSTT` deliberately
-takes only the **first** model in the list (`gemini.js:38-40`):
+`createStreamingLLM` — the Ask/answer path. So is the chain across providers (a model list
+that ends in another provider's models, `ARCHITECTURE.md` §10.4). STT never touches either.
+`createSTT` deliberately takes only the **first** model in the list (`gemini.js:38-40`):
 
 ```js
 // STT does NOT failover — use only the first model in the CSV list (locked decision #3).

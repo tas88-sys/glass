@@ -1,6 +1,7 @@
 %% 10 - AI Provider Factory + Model State resolution
 %% A single registry (factory.js PROVIDERS) drives the whole model layer and the
-%% Settings UI. modelStateService resolves {provider, model, apiKey} at call time.
+%% Settings UI. modelStateService resolves {provider, model, apiKey} at call time,
+%% plus keys for an LLM list that names several providers (diagram 17).
 flowchart TB
     subgraph registry["factory.js — PROVIDERS registry (single source of truth)"]
         direction LR
@@ -17,7 +18,7 @@ flowchart TB
     subgraph state["modelStateService"]
         keys["provider_settings table<br/>api_key (encrypted at rest if Firebase)<br/>selected_llm_model / selected_stt_model<br/>is_active_llm / is_active_stt"]
         auto["_autoSelectAvailableModels()<br/>picks a valid model when key added/removed"]
-        resolve["getCurrentModelInfo('llm' | 'stt')<br/>-> {provider, model, apiKey}"]
+        resolve["getCurrentModelInfo('llm' | 'stt')<br/>-> {provider, model, apiKey}<br/>llm also: keys of every provider the list names"]
         gate["areProvidersConfigured()<br/>requires BOTH an LLM key AND an STT key"]
         infer["getProviderForModel(id)<br/>presets, then Ollama installs, then typed IDs / CSV:<br/>inferProviderFromModelId — gemini- → gemini, claude- → anthropic,<br/>vendor/model → groq (the last two LLM only)"]
     end
@@ -31,10 +32,14 @@ flowchart TB
     registry --> state
     keys --> resolve
     resolve --> consumers
-    consumers --> dispatch["factory.createLLM / createStreamingLLM / createSTT<br/>sanitizeModelId strips '-glass'"]
-    dispatch --> registry
+    consumers --> dispatch["factory.createLLM / createStreamingLLM / createSTT<br/>removes keys; sanitizeModelId strips '-glass'"]
+    dispatch --> split{"splitByProvider(model, provider):<br/>how many providers?"}
+    split -->|"one"| registry
+    split -->|"two or more"| chain["providerChain.js<br/>runs each provider's segment in turn,<br/>each with its own key (diagram 17)"]
+    chain --> registry
 
     settingsui["SettingsView (data-driven)<br/>renders one API-key field per provider<br/>+ Gemini, Anthropic and Groq model-list inputs"] --> keys
     settingsui --> infer
-    health["providers/modelHealth.js<br/>one in-memory cooldown registry,<br/>shared by the Gemini, Anthropic and Groq failover loops"]
+    health["providers/modelHealth.js<br/>one in-memory cooldown registry,<br/>shared by the Gemini, Anthropic and Groq failover loops;<br/>isCoolingDown read by the chain"]
     registry -.-> health
+    chain -.-> health

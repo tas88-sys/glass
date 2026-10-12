@@ -214,9 +214,9 @@ happening when there is no answer to show:
 
 | Payload | Sent when | Panel |
 |---|---|---|
-| `{ id, question, status: 'retrying', model }` | each Gemini, Anthropic or Groq `_reset` (failover, timeout, refusal, too-large, retry round); `model` is its `next_model` | "Trying <model>…" |
+| `{ id, question, status: 'retrying', model }` | each Gemini, Anthropic or Groq `_reset` (failover, timeout, refusal, too-large, retry round), and the chain's switch to the next provider of a mixed list; `model` is its `next_model` | "Trying <model>…" |
 | `{ id, status: 'idle' }` | that answer's stream ends after a `retrying` | clears its "Trying …" (same `id` only) |
-| `{ id, question, status: 'error', error }` | the stream fails (`error` = the provider's `userMessage`, e.g. `All Gemini models failed …`, `All Claude models failed …` or `All Groq models failed …`) or ends with no text | "No answer — <error>" until an answer starts |
+| `{ id, question, status: 'error', error }` | the stream fails (`error` = the provider's `userMessage`, e.g. `All Gemini models failed …`, `All Claude models failed …` or `All Groq models failed …`; for a mixed list `All providers failed (groq → gemini). Last: …`) or ends with no text | "No answer — <error>" until an answer starts |
 
 Aborted answers (a newer question, session reset) send no error. `liveAnswerHistory.js` keeps
 the two concerns apart: `applyLiveAnswerUpdate` ignores payloads without `answer`, and
@@ -249,7 +249,7 @@ needed). It clears the debounce timer, aborts any in-flight `AbortController`, a
 `lastAnsweredTail`, `inFlight`, `hadFallback`, and the career session state (`careerPrev`,
 `activeCompany`, §4.7).
 
-### 4.6 Failover (Gemini, Anthropic, Groq) and debugging
+### 4.6 Failover (Gemini, Anthropic, Groq, across providers) and debugging
 
 With Gemini, `createStreamingLLM` (`src/features/common/ai/providers/gemini.js`) keeps one
 answer alive across model failures:
@@ -268,6 +268,8 @@ When to expect 503s: [`GEMINI_503_PEAK_HOURS.md`](GEMINI_503_PEAK_HOURS.md).
 With Anthropic, `anthropic.js` sends the same sentinels for a list of Claude models (`claude-haiku-5-5,claude-sonnet-5-5`, typed in Settings). It fails over on overloads, rate limits and refusals, and when no text arrives in time (20 s for Haiku, 45 s for the others; `ANTHROPIC_FIRST_TEXT_TIMEOUT_MS` overrides). The SDK never retries; fast failures get a second round after 2 s, and the same 60 s deadline applies. Live Answer's `maxTokens: 900` is raised to 4096 on models that think, and no `temperature` is sent. Details in [`ARCHITECTURE.md` §10.2](../ARCHITECTURE.md#102-anthropic-claude).
 
 With Groq, `groq.js` sends the same sentinels for a list of `vendor/model` IDs (`openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b`, typed in Settings). It fails over on rate limits, overloads, a request too large for a model's per-minute limit (413), and when no text arrives within 15 s (`GROQ_FIRST_TEXT_TIMEOUT_MS` overrides). An answer must start within 45 s. An Ask with a screenshot tries the models that see images first (only Qwen 3.8 does); the others get the question without the image. Live Answer's `maxTokens: 900` gets 1024 more tokens on gpt-oss for its reasoning, which is never sent back or logged; `temperature` is passed through. A Free-plan key has 8K tokens per minute and 200K per day per model, so each log line shows `tpm_left`. Details in [`ARCHITECTURE.md` §10.3](../ARCHITECTURE.md#103-groq).
+
+A list may also end in another provider's models whose key is saved, e.g. in the Groq field `openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b,gemini-3.5-flash-lite,gemini-3.1-flash-lite`. When every Groq model fails (for example when the free daily budget runs out mid-interview), the panel shows "Trying gemini-3.5-flash-lite…" and Gemini answers, marked "(fallback)". Live Insights falls back the same way. While every Groq model is cooling down (up to 5 min), later questions go straight to Gemini with no Groq request. Any Groq failure moves on, a bad key included. A screenshot goes first to a provider that sees images. An answer must start within 60 s across providers (`LLM_CHAIN_DEADLINE_MS`). When nothing answers, the panel reads `All providers failed (groq → gemini). Last: …`. Details in [`ARCHITECTURE.md` §10.4](../ARCHITECTURE.md#104-lists-across-providers).
 
 `LIVE_ANSWER_DEBUG=1` (env or `.env`) logs the lane's decisions: the trigger gate, the
 provider/model in use, the PASSIVE decision and the streamed character count. It never logs answer
