@@ -209,3 +209,61 @@ describe('applyLiveAnswerUpdate: unverified', () => {
         assert.deepEqual(out[2].unverified, ['40%']);
     });
 });
+
+// Live features FR-014 (spec 2026-10-12-live-features-toggle): with only Answer
+// on, the copy button copies the answers as text.
+const { answersToText } = require('../liveAnswerHistory');
+
+describe('answersToText', () => {
+    it('returns an empty string for no answers or a non-array', () => {
+        assert.equal(answersToText([]), '');
+        assert.equal(answersToText(null), '');
+        assert.equal(answersToText(undefined), '');
+        assert.equal(answersToText('Q1\nA1'), '');
+    });
+
+    it('writes each answer under its question, newest first, a blank line between them', () => {
+        const answers = [
+            { id: '2', question: 'Q2', text: 'A2', ts: 2 },
+            { id: '1', question: 'Q1', text: 'A1', ts: 1 },
+        ];
+        assert.equal(answersToText(answers), 'Q2\nA2\n\nQ1\nA1');
+    });
+
+    it('writes an answer without a question as its text alone', () => {
+        assert.equal(answersToText([{ id: '1', text: 'A' }]), 'A');
+        assert.equal(answersToText([{ id: '2', question: '', text: 'B' }, { id: '1', question: 'Q1', text: 'A1' }]), 'B\n\nQ1\nA1');
+    });
+
+    it('skips an answer with no text, empty text or only whitespace', () => {
+        const answers = [
+            { id: '4', question: 'Q4' },
+            { id: '3', question: 'Q3', text: '' },
+            { id: '2', question: 'Q2', text: '  \n ' },
+            { id: '1', question: 'Q1', text: 'A1' },
+        ];
+        assert.equal(answersToText(answers), 'Q1\nA1');
+        assert.equal(answersToText([{ question: 'Q', text: '' }, { text: 'B' }]), 'B');
+    });
+
+    it('keeps the answer text as it is, bullets and line breaks included', () => {
+        const text = 'Headline.\n- point one\n- point two';
+        assert.equal(answersToText([{ id: '1', question: 'Q1', text }]), `Q1\n${text}`);
+    });
+
+    it('ends a single answer with no trailing blank line', () => {
+        const out = answersToText([{ id: '1', question: 'Q1', text: 'A1' }]);
+        assert.equal(out, 'Q1\nA1');
+        assert.ok(!out.endsWith('\n'));
+    });
+
+    it('does not change its input', () => {
+        const answers = [
+            { id: '2', question: 'Q2', text: 'A2', ts: 2, sources: ['notes'] },
+            { id: '1', question: 'Q1', text: 'A1', ts: 1 },
+        ];
+        const copy = JSON.parse(JSON.stringify(answers));
+        answersToText(answers);
+        assert.deepEqual(answers, copy);
+    });
+});

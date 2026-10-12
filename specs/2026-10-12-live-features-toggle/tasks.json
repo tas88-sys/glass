@@ -1,7 +1,7 @@
 {
   "spec_id": "2026-10-12-live-features-toggle",
   "spec_name": "live-features-toggle",
-  "updated": "2026-10-12T17:06:04Z",
+  "updated": "2026-10-12T17:08:36Z",
   "anthropic_patterns": [
     "Ralph looping",
     "JSON task state"
@@ -135,7 +135,7 @@
       "scope": null,
       "block_on": null,
       "completed_at": "2026-10-12T17:06:04Z",
-      "evidence": "node --check ok on featureBridge.js, settingsService.js, listenService.js, preload.js; the three new require paths resolve; AT-CLI-005 and AT-CLI-006 pass; diffs add only (featureBridge +25, listenService +15, settingsService +1, preload +7/-1: the trailing comma on removeOnSessionStateChanged); a failed save is returned as is and the mode is not applied (spec error registry); npm test 1089/1089. The npm start check (a mode change logs [Live] features=...) needs the Settings button and runs with T018",
+      "evidence": "node --check ok on featureBridge.js, settingsService.js, listenService.js, preload.js; the three new require paths resolve; AT-CLI-005 and AT-CLI-006 pass; diffs add only (featureBridge +25, listenService +15, settingsService +1, preload +8/-1: the trailing comma on removeOnSessionStateChanged); a failed save is returned as is and the mode is not applied (spec error registry); npm test 1089/1089. The npm start check (a mode change logs [Live] features=...) needs the Settings button and runs with T018",
       "evidence_type": null,
       "auto_skill": null,
       "auto_skill_timing": null,
@@ -147,7 +147,7 @@
       "description": "Wiring (Electron-only files, no unit test: they cannot load under npm test; the logic is already covered by T010..T013): settingsService.getDefaultSettings gains liveFeatures: 'both' (FR-002); featureBridge adds ipcMain.handle('settings:getLiveFeatures') -> liveFeaturesState(saved value) and ipcMain.handle('settings:setLiveFeatures', mode) (refuse a mode outside LIVE_FEATURES with {success:false,error}; else saveSettings({liveFeatures: mode}), listenService.setLiveFeatures(mode), send 'listen:liveFeaturesChanged' with the state to windowPool.get('listen') when it exists and is not destroyed, return {success:true, ...state}) (FR-003); listenService.setLiveFeatures(mode) delegates to summaryService.setLiveFeatures, and initializeNewSession reads settingsService.getSettings() (required lazily inside the method) and sets the mode before resetConversationHistory, logging only error.message on failure and leaving 'both' (FR-010); preload.js adds listenView.getLiveFeatures/onLiveFeaturesChanged/removeOnLiveFeaturesChanged and settingsView.getLiveFeatures/setLiveFeatures (FR-004)."
     },
     {
-      "status": "pending",
+      "status": "completed",
       "parallel": true,
       "target_file": "src/ui/listen/summary/__tests__/liveAnswerHistory.test.js",
       "gate": "T014",
@@ -157,8 +157,8 @@
       "gate_type": null,
       "scope": null,
       "block_on": null,
-      "completed_at": null,
-      "evidence": null,
+      "completed_at": "2026-10-12T17:08:36Z",
+      "evidence": "7 answersToText cases appended to liveAnswerHistory.test.js (58 lines added, 0 deleted): all 7 failed with answersToText is not a function before T016; the 26 existing cases passed",
       "evidence_type": null,
       "auto_skill": null,
       "auto_skill_timing": null,
@@ -170,7 +170,7 @@
       "description": "TEST answersToText (additions to src/ui/listen/summary/__tests__/liveAnswerHistory.test.js; existing cases untouched): [] and non-arrays (null, undefined, a string) -> ''; two entries newest-first -> 'Q2\\nA2\\n\\nQ1\\nA1'; an entry without question -> its text alone; an entry without text (or empty text) skipped; entries with whitespace-only text skipped; the input is not mutated; a single entry has no trailing blank line."
     },
     {
-      "status": "pending",
+      "status": "completed",
       "parallel": false,
       "target_file": "src/ui/listen/ListenView.js",
       "gate": "T015",
@@ -180,8 +180,8 @@
       "gate_type": null,
       "scope": null,
       "block_on": null,
-      "completed_at": null,
-      "evidence": null,
+      "completed_at": "2026-10-12T17:08:36Z",
+      "evidence": "liveAnswerHistory.test.js 33/33; npm run build:renderer builds (the CJS liveFeatures.js bundles into content.js; the new texts are in the bundle); AT-CLI-007 and AT-NEG-006 pass; npm test 1096/1096. LiveAnswerView: showEmptyState, getAnswerText, its own .empty-state CSS; ListenView: mode read at connect, at session start and on listen:liveFeaturesChanged (same handler reference removed on disconnect), panes, labels and copy per mode, height re-measured on a mode change; resetAnswer/resetAnalysis untouched",
       "evidence_type": null,
       "auto_skill": null,
       "auto_skill_timing": null,

@@ -101,4 +101,21 @@ function applyLiveAnswerStatus(status, data) {
     return status;
 }
 
-module.exports = { applyLiveAnswerUpdate, applyLiveAnswerStatus, MAX_ANSWERS };
+/**
+ * The answers as plain text, for the copy button when only Live Answer is on
+ * (live features FR-014): each answer as its question (when it has one), a
+ * newline and its text, newest first, separated by a blank line. An answer
+ * with no text is skipped; no answers give ''.
+ *
+ * @param {Array<{question?:string, text?:string}>} answers newest first
+ * @returns {string}
+ */
+function answersToText(answers) {
+    if (!Array.isArray(answers)) return '';
+    return answers
+        .filter(a => a && typeof a.text === 'string' && a.text.trim())
+        .map(a => (a.question ? `${a.question}\n${a.text}` : a.text))
+        .join('\n\n');
+}
+
+module.exports = { applyLiveAnswerUpdate, applyLiveAnswerStatus, answersToText, MAX_ANSWERS };
