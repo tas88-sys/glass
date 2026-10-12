@@ -1,35 +1,72 @@
 const { Anthropic, APIConnectionError } = require('@anthropic-ai/sdk');
 const health = require('./modelHealth');
+const catalog = require('../modelCatalog');
 const { classify, retryAfterMs, retryAfterHeaderMs, shortErrorMessage } = require('./anthropicErrors');
+
+// Whether Glass messages (or generateContent parts) carry an image. Required
+// when called: providerChain requires the providers lazily too.
+const hasImages = (input) => require('../providerChain').hasImages(input);
 
 // ---------------------------------------------------------------------------
 // Request building (pure)
 // ---------------------------------------------------------------------------
 
-const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
 // Every Glass lane has someone waiting on the answer.
 const DEFAULT_EFFORT = 'low';
 // Thinking counts toward max_tokens, so a small cap (Live Answer passes 900)
 // can run out inside thinking, before any text. Floor on models that think.
 const MIN_MAX_TOKENS = 4096;
 const DEFAULT_MAX_TOKENS = { stream: 16_000, once: 8_192 };
-// Server-side refusal fallback, "default" form. Only these models have it:
-// Haiku 5.5 has none (a declined request stays declined).
+// Server-side refusal fallback, "default" form. Sent to every model until the
+// API rejects it for one (the catalog keeps that).
 const SERVER_FALLBACK_BETA = 'server-side-fallback-2026-07-01';
-const SERVER_FALLBACK_MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5'];
 
 /**
- * Whether the model takes output_config.effort (and thinks by default): the
- * Claude 5 families and later, claude-opus-4-5 … 4-8, claude-sonnet-4-6.
- * Haiku 4.5 and Sonnet 4.5 reject effort with a 400.
+ * The effort levels the model takes in output_config.effort, from the
+ * catalog (the Models API's capabilities.effort). Empty when the model takes
+ * none (Haiku 4.5 and Sonnet 4.5 reject effort with a 400) or when the
+ * catalog does not know the model: then no effort is sent.
+ * @param {string} modelId
+ * @returns {string[]}
+ */
+function effortLevels(modelId) {
+  return catalog.capabilities('anthropic', String(modelId || '')).effortLevels || [];
+}
+
+/**
+ * Whether the model takes output_config.effort (catalog).
  * @param {string} modelId
  * @returns {boolean}
  */
 function acceptsEffort(modelId) {
-  const id = String(modelId || '');
-  const family = /^claude-(?:fable|mythos|opus|sonnet|haiku)-(\d+)(?:\D|$)/.exec(id);
-  if (family && Number(family[1]) >= 5) return true;
-  return /^claude-opus-4-[5-8](?:\D|$)/.test(id) || /^claude-sonnet-4-6(?:\D|$)/.test(id);
+  return effortLevels(modelId).length > 0;
+}
+
+/**
+ * One model of the Models API in the catalog's shape. A capability the API
+ * does not send is null (unknown), not false.
+ * @param {object} m - GET /v1/models item
+ */
+function normalizeModel(m) {
+  const caps = m?.capabilities && typeof m.capabilities === 'object' ? m.capabilities : null;
+  const supported = (node) => (node && typeof node === 'object' && typeof node.supported === 'boolean' ? node.supported : null);
+  let levels = null;
+  const effort = caps?.effort;
+  if (effort && typeof effort === 'object') {
+    levels = supported(effort) === false
+      ? []
+      : Object.entries(effort).filter(([k, v]) => k !== 'supported' && supported(v) === true).map(([k]) => k);
+  }
+  const thinking = supported(caps?.thinking);
+  const max = Number(m?.max_tokens);
+  return {
+    id: m?.id,
+    vision: supported(caps?.image_input),
+    maxOutput: Number.isFinite(max) && max > 0 ? max : null,
+    reasoning: thinking,
+    effortLevels: levels,
+    thinking,
+  };
 }
 
 /** A number from the environment, or null when unset, blank or not a number. */
@@ -40,12 +77,13 @@ function envNumber(env, name) {
   return Number.isFinite(n) ? n : null;
 }
 
-function resolveEffort(effort, env) {
-  for (const value of [effort, env?.ANTHROPIC_EFFORT]) {
+/** The caller's effort, else ANTHROPIC_EFFORT, else low, among the model's levels; else its first level. */
+function resolveEffort(effort, env, levels) {
+  for (const value of [effort, env?.ANTHROPIC_EFFORT, DEFAULT_EFFORT]) {
     const level = typeof value === 'string' ? value.trim().toLowerCase() : '';
-    if (EFFORT_LEVELS.includes(level)) return level;
+    if (levels.includes(level)) return level;
   }
-  return DEFAULT_EFFORT;
+  return levels[0];
 }
 
 function minMaxTokens(env) {
@@ -93,11 +131,13 @@ function textOf(content) {
 /**
  * Glass messages to { system, messages }: system messages joined with a blank
  * line; consecutive messages with the same role merged (the API wants them
- * alternating).
+ * alternating). Images are dropped (and counted) for a model that does not
+ * see them.
  */
-function mapMessages(messages) {
+function mapMessages(messages, vision = true) {
   const system = [];
   const out = [];
+  let imagesDropped = 0;
   for (const msg of messages || []) {
     if (!msg) continue;
     if (msg.role === 'system') {
@@ -106,13 +146,17 @@ function mapMessages(messages) {
       continue;
     }
     const role = msg.role === 'assistant' ? 'assistant' : 'user';
-    const content = (Array.isArray(msg.content) ? msg.content : [msg.content]).map(toBlock).filter(Boolean);
+    const content = (Array.isArray(msg.content) ? msg.content : [msg.content]).map(toBlock).filter((block) => {
+      if (!block) return false;
+      if (block.type === 'image' && !vision) { imagesDropped++; return false; }
+      return true;
+    });
     if (content.length === 0) continue;
     const last = out[out.length - 1];
     if (last && last.role === role) last.content.push(...content);
     else out.push({ role, content });
   }
-  return { system: system.join('\n\n'), messages: out };
+  return { system: system.join('\n\n'), messages: out, imagesDropped };
 }
 
 /**
@@ -122,34 +166,44 @@ function mapMessages(messages) {
  * lanes included: a non-streaming response sends its headers only once the
  * whole answer is written, which the SDK's 15 s timeout would cut.
  *
+ * What the model takes comes from the catalog (the Models API, or an
+ * override in Settings): the effort levels (none known: no effort), whether
+ * it thinks (the max_tokens floor; unknown counts as thinking, so a small cap
+ * never ends inside thinking), its output maximum (the cap never goes over
+ * it), whether it sees images, and whether the API refused the server-side
+ * fallback beta for it.
+ *
  * @param {object} input
  * @param {string} input.modelId
  * @param {Array} input.messages - Glass messages ({ role, content })
  * @param {number} [input.maxTokens] - caller cap; default by mode
- * @param {string} [input.effort] - low|medium|high|xhigh|max; else ANTHROPIC_EFFORT; else low
+ * @param {string} [input.effort] - one of the model's levels; else ANTHROPIC_EFFORT; else low
  * @param {'stream'|'once'} [input.mode='stream'] - picks the default max_tokens
  * @param {boolean} [input.serverFallback=true] - false once the API rejected the beta
  * @param {object} [input.env=process.env]
- * @returns {{ method: 'messages'|'beta', params: object }}
+ * @returns {{ method: 'messages'|'beta', params: object, imagesDropped: number }}
  */
 function buildRequest({ modelId, messages, maxTokens, effort, mode = 'stream', serverFallback = true, env = process.env }) {
-  const { system, messages: mapped } = mapMessages(messages);
-  const thinks = acceptsEffort(modelId);
+  const caps = catalog.capabilities('anthropic', String(modelId || ''));
+  const { system, messages: mapped, imagesDropped } = mapMessages(messages, caps.vision !== false);
+  const levels = caps.effortLevels || [];
+  const thinks = caps.effortLevels ? levels.length > 0 : caps.thinking !== false;
   let max = Number.isFinite(maxTokens) && maxTokens > 0
     ? Math.floor(maxTokens)
     : DEFAULT_MAX_TOKENS[mode === 'once' ? 'once' : 'stream'];
   if (thinks) max = Math.max(max, minMaxTokens(env));
+  if (caps.maxOutput != null) max = Math.min(max, caps.maxOutput);
 
   const params = { model: modelId, max_tokens: max, messages: mapped, stream: true };
   if (system) params.system = system;
-  if (thinks) params.output_config = { effort: resolveEffort(effort, env) };
+  if (levels.length > 0) params.output_config = { effort: resolveEffort(effort, env, levels) };
 
-  if (!serverFallback || serverFallbackOff(env) || !SERVER_FALLBACK_MODELS.includes(modelId)) {
-    return { method: 'messages', params };
+  if (!serverFallback || serverFallbackOff(env) || caps.serverFallback === false) {
+    return { method: 'messages', params, imagesDropped };
   }
   params.betas = [SERVER_FALLBACK_BETA];
   params.fallbacks = 'default';
-  return { method: 'beta', params };
+  return { method: 'beta', params, imagesDropped };
 }
 
 // ---------------------------------------------------------------------------
@@ -245,6 +299,39 @@ class AnthropicProvider {
 }
 
 /**
+ * Every model of the key's list, for the catalog (modelCatalog.refresh). The
+ * SDK pages through the list. A retired model (lifecycle) is left out: a
+ * request naming it fails.
+ * @param {string} apiKey
+ * @returns {Promise<object[]>} normalizeModel entries
+ */
+async function listModels(apiKey) {
+  const client = makeClient(apiKey);
+  const out = [];
+  for await (const m of client.models.list({ limit: 1000 }, { maxRetries: SDK_MAX_RETRIES, timeout: SDK_TIMEOUT_MS })) {
+    if (m?.id && m.lifecycle !== 'retired') out.push(normalizeModel(m));
+  }
+  return out;
+}
+
+/**
+ * One model the list did not name (an alias), for the catalog
+ * (modelCatalog.ensureKnown).
+ * @param {string} apiKey
+ * @param {string} modelId
+ * @returns {Promise<object|null>} null when the API has no such model
+ */
+async function getModel(apiKey, modelId) {
+  const client = makeClient(apiKey);
+  try {
+    return normalizeModel(await client.models.retrieve(modelId, {}, { maxRetries: SDK_MAX_RETRIES, timeout: SDK_TIMEOUT_MS }));
+  } catch (err) {
+    if (err?.status === 404) return null;
+    throw err;
+  }
+}
+
+/**
  * Creates an Anthropic STT session
  * Note: Anthropic doesn't have native real-time STT, so this is a placeholder
  * You might want to use a different STT service or implement a workaround
@@ -284,18 +371,6 @@ const TIMEOUT_COOLDOWN_MS = 10_000;
 // round after a short wait (brief overload bursts usually pass by then).
 const MAX_ROUNDS = 2;
 const RETRY_ROUND_DELAY_MS = 2_000;
-
-// Set when the API rejects the server-side fallback beta (an org without it).
-// It is then never sent again in this process.
-let serverFallbackDisabled = false;
-
-/**
- * Turn the server-side fallback back on. For use in test beforeEach only.
- * @internal
- */
-function resetServerFallback() {
-  serverFallbackDisabled = false;
-}
 
 /** "45s", "0.08s", "12.35s" */
 const seconds = (ms) => `${Math.round(ms / 10) / 100}s`;
@@ -342,6 +417,7 @@ function logAttempt({ mode, attempt, of, modelId, outcome, stats, err }) {
   if (stats.refusalCategory) parts.push(`category=${stats.refusalCategory}`);
   const u = stats.usage;
   if (u) parts.push(`tokens=in:${u.input_tokens ?? '-'},out:${u.output_tokens ?? '-'},cache_read:${u.cache_read_input_tokens ?? 0}`);
+  if (stats.imagesDropped) parts.push(`images=dropped:${stats.imagesDropped}`);
   if (stats.fallbackFrom) parts.push(`fallback=${stats.fallbackFrom}→${stats.servedBy}`);
   else if (stats.servedBy && stats.servedBy !== modelId) parts.push(`served_by=${stats.servedBy}`);
   const requestId = err?.requestID || stats.requestId;
@@ -395,37 +471,34 @@ function describeFailure(modelId, err, kind) {
   return `${modelId} — ${shortErrorMessage(err)}`;
 }
 
-/** A 400 that names the beta header or the parameter: this org has no server-side fallback. */
-function isServerFallbackRejected(err) {
-  return err?.status === 400 && /anthropic-beta|fallbacks/i.test(shortErrorMessage(err));
-}
-
 /**
  * Send one Messages request (always streaming) and return its event
- * iterator. When the API rejects the server-side fallback beta, resend the
- * same attempt once without it and stop sending it for the rest of the process.
+ * iterator. A 400 on the beta method is resent once without the beta: when
+ * that is accepted, the beta was the cause (an org or a model without it),
+ * and the catalog keeps it, so that model is not sent the beta again. When
+ * the resend fails too, its error is the attempt's and nothing is recorded.
  */
 async function openStream({ client, modelId, mode, messages, maxTokens, effort, stats, signal }) {
   const options = { maxRetries: SDK_MAX_RETRIES, timeout: SDK_TIMEOUT_MS, signal };
   const request = (serverFallback) => buildRequest({ modelId, messages, maxTokens, effort, mode, serverFallback });
-  const send = async ({ method, params }) => {
+  const send = async ({ method, params, imagesDropped }) => {
     stats.maxTokens = params.max_tokens;
+    stats.imagesDropped = imagesDropped;
     const api = method === 'beta' ? client.beta.messages : client.messages;
     const { data, request_id: requestId } = await api.create(params, options).withResponse();
     stats.requestId = requestId || null;
     return data;
   };
 
-  const first = request(!serverFallbackDisabled);
+  const first = request(true);
   try {
     return await send(first);
   } catch (err) {
-    if (first.method !== 'beta' || signal.aborted || !isServerFallbackRejected(err)) throw err;
-    if (!serverFallbackDisabled) {
-      serverFallbackDisabled = true;
-      console.warn(`[Anthropic Provider] server-side fallback disabled for this session: ${shortErrorMessage(err)}`);
-    }
-    return send(request(false));
+    if (first.method !== 'beta' || signal.aborted || err?.status !== 400) throw err;
+    const data = await send(request(false));
+    catalog.markServerFallback('anthropic', modelId, false);
+    console.warn(`[Anthropic Provider] server-side fallback off for model=${modelId}: ${shortErrorMessage(err)}`);
+    return data;
   }
 }
 
@@ -537,15 +610,32 @@ async function runAttempt({ client, modelId, mode, messages, maxTokens, effort, 
  * @param {Array} o.messages - Glass messages
  * @param {number} [o.maxTokens]
  * @param {string} [o.effort]
+ * @param {boolean} [o.visionOnly] - with an image, only the models that see images may answer
  * @param {object} o.timing - firstTextTimeoutMs / requestDeadlineMs / idleTimeoutMs overrides, retryRoundDelayMs
  * @param {object} o.sink - text(t) → false once the consumer is gone; reset({ next_model, reason })
  * @param {object} o.control - cancelled() → boolean; track(abortController) / untrack(abortController)
  * @returns {Promise<{ modelId: string, servedBy: string, stats: object } | null>} null when cancelled
- * @throws the last error, carrying a short userMessage
+ * @throws the last error, carrying a short userMessage; NO_VISION_MODEL, before any attempt,
+ *   when visionOnly leaves no model
  */
-async function runWithFailover({ client, model, mode, messages, maxTokens, effort, timing, sink, control }) {
-  let remaining = health.parseModelList(model);
-  if (remaining.length === 0) remaining = [DEFAULT_MODEL];
+async function runWithFailover({ client, model, mode, messages, maxTokens, effort, visionOnly, timing, sink, control }) {
+  let listed = health.parseModelList(model);
+  if (listed.length === 0) listed = [DEFAULT_MODEL];
+  // With an image, the models that see it go first (catalog); a model that
+  // does not see images gets the request without them.
+  const withImages = hasImages(messages);
+  let remaining = catalog.orderForImages('anthropic', listed, withImages);
+  // A later provider sees the image (providerChain): a model here that does
+  // not would answer without it, so it is left to that provider.
+  if (visionOnly && withImages) {
+    remaining = remaining.filter((m) => catalog.seesImages('anthropic', m));
+    if (remaining.length === 0) {
+      console.warn(`[Anthropic Provider] request ${mode} answered_by=none attempts=0 no model sees images: ${listed.join(',')}`);
+      const err = providerError('NO_VISION_MODEL', 'no model in the list sees images');
+      err.userMessage = 'No Anthropic model in the list sees images.';
+      throw err;
+    }
+  }
   // Planned attempts for the "attempt i/n" log; grows when a second round starts.
   let plannedAttempts = remaining.length;
   let retryable = []; // models of this round worth another try (joinsNextRound)
@@ -680,14 +770,16 @@ function makeClient(apiKey) {
  * @param {string} opts.apiKey
  * @param {string} [opts.model='claude-opus-5-5'] - one Claude ID or a CSV list, tried in order
  * @param {number} [opts.maxTokens] - default 8192; at least 4096 on models that think
- * @param {string} [opts.effort] - low|medium|high|xhigh|max (default ANTHROPIC_EFFORT, else low)
+ * @param {string} [opts.effort] - one of the model's effort levels (default ANTHROPIC_EFFORT, else low)
+ * @param {boolean} [opts.visionOnly] - a request with an image goes only to the models that see images
+ *   (set by providerChain when a later provider sees it)
  * @param {number} [opts.temperature] - accepted for compatibility; never sent
  * @param {number} [opts.firstTextTimeoutMs] - overrides firstTextTimeoutMs(modelId) for every model
  * @param {number|null} [opts.requestDeadlineMs] - overrides requestDeadlineMs(); null disables
  * @param {number|null} [opts.idleTimeoutMs] - overrides idleTimeoutMs(); null disables
  * @param {number} [opts.retryRoundDelayMs] - wait before the second round (default 2 s)
  */
-function createLLM({ apiKey, model = DEFAULT_MODEL, maxTokens, effort, firstTextTimeoutMs: firstTextOverride, requestDeadlineMs: deadlineOverride, idleTimeoutMs: idleOverride, retryRoundDelayMs = RETRY_ROUND_DELAY_MS }) {
+function createLLM({ apiKey, model = DEFAULT_MODEL, maxTokens, effort, visionOnly, firstTextTimeoutMs: firstTextOverride, requestDeadlineMs: deadlineOverride, idleTimeoutMs: idleOverride, retryRoundDelayMs = RETRY_ROUND_DELAY_MS }) {
   const client = makeClient(apiKey);
   const timing = { firstTextTimeoutMs: firstTextOverride, requestDeadlineMs: deadlineOverride, idleTimeoutMs: idleOverride, retryRoundDelayMs };
   // No consumer can cancel a non-streaming call.
@@ -697,7 +789,8 @@ function createLLM({ apiKey, model = DEFAULT_MODEL, maxTokens, effort, firstText
     let text = '';
     // A failed attempt's partial text is dropped before the next attempt.
     const sink = { text: (t) => { text += t; return true; }, reset: () => { text = ''; } };
-    const { servedBy, stats } = await runWithFailover({ client, model, mode: 'once', messages, maxTokens, effort, timing, sink, control });
+    await catalog.ensureKnown('anthropic', apiKey, health.parseModelList(model));
+    const { servedBy, stats } = await runWithFailover({ client, model, mode: 'once', messages, maxTokens, effort, visionOnly, timing, sink, control });
     const raw = { model: servedBy, stop_reason: stats.stopReason, usage: stats.usage, content: [{ type: 'text', text }] };
     return { text, raw, servedBy };
   }
@@ -729,7 +822,7 @@ function createLLM({ apiKey, model = DEFAULT_MODEL, maxTokens, effort, firstText
  *
  * @param {object} opts - as createLLM; maxTokens defaults to 16000
  */
-function createStreamingLLM({ apiKey, model = DEFAULT_MODEL, maxTokens, effort, firstTextTimeoutMs: firstTextOverride, requestDeadlineMs: deadlineOverride, idleTimeoutMs: idleOverride, retryRoundDelayMs = RETRY_ROUND_DELAY_MS }) {
+function createStreamingLLM({ apiKey, model = DEFAULT_MODEL, maxTokens, effort, visionOnly, firstTextTimeoutMs: firstTextOverride, requestDeadlineMs: deadlineOverride, idleTimeoutMs: idleOverride, retryRoundDelayMs = RETRY_ROUND_DELAY_MS }) {
   const client = makeClient(apiKey);
   const timing = { firstTextTimeoutMs: firstTextOverride, requestDeadlineMs: deadlineOverride, idleTimeoutMs: idleOverride, retryRoundDelayMs };
 
@@ -767,7 +860,8 @@ function createStreamingLLM({ apiKey, model = DEFAULT_MODEL, maxTokens, effort, 
             reset: ({ next_model, reason }) => { safeEnqueue(encode({ _reset: true, next_model, reason })); },
           };
           try {
-            const result = await runWithFailover({ client, model, mode: 'stream', messages, maxTokens, effort, timing, sink, control });
+            await catalog.ensureKnown('anthropic', apiKey, health.parseModelList(model));
+            const result = await runWithFailover({ client, model, mode: 'stream', messages, maxTokens, effort, visionOnly, timing, sink, control });
             if (!result) return;
             safeEnqueue(encode({ _final_model: result.servedBy }));
             safeEnqueue(new TextEncoder().encode('data: [DONE]\n\n'));
@@ -796,10 +890,13 @@ module.exports = {
   createSTT,
   createLLM,
   createStreamingLLM,
+  listModels,
+  getModel,
+  normalizeModel,
   buildRequest,
   acceptsEffort,
+  effortLevels,
   firstTextTimeoutMs,
   requestDeadlineMs,
   idleTimeoutMs,
-  resetServerFallback,
 };

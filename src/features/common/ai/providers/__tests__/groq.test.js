@@ -92,7 +92,9 @@ Module._load = function (request, parent, isMain) {
 for (const k of Object.keys(require.cache)) if (/[\\/]groq\.js$/.test(k)) delete require.cache[k];
 
 const health = require('../modelHealth');
-const { createLLM, createStreamingLLM } = require('../groq');
+const catalog = require('../../modelCatalog');
+const GROQ_MODELS = require('../../__tests__/fixtures/groq-models.json');
+const { createLLM, createStreamingLLM, normalizeModel } = require('../groq');
 
 // ---------------------------------------------------------------------------
 // Scripts
@@ -227,6 +229,9 @@ const E = 'acme/model-e';
 
 beforeEach(() => {
   health.resetHealth();
+  // What Groq's models API reported (recorded 2026-10-12): Qwen sees images.
+  catalog.resetCatalog();
+  catalog.seed('groq', GROQ_MODELS.data.map(normalizeModel));
   script = null;
   calls = [];
 });
@@ -673,6 +678,58 @@ describe('streamChat: visionOnly (a later provider sees the image)', () => {
     captureLogs(t);
     await assert.rejects(once(A, { visionOnly: true }).chat(askWithScreen), (err) => err.code === 'NO_VISION_MODEL');
     assert.equal(calls.length, 0);
+  });
+});
+
+describe('the key output limit, learned from a refusal (catalog)', () => {
+  test('an OTPM refusal records the limit for the model', async (t) => {
+    captureLogs(t);
+    script = byModel({ [Q]: outputTooLarge() });
+    await readAll(await stream(Q, { visionOnly: true }).streamChat(askWithScreen));
+    assert.equal(catalog.keyOutputLimit('groq', Q), 1000);
+    assert.equal(catalog.keyOutputLimit('groq', A), null);
+  });
+
+  test('the next request over the limit skips the model without a call', async (t) => {
+    const logs = captureLogs(t);
+    catalog.recordKeyOutputLimit('groq', Q, 1000);
+    script = byModel({ [Q]: answer(Q, 'unreachable'), [A]: answer(A, 'blind') });
+    const { error } = await readAll(await stream(`${A},${B},${Q}`, { visionOnly: true }).streamChat(askWithScreen));
+    assert.equal(calls.length, 0);
+    assert.equal(error.code, 'KEY_OUTPUT_LIMIT');
+    assert.equal(error.userMessage, `${Q} — asks for up to 16384 output tokens; this key allows 1000 per minute.`);
+    assert.ok(logs.some(l => l.includes(`skip model=${Q} reason=key-output-limit limit=1000 requested=16384`)), logs.join('\n'));
+  });
+
+  test('a cap under the limit (Live Answer, 900) still runs on the model', async (t) => {
+    captureLogs(t);
+    catalog.recordKeyOutputLimit('groq', Q, 1000);
+    script = byModel({ [Q]: answer(Q, 'short') });
+    const { text } = await readAll(await stream(Q, { maxTokens: 900 }).streamChat(ask));
+    assert.deepEqual(calls.map(c => c.params.model), [Q]);
+    assert.equal(calls[0].params.max_completion_tokens, 900);
+    assert.equal(text, 'short');
+  });
+
+  test('without visionOnly the other models still answer (a Groq-only list)', async (t) => {
+    captureLogs(t);
+    catalog.recordKeyOutputLimit('groq', Q, 1000);
+    script = byModel({ [A]: answer(A, 'blind') });
+    const { text } = await readAll(await stream(`${A},${Q}`).streamChat(askWithScreen));
+    assert.deepEqual(calls.map(c => c.params.model), [A]);
+    assert.equal(text, 'blind');
+  });
+
+  test('once the learned limit expires, the model is tried again', async (t) => {
+    captureLogs(t);
+    let clock = Date.now();
+    catalog.configure({ now: () => clock });
+    catalog.recordKeyOutputLimit('groq', Q, 1000);
+    clock += catalog.KEY_LIMIT_TTL_MS + 1;
+    script = byModel({ [Q]: answer(Q, 'I see it') });
+    const { text } = await readAll(await stream(Q, { visionOnly: true }).streamChat(askWithScreen));
+    assert.deepEqual(calls.map(c => c.params.model), [Q]);
+    assert.equal(text, 'I see it');
   });
 });
 

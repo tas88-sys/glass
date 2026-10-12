@@ -23,7 +23,7 @@ module.exports = {
     ipcMain.handle('settings:set-auto-update', async (event, isEnabled) => await settingsService.setAutoUpdateSetting(isEnabled));  
     ipcMain.handle('settings:get-model-settings', async () => await settingsService.getModelSettings());
     ipcMain.handle('settings:clear-api-key', async (e, { provider }) => await settingsService.clearApiKey(provider));
-    ipcMain.handle('settings:set-selected-model', async (e, { type, modelId }) => await settingsService.setSelectedModel(type, modelId));    
+    ipcMain.handle('settings:set-selected-model', async (e, { type, modelId, fieldProvider }) => await settingsService.setSelectedModel(type, modelId, fieldProvider));
 
     ipcMain.handle('settings:get-ollama-status', async () => await settingsService.getOllamaStatus());
     ipcMain.handle('settings:ensure-ollama-ready', async () => await settingsService.ensureOllamaReady());
@@ -196,7 +196,12 @@ module.exports = {
     ipcMain.handle('model:set-api-key', async (e, { provider, key }) => await modelStateService.setApiKey(provider, key));
     ipcMain.handle('model:remove-api-key', async (e, provider) => await modelStateService.handleRemoveApiKey(provider));
     ipcMain.handle('model:get-selected-models', async () => await modelStateService.getSelectedModels());
-    ipcMain.handle('model:set-selected-model', async (e, { type, modelId }) => await modelStateService.handleSetSelectedModel(type, modelId));
+    ipcMain.handle('model:set-selected-model', async (e, { type, modelId, fieldProvider }) => await modelStateService.handleSetSelectedModel(type, modelId, fieldProvider));
+    // Model catalog (modelCatalog.js): what each model can do, and the overrides set in Settings
+    ipcMain.handle('model:get-catalog', async (e, query) => modelStateService.getCatalog(query || {}));
+    ipcMain.handle('model:plan-model-list', async (e, { list, fieldProvider }) => await modelStateService.planModelList({ list, fieldProvider }));
+    ipcMain.handle('model:set-capability-override', async (e, input) => await modelStateService.setCapabilityOverride(input));
+    ipcMain.handle('model:refresh-catalog', async (e, { provider } = {}) => await modelStateService.refreshCatalog({ provider, force: true }));
     ipcMain.handle('model:get-available-models', async (e, { type }) => await modelStateService.getAvailableModels(type));
     ipcMain.handle('model:are-providers-configured', async () => await modelStateService.areProvidersConfigured());
     ipcMain.handle('model:get-provider-config', () => modelStateService.getProviderConfig());

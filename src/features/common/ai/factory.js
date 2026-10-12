@@ -1,6 +1,7 @@
 // factory.js
 
 const providerChain = require('./providerChain');
+const catalog = require('./modelCatalog');
 
 /**
  * @typedef {object} ModelOption
@@ -110,28 +111,47 @@ const PROVIDERS = {
 };
 
 /**
- * Provider of a model ID typed in Settings, or of a comma-separated list of
- * them (the first entry decides): 'claude-…' → anthropic, 'gemini-…' → gemini,
- * '<vendor>/<model>' → groq (every current Groq chat model is namespaced; no
- * other provider uses a slash). Installed Ollama models are matched before
- * this rule by the callers.
- * @param {string|null|undefined} modelId
+ * The provider an ID's prefix suggests: 'claude-…' → anthropic, 'gemini-…' →
+ * gemini, '<vendor>/<model>' → groq. Only the last resort of
+ * inferProviderFromModelId, for an ID no provider's models list has (no key
+ * for it yet, an empty catalog, or a typo).
+ * @param {string} id
  * @returns {'anthropic'|'gemini'|'groq'|null}
  */
-function inferProviderFromModelId(modelId) {
-  if (typeof modelId !== 'string') return null;
-  const first = modelId.split(',').map(s => s.trim()).find(Boolean) || '';
-  if (first.startsWith('claude-')) return 'anthropic';
-  if (first.startsWith('gemini-')) return 'gemini';
-  if (/^[^\s/]+\/\S+$/.test(first)) return 'groq';
+function providerFromPrefix(id) {
+  if (id.startsWith('claude-')) return 'anthropic';
+  if (id.startsWith('gemini-')) return 'gemini';
+  if (/^[^\s/]+\/\S+$/.test(id)) return 'groq';
   return null;
 }
 
 /**
+ * Provider of a model ID typed in Settings, or of a comma-separated list of
+ * them (the first entry decides): the provider whose models API lists it
+ * (modelCatalog); when several do, `context` (the field the list was typed
+ * in, or the run it continues) if it is one of them. An ID no catalog has
+ * falls back to its prefix (providerFromPrefix), logged once. Installed
+ * Ollama models are matched before this by the callers.
+ * @param {string|null|undefined} modelId
+ * @param {string} [context]
+ * @returns {'anthropic'|'gemini'|'groq'|null}
+ */
+function inferProviderFromModelId(modelId, context) {
+  if (typeof modelId !== 'string') return null;
+  const first = modelId.split(',').map(s => s.trim()).find(Boolean) || '';
+  if (!first) return null;
+  const listed = catalog.providerOf(first, context);
+  if (listed) return listed;
+  const byPrefix = providerFromPrefix(first);
+  catalog.notePrefixProvider(first, byPrefix);
+  return byPrefix;
+}
+
+/**
  * Segments of a model list that may name several providers: runs of
- * consecutive IDs of one provider (inferProviderFromModelId). An ID with no
- * inferable provider joins the current run; the first run's provider is
- * `firstProvider`. Only Anthropic, Gemini and Groq lists are cut; any other
+ * consecutive IDs of one provider (inferProviderFromModelId, with the current
+ * run as context). An ID with no inferable provider joins the current run;
+ * the first run's provider is `firstProvider`. Only Anthropic, Gemini and Groq lists are cut; any other
  * provider's list is one segment. Trimmed, empties dropped; an empty list → [].
  * @param {string|null|undefined} modelCsv
  * @param {string} firstProvider - the active provider
@@ -144,7 +164,7 @@ function splitByProvider(modelCsv, firstProvider) {
   const segments = [];
   let current = firstProvider;
   for (const id of ids) {
-    current = inferProviderFromModelId(id) || current;
+    current = inferProviderFromModelId(id, current) || current;
     const last = segments[segments.length - 1];
     if (last && last.provider === current) last.models.push(id);
     else segments.push({ provider: current, models: [id] });
@@ -261,5 +281,6 @@ module.exports = {
   getProviderClass,
   getAvailableProviders,
   inferProviderFromModelId,
+  providerFromPrefix,
   splitByProvider,
 };

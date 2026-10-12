@@ -1,9 +1,10 @@
 /**
  * groqRequest.test.js
  *
- * The pure half of the Groq provider: model traits, request building
+ * The pure half of the Groq provider: model traits (from the catalog, seeded
+ * with a recorded GET /openai/v1/models response), request building
  * (data-model "Request params"), image routing ("Attempt order"), the timeout
- * settings, and key validation against a mocked SDK.
+ * settings, and key validation and the models list against a mocked SDK.
  * Every env read is injected; process.env is never touched.
  * Run: node --test src/features/common/ai/providers/__tests__/groqRequest.test.js
  */
@@ -19,6 +20,7 @@ const Module = require('module');
 const realSdk = require('groq-sdk');
 
 let modelsList = null; // (options) => Promise, set per test
+let modelsRetrieve = null; // (id, options) => Promise, set per test
 let sdkCalls = [];
 class FakeGroq {
   constructor(opts) {
@@ -26,6 +28,10 @@ class FakeGroq {
       list: (options) => {
         sdkCalls.push({ kind: 'models.list', clientOpts: opts, options });
         return modelsList(options);
+      },
+      retrieve: (id, options) => {
+        sdkCalls.push({ kind: 'models.retrieve', id, options });
+        return modelsRetrieve(id, options);
       },
     };
     this.chat = { completions: { create: () => { sdkCalls.push({ kind: 'chat' }); throw new Error('unexpected chat call'); } } };
@@ -38,8 +44,13 @@ Module._load = function (request, parent, isMain) {
 };
 for (const k of Object.keys(require.cache)) if (/[\\/]groq\.js$/.test(k)) delete require.cache[k];
 
+const catalog = require('../../modelCatalog');
+const GROQ_MODELS = require('../../__tests__/fixtures/groq-models.json');
 const {
   GroqProvider,
+  listModels,
+  getModel,
+  normalizeModel,
   modelTraits,
   buildRequest,
   orderForImages,
@@ -53,25 +64,78 @@ const IMAGE = { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,AAA
 const user = (content) => ({ role: 'user', content });
 const build = (input) => buildRequest({ messages: [user('hi')], env: {}, ...input });
 
-describe('modelTraits', () => {
-  it('gpt-oss family', () => {
-    for (const id of ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'openai/gpt-oss-safeguard-20b']) {
+// What Groq's models API reported (recorded 2026-10-12), as the catalog keeps it.
+beforeEach(() => {
+  catalog.resetCatalog();
+  catalog.seed('groq', GROQ_MODELS.data.map(normalizeModel));
+});
+
+describe('modelTraits (catalog)', () => {
+  it('gpt-oss: text only, 65,536 out, the gpt-oss dialect (from the API)', () => {
+    for (const id of ['openai/gpt-oss-120b', 'openai/gpt-oss-20b']) {
       assert.deepEqual(modelTraits(id), { reasoning: 'gpt-oss', vision: false, maxOutput: 65_536 }, id);
     }
   });
 
-  it('qwen/qwen3.8-27b sees images and caps output at 16,384', () => {
+  it('qwen/qwen3.8-27b sees images and caps output at 16,384 (from the API)', () => {
     assert.deepEqual(modelTraits('qwen/qwen3.8-27b'), { reasoning: 'qwen3', vision: true, maxOutput: 16_384 });
   });
 
-  it('other qwen3 models reason but are text-only and uncapped', () => {
-    assert.deepEqual(modelTraits('qwen/qwen3.9-32b'), { reasoning: 'qwen3', vision: false, maxOutput: null });
+  it('a new model the API says sees images gets them, with no code change', () => {
+    catalog.seed('groq', [{ id: 'qwen/qwen3.9-27b', vision: true, maxOutput: 32_768, reasoning: true }]);
+    assert.deepEqual(modelTraits('qwen/qwen3.9-27b'), { reasoning: 'qwen3', vision: true, maxOutput: 32_768 });
+    assert.equal(build({ modelId: 'qwen/qwen3.9-27b', messages: [user(['q', IMAGE])] }).imagesSent, 1);
   });
 
-  it('unknown models get nothing', () => {
+  it('a model the catalog does not know: no image, no cap, its family dialect', () => {
+    assert.deepEqual(modelTraits('qwen/qwen3.9-32b'), { reasoning: 'qwen3', vision: false, maxOutput: null });
     for (const id of ['acme/foo-1', 'allam-2-7b', '', null, undefined]) {
       assert.deepEqual(modelTraits(id), { reasoning: null, vision: false, maxOutput: null }, String(id));
     }
+  });
+
+  it('reasoning false in the catalog sends no reasoning field', () => {
+    catalog.setOverride('groq', 'openai/gpt-oss-20b', 'reasoning', false);
+    assert.equal(modelTraits('openai/gpt-oss-20b').reasoning, null);
+    assert.equal(build({ modelId: 'openai/gpt-oss-20b' }).params.reasoning_effort, undefined);
+  });
+
+  it('an override in Settings wins over the API', () => {
+    catalog.setOverride('groq', 'qwen/qwen3.8-27b', 'vision', false);
+    catalog.setOverride('groq', 'openai/gpt-oss-120b', 'maxOutput', 4_000);
+    assert.equal(modelTraits('qwen/qwen3.8-27b').vision, false);
+    assert.equal(build({ modelId: 'openai/gpt-oss-120b' }).params.max_completion_tokens, 4_000);
+  });
+});
+
+describe('models list for the catalog', () => {
+  it('normalizes the recorded response: vision, max output and reasoning', () => {
+    const byId = Object.fromEntries(GROQ_MODELS.data.map(normalizeModel).map((m) => [m.id, m]));
+    assert.deepEqual(byId['qwen/qwen3.8-27b'], { id: 'qwen/qwen3.8-27b', vision: true, maxOutput: 16_384, reasoning: true, effortLevels: null, thinking: null });
+    assert.deepEqual(byId['openai/gpt-oss-120b'], { id: 'openai/gpt-oss-120b', vision: false, maxOutput: 65_536, reasoning: true, effortLevels: null, thinking: null });
+    assert.equal(byId['whisper-large-v3'].reasoning, null, 'no supported_features: unknown, not false');
+  });
+
+  it('a field Groq does not send is unknown', () => {
+    assert.deepEqual(normalizeModel({ id: 'x/y' }), { id: 'x/y', vision: null, maxOutput: null, reasoning: null, effortLevels: null, thinking: null });
+  });
+
+  it('listModels reads the list and leaves out inactive models', async () => {
+    sdkCalls = [];
+    modelsList = async () => ({ object: 'list', data: [...GROQ_MODELS.data, { id: 'old/model', active: false }] });
+    const models = await listModels('gsk_test');
+    assert.deepEqual(models.map((m) => m.id).sort(), GROQ_MODELS.data.map((m) => m.id).sort());
+    assert.equal(sdkCalls[0].kind, 'models.list');
+    assert.equal(sdkCalls[0].clientOpts.apiKey, 'gsk_test');
+  });
+
+  it('getModel: one model, null on 404, other errors thrown', async () => {
+    modelsRetrieve = async (id) => GROQ_MODELS.data.find((m) => m.id === id);
+    assert.equal((await getModel('gsk_test', 'qwen/qwen3.8-27b')).vision, true);
+    modelsRetrieve = async () => { throw new realSdk.NotFoundError(404, { error: { message: 'not found' } }, 'not found', new Headers()); };
+    assert.equal(await getModel('gsk_test', 'typo/model'), null);
+    modelsRetrieve = async () => { throw new realSdk.InternalServerError(500, { error: { message: 'boom' } }, 'boom', new Headers()); };
+    await assert.rejects(getModel('gsk_test', 'x/y'), /boom/);
   });
 });
 

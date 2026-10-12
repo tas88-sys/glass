@@ -1,28 +1,54 @@
 const { Groq, APIConnectionError } = require('groq-sdk');
 const health = require('./modelHealth');
+const catalog = require('../modelCatalog');
 const { classify, retryAfterMs, retryAfterHeaderMs, shortErrorMessage, tooLargeNumbers, errorCode } = require('./groqErrors');
 
 // ---------------------------------------------------------------------------
-// Model traits (static table)
+// Model traits (catalog, plus the reasoning dialect)
 // ---------------------------------------------------------------------------
 
-// What each family accepts. A field a model does not know returns 400, so an
-// unknown model gets no reasoning field and no image.
-const MODEL_TRAITS = [
-  { match: /^openai\/gpt-oss-/, traits: { reasoning: 'gpt-oss', vision: false, maxOutput: 65_536 } },
-  { match: /^qwen\/qwen3\.8-27b$/, traits: { reasoning: 'qwen3', vision: true, maxOutput: 16_384 } },
-  { match: /^qwen\/qwen3/, traits: { reasoning: 'qwen3', vision: false, maxOutput: null } },
+// How a reasoning family is asked to reason: which fields and efforts it
+// takes (REASONING_EFFORTS). models.list says only that a model reasons
+// (supported_features), not which fields it accepts, and a field a model does
+// not know returns 400. So this stays a table: request format, like the SDK's
+// types. A model that reasons in no family here gets no reasoning field and
+// reasons at its own default.
+const REASONING_DIALECTS = [
+  { match: /^openai\/gpt-oss-/, family: 'gpt-oss' },
+  { match: /^qwen\/qwen3/, family: 'qwen3' },
 ];
-const NO_TRAITS = { reasoning: null, vision: false, maxOutput: null };
 
 /**
+ * What the model takes: vision and maxOutput from the catalog (override, else
+ * Groq's models API, else no image and no cap); the reasoning dialect when
+ * the catalog does not say the model does not reason.
  * @param {string} modelId
  * @returns {{ reasoning: 'gpt-oss'|'qwen3'|null, vision: boolean, maxOutput: number|null }}
  */
 function modelTraits(modelId) {
   const id = String(modelId || '');
-  const hit = MODEL_TRAITS.find((t) => t.match.test(id));
-  return { ...(hit ? hit.traits : NO_TRAITS) };
+  const caps = catalog.capabilities('groq', id);
+  const dialect = caps.reasoning === false ? null : REASONING_DIALECTS.find((d) => d.match.test(id));
+  return { reasoning: dialect ? dialect.family : null, vision: caps.vision === true, maxOutput: caps.maxOutput ?? null };
+}
+
+/**
+ * One entry of Groq's models list in the catalog's shape. A field Groq does
+ * not send is null (unknown), not false.
+ * @param {object} m - GET /openai/v1/models item
+ */
+function normalizeModel(m) {
+  const modalities = Array.isArray(m?.input_modalities) ? m.input_modalities : null;
+  const features = Array.isArray(m?.supported_features) ? m.supported_features : null;
+  const max = Number(m?.max_completion_tokens ?? m?.max_output_length);
+  return {
+    id: m?.id,
+    vision: modalities ? modalities.includes('image') : null,
+    maxOutput: Number.isFinite(max) && max > 0 ? max : null,
+    reasoning: features ? features.includes('reasoning') : null,
+    effortLevels: null,
+    thinking: null,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -40,7 +66,8 @@ const REASONING_EFFORTS = {
 // gpt-oss-120b, research R20), and an Ask answer must not stop mid-way. The
 // declared value is not metered against the per-minute limit (R5, R20). The
 // exception is Qwen on a key with a 1K output limit, which refuses it as
-// too-large; an image then goes to a later provider (visionOnly).
+// too-large; an image then goes to a later provider (visionOnly), and the
+// catalog keeps the limit, so the next request over it skips Qwen without a call.
 const DEFAULT_MAX_TOKENS = 16_384;
 // Reasoning tokens count toward max_completion_tokens, so a caller's cap (Live
 // Answer passes 900) could end inside the reasoning. The declared value is not
@@ -183,6 +210,19 @@ function buildRequest({ modelId, messages, maxTokens, temperature, effort, env =
   return { params, imagesSent: mapped.imagesSent, imagesDropped: mapped.imagesDropped, effort: resolved };
 }
 
+/**
+ * The max_completion_tokens buildRequest declares for the model, without
+ * building the request.
+ * @param {{ modelId: string, maxTokens?: number, effort?: string, env?: object }} input
+ * @returns {number}
+ */
+function declaredMaxTokens({ modelId, maxTokens, effort, env = process.env }) {
+  const traits = modelTraits(modelId);
+  const resolved = traits.reasoning ? resolveEffort(traits.reasoning, effort, env) : null;
+  const reasons = traits.reasoning === 'gpt-oss' || (traits.reasoning === 'qwen3' && resolved !== 'none');
+  return completionBudget({ maxTokens, reasons, maxOutput: traits.maxOutput, env });
+}
+
 // ---------------------------------------------------------------------------
 // Timeouts
 // ---------------------------------------------------------------------------
@@ -268,6 +308,35 @@ class GroqProvider {
       }
       return { success: false, error: shortErrorMessage(err) || `Validation failed with status: ${err.status}` };
     }
+  }
+}
+
+/**
+ * Every model of the key's list, for the catalog (modelCatalog.refresh). A
+ * model Groq marks inactive is left out.
+ * @param {string} apiKey
+ * @returns {Promise<object[]>} normalizeModel entries
+ */
+async function listModels(apiKey) {
+  const client = makeClient(apiKey);
+  const page = await client.models.list({ maxRetries: SDK_MAX_RETRIES, timeout: SDK_TIMEOUT_MS });
+  const data = Array.isArray(page?.data) ? page.data : [];
+  return data.filter((m) => m?.id && m.active !== false).map(normalizeModel);
+}
+
+/**
+ * One model the list did not name, for the catalog (modelCatalog.ensureKnown).
+ * @param {string} apiKey
+ * @param {string} modelId
+ * @returns {Promise<object|null>} null when Groq has no such model
+ */
+async function getModel(apiKey, modelId) {
+  const client = makeClient(apiKey);
+  try {
+    return normalizeModel(await client.models.retrieve(modelId, { maxRetries: SDK_MAX_RETRIES, timeout: SDK_TIMEOUT_MS }));
+  } catch (err) {
+    if (err?.status === 404) return null;
+    throw err;
   }
 }
 
@@ -552,6 +621,29 @@ async function runWithFailover({ client, model, mode, messages, maxTokens, tempe
       throw err;
     }
   }
+  // The key's output limit, learned from an earlier refusal (catalog): a model
+  // whose declared cap is over it would be refused before answering, so it is
+  // left out without a call. A smaller cap (Live Answer's 900) still runs there.
+  const overLimit = [];
+  const candidates = remaining;
+  remaining = remaining.filter((m) => {
+    const limit = catalog.keyOutputLimit('groq', m);
+    if (limit == null) return true;
+    const requested = declaredMaxTokens({ modelId: m, maxTokens, effort });
+    if (requested <= limit) return true;
+    overLimit.push({ modelId: m, limit, requested });
+    return false;
+  });
+  for (const s of overLimit) {
+    console.warn(`[Groq Provider] skip model=${s.modelId} reason=key-output-limit limit=${s.limit} requested=${s.requested}`);
+  }
+  if (remaining.length === 0) {
+    const s = overLimit[0];
+    console.warn(`[Groq Provider] request ${mode} answered_by=none attempts=0 every candidate is over this key's output limit: ${candidates.join(',')}`);
+    const err = providerError('KEY_OUTPUT_LIMIT', `asks for up to ${s.requested} output tokens; this key allows ${s.limit} per minute`);
+    err.userMessage = `${s.modelId} — asks for up to ${s.requested} output tokens; this key allows ${s.limit} per minute.`;
+    throw err;
+  }
   // Planned attempts for the "attempt i/n" log; grows when a second round starts.
   let plannedAttempts = remaining.length;
   let retryable = []; // models of this round worth another try (joinsNextRound)
@@ -624,6 +716,12 @@ async function runWithFailover({ client, model, mode, messages, maxTokens, tempe
       lastKind = kind;
       if (stats.firstTextAt != null) answerStarted = true;
       logAttempt({ mode, attempt: attempts, of: plannedAttempts, modelId, outcome: isTimeout(err) ? 'timeout' : kind, stats, err });
+      if (kind === 'too-large') {
+        // Over the key's output tokens per minute: refused before answering. Kept
+        // in the catalog, so the next request over it skips the model.
+        const n = tooLargeNumbers(err);
+        if (n?.output) catalog.recordKeyOutputLimit('groq', modelId, n.limit);
+      }
 
       if (kind === 'fatal-request' || kind === 'fatal-auth') {
         logRequest({ mode, answeredBy: null, attempts, startedAt, reordered });
@@ -706,6 +804,7 @@ function createLLM({ apiKey, model = DEFAULT_MODEL, maxTokens, temperature, effo
     let text = '';
     // A failed attempt's partial text is dropped before the next attempt.
     const sink = { text: (t) => { text += t; return true; }, reset: () => { text = ''; } };
+    await catalog.ensureKnown('groq', apiKey, health.parseModelList(model));
     const { servedBy, stats } = await runWithFailover({ client, model, mode: 'once', messages, maxTokens, temperature, effort, visionOnly, timing, sink, control });
     const raw = {
       model: servedBy,
@@ -780,6 +879,7 @@ function createStreamingLLM({ apiKey, model = DEFAULT_MODEL, maxTokens, temperat
             reset: ({ next_model, reason }) => { safeEnqueue(encode({ _reset: true, next_model, reason })); },
           };
           try {
+            await catalog.ensureKnown('groq', apiKey, health.parseModelList(model));
             const result = await runWithFailover({ client, model, mode: 'stream', messages, maxTokens, temperature, effort, visionOnly, timing, sink, control });
             if (!result) return;
             safeEnqueue(encode({ _final_model: result.servedBy }));
@@ -809,8 +909,12 @@ module.exports = {
   createSTT,
   createLLM,
   createStreamingLLM,
+  listModels,
+  getModel,
+  normalizeModel,
   modelTraits,
   buildRequest,
+  declaredMaxTokens,
   orderForImages,
   firstTextTimeoutMs,
   requestDeadlineMs,

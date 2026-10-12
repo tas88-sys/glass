@@ -28,9 +28,10 @@
 'use strict';
 
 const health = require('./providers/modelHealth');
+const catalog = require('./modelCatalog');
 
 /** Providers whose IDs can be cut into segments (factory.inferProviderFromModelId). */
-const CHAIN_PROVIDERS = Object.freeze(['anthropic', 'gemini', 'groq']);
+const CHAIN_PROVIDERS = catalog.CATALOG_PROVIDERS;
 // Kept for a later segment while one can still run.
 const FALLBACK_RESERVE_MS = 15_000;
 // Longest a request may wait for an answer to start, across every segment.
@@ -62,34 +63,28 @@ const anthropic = () => require('./providers/anthropic');
 
 /**
  * The real providers. requestDeadlineMs is each provider's own exported
- * function, so its env override holds. firstModel is the model the provider
- * will try first, for the _reset that announces the switch.
+ * function, so its env override holds. seesImages reads the catalog (the
+ * provider's models API, an override in Settings, or the provider default).
+ * firstModel is the model the provider will try first, for the _reset that
+ * announces the switch. ensureKnown lets the catalog learn the segment's
+ * models before the plan reads it (bounded wait, modelCatalog.ensureKnown).
  */
+function adapterFor(id, load) {
+  return Object.freeze({
+    id,
+    createStreamingLLM: (opts) => load().createStreamingLLM(opts),
+    createLLM: (opts) => load().createLLM(opts),
+    requestDeadlineMs: () => load().requestDeadlineMs(),
+    seesImages: (models) => models.some((m) => catalog.seesImages(id, m)),
+    firstModel: (models, input) => health.pickModel(catalog.orderForImages(id, models, hasImages(input))),
+    ensureKnown: (models, apiKey) => catalog.ensureKnown(id, apiKey, models),
+  });
+}
+
 const DEFAULT_ADAPTERS = Object.freeze({
-  groq: {
-    id: 'groq',
-    createStreamingLLM: (opts) => groq().createStreamingLLM(opts),
-    createLLM: (opts) => groq().createLLM(opts),
-    requestDeadlineMs: () => groq().requestDeadlineMs(),
-    seesImages: (models) => models.some((m) => groq().modelTraits(m).vision),
-    firstModel: (models, input) => health.pickModel(groq().orderForImages(models, input)),
-  },
-  gemini: {
-    id: 'gemini',
-    createStreamingLLM: (opts) => gemini().createStreamingLLM(opts),
-    createLLM: (opts) => gemini().createLLM(opts),
-    requestDeadlineMs: () => gemini().requestDeadlineMs(),
-    seesImages: () => true,
-    firstModel: (models) => health.pickModel(models),
-  },
-  anthropic: {
-    id: 'anthropic',
-    createStreamingLLM: (opts) => anthropic().createStreamingLLM(opts),
-    createLLM: (opts) => anthropic().createLLM(opts),
-    requestDeadlineMs: () => anthropic().requestDeadlineMs(),
-    seesImages: () => true,
-    firstModel: (models) => health.pickModel(models),
-  },
+  groq: adapterFor('groq', groq),
+  gemini: adapterFor('gemini', gemini),
+  anthropic: adapterFor('anthropic', anthropic),
 });
 
 // ---------------------------------------------------------------------------
@@ -207,18 +202,34 @@ function logRequest({ mode, answeredBy, provider, segmentsRun, ms, reordered = f
 // Turns (shared by the stream and non-stream paths)
 // ---------------------------------------------------------------------------
 
+/** The key of each provider; the active one falls back to opts.apiKey when keys does not name it. */
+function keysFor({ segments, keys, apiKey }) {
+  const segmentKeys = { ...(keys || {}) };
+  const active = segments[0]?.provider;
+  if (active && !segmentKeys[active]) segmentKeys[active] = apiKey;
+  return segmentKeys;
+}
+
+/**
+ * Let the catalog learn the models of every segment with a key, in parallel,
+ * before the plan reads it (each wait is bounded). Never throws.
+ */
+async function ensureCatalog({ segments, segmentKeys, adapters }) {
+  await Promise.all(segments.map(async (s) => {
+    const key = segmentKeys[s.provider];
+    if (!key) return;
+    try { await adapters[s.provider]?.ensureKnown?.(s.models, key); } catch {}
+  }));
+}
+
 /**
  * The request's plan: whether it carries an image, segment order, and the key
- * of each provider (the active one falls back to opts.apiKey when keys does
- * not name it).
+ * of each provider (keysFor).
  */
 function planRequest({ segments, keys, apiKey, adapters, input }) {
   const withImages = hasImages(input);
   const { segments: ordered, reordered } = orderSegments(segments, withImages, adapters);
-  const segmentKeys = { ...(keys || {}) };
-  const active = segments[0]?.provider;
-  if (active && !segmentKeys[active]) segmentKeys[active] = apiKey;
-  return { withImages, ordered, reordered, segmentKeys };
+  return { withImages, ordered, reordered, segmentKeys: keysFor({ segments, keys, apiKey }) };
 }
 
 /** The model a segment will try first, for the _reset; its first model when that cannot be told. */
@@ -230,8 +241,8 @@ function firstModelOf(adapter, segment, input) {
  * Decide the turn of segment i: skip it, stop (chain deadline passed), or
  * call it with these options: the caller's options, its own key, its models,
  * its timing (segmentTiming), and visionOnly when the request carries an
- * image that a later segment with a key sees (only Groq has models that drop
- * images; the other providers ignore the option).
+ * image that a later segment with a key sees (every provider then leaves out
+ * its models that do not see images, by the catalog).
  * @returns {{ skip: string } | { deadlineHit: true } | { adapter: object, options: object }}
  */
 function decideTurn({ i, withImages, ordered, segmentKeys, adapters, base, deadlineMs, startedAt, answerStarted, now }) {
@@ -335,6 +346,7 @@ function createChainStreamingLLM({ segments, keys, opts = {}, adapters = DEFAULT
           const mode = 'stream';
           const startedAt = now();
           const deadlineMs = chainDeadlineMs(env);
+          await ensureCatalog({ segments, segmentKeys: keysFor({ segments, keys, apiKey }), adapters });
           const { withImages, ordered, reordered, segmentKeys } = planRequest({ segments, keys, apiKey, adapters, input: messages });
           const of = ordered.length;
           const ran = [];
@@ -461,6 +473,7 @@ function createChainLLM({ segments, keys, opts = {}, adapters = DEFAULT_ADAPTERS
     const mode = 'once';
     const startedAt = now();
     const deadlineMs = chainDeadlineMs(env);
+    await ensureCatalog({ segments, segmentKeys: keysFor({ segments, keys, apiKey }), adapters });
     const { withImages, ordered, reordered, segmentKeys } = planRequest({ segments, keys, apiKey, adapters, input });
     const of = ordered.length;
     const ran = [];

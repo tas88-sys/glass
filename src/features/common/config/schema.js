@@ -102,6 +102,31 @@ const LATEST_SCHEMA = {
         ],
         constraints: ['PRIMARY KEY (provider)']
     },
+    // What each provider's models API reports about a model, the user's
+    // overrides from Settings, and what was learned from refusals
+    // (modelCatalog.js). NULL is "unknown" for a reported value and "automatic"
+    // for an override.
+    model_catalog: {
+        columns: [
+            { name: 'provider', type: 'TEXT NOT NULL' },
+            { name: 'model_id', type: 'TEXT NOT NULL' },
+            { name: 'listed', type: 'INTEGER' },
+            { name: 'vision', type: 'INTEGER' },
+            { name: 'max_output', type: 'INTEGER' },
+            { name: 'reasoning', type: 'INTEGER' },
+            { name: 'effort_levels', type: 'TEXT' },
+            { name: 'thinking', type: 'INTEGER' },
+            { name: 'server_fallback', type: 'INTEGER' },
+            { name: 'override_vision', type: 'INTEGER' },
+            { name: 'override_max_output', type: 'INTEGER' },
+            { name: 'override_reasoning', type: 'INTEGER' },
+            { name: 'key_output_limit', type: 'INTEGER' },
+            { name: 'key_limit_at', type: 'INTEGER' },
+            { name: 'fetched_at', type: 'INTEGER' },
+            { name: 'updated_at', type: 'INTEGER' }
+        ],
+        constraints: ['PRIMARY KEY (provider, model_id)']
+    },
     shortcuts: {
         columns: [
             { name: 'action', type: 'TEXT PRIMARY KEY' },

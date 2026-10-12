@@ -1047,3 +1047,107 @@ describe('firstChunkTimeoutMs', () => {
     assert.equal(firstChunkTimeoutMs('gemini-3-flash-preview'), 60_000);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The catalog: models list, output cap and images
+// ---------------------------------------------------------------------------
+
+describe('models list for the catalog', () => {
+  const catalog = require('../../modelCatalog');
+  const { listModels, getModel, normalizeModel, maxOutputTokensFor } = require('../gemini');
+  const MODELS = [
+    { name: 'models/gemini-3.5-flash-lite', outputTokenLimit: 65536, thinking: true, supportedGenerationMethods: ['generateContent', 'countTokens'] },
+    { name: 'models/gemini-embedding-001', outputTokenLimit: 1, supportedGenerationMethods: ['embedContent'] },
+  ];
+  const json = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
+
+  beforeEach(() => {
+    catalog.resetCatalog();
+  });
+
+  it('normalizes a Model resource: no vision field, so vision is unknown', () => {
+    assert.deepEqual(normalizeModel(MODELS[0]), {
+      id: 'gemini-3.5-flash-lite', vision: null, maxOutput: 65536, reasoning: true, effortLevels: null, thinking: true,
+    });
+  });
+
+  it('listModels pages, keeps generateContent models, and sends the key in a header', async (t) => {
+    const urls = [];
+    t.mock.method(globalThis, 'fetch', async (url, init) => {
+      urls.push(String(url));
+      assert.equal(init.headers['x-goog-api-key'], 'AIza-test');
+      return String(url).includes('pageToken=p2')
+        ? json(200, { models: [MODELS[1]] })
+        : json(200, { models: [MODELS[0]], nextPageToken: 'p2' });
+    });
+    const models = await listModels('AIza-test');
+    assert.deepEqual(models.map((m) => m.id), ['gemini-3.5-flash-lite']);
+    assert.equal(urls.length, 2);
+    assert.ok(urls.every((u) => !u.includes('AIza-test')), 'the key is never in the URL');
+  });
+
+  it('getModel: an alias, null on 404, other errors thrown', async (t) => {
+    t.mock.method(globalThis, 'fetch', async (url) => {
+      if (String(url).endsWith('/gemini-flash-latest')) return json(200, { ...MODELS[0], name: 'models/gemini-3.5-flash' });
+      if (String(url).endsWith('/gemini-typo')) return json(404, {});
+      return json(500, {});
+    });
+    assert.equal((await getModel('k', 'gemini-flash-latest')).id, 'gemini-flash-latest');
+    assert.equal(await getModel('k', 'gemini-typo'), null);
+    await assert.rejects(getModel('k', 'gemini-x'), /models.get 500/);
+  });
+
+  it('maxOutputTokens: the caller cap or 65,536, never over the model limit', () => {
+    assert.equal(maxOutputTokensFor('gemini-new', undefined), 65536);
+    assert.equal(maxOutputTokensFor('gemini-new', 900), 900);
+    catalog.seed('gemini', [{ id: 'gemini-small', maxOutput: 8192 }]);
+    assert.equal(maxOutputTokensFor('gemini-small', undefined), 8192);
+    assert.equal(maxOutputTokensFor('gemini-small', 900), 900);
+  });
+});
+
+describe('createStreamingLLM: images (catalog)', () => {
+  const catalog = require('../../modelCatalog');
+  const IMAGE = { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,AAAA' } };
+  const screen = [{ role: 'user', content: [{ type: 'text', text: 'What is on screen?' }, IMAGE] }];
+  const sentImage = (request) => request.contents[0].parts.some((p) => p.inlineData);
+
+  beforeEach(() => {
+    catalog.resetCatalog();
+  });
+
+  it('every Gemini model sees images by default (models.list does not say)', async () => {
+    const seen = [];
+    mockGenerateContentStream = async (modelId, request) => { seen.push([modelId, sentImage(request)]); return makeStream(chunk('ok')); };
+    const llm = createStreamingLLM({ apiKey: 'k', model: 'gemini-a,gemini-b', visionOnly: true, firstChunkTimeoutMs: 500, hedgeDelayMs: null });
+    await collectStream(await llm.streamChat(screen));
+    assert.deepEqual(seen, [['gemini-a', true]]);
+  });
+
+  it('a model set to not see images is skipped first, and without visionOnly gets no image', async () => {
+    catalog.setOverride('gemini', 'gemini-a', 'vision', false);
+    const seen = [];
+    mockGenerateContentStream = async (modelId, request) => {
+      seen.push([modelId, sentImage(request)]);
+      if (modelId === 'gemini-b') throw makeError(503, 'busy');
+      return makeStream(chunk('ok'));
+    };
+    const llm = createStreamingLLM({ apiKey: 'k', model: 'gemini-a,gemini-b', firstChunkTimeoutMs: 500, hedgeDelayMs: null, retryRoundDelayMs: 1, requestDeadlineMs: null });
+    await collectStream(await llm.streamChat(screen));
+    assert.deepEqual(seen[0], ['gemini-b', true], 'the model that sees images goes first');
+    assert.deepEqual(seen[1], ['gemini-a', false], 'the other one gets the request without the image');
+  });
+
+  it('visionOnly with no model that sees images: NO_VISION_MODEL before any call', async () => {
+    catalog.setOverride('gemini', 'gemini-a', 'vision', false);
+    let calls = 0;
+    mockGenerateContentStream = async () => { calls++; return makeStream(chunk('blind')); };
+    const llm = createStreamingLLM({ apiKey: 'k', model: 'gemini-a', visionOnly: true });
+    await assert.rejects(collectStream(await llm.streamChat(screen)), (err) => {
+      assert.equal(err.code, 'NO_VISION_MODEL');
+      assert.equal(err.userMessage, 'No Gemini model in the list sees images.');
+      return true;
+    });
+    assert.equal(calls, 0);
+  });
+});

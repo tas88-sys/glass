@@ -8,7 +8,7 @@
 
 'use strict';
 
-const { describe, it } = require('node:test');
+const { describe, it, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 
 const { PROVIDERS, inferProviderFromModelId } = require('../factory');
@@ -47,6 +47,39 @@ describe('inferProviderFromModelId (FR-002)', () => {
   for (const [input, expected] of cases) {
     it(`${JSON.stringify(input)} → ${expected}`, () => assert.equal(inferProviderFromModelId(input), expected));
   }
+});
+
+describe('inferProviderFromModelId: the catalog first, the prefix last (spec 2026-10-12-model-catalog)', () => {
+  const catalog = require('../modelCatalog');
+  const { splitByProvider } = require('../factory');
+  beforeEach(() => catalog.resetCatalog());
+
+  it('the provider whose models list has the ID, whatever its shape', () => {
+    catalog.seed('groq', [{ id: 'allam-2-7b' }]);
+    catalog.seed('anthropic', [{ id: 'opus-next' }]);
+    assert.equal(inferProviderFromModelId('allam-2-7b'), 'groq', 'no slash');
+    assert.equal(inferProviderFromModelId('opus-next'), 'anthropic', 'no claude- prefix');
+    assert.deepEqual(splitByProvider('openai/gpt-oss-120b,allam-2-7b,opus-next', 'groq'), [
+      { provider: 'groq', models: ['openai/gpt-oss-120b', 'allam-2-7b'] },
+      { provider: 'anthropic', models: ['opus-next'] },
+    ]);
+  });
+
+  it('an ID several providers list: the field it was typed in (context)', () => {
+    catalog.seed('groq', [{ id: 'shared/model' }]);
+    catalog.seed('gemini', [{ id: 'shared/model' }]);
+    assert.equal(inferProviderFromModelId('shared/model', 'groq'), 'groq');
+    assert.equal(inferProviderFromModelId('shared/model', 'gemini'), 'gemini');
+    assert.deepEqual(splitByProvider('openai/gpt-oss-120b,shared/model', 'groq'), [{ provider: 'groq', models: ['openai/gpt-oss-120b', 'shared/model'] }]);
+  });
+
+  it('an ID no catalog has falls back to the prefix, logged once', (t) => {
+    const lines = [];
+    t.mock.method(console, 'warn', (line) => lines.push(line));
+    assert.equal(inferProviderFromModelId('claude-new-9'), 'anthropic');
+    assert.equal(inferProviderFromModelId('claude-new-9'), 'anthropic');
+    assert.equal(lines.filter((l) => l.includes('model=claude-new-9 taken from its prefix (anthropic)')).length, 1);
+  });
 });
 
 describe('Groq provider (spec 2026-10-12-groq-provider FR-001)', () => {

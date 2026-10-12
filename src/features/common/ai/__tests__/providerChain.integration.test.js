@@ -142,8 +142,11 @@ for (const k of Object.keys(require.cache)) {
 }
 
 const health = require('../providers/modelHealth');
+const catalog = require('../modelCatalog');
+const GROQ_MODELS_RESPONSE = require('./fixtures/groq-models.json');
 // Through the factory, as the three lanes call it.
 const { splitByProvider, createStreamingLLM, createLLM } = require('../factory');
+const { normalizeModel: groqModel } = require('../providers/groq');
 
 // ---------------------------------------------------------------------------
 // Scripts
@@ -230,6 +233,9 @@ const chainLine = (kind) => logs.find(l => l.startsWith(`[LLM Chain] ${kind}`));
 
 beforeEach(() => {
   health.resetHealth();
+  // What Groq's models API reported (recorded 2026-10-12): Qwen sees images.
+  catalog.resetCatalog();
+  catalog.seed('groq', GROQ_MODELS_RESPONSE.data.map(groqModel));
   logs.length = 0;
   for (const s of Object.values(sdk)) { s.calls = []; s.script = async (call) => { throw new Error(`unexpected ${call.model} call`); }; }
 });

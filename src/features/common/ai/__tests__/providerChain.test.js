@@ -30,8 +30,18 @@ const {
   failureMessage,
 } = chain;
 
+const catalog = require('../modelCatalog');
+
 beforeEach(() => {
   health.resetHealth();
+  // What Groq's models API reported (fixtures/groq-models.json, recorded
+  // 2026-10-12), without loading the provider (and its SDK).
+  catalog.resetCatalog();
+  catalog.seed('groq', [
+    { id: 'openai/gpt-oss-120b', vision: false, maxOutput: 65_536, reasoning: true },
+    { id: 'openai/gpt-oss-20b', vision: false, maxOutput: 65_536, reasoning: true },
+    { id: 'qwen/qwen3.8-27b', vision: true, maxOutput: 16_384, reasoning: true },
+  ]);
 });
 
 const seg = (provider, ...models) => ({ provider, models });
@@ -290,11 +300,27 @@ describe('DEFAULT_ADAPTERS', () => {
     assert.equal(DEFAULT_ADAPTERS.anthropic.requestDeadlineMs(), require('../providers/anthropic').requestDeadlineMs());
   });
 
-  it('Groq sees images only through a vision model; Gemini and Anthropic always', () => {
+  it('seesImages reads the catalog: Groq through a vision model; Gemini and Anthropic by default', () => {
     assert.equal(DEFAULT_ADAPTERS.groq.seesImages(GROQ.models), false);
     assert.equal(DEFAULT_ADAPTERS.groq.seesImages(GROQ_VISION.models), true);
     assert.equal(DEFAULT_ADAPTERS.gemini.seesImages(GEMINI.models), true);
     assert.equal(DEFAULT_ADAPTERS.anthropic.seesImages(CLAUDE.models), true);
+  });
+
+  it('seesImages follows the catalog for any model or provider, with no code change', () => {
+    catalog.seed('groq', [{ id: 'meta-llama/new-vision', vision: true }]);
+    assert.equal(DEFAULT_ADAPTERS.groq.seesImages(['openai/gpt-oss-120b', 'meta-llama/new-vision']), true);
+    catalog.setOverride('gemini', 'gemini-3.5-flash-lite', 'vision', false);
+    catalog.setOverride('gemini', 'gemini-3.1-flash-lite', 'vision', false);
+    assert.equal(DEFAULT_ADAPTERS.gemini.seesImages(GEMINI.models), false);
+  });
+
+  it('ensureKnown asks the catalog for the segment models with its key', async () => {
+    const asked = [];
+    catalog.configure({ fetchers: { gemini: { list: async (key) => { asked.push(key); return [{ id: 'gemini-3.5-flash-lite', maxOutput: 65536 }]; }, get: async () => null } } });
+    await DEFAULT_ADAPTERS.gemini.ensureKnown(GEMINI.models, 'AIza-test');
+    assert.deepEqual(asked, ['AIza-test']);
+    assert.equal(catalog.capabilities('gemini', 'gemini-3.5-flash-lite').maxOutput, 65536);
   });
 
   it('firstModel is the model the provider will try first (E27)', () => {
