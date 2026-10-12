@@ -11,6 +11,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 #### Added
 
 - **A model list can name several providers.** The Gemini, Anthropic and Groq fields in Settings accept another provider's models after the first entry, in any position, when that provider's key is saved. The order is the priority. For example, the Groq field can hold `openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b,gemini-3.5-flash-lite,gemini-3.1-flash-lite`. When every Groq model fails (a spent daily budget, an outage, a revoked key), Gemini answers in Ask, Live Answer and Live Insights. A list of one provider behaves exactly as before.
+- **Settings shows the rule.** Each model field's help explains how to mix providers. The field that holds the active list shows the order it runs in ("Groq (3 models) → Gemini (2 models)") and flags a provider whose key is missing. The other fields say where the active list is.
 - **`providerChain.js`** runs the list's segments through each provider's own `createStreamingLLM` / `createLLM`, so each provider keeps its failover, cooldowns, timeouts and image routing:
   - the running segment's events pass through unchanged, and a switch is announced with a `_reset` whose `reason` is `provider` ("Trying gemini-3.5-flash-lite…");
   - the chain switches only when a provider as a whole gives up, after its own failover; then any cause moves on, a bad key included;

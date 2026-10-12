@@ -72,7 +72,7 @@ npx -p typescript@5.4.5 tsc -p specs/2026-10-12-cross-provider-failover/contract
 
 | # | Do | Expect | Covers |
 |---|----|--------|--------|
-| 1 | In the Groq field, save the recommended list; reopen Settings | The Groq field shows the whole list; the LLM model list shows it as "(custom)"; the Gemini field is empty | FR-005, FR-006, E46 |
+| 1 | In the Groq field, save the recommended list; reopen Settings | The Groq field shows the whole list, with "Active list, tried in this order: Groq (3 models) → Gemini (2 models)" under it; the LLM model list shows it as "(custom)"; the Gemini field is empty and says "Your active LLM list is in the Groq field, and it already uses Gemini models…"; each model field's help has the "Mixing providers" rule | FR-005, FR-006, E46 |
 | 2 | In the Groq field, try `openai/gpt-oss-120b,claude-haiku-5-5` (no Anthropic key), then `gemini-3.5-flash-lite,openai/gpt-oss-120b` | First refused, naming `claude-haiku-5-5` and the missing Anthropic key; second refused: the first entry must be a Groq model | FR-005, E47, E48 |
 | 3 | With the recommended list, ask in Ask (no screenshot) | Groq answers. `[LLM Chain] segment 1/2 … provider=groq … outcome=ok`, request line `answered_by=openai/gpt-oss-120b provider=groq segments_run=1`. No Gemini request | FR-008, FR-015 |
 | 4 | Save `acme/nonexistent-1,gemini-3.5-flash-lite`; ask in Ask | Brief "Trying gemini-3.5-flash-lite…", then the answer; footer "answered by: gemini-3.5-flash-lite (fallback)". Log: Groq `outcome=unavailable`, chain segment 1 `failed`, segment 2 `ok` | FR-011, SC-001, R15 V1 |

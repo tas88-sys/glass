@@ -928,6 +928,12 @@ any list is. For example, in the Groq field:
 The first entry decides the active provider, as before. A list that starts with `claude-…`
 goes in the Anthropic field. After the first entry, another provider's models can go **in any
 position, and more than once**. Settings accepts them only when that provider's key is saved.
+So the rule need not be remembered, Settings shows it under each model field:
+- the help line states it ("Mixing providers: put the whole list in the field of its first model…");
+- the field that holds the active list shows the order it runs in, e.g. "Active list, tried in this order: Groq (3 models) → Gemini (2 models)", and flags a provider with no saved key ("no API key: skipped");
+- the other fields say where the active list is, and that saving there makes their provider the active one.
+
+These notes come from `SettingsView.modelListOrder`, which cuts the saved list the same way as `factory.splitByProvider`.
 The order of the list is the order of priority, left to right.
 
 ```mermaid

@@ -62,3 +62,12 @@ Updated:
 - `docs/diagrams/17-cross-provider-chain.mmd`: the timing node and the failure edge. It renders.
 - `docs/LIVE_INSIGHTS_AND_ASK.md` §4.6 and `CHANGELOG.md`.
 - The spec set: D7, FR-009, a clarification, `data-model.md`, the contract (it type-checks), E34/E35, `plan.md`, `research.md` R8/R13/R16, and AT-CLI-003.
+
+## Settings notes (T027, 2026-10-12)
+
+The user asked for the rule to be in the UI, so it need not be remembered a month later. Settings now has three things:
+- a "Mixing providers" help line under each model field;
+- the order of the active list under its field, flagging a provider with no saved key;
+- in the other fields, where the active list is.
+
+This replaces the incomplete help line noted above. Updated: `ARCHITECTURE.md` §10.4, `CHANGELOG.md`, `quickstart.md` check 1.
