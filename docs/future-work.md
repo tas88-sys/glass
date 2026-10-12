@@ -242,3 +242,45 @@ Four gaps are still open after T038 to T040. Each was measured with the eval, `s
 - [ ] On a new English held-out set, questions about the candidate routed general are counted before and after.
 - [ ] The eval's Portuguese questions asked in English send the right note as often as in Portuguese, or the gap is explained.
 - [ ] The ambiguous threshold is set from labeled turns (T027).
+
+---
+
+## 6. Groq — the output-token limit (OTPM) blocks screenshots on Qwen
+
+**Status:** Pending. Found on 2026-10-12 in an app session; not started (the user chose to only record it).
+**Specs:** `specs/2026-10-12-groq-provider/`, `specs/2026-10-12-cross-provider-failover/`
+
+### Summary
+
+The Groq console's Limits page now splits the 8K tokens per minute of `qwen/qwen3.8-27b` and `openai/gpt-oss-120b` into **7K in / 1K out**: at most 1,000 output tokens per minute per model (OTPM, read on 2026-10-12). Groq's docs say only some organizations get separate input and output limits.
+
+An Ask with a screenshot declares `max_completion_tokens` 2048 on Qwen. That is the default cap, with no reasoning allowance at effort `none`.
+- Groq refuses the request outright: `429 rate_limit_exceeded`, "Request too large for model `qwen/qwen3.8-27b` … on output tokens per minute (OTPM)". The 8K budget was untouched (`tpm_left=8000`).
+- The same 2048 passed earlier that day (Groq spec research R19), so the split looks new on Groq's side.
+- gpt-oss-120b was accepted with 3072 declared, so Groq does not compare gpt-oss's declared cap with the limit.
+
+### What the user sees
+
+- Qwen is the only Groq model that sees images. When it is refused, gpt-oss-120b answers **without the screenshot** (`images=dropped:1`), with no sign of it in the Ask window.
+- With a mixed list, Gemini, which sees images, is not tried, because Groq did answer.
+- This happens on every Ask with a screenshot while the account has this limit.
+- Live Answer (cap 900) is not affected. Live Insights (cap 1024) would be on Qwen, but Qwen is only its third text model.
+- `groqErrors.classify` reads the refusal as a transient rate limit, because Groq sends 429 rather than 413. The model is cooled down, and the message says "rate limit" instead of "request too large".
+
+### Proposed
+
+- In `groq.js`, when a refusal reads "Request too large … (OTPM): Limit L, Requested R", retry the same model once with `max_completion_tokens` = L, inside the same attempt budget. The screenshot then still reaches Qwen, with the answer capped at about 750 words.
+- The fix adapts if the account's limit changes (e.g. a paid tier). `groqErrors.tooLargeNumbers` already reads "Limit L, Requested R" from the 413 TPM message.
+- Classify a 429 whose message is "Request too large" as `too-large`: no cooldown, and the matching message.
+- A separate, small PR. The cross-provider PR keeps `groq.js` and `groqErrors.js` unchanged (its C2).
+- Workaround until then, no code: `GROQ_MAX_TOKENS=1000` in `.env`. It caps every Groq Ask answer at 1000 tokens, plus 1024 for gpt-oss's reasoning.
+
+### To watch
+
+1,000 output tokens per minute per model is tight for an interview. Several long answers in a minute could hit it on gpt-oss too, as a real per-minute 429. The three Groq models and the Gemini segment absorb it, but it is worth checking in the logs (`code=rate_limit_exceeded` with "OTPM").
+
+### Acceptance
+
+- [ ] An Ask with a screenshot under a 1K OTPM answers on Qwen with the image (`images=sent:1`, `outcome=ok`), after at most one retry.
+- [ ] A test in `groq.test.js` replays the OTPM 429 and checks the retry's `max_completion_tokens` and the absence of a cooldown.
+- [ ] `groqErrors.test.js` covers a 429 "Request too large" read as `too-large`.
