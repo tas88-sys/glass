@@ -12,7 +12,7 @@ top-down — the cheapest checks are first.
 - **`"Me"` = your microphone. `"Them"` = system/loopback audio.** The split is by **audio
   source**, never by voice. Two people on one mic are both `"Me"`. (`sttService.js:82`,`:109`)
 - **Nothing transcribes without BOTH an LLM key and an STT key.** (`areProvidersConfigured`,
-  `modelStateService.js:438-456`)
+  `modelStateService.js:459-477`)
 - **Linux never has `"Them"`** — system-audio loopback is disabled. (`listenCapture.js:488`)
 - **Screenshots are unrelated to Listen** — they only happen on an Ask press.
 
@@ -71,7 +71,7 @@ This is the AEC (acoustic echo cancellation) path failing to subtract speaker bl
 ## 5. "Latency / cost is high" or "I want offline"
 
 - Switch STT to **Whisper (local)** and LLM to **Ollama (local)** in Settings — fully offline,
-  no per-token cost. Whisper runs in the **main process only** (`factory.js:86-107`); first use
+  no per-token cost. Whisper runs in the **main process only** (`factory.js:88-109`); first use
   downloads the model (SHA-256 verified, `checksums.js`).
 - Whisper noise tokens (`[BLANK_AUDIO]`, `[INAUDIBLE]`, …) are filtered out
   (`sttService.js:175-205`), so brief silences won't pollute the transcript.

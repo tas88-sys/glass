@@ -380,6 +380,7 @@ class SummaryService {
         const llm = createStreamingLLM(modelInfo.provider, {
             apiKey: modelInfo.apiKey,
             model: modelInfo.model,
+            keys: modelInfo.keys,
             temperature: 0.7,
             maxTokens: 900,
             usePortkey: modelInfo.provider === 'openai-glass',
@@ -813,6 +814,7 @@ Keep all points concise and build upon previous analysis if provided.`,
             const llm = createLLM(modelInfo.provider, {
                 apiKey: modelInfo.apiKey,
                 model: modelInfo.model,
+                keys: modelInfo.keys,
                 temperature: 0.7,
                 maxTokens: 1024,
                 usePortkey: modelInfo.provider === 'openai-glass',

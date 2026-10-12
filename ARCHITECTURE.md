@@ -29,7 +29,7 @@ below and also renderable to SVG via `docs/diagrams/render.sh` / `render.ps1`.
 - [7. The Listen (audio / STT) feature](#7-the-listen-audio--stt-feature)
 - [8. Incremental summarization](#8-incremental-summarization)
 - [9. AI provider abstraction & model state](#9-ai-provider-abstraction--model-state)
-- [10. Gemini, Anthropic and Groq failover](#10-gemini-anthropic-and-groq-failover)
+- [10. Failover: Gemini, Anthropic, Groq and across providers](#10-failover-gemini-anthropic-groq-and-across-providers)
 - [11. Data, persistence & auth](#11-data-persistence--auth)
 - [12. Local AI (Ollama + Whisper)](#12-local-ai-ollama--whisper)
 - [13. Prompts & Ask modes](#13-prompts--ask-modes)
@@ -80,7 +80,7 @@ your microphone is `"Me"` (`sttService.js:82`), the system/loopback audio is `"T
 "interviewer vs you" because the other person comes through system audio — but **two people
 sharing your one microphone are both tagged `"Me"`.** And nothing transcribes at all until you
 have both an LLM key and an STT key configured (`modelStateService.areProvidersConfigured`,
-`modelStateService.js:438-456`).
+`modelStateService.js:459-477`).
 
 **Does transcription + that speaker split work on Windows too?**
 **Yes.** Windows captures system audio via Electron's **native loopback** (the handler at
@@ -548,25 +548,34 @@ flowchart TB
     end
     subgraph state["modelStateService"]
         keys["provider_settings table (api_key, selected_*_model, is_active_*)"]
-        resolve["getCurrentModelInfo('llm'|'stt') -> {provider, model, apiKey}"]
+        resolve["getCurrentModelInfo('llm'|'stt') -> {provider, model, apiKey} (+ keys for llm)"]
         gate["areProvidersConfigured() — needs BOTH an LLM key AND an STT key"]
     end
     consumers["askService · summaryService · sttService"]
     registry --> state
     keys --> resolve --> consumers --> dispatch["factory.createLLM/createStreamingLLM/createSTT"] --> registry
+    dispatch -->|"list names 2+ providers"| chain["providerChain.js (§10.4)"] --> registry
     settingsui["SettingsView (renders one key field per provider)"] --> keys
 ```
 
-- The **registry** `PROVIDERS` (`factory.js:20-108`) declares each provider's `llmModels` and
+- The **registry** `PROVIDERS` (`factory.js:22-110`) declares each provider's `llmModels` and
   `sttModels`. The factory exposes `createSTT` / `createLLM` / `createStreamingLLM`
-  (`factory.js:132-169`), normalizing the `-glass` suffix via `sanitizeModelId` (`:128-130`).
+  (`factory.js:169-216`), normalizing the `-glass` suffix via `sanitizeModelId` (`:165-167`).
+- **Lists across providers.** `createLLM` and `createStreamingLLM` first remove the caller's
+  `keys` (`takeKeys`, `:159`), so no provider ever receives them. Then `splitByProvider` (`:140`)
+  cuts the model list into runs of one provider's IDs. With one run, the call goes to that
+  provider exactly as before. With two or more (e.g. three Groq models then two Gemini models),
+  it goes to `providerChain.js`, which gives each provider its own key (§10.4).
 - **`modelStateService`** is the single arbiter of *which* model and key are live. It stores
   keys + selections in the `provider_settings` table, auto-selects a valid model when keys
   change (`_autoSelectAvailableModels`, `:142-179`), maps a model ID back to its provider
   (`getProviderForModel`, `:286-312`: presets, then installed Ollama models, then a typed ID or CSV
-  list by prefix through `inferProviderFromModelId` (`factory.js:119`): `gemini-` → Gemini,
+  list by prefix through `inferProviderFromModelId` (`factory.js:121`): `gemini-` → Gemini,
   `claude-` → Anthropic, `vendor/model` (a slash, e.g. `openai/gpt-oss-120b`) → Groq; the last
-  two LLM only), and returns the runtime triple via `getCurrentModelInfo` (`:378-390`).
+  two LLM only; for a list, the first entry decides), and returns the runtime triple via
+  `getCurrentModelInfo` (`:378-392`). For `'llm'` it also returns `keys`: the saved key of every
+  provider the list names, or `null` (`_keysForModelList`, `:399-411`). Ask, Live Answer and
+  Live Insights pass them to the factory.
 - **Configuration gate**: `areProvidersConfigured` (`:438-456`) requires **both** a working LLM
   key and a working STT key — so an STT-only provider (Deepgram) or LLM-only provider
   (Anthropic/Groq/Ollama) can't satisfy the app alone.
@@ -575,16 +584,16 @@ flowchart TB
 |---|---|---|---|
 | OpenAI | ✅ `gpt-4.1` | ✅ `gpt-4o-mini-transcribe` | Realtime STT; 60 s keep-alive |
 | OpenAI (Glass) | ✅ | ✅ | Pickle-hosted key via Portkey |
-| Gemini | ✅ `gemini-3-flash-preview` | ✅ `gemini-3.8-live` | LLM supports CSV failover; STT does not |
-| Anthropic | ✅ `claude-opus-5-5` · `claude-sonnet-5-5` · `claude-haiku-5-5` | ❌ | LLM only; supports CSV failover |
-| Groq | ✅ `openai/gpt-oss-120b` · `openai/gpt-oss-20b` · `qwen/qwen3.8-27b` | ❌ | LLM only; supports CSV failover; only Qwen 3.8 sees images |
+| Gemini | ✅ `gemini-3-flash-preview` | ✅ `gemini-3.8-live` | LLM supports CSV failover, also across providers (§10.4); STT does not |
+| Anthropic | ✅ `claude-opus-5-5` · `claude-sonnet-5-5` · `claude-haiku-5-5` | ❌ | LLM only; supports CSV failover, also across providers (§10.4) |
+| Groq | ✅ `openai/gpt-oss-120b` · `openai/gpt-oss-20b` · `qwen/qwen3.8-27b` | ❌ | LLM only; supports CSV failover, also across providers (§10.4); only Qwen 3.8 sees images |
 | Deepgram | ❌ | ✅ `nova-3` | STT only (pinned to nova-3) |
 | Whisper (local) | ❌ | ✅ tiny/base/small/medium | Main process only |
 | Ollama (local) | ✅ (dynamic) | ❌ | LLM only |
 
 ---
 
-## 10. Gemini, Anthropic and Groq failover
+## 10. Failover: Gemini, Anthropic, Groq and across providers
 
 ### 10.1 Gemini
 
@@ -617,8 +626,9 @@ flowchart TB
     round -->|no| allfail["controller.error(lastErr)"]
 ```
 
-- The health registry is an **in-memory singleton** `Map` (`modelHealth.js:15`, shared with the
-  Anthropic and Groq providers and re-exported by `geminiModelRotator.js`) — one
+- The health registry is an **in-memory singleton** `Map` (`modelHealth.js:17`, shared with the
+  Anthropic and Groq providers, read by the cross-provider chain through `isCoolingDown` (§10.4),
+  and re-exported by `geminiModelRotator.js`) — one
   shared rate-limit view per process; it resets on restart (cooldowns are clamped to ≤ 300 s, so
   nothing meaningful is lost).
 - `classifyError` (`geminiModelRotator.js:33-69`) inspects HTTP status → `errorDetails[]`
@@ -627,7 +637,7 @@ flowchart TB
   `UNAVAILABLE` / `DEADLINE_EXCEEDED`; `fatal-request` = 400/`INVALID_ARGUMENT` (catches CSV
   typos); `fatal-auth` = 401/403/`API_KEY_INVALID`.
 - Cooldown honors `Retry-After` / `retryDelay`, defaults to 60 s, clamped to `[5 s, 300 s]`
-  (`parseRetryAfter`, `:87-130`; constants `modelHealth.js:17-19`).
+  (`parseRetryAfter`, `:87-130`; constants `modelHealth.js:19-21`).
 - **Streaming** emits a `_reset` sentinel so the Ask consumer discards the partial answer before
   the next model streams in, then a `_final_model` sentinel (`gemini.js:663-804`); the Ask
   consumer applies both through the pure reducer `applyAskSseEvent` (`askStreamState.js:42-70`),
@@ -902,6 +912,156 @@ flowchart TB
   `GROQ_BASE_URL`, if set, redirects the SDK; leave it unset.
 - **STT:** none. Groq's Whisper is batch-only, and Listen needs a real-time session.
 
+### 10.4 Lists across providers
+
+Since 2026-10-12 one model list may name several providers (full design in
+[`specs/2026-10-12-cross-provider-failover/`](specs/2026-10-12-cross-provider-failover/); diagram
+[`docs/diagrams/17-cross-provider-chain.mmd`](docs/diagrams/17-cross-provider-chain.mmd)). When
+every model of one provider fails, for example when Groq's free daily budget runs out
+mid-interview, the next provider's models answer in Ask, Live Answer and Live Insights.
+
+The list is typed in the **first provider's** model field and stored in that provider's row, as
+any list is. For example, in the Groq field:
+
+`openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b,gemini-3.5-flash-lite,gemini-3.1-flash-lite`
+
+The first entry decides the active provider, as before. A list that starts with `claude-…`
+goes in the Anthropic field. After the first entry, another provider's models can go **in any
+position, and more than once**. Settings accepts them only when that provider's key is saved.
+So the rule need not be remembered, Settings shows it under each model field:
+- the help line states it ("Mixing providers: put the whole list in the field of its first model…");
+- the field that holds the active list shows the order it runs in, e.g. "Active list, tried in this order: Groq (3 models) → Gemini (2 models)", and flags a provider with no saved key ("no API key: skipped");
+- the other fields say where the active list is, and that saving there makes their provider the active one.
+
+These notes come from `SettingsView.modelListOrder`, which cuts the saved list the same way as `factory.splitByProvider`.
+The order of the list is the order of priority, left to right.
+
+```mermaid
+flowchart TB
+    split(["factory.splitByProvider: runs of one provider's IDs"]) --> n{"segments?"}
+    n -->|"0 or 1"| today["the provider, exactly as before"]
+    n -->|"2+"| order["image in the request? segments that see images first"]
+    order --> turn["next segment's turn"]
+    turn --> skip{"no key / all models cooling (a later one healthy) / no time left before a later one?"}
+    skip -->|yes| logskip["outcome=skipped-…"] --> turn
+    skip -->|no| run["run it: own key, its models, deadline cut to keep 15 s for a later segment"]
+    run --> ended{"[DONE]?"}
+    ended -->|yes| ok["chain [DONE]"]
+    ended -->|"any failure"| more{"another segment can run?"}
+    more -->|yes| reset["_reset reason provider"] --> turn
+    more -->|no| fail["its own message, or All providers failed (groq → gemini). Last: …"]
+```
+
+- **Segments** (`factory.splitByProvider`, `factory.js:140`, pure). Consecutive IDs with the same
+  prefix provider form one segment. An ID with no known prefix joins the current segment, so
+  the provider tries it as before. Only Anthropic, Gemini and Groq lists are cut; OpenAI and
+  Ollama lists never are. An interleaved list (`groq, gemini, groq`) gives three segments.
+- **Composition, not a new loop.** `providerChain.js` calls each segment's provider through its
+  public `createStreamingLLM` / `createLLM`, so every provider keeps its own failover, cooldowns,
+  rounds, timeouts and image routing (§10.1–10.3). The providers are unchanged. The module never
+  calls an SDK, and loads a provider only when one of its segments runs.
+- **Stream protocol.** The running segment's events pass through unchanged: deltas, its own
+  `_reset`s and `_final_model`. Its `[DONE]` becomes the chain's `[DONE]`. When a segment fails
+  and another can run, the chain sends `{ _reset: true, next_model, reason: 'provider' }`, where
+  `next_model` is the model that segment will try first. The consumers already show
+  "Trying <model>…", discard any partial answer, and mark the answer "(fallback)".
+- **The chain switches only when a provider as a whole gives up.** Intermittent errors are handled
+  first by that provider's own failover: its other models, its cooldowns, and its second round.
+  A segment fails when its stream errors, ends without `[DONE]`, or its call throws. Then the
+  chain moves on whatever the cause, a 401, 400 or 413 included, because keys, limits and request
+  rules differ per provider. Only a cancel stops the chain.
+- **How each failure is handled**, with Groq first (its rules, §10.3; Gemini and Anthropic apply
+  their own, §10.1–10.2):
+
+  | Situation | What happens |
+  |---|---|
+  | 429, 503 or timeout on one Groq model | Groq tries its next model. The next provider is not called |
+  | Fast failures on every Groq model (5xx, network, a per-minute 429 whose `retry-after` fits in 2 s) | Groq waits its 2 s and gives them a second round. Only if they fail again does the next provider take over |
+  | Daily 429 (budget spent) | No second round: the hint is minutes. The next provider takes over in under a second |
+  | Timeouts on every Groq model | No second round (a timeout already cost seconds). The next provider takes over |
+  | 413, request too large | Groq's next model (no cooldown), then the next provider |
+  | 401, 403, 400 (bad key or request) | Groq stops at once, since every model shares the key and the rules. The next provider takes over; without the chain this would end in an error |
+  | Groq started answering, then failed | The partial answer is discarded (`_reset`), and the next provider answers from scratch with no chain deadline |
+  | The stream ended without `[DONE]` | Treated as a failure: the next provider |
+  | The next provider has no saved key | It is skipped; the one after it runs, if any |
+  | A newer question replaced this one (cancel) | The running request is aborted. Nothing else starts and no error is shown |
+
+  **Cooldowns decide whether the next request skips Groq.** Each failed Groq model cools down:
+  - a per-minute 429: the server's hint, at least 5 s;
+  - a timeout or a 422: 10 s;
+  - a 503 or a network error with no hint: 60 s;
+  - a daily 429, or a model not available to the key: 5 min (the registry's ceiling);
+  - a 413: none.
+
+  While **every** Groq model is cooling down, later requests go straight to the next provider
+  with no Groq request (`skipped-cooling`). If only some are, Groq runs and uses the healthy ones.
+- **Skips** (decided when a segment's turn comes; logged, no request):
+  - `skipped-no-key`: its provider has no saved key;
+  - `skipped-cooling`: every one of its models is cooling down in the shared registry
+    (`modelHealth.isCoolingDown`), and a later segment with a key has a model that is not. A
+    spent Groq (daily 429, "try again in 6m11s") therefore costs one fast pass of 429s on the
+    first request, then nothing until a 5-minute cooldown ends. One probe then tells whether its
+    budget has refilled. If every segment is cooling down, they run in order;
+  - `skipped-deadline`: see below.
+- **Time.** An answer must start within `LLM_CHAIN_DEADLINE_MS` (60 s) across segments.
+  - A segment with a later one behind it gets `requestDeadlineMs` = min(its provider's own
+    deadline, time left − 15 s).
+  - The chain never changes a provider's wait before its second round: 2 s for Groq and
+    Anthropic, 3 s for Gemini. A 1–2 s overload therefore still resolves on the provider the
+    user put first. This was a review decision; the first build passed `retryRoundDelayMs: 0`.
+  - When that comes to 0 or less, the segment is skipped.
+  - The last segment gets what is left.
+  - Once answer text has been forwarded, no chain deadline applies.
+  - **With three providers, the middle one depends on how the first one failed.** Groq's own
+    deadline is 45 s, the same as 60 s − 15 s:
+    - Groq fails fast, e.g. spent with 429s in under a second: the middle provider gets about
+      44 s and the last about 59 s.
+    - Groq stalls until its 45 s deadline: 15 s are left, so the middle provider gets 0 and is
+      skipped (`skipped-deadline`), and the last answers with 15 s.
+
+    Checked over fake providers with an injected clock (spec research R13).
+- **Images.** With an image in the request, segments that see images go first (stable order).
+  A Groq segment sees images only when it has `qwen/qwen3.8-27b`; Gemini and Anthropic segments
+  always do. The request line then carries `order=images-first`.
+- **Order and position.** Consecutive IDs of one provider form one segment. The provider tries
+  them in the order typed, with its own failover. The chain moves to the next segment only when
+  every model of the current one fails.
+  - The skips, the time rules and image ordering above apply to every position.
+  - For Claude Haiku 5.5 (paid, optional) after the three Groq models:
+
+    | List after the Groq models | Effect |
+    |---|---|
+    | `…,gemini-3.5-flash-lite,gemini-3.1-flash-lite,claude-haiku-5-5` (recommended) | Claude answers only when Gemini's free tier also fails, e.g. 503 at peak hours, or when a stalled Groq leaves time only for the last provider. Costs almost nothing |
+    | `…,claude-haiku-5-5,gemini-3.5-flash-lite,gemini-3.1-flash-lite` | Claude answers as soon as Groq fails. It is steadier than Gemini's free tier, but paid. Once Groq is spent, Groq is skipped while it cools down and probed every 5 min. So Claude answers most requests until Groq's daily budget refills, about US$0.10–0.15 an hour of interview (spec research R3). A stalled Groq skips Claude and goes to Gemini |
+    | `openai/gpt-oss-120b,claude-haiku-5-5,openai/gpt-oss-20b` | Three segments (Groq, Claude, Groq), each with its own rules. The two Groq segments share the cooldown registry |
+- **Keys.** `getCurrentModelInfo('llm')` returns `keys` (§9); the three LLM call sites pass them;
+  the factory removes them before any provider call. Each segment gets only its own key as
+  `apiKey`. A caller that passes no `keys` still works: the first provider uses `apiKey`, and the
+  other segments are skipped for no key.
+- **Cancel.** Cancelling the chain's stream cancels the running segment's reader in the same
+  turn, so its provider aborts the HTTP request, and nothing else starts.
+- **When nothing answers:**
+  - one segment ran: the user reads that provider's own message;
+  - more ran: "All providers failed (groq → gemini). Last: <last provider's message>";
+  - the chain deadline passed: "No answer within 60s (groq → gemini). Last: …".
+- **Non-streaming** (`chat`, `generateContent`, used by Live Insights) follows the same plan, skips
+  and timing, and returns the first result unchanged (`content` / `response`, `raw`, `_modelUsed`).
+- **Diagnostics:** grep `[LLM Chain]`. There is one line per segment whose turn came, e.g.
+  `segment 1/2 stream provider=groq models=openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b
+  outcome=failed total=640ms error="All Groq models failed (3 attempts). Last: …"`. There is one
+  line per request, e.g. `request stream answered_by=gemini-3.5-flash-lite provider=gemini
+  segments_run=2 total=1910ms`. No line carries prompt, answer or reasoning text, or a key. A
+  list of one provider logs no chain line at all.
+- **Tuning (`.env`, optional):**
+
+  | Variable | Default | Effect |
+  |---|---|---|
+  | `LLM_CHAIN_DEADLINE_MS` | 60000 | Wait for an answer to start across all providers; `0` disables (each provider keeps its own deadline) |
+
+- **Data.** On a fallback, the same request (prompt, transcript excerpt, career context,
+  screenshot) goes to the next provider the user configured. Gemini's free tier is an unpaid
+  service, which Google's terms allow to use content to improve its products.
+
 ---
 
 ## 11. Data, persistence & auth
@@ -951,9 +1111,9 @@ Glass can run fully local — no cloud, no API key:
   in the `ollama_models` table; the selected model is warmed up in the background at startup
   (`index.js:209-216`) and on selection (`modelStateService.js:343-345`). Ollama's `llmModels`
   list in the registry is empty and **populated dynamically** from installed models
-  (`factory.js:83`, `modelStateService.getAvailableModels` `:361-363`).
+  (`factory.js:85`, `modelStateService.getAvailableModels` `:361-363`).
 - **Whisper** (local STT) runs **only in the main process** — the factory returns a stub in the
-  renderer (`factory.js:88-99`). Models (tiny/base/small/medium) are downloaded with SHA-256
+  renderer (`factory.js:90-101`). Models (tiny/base/small/medium) are downloaded with SHA-256
   verification from the manifest in `checksums.js`. STT output is filtered for noise tokens like
   `[BLANK_AUDIO]` (`sttService.js:175-205`).
 - `localAIManager` periodically syncs service health and, if a local service goes down,
@@ -1084,6 +1244,7 @@ So, concretely, on first launch:
 | Gemini failover | `ai/providers/gemini.js`, `ai/providers/geminiModelRotator.js`, `ai/providers/modelHealth.js` |
 | Anthropic failover | `ai/providers/anthropic.js`, `ai/providers/anthropicErrors.js`, `ai/providers/modelHealth.js` |
 | Groq failover | `ai/providers/groq.js`, `ai/providers/groqErrors.js`, `ai/providers/modelHealth.js` |
+| Cross-provider lists | `ai/factory.js` (`splitByProvider`), `ai/providerChain.js`, `ai/providers/modelHealth.js` (`isCoolingDown`) |
 | Model & key state | `src/features/common/services/modelStateService.js` |
 | Auth / encryption | `src/features/common/services/{authService,encryptionService,migrationService}.js` |
 | Persistence | `src/features/common/repositories/**`, `src/features/common/config/schema.js` |

@@ -1,6 +1,6 @@
 const { EventEmitter } = require('events');
 const Store = require('electron-store');
-const { PROVIDERS, getProviderClass, inferProviderFromModelId } = require('../ai/factory');
+const { PROVIDERS, getProviderClass, inferProviderFromModelId, splitByProvider } = require('../ai/factory');
 const encryptionService = require('./encryptionService');
 const providerSettingsRepository = require('../repositories/providerSettings');
 const authService = require('./authService');
@@ -382,11 +382,32 @@ class ModelStateService extends EventEmitter {
         const model = type === 'llm' ? activeSetting.selected_llm_model : activeSetting.selected_stt_model;
         if (!model) return null;
 
-        return {
+        const info = {
             provider: activeSetting.provider,
             model: model,
             apiKey: activeSetting.api_key,
         };
+        if (type === 'llm') info.keys = await this._keysForModelList(model, activeSetting);
+        return info;
+    }
+
+    /**
+     * The saved key of every provider a model list names (a list may end in
+     * another provider's models; see providerChain.js), or null when none is
+     * saved. The active provider's key comes from its own row.
+     */
+    async _keysForModelList(model, activeSetting) {
+        const keys = {};
+        for (const { provider } of splitByProvider(model, activeSetting.provider)) {
+            if (provider in keys) continue;
+            if (provider === activeSetting.provider) {
+                keys[provider] = activeSetting.api_key || null;
+                continue;
+            }
+            const setting = await providerSettingsRepository.getByProvider(provider);
+            keys[provider] = setting?.api_key || null;
+        }
+        return keys;
     }
 
     // --- 핸들러 및 유틸리티 메서드 ---

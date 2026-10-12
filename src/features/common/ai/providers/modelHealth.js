@@ -1,12 +1,14 @@
 /**
  * modelHealth.js
  *
- * In-memory health registry for model failover, shared by the Gemini and
- * Anthropic providers. Keyed by model ID: gemini-… and claude-… never collide.
+ * In-memory health registry for model failover, shared by the Gemini,
+ * Anthropic and Groq providers, and read by the cross-provider chain
+ * (providerChain.js) to skip a provider whose models all cool down. Keyed by
+ * model ID: gemini-…, claude-… and vendor/model never collide.
  * Singleton module — one Electron process, one shared rate-limit budget.
  *
- * Exports: parseModelList, pickModel, markFailed, markSucceeded, resetHealth,
- *          DEFAULT_COOLDOWN_MS, MIN_COOLDOWN_MS, MAX_COOLDOWN_MS
+ * Exports: parseModelList, pickModel, markFailed, markSucceeded, isCoolingDown,
+ *          resetHealth, DEFAULT_COOLDOWN_MS, MIN_COOLDOWN_MS, MAX_COOLDOWN_MS
  */
 
 'use strict';
@@ -79,6 +81,19 @@ function markSucceeded(modelId) {
 }
 
 // ---------------------------------------------------------------------------
+// isCoolingDown
+// ---------------------------------------------------------------------------
+/**
+ * Whether the model is in a cooldown that has not ended. Reads only.
+ * @param {string} modelId
+ * @returns {boolean}
+ */
+function isCoolingDown(modelId) {
+  const entry = health.get(modelId);
+  return !!entry && entry.cooldownUntil > Date.now();
+}
+
+// ---------------------------------------------------------------------------
 // resetHealth  (@internal — test helper)
 // ---------------------------------------------------------------------------
 /**
@@ -97,6 +112,7 @@ module.exports = {
   pickModel,
   markFailed,
   markSucceeded,
+  isCoolingDown,
   resetHealth,
   DEFAULT_COOLDOWN_MS,
   MIN_COOLDOWN_MS,

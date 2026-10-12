@@ -18,13 +18,14 @@ grounded in the current code — read them next to the matching section.
 | 07 | `07-speaker-attribution.mmd` | Why "Me vs Them" is **source attribution, not voice diarization**, per platform |
 | 08 | `08-stt-session-lifecycle.mmd` | STT init-retry, 60 s keep-alive, 20 min renewal, and the no-failover drop gap |
 | 09 | `09-summarization-pipeline.mmd` | Incremental summary every 5 turns, building on the previous summary |
-| 10 | `10-provider-factory-and-model-state.mmd` | The `PROVIDERS` registry + `modelStateService` resolution of `{provider, model, apiKey}`, the `gemini-` / `claude-` / `vendor/model` (Groq) prefix rule, and the shared cooldown registry |
+| 10 | `10-provider-factory-and-model-state.mmd` | The `PROVIDERS` registry + `modelStateService` resolution of `{provider, model, apiKey}` (+ `keys` for an LLM list), the `gemini-` / `claude-` / `vendor/model` (Groq) prefix rule, the routing of a list that names several providers to the chain, and the shared cooldown registry |
 | 11 | `11-gemini-failover.mmd` | The Gemini CSV failover loop, error classification, and cooldown (LLM only) |
 | 12 | `12-data-persistence-and-auth.mmd` | Dual SQLite/Firebase repository pattern, schema, and auth-driven storage switching |
 | 13 | `13-run-as-is-decision.mmd` | "If I run it as-is" — what works on first launch, per platform |
 | 14 | `14-career-intent-router.mmd` | How Live Answer's career intent router picks a route (company, follow-up, personal, ambiguous, general) and what each route searches. Shown in `LIVE_INSIGHTS_AND_ASK.md` §4.7 |
 | 15 | `15-anthropic-failover.mmd` | The Claude CSV failover loop: request building, first-text / idle / deadline timeouts, error kinds, cooldowns, server-side refusal fallback, second round (LLM only) |
 | 16 | `16-groq-failover.mmd` | The Groq CSV failover loop: image routing (vision models first), request building per reasoning family, first-text / idle / deadline timeouts, error kinds incl. too-large (413), cooldowns, second round (LLM only) |
+| 17 | `17-cross-provider-chain.mmd` | A model list that names several providers (e.g. Groq then Gemini): segments, skips (no key, all models cooling, no time left), the 60 s chain deadline with a 15 s reserve, images first, the `provider` reset, and the final messages |
 
 ## Rendering
 

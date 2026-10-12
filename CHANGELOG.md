@@ -6,6 +6,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 
 ## [Unreleased]
 
+### Cross-provider failover (branch `2026-10-12-cross-provider-failover`)
+
+#### Added
+
+- **A model list can name several providers.** The Gemini, Anthropic and Groq fields in Settings accept another provider's models after the first entry, in any position, when that provider's key is saved. The order is the priority. For example, the Groq field can hold `openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b,gemini-3.5-flash-lite,gemini-3.1-flash-lite`. When every Groq model fails (a spent daily budget, an outage, a revoked key), Gemini answers in Ask, Live Answer and Live Insights. A list of one provider behaves exactly as before.
+- **Settings shows the rule.** Each model field's help explains how to mix providers. The field that holds the active list shows the order it runs in ("Groq (3 models) → Gemini (2 models)") and flags a provider whose key is missing. The other fields say where the active list is.
+- **`providerChain.js`** runs the list's segments through each provider's own `createStreamingLLM` / `createLLM`, so each provider keeps its failover, cooldowns, timeouts and image routing:
+  - the running segment's events pass through unchanged, and a switch is announced with a `_reset` whose `reason` is `provider` ("Trying gemini-3.5-flash-lite…");
+  - the chain switches only when a provider as a whole gives up, after its own failover; then any cause moves on, a bad key included;
+  - a provider with no saved key is skipped;
+  - a provider whose models all cool down is skipped with no request while a later one is healthy, so a spent Groq costs nothing after its first failure until a cooldown ends;
+  - an answer must start within 60 s across providers (`LLM_CHAIN_DEADLINE_MS`; `0` disables). 15 s are kept for a later provider. Each provider keeps its own wait before its second round, so a brief overload still resolves on the first provider;
+  - with a screenshot, providers that see images go first;
+  - a cancel aborts the running provider's request;
+  - when nothing answers, the user reads `All providers failed (groq → gemini). Last: …`;
+  - one `[LLM Chain]` log line per provider tried and one per request, with no prompt, answer or key.
+- **`modelHealth.isCoolingDown`**, a read-only query of the shared cooldown registry.
+
+#### Changed
+
+- **`getCurrentModelInfo('llm')` also returns `keys`**, the saved key of every provider the list names. Ask, Live Answer and Live Insights pass them to the factory. The factory removes them before any provider call, and each provider receives only its own key.
+
+#### Docs
+
+- `ARCHITECTURE.md` §10 is now "Failover: Gemini, Anthropic, Groq and across providers", with a new §10.4. §9 describes the keys and the routing.
+- New `docs/diagrams/17-cross-provider-chain.mmd`. Diagram 10 shows the routing and the keys.
+- `docs/LIVE_INSIGHTS_AND_ASK.md` §4.3 and §4.6 and the README describe mixed lists.
+
 ### Groq provider (branch `2026-10-12-groq-provider`)
 
 #### Added

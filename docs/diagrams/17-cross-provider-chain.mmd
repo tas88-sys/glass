@@ -1,0 +1,33 @@
+%% 17 - Cross-provider chain
+%% One model list may name several providers, e.g. in the Groq field:
+%%   openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b,gemini-3.5-flash-lite,gemini-3.1-flash-lite
+%% factory.splitByProvider cuts it into segments; providerChain.js runs them in
+%% turn through each provider's own createStreamingLLM / createLLM, so every
+%% provider keeps its own failover (diagrams 11, 15, 16).
+%% Source: factory.js (splitByProvider, routing) + providerChain.js + modelHealth.js (isCoolingDown)
+flowchart TB
+    lane(["Ask / Live Answer / Live Insights<br/>getCurrentModelInfo('llm') -> provider, model, apiKey, keys"]) --> split["factory.splitByProvider(model, provider)<br/>runs of one provider's IDs (prefix rule);<br/>an unknown ID joins the current run;<br/>only anthropic, gemini and groq lists are cut"]
+    split --> segs{"how many segments?"}
+    segs -->|"0 or 1"| today["today's path: the provider's own<br/>createStreamingLLM / createLLM<br/>(options minus keys)"]
+    segs -->|"2 or more"| plan["providerChain: plan the request<br/>image in the request? segments that see images first<br/>(Groq only with qwen/qwen3.8-27b; log order=images-first)"]
+
+    plan --> turn["next segment's turn"]
+    turn --> nokey{"its provider has a key?"}
+    nokey -->|no| skipkey["outcome=skipped-no-key"] --> turn
+    nokey -->|yes| cooling{"every model cooling down<br/>(modelHealth.isCoolingDown)<br/>and a later segment has a healthy one?"}
+    cooling -->|yes| skipcool["outcome=skipped-cooling<br/>no request"] --> turn
+    cooling -->|no| left{"answer started, or chain time left?<br/>(LLM_CHAIN_DEADLINE_MS, 60 s)"}
+    left -->|"no time left"| deadline["No answer within 60s (groq → gemini). Last: …"]
+    left -->|yes| timing["timing: requestDeadlineMs = min(provider's own,<br/>time left − 15 s when a later segment can run);<br/>≤ 0 with a later one: outcome=skipped-deadline<br/>the provider keeps its own wait before its second round (2-3 s)"]
+    timing -->|"skipped-deadline"| turn
+    timing --> announce["after a failed segment:<br/>_reset {next_model: its first model, reason: 'provider'}"]
+    announce --> run["run the segment: own key only, its models joined;<br/>pass its SSE events through unchanged<br/>(deltas, its own _resets, _final_model)"]
+    run --> ended{"how did it end?"}
+    ended -->|"[DONE]"| answered["chain sends [DONE]<br/>outcome=ok answered_by=MODEL"]
+    ended -->|"the provider gave up after its own failover<br/>(other models, second round): any kind,<br/>429, 503, timeout, 401, 400, 413; or no [DONE]"| failed["outcome=failed error=userMessage"]
+    failed --> more{"another segment can run?"}
+    more -->|yes| turn
+    more -->|"no, one ran"| own["its own userMessage"]
+    more -->|"no, several ran"| all["All providers failed (groq → gemini). Last: …"]
+
+    cancel(["consumer cancels"]) -.-> stop["cancel the running segment's reader<br/>(the provider aborts its request);<br/>start nothing else; no error"]

@@ -1,5 +1,7 @@
 // factory.js
 
+const providerChain = require('./providerChain');
+
 /**
  * @typedef {object} ModelOption
  * @property {string} id 
@@ -125,6 +127,41 @@ function inferProviderFromModelId(modelId) {
   return null;
 }
 
+/**
+ * Segments of a model list that may name several providers: runs of
+ * consecutive IDs of one provider (inferProviderFromModelId). An ID with no
+ * inferable provider joins the current run; the first run's provider is
+ * `firstProvider`. Only Anthropic, Gemini and Groq lists are cut; any other
+ * provider's list is one segment. Trimmed, empties dropped; an empty list → [].
+ * @param {string|null|undefined} modelCsv
+ * @param {string} firstProvider - the active provider
+ * @returns {{ provider: string, models: string[] }[]}
+ */
+function splitByProvider(modelCsv, firstProvider) {
+  const ids = typeof modelCsv === 'string' ? modelCsv.split(',').map(s => s.trim()).filter(Boolean) : [];
+  if (ids.length === 0) return [];
+  if (!providerChain.CHAIN_PROVIDERS.includes(firstProvider)) return [{ provider: firstProvider, models: ids }];
+  const segments = [];
+  let current = firstProvider;
+  for (const id of ids) {
+    current = inferProviderFromModelId(id) || current;
+    const last = segments[segments.length - 1];
+    if (last && last.provider === current) last.models.push(id);
+    else segments.push({ provider: current, models: [id] });
+  }
+  return segments;
+}
+
+/**
+ * The caller's options without keys, and the keys. No provider ever receives
+ * the keys map: the chain gives each segment its own key as apiKey.
+ */
+function takeKeys(opts) {
+  if (!opts || !('keys' in opts)) return { keys: undefined, opts };
+  const { keys, ...rest } = opts;
+  return { keys, opts: rest };
+}
+
 function sanitizeModelId(model) {
   return (typeof model === 'string') ? model.replace(/-glass$/, '') : model;
 }
@@ -144,6 +181,11 @@ function createSTT(provider, opts) {
 
 function createLLM(provider, opts) {
   if (provider === 'openai-glass') provider = 'openai';
+  const taken = takeKeys(opts);
+  opts = taken.opts;
+  // A list naming several providers runs them in turn (providerChain.js).
+  const segments = splitByProvider(opts?.model, provider);
+  if (segments.length > 1) return providerChain.createChainLLM({ segments, keys: taken.keys, opts });
 
   const handler = PROVIDERS[provider]?.handler();
   if (!handler?.createLLM) {
@@ -157,7 +199,12 @@ function createLLM(provider, opts) {
 
 function createStreamingLLM(provider, opts) {
   if (provider === 'openai-glass') provider = 'openai';
-  
+  const taken = takeKeys(opts);
+  opts = taken.opts;
+  // A list naming several providers runs them in turn (providerChain.js).
+  const segments = splitByProvider(opts?.model, provider);
+  if (segments.length > 1) return providerChain.createChainStreamingLLM({ segments, keys: taken.keys, opts });
+
   const handler = PROVIDERS[provider]?.handler();
   if (!handler?.createStreamingLLM) {
       throw new Error(`Streaming LLM not supported for provider: ${provider}`);
@@ -214,4 +261,5 @@ module.exports = {
   getProviderClass,
   getAvailableProviders,
   inferProviderFromModelId,
+  splitByProvider,
 };

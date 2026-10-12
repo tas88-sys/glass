@@ -74,6 +74,8 @@ npm run setup
 - Deepgram (STT): Get Deepgram API Key [here](https://console.deepgram.com/)
 - Local: Ollama (LLM) & Whisper (STT)
 
+A Gemini, Anthropic or Groq model list can include another provider's models whose key is saved, in any position after the first entry. The order is the priority. For example, put `openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b,gemini-3.5-flash-lite,gemini-3.1-flash-lite` in the Groq field. When every Groq model fails, such as when its free daily budget runs out, Gemini answers. Where to put a paid Claude model, and how position affects timing: [`ARCHITECTURE.md` §10.4](ARCHITECTURE.md#104-lists-across-providers).
+
 See [`docs/AUDIO_AND_STT.md` §3](docs/AUDIO_AND_STT.md#3-stt--llm-provider-matrix) for the full STT/LLM capability matrix.
 
 ### Liquid Glass Design (coming soon)
@@ -101,7 +103,7 @@ See [`docs/AUDIO_AND_STT.md` §3](docs/AUDIO_AND_STT.md#3-stt--llm-provider-matr
 A technical walkthrough of what actually happens when you use Glass. Useful for contributors and anyone trying to understand the runtime behavior.
 
 > 📐 For the full, code-verified architecture — process/window topology, IPC, the Ask & Listen
-> pipelines, the AI provider layer, Gemini, Anthropic and Groq failover, persistence, and a "what works if I run it
+> pipelines, the AI provider layer, Gemini, Anthropic and Groq failover (also across providers), persistence, and a "what works if I run it
 > as-is" breakdown — see **[`ARCHITECTURE.md`](ARCHITECTURE.md)** and the diagram suite in
 > **[`docs/diagrams/`](docs/diagrams/)**. Audio-specific deep dives live in
 > [`docs/AUDIO_AND_STT.md`](docs/AUDIO_AND_STT.md) and

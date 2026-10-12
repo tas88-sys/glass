@@ -1,0 +1,309 @@
+# Acceptance Tests Manifest (v2)
+# Feature: Cross-Provider Failover.
+# Hand-authored in the /tasks format (SpecKit not installed on this machine).
+# Deterministic checks cover the pure plan, scope guards and the test suite.
+# Live API behavior (SC-001, SC-006) is manual and needs the user's Groq and
+# Gemini keys, so it is tagged environment local-key.
+# Commands are YAML literal blocks (no escaping); each is one shell line.
+
+# --- Root Fields ---
+_version: 2
+spec_id: "2026-10-12-cross-provider-failover"
+spec_name: "cross-provider-failover"
+
+# --- Staleness Detection (v2 required) ---
+generation_context:
+  generated_at: "2026-10-12T00:00:00Z"
+  spec_hash: "7bcf71c144c6b2edb9964b4d91686529a2ac1c22c2bfa7dbd90844f26fc5ca2c"
+  plan_hash: "a3dc6eb202fce23274d4c8fd2c7c43cb18a0be9ae159b14f53a570f0424333c3"
+  tasks_hash: "47f6f7a43cbb031714b2461d8a2eba718b75d0468718e9c3316e3d7ea5c5e40f"
+
+# --- Drift Detection (v2 required) ---
+_references:
+  tables: []
+  routes: []
+  files:
+    - "src/features/common/ai/providerChain.js"
+    - "src/features/common/ai/factory.js"
+    - "src/features/common/ai/providers/modelHealth.js"
+    - "src/features/common/services/modelStateService.js"
+    - "src/features/ask/askService.js"
+    - "src/features/listen/summary/summaryService.js"
+    - "src/ui/settings/SettingsView.js"
+  ecs_tasks: []
+
+# --- Supported Environments ---
+# local: repo only. local-key: repo + valid Groq and Gemini keys in Settings (live calls cost money and use free-tier quota).
+environments: [local, local-key]
+
+# =============================================================================
+# CLI TESTS (deterministic)
+# =============================================================================
+cli_tests:
+  - id: "AT-CLI-001"
+    requirement: "FR-001, FR-016, contracts"
+    environments: [local]
+    command: |-
+      node -e "const c=require('./src/features/common/ai/providerChain.js');const f=require('./src/features/common/ai/factory.js');const h=require('./src/features/common/ai/providers/modelHealth.js');const need=['chainDeadlineMs','hasImages','orderSegments','skipReason','segmentTiming','failureMessage','createChainStreamingLLM','createChainLLM'];const miss=need.filter(k=>typeof c[k]!=='function');if(!Array.isArray(c.CHAIN_PROVIDERS))miss.push('CHAIN_PROVIDERS');if(c.FALLBACK_RESERVE_MS!==15000)miss.push('FALLBACK_RESERVE_MS');if(typeof f.splitByProvider!=='function')miss.push('factory.splitByProvider');if(typeof h.isCoolingDown!=='function')miss.push('modelHealth.isCoolingDown');if(miss.length){console.error('missing: '+miss.join(','));process.exit(1)}"
+    expected_exit_code: 0
+    description: "The chain, the factory addition and the registry query export the contract surface."
+    severity: critical
+
+  - id: "AT-CLI-002"
+    requirement: "FR-001, D2, E4-E9"
+    environments: [local]
+    command: |-
+      node -e "const {splitByProvider:s}=require('./src/features/common/ai/factory.js');const j=x=>JSON.stringify(x);const cases=[[s('','groq'),[]],[s(null,'groq'),[]],[s('openai/gpt-oss-120b,openai/gpt-oss-20b','groq'),[{provider:'groq',models:['openai/gpt-oss-120b','openai/gpt-oss-20b']}]],[s(' openai/gpt-oss-120b , ,gemini-3.5-flash-lite ','groq'),[{provider:'groq',models:['openai/gpt-oss-120b']},{provider:'gemini',models:['gemini-3.5-flash-lite']}]],[s('gemini-3.5-flash-lite,custom-model','gemini'),[{provider:'gemini',models:['gemini-3.5-flash-lite','custom-model']}]],[s('foo,gemini-y','gemini'),[{provider:'gemini',models:['foo','gemini-y']}]],[s('a/x,gemini-y,b/z','groq').map(x=>x.provider),['groq','gemini','groq']],[s('claude-haiku-5-5,openai/gpt-oss-120b','anthropic').map(x=>x.provider),['anthropic','groq']],[s('gpt-4.1,gemini-y','openai'),[{provider:'openai',models:['gpt-4.1','gemini-y']}]]];const bad=cases.map((c,i)=>j(c[0])===j(c[1])?null:i).filter(x=>x!==null);if(bad.length){console.error('cases '+bad.join(','));process.exit(1)}"
+    expected_exit_code: 0
+    description: "Lists split into consecutive runs by prefix; unknown IDs join the current run; non-chain providers never split."
+    severity: critical
+
+  - id: "AT-CLI-003"
+    requirement: "FR-009, FR-010, D7"
+    environments: [local]
+    command: |-
+      node -e "const c=require('./src/features/common/ai/providerChain.js');const t=c.segmentTiming;const n=o=>JSON.stringify(Object.keys(o).filter(k=>o[k]!==undefined).sort().map(k=>[k,o[k]]));const a=t({providerDeadlineMs:45000,leftMs:60000,laterCanRun:true,answerStarted:false});const b=t({providerDeadlineMs:60000,leftMs:59000,laterCanRun:false,answerStarted:false});const s=t({providerDeadlineMs:45000,leftMs:10000,laterCanRun:true,answerStarted:false});const i=t({providerDeadlineMs:null,leftMs:Infinity,laterCanRun:false,answerStarted:false});const st=t({providerDeadlineMs:60000,leftMs:5000,laterCanRun:false,answerStarted:true});const ok=n(a)===n({requestDeadlineMs:45000})&&n(b)===n({requestDeadlineMs:59000})&&s.skip==='deadline'&&n(i)==='[]'&&n(st)==='[]';const d=c.chainDeadlineMs({})===60000&&c.chainDeadlineMs({LLM_CHAIN_DEADLINE_MS:'0'})===null&&c.chainDeadlineMs({LLM_CHAIN_DEADLINE_MS:'30000'})===30000&&c.chainDeadlineMs({LLM_CHAIN_DEADLINE_MS:'abc'})===60000;process.exit(ok&&d?0:1)"
+    expected_exit_code: 0
+    description: "Segment deadlines keep 15 s for a later segment, skip a segment with no time left, drop the chain limit once an answer started, and never change a provider's own wait before its second round; the chain deadline defaults to 60 s and 0 disables it."
+    severity: critical
+
+  - id: "AT-CLI-004"
+    requirement: "FR-013, D11"
+    environments: [local]
+    command: |-
+      node -e "const {failureMessage:f}=require('./src/features/common/ai/providerChain.js');const e=Object.assign(new Error('raw'),{userMessage:'All Gemini models failed (1 attempt). Last: x'});const a=f({ran:['groq'],last:e});const b=f({ran:['groq','gemini'],last:e});const c=f({ran:['groq','gemini'],last:e,deadlineMs:60000});const d=f({ran:['groq','gemini'],last:new Error('plain')});const ok=a===e.userMessage&&b==='All providers failed (groq → gemini). Last: '+e.userMessage&&c==='No answer within 60s (groq → gemini). Last: '+e.userMessage&&d.endsWith('Last: plain');process.exit(ok?0:1)"
+    expected_exit_code: 0
+    description: "One provider that ran keeps its own message; two or more read 'All providers failed (groq → gemini). Last: …'; the deadline reads 'No answer within 60s …'."
+    severity: critical
+
+  - id: "AT-CLI-005"
+    requirement: "D3, C2"
+    environments: [local]
+    command: |-
+      node -e "require('./src/features/common/ai/providerChain.js');require('./src/features/common/ai/factory.js');const k=Object.keys(require.cache).filter(p=>/groq-sdk|@anthropic-ai|@google/.test(p));if(k.length){console.error(k[0]);process.exit(1)}"
+    expected_exit_code: 0
+    description: "Loading the chain and the factory loads no SDK: providers are required only when a segment runs."
+    severity: warning
+
+  - id: "AT-CLI-006"
+    requirement: "FR-016"
+    environments: [local]
+    command: |-
+      node -e "const h=require('./src/features/common/ai/providers/modelHealth.js');h.resetHealth();const a=h.isCoolingDown('m1');h.markFailed('m1',60000);const b=h.isCoolingDown('m1');const p=h.pickModel(['m1','m2']);h.markSucceeded('m1');const c=h.isCoolingDown('m1');process.exit(!a&&b&&p==='m2'&&!c?0:1)"
+    expected_exit_code: 0
+    description: "isCoolingDown reports a cooldown and leaves the registry as it was."
+    severity: critical
+
+  - id: "AT-CLI-007"
+    requirement: "FR-003, FR-004, D9"
+    environments: [local]
+    command: |-
+      node -e "const fs=require('fs');const n=f=>(fs.readFileSync(f,'utf8').match(/keys: modelInfo\.keys/g)||[]).length;const m=fs.readFileSync('src/features/common/services/modelStateService.js','utf8');const ok=n('src/features/ask/askService.js')===1&&n('src/features/listen/summary/summaryService.js')===2&&/splitByProvider/.test(m)&&/keys/.test(m);process.exit(ok?0:1)"
+    expected_exit_code: 0
+    description: "The three LLM call sites pass keys, and getCurrentModelInfo builds them from the list's segments."
+    severity: critical
+
+  - id: "AT-CLI-008"
+    requirement: "Contracts"
+    environments: [local]
+    command: |-
+      npx -p typescript@5.4.5 tsc -p specs/2026-10-12-cross-provider-failover/contracts/tsconfig.json
+    expected_exit_code: 0
+    description: "The contracts file type-checks."
+    severity: warning
+
+# =============================================================================
+# TEST GATES
+# =============================================================================
+test_gates:
+  - id: "AT-GATE-001"
+    requirement: "All FRs, SC-002..SC-005"
+    environments: [local]
+    command: |-
+      npm test
+    expected_exit_code: 0
+    description: "Full node:test suite green: the chain tests (fake and real providers), the factory and modelHealth additions, and every pre-existing test."
+    severity: critical
+
+  - id: "AT-GATE-002"
+    requirement: "Code quality"
+    environments: [local]
+    command: |-
+      node -e "const {execSync}=require('child_process');const fs=require('fs');const files=execSync('git diff --name-only origin/main...HEAD',{encoding:'utf8'}).split(String.fromCharCode(10)).map(s=>s.trim()).filter(f=>f.endsWith('.js')&&!f.startsWith('src/ui/')&&fs.existsSync(f));for(const f of files)execSync('node --check '+JSON.stringify(f));console.log(files.length+' files ok')" && npm run build:renderer
+    expected_exit_code: 0
+    description: "Syntax gate. eslint is not installed in this repo, so npm run lint cannot run. Main-process files changed on the branch pass node --check, and the renderer builds with esbuild."
+    severity: warning
+
+# =============================================================================
+# NEGATIVE ASSERTIONS (scope and invariant guards)
+# =============================================================================
+negative_assertions:
+  - id: "AT-NEG-001"
+    requirement: "C2, FR-017"
+    environments: [local]
+    check_type: "cli"
+    command: |-
+      node -e "const {execSync}=require('child_process');const out=execSync('git diff --name-only origin/main...HEAD',{encoding:'utf8'});const p='src/features/common/ai/providers/';const guarded=['groq.js','groqErrors.js','gemini.js','geminiModelRotator.js','anthropic.js','anthropicErrors.js','__tests__/groq.test.js','__tests__/groqErrors.test.js','__tests__/groqRequest.test.js','__tests__/gemini.test.js','__tests__/geminiModelRotator.test.js','__tests__/anthropic.test.js','__tests__/anthropicErrors.test.js','__tests__/anthropicRequest.test.js'].map(f=>p+f);process.stdout.write(String(out.split(/\r?\n/).filter(f=>guarded.includes(f)).length))"
+    expected_result: "0"
+    description: "The three providers, their classifiers, the Gemini rotator and their tests are not modified."
+    severity: critical
+
+  - id: "AT-NEG-002"
+    requirement: "C1, FR-004"
+    environments: [local]
+    check_type: "cli"
+    command: |-
+      node -e "const {execSync}=require('child_process');const r=f=>execSync('git diff --numstat origin/main...HEAD -- '+f,{encoding:'utf8'}).trim();const st=r('src/features/ask/askStreamState.js');const sum=['src/features/ask/askService.js','src/features/listen/summary/summaryService.js'].map(r).filter(Boolean).map(l=>l.split(/\s+/)).reduce((a,x)=>[a[0]+Number(x[0]),a[1]+Number(x[1])],[0,0]);process.stdout.write((st?'askStreamState-changed ':'')+sum[0]+'/'+sum[1])"
+    expected_result: "3/0"
+    description: "askStreamState.js is untouched; askService.js and summaryService.js only gain the three keys lines."
+    severity: critical
+
+  - id: "AT-NEG-003"
+    requirement: "C3, C4, FR-015"
+    environments: [local]
+    check_type: "cli"
+    command: |-
+      node -e "const fs=require('fs');let n=0;for(const l of fs.readFileSync('src/features/common/ai/providerChain.js','utf8').split(/\r?\n/)){if(/console\.(log|warn|error|info)\(/.test(l)&&/(\.text\b|delta\b|content\b|messages\b|parts\b|apiKey|keys\b)/.test(l))n++}process.stdout.write(String(n))"
+    expected_result: "0"
+    description: "No log statement in the chain references answer text, deltas, content, messages, parts or keys."
+    severity: critical
+
+  - id: "AT-NEG-004"
+    requirement: "FR-017"
+    environments: [local]
+    check_type: "cli"
+    command: |-
+      node -e "const {execSync}=require('child_process');const out=execSync('git diff --numstat origin/main...HEAD -- src/features/common/ai/__tests__/factory.test.js src/features/common/ai/providers/__tests__/modelHealth.test.js',{encoding:'utf8'}).trim();process.stdout.write(String(out?out.split(/\r?\n/).reduce((a,l)=>a+Number(l.split(/\s+/)[1]),0):0))"
+    expected_result: "0"
+    description: "factory.test.js and modelHealth.test.js only gain lines: no existing assertion is removed or rewritten."
+    severity: critical
+
+  - id: "AT-NEG-005"
+    requirement: "C5"
+    environments: [local]
+    check_type: "cli"
+    command: |-
+      node -e "const {execSync}=require('child_process');const out=execSync('git diff --name-only origin/main...HEAD -- package.json package-lock.json',{encoding:'utf8'}).trim();process.stdout.write(String(out?out.split(/\r?\n/).length:0))"
+    expected_result: "0"
+    description: "No dependency is added or changed."
+    severity: critical
+
+  - id: "AT-NEG-006"
+    requirement: "C2, FR-016"
+    environments: [local]
+    check_type: "cli"
+    command: |-
+      node -e "const h=require('./src/features/common/ai/providers/modelHealth.js');const ok=['parseModelList','pickModel','markFailed','markSucceeded','resetHealth'].every(k=>typeof h[k]==='function')&&h.DEFAULT_COOLDOWN_MS===60000&&h.MIN_COOLDOWN_MS===5000&&h.MAX_COOLDOWN_MS===300000;process.stdout.write(ok?'ok':'changed')"
+    expected_result: "ok"
+    description: "The registry's existing surface and cooldown bounds are unchanged."
+    severity: critical
+
+  - id: "AT-NEG-007"
+    requirement: "D3, C2"
+    environments: [local]
+    check_type: "cli"
+    command: |-
+      node -e "const s=require('fs').readFileSync('src/features/common/ai/providerChain.js','utf8');process.stdout.write(String((s.match(/require\(['\x22](groq-sdk|@anthropic-ai\/sdk|@google\/[a-z-]+)['\x22]\)/g)||[]).length))"
+    expected_result: "0"
+    description: "The chain never calls an SDK; it only composes the providers."
+    severity: critical
+
+# =============================================================================
+# MANUAL VERIFICATION (quickstart.md §4)
+# =============================================================================
+manual_tests:
+  - id: "AT-MANUAL-001"
+    requirement: "FR-005, FR-006, E46"
+    environments: [local]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "The recommended mixed list saves in the Groq field, shows whole, and appears as (custom) (quickstart #1)."
+    severity: critical
+
+  - id: "AT-MANUAL-002"
+    requirement: "FR-005, E47, E48"
+    environments: [local]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "A list naming a provider without a key, or starting with another provider's model, is refused by name (quickstart #2)."
+    severity: warning
+
+  - id: "AT-MANUAL-003"
+    requirement: "FR-008, FR-015"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "With the recommended list Groq answers; one chain segment line ok; no Gemini request (quickstart #3)."
+    severity: critical
+
+  - id: "AT-MANUAL-004"
+    requirement: "FR-011, SC-001, R15 V1"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "An unknown first Groq model switches to Gemini with 'Trying gemini-3.5-flash-lite…' and a '(fallback)' footer (quickstart #4)."
+    severity: critical
+
+  - id: "AT-MANUAL-005"
+    requirement: "FR-007, D5, R15 V2"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "The next request within the cooldown skips Groq with no request (quickstart #5)."
+    severity: critical
+
+  - id: "AT-MANUAL-006"
+    requirement: "FR-008, FR-014, SC-001"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Live Answer and Live Insights answer from Gemini through the chain (quickstart #6)."
+    severity: critical
+
+  - id: "AT-MANUAL-007"
+    requirement: "FR-011, SC-006, R15 V3"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Groq first-text timeouts switch to Gemini; segment total and Gemini ttft recorded (quickstart #7)."
+    severity: warning
+
+  - id: "AT-MANUAL-008"
+    requirement: "FR-007, D8, E24"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "A screenshot question goes to Gemini first when the Groq segment has no vision model (quickstart #8)."
+    severity: warning
+
+  - id: "AT-MANUAL-009"
+    requirement: "FR-012, SC-004"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "A replaced Ask request logs 'cancelled' and shows no error (quickstart #9)."
+    severity: critical
+
+  - id: "AT-MANUAL-010"
+    requirement: "FR-013, E40"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Every provider failing reads 'All providers failed (groq → gemini). Last: …' (quickstart #10)."
+    severity: warning
+
+  - id: "AT-MANUAL-011"
+    requirement: "FR-002, G3, SC-005"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "A Groq-only list logs no chain line and behaves as in PR #14 (quickstart #11)."
+    severity: critical
+
+  - id: "AT-MANUAL-012"
+    requirement: "R15 V4"
+    environments: [local-key]
+    manual_verification: true
+    verification_command: "npm start"
+    description: "Opportunistic: the real daily-limit 429 and the chain switch are recorded when Groq's budget runs out (quickstart #12)."
+    severity: warning
