@@ -262,6 +262,20 @@ Each provider's own limits (defaults; env overrides exist):
 - Flash-Lite answers are weaker than gpt-oss-120b's, but an answer beats "All Groq models failed".
 - If quality on the fallback matters more than cost, Claude Haiku 5.5 can go before Gemini.
 
+**Where Claude goes (added 2026-10-12, after the user asked whether it could go in the middle).**
+- **Position.** Any position after the first entry works, more than once. The list order is the priority. Consecutive IDs of one provider form one segment, run with that provider's own failover. The first entry decides the field and the active provider.
+- **At the end (recommended).** Claude answers only when Gemini's free tier also fails, e.g. a peak-hour 503 on both Flash-Lite models (R3). It also answers when a stalled Groq leaves time only for the last provider (below). Cost: a few requests a day at most.
+- **Before Gemini.** Fallback answers are steadier than Gemini's free tier. Once Groq is spent, every Groq model cools down for 5 min and is skipped (R7), then probed. Claude therefore answers most requests until Groq's daily budget refills (R2). That is about US$0.10–0.15 per hour of interview (R3), so about US$0.15 for an interview that runs mostly on the fallback.
+- **The middle position and time** (R8). Groq's own deadline (45 s) equals the chain's 60 s minus the 15 s reserve. Checked over fake providers with an injected clock (`createChainStreamingLLM` with a Groq → Claude → Gemini list):
+
+  | How Groq failed | Groq | Middle (Claude) | Last (Gemini) |
+  |---|---|---|---|
+  | Spent: 429s in 0.6 s | `requestDeadlineMs` 45,000, round delay 0 | 44,400 ms, round delay 0 | 59,400 ms when reached |
+  | Stalled until its 45 s deadline | 45,000 | `skipped-deadline` | 15,000 ms |
+
+  In any three-provider list, a first provider that stalls to its deadline skips the middle one. With Claude at the end, a stalled Groq goes straight to Claude; with Claude in the middle, it goes to Gemini. A stall is rarer than a 429. Groq's stalls end at the 15 s first-text timeout per model, and three such models make 45 s.
+- **Screenshots.** Segments that see images go first. Claude and Gemini always do; a Groq segment only with `qwen/qwen3.8-27b`. The recommended lists have it, so nothing is reordered.
+
 ---
 
 ## R14: What stays as is

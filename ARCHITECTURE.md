@@ -925,8 +925,10 @@ any list is. For example, in the Groq field:
 
 `openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b,gemini-3.5-flash-lite,gemini-3.1-flash-lite`
 
-The first entry decides the active provider, as before. Settings accepts another provider's
-model after the first entry only when that provider's key is saved.
+The first entry decides the active provider, as before. A list that starts with `claude-…`
+goes in the Anthropic field. After the first entry, another provider's models can go **in any
+position, and more than once**. Settings accepts them only when that provider's key is saved.
+The order of the list is the order of priority, left to right.
 
 ```mermaid
 flowchart TB
@@ -975,9 +977,28 @@ flowchart TB
   - When that comes to 0 or less, the segment is skipped.
   - The last segment gets what is left.
   - Once answer text has been forwarded, no chain deadline applies.
+  - **With three providers, the middle one depends on how the first one failed.** Groq's own
+    deadline is 45 s, the same as 60 s − 15 s:
+    - Groq fails fast, e.g. spent with 429s in under a second: the middle provider gets about
+      44 s and the last about 59 s.
+    - Groq stalls until its 45 s deadline: 15 s are left, so the middle provider gets 0 and is
+      skipped (`skipped-deadline`), and the last answers with 15 s.
+
+    Checked over fake providers with an injected clock (spec research R13).
 - **Images.** With an image in the request, segments that see images go first (stable order).
   A Groq segment sees images only when it has `qwen/qwen3.8-27b`; Gemini and Anthropic segments
   always do. The request line then carries `order=images-first`.
+- **Order and position.** Consecutive IDs of one provider form one segment. The provider tries
+  them in the order typed, with its own failover. The chain moves to the next segment only when
+  every model of the current one fails.
+  - The skips, the time rules and image ordering above apply to every position.
+  - For Claude Haiku 5.5 (paid, optional) after the three Groq models:
+
+    | List after the Groq models | Effect |
+    |---|---|
+    | `…,gemini-3.5-flash-lite,gemini-3.1-flash-lite,claude-haiku-5-5` (recommended) | Claude answers only when Gemini's free tier also fails, e.g. 503 at peak hours, or when a stalled Groq leaves time only for the last provider. Costs almost nothing |
+    | `…,claude-haiku-5-5,gemini-3.5-flash-lite,gemini-3.1-flash-lite` | Claude answers as soon as Groq fails. It is steadier than Gemini's free tier, but paid. Once Groq is spent, Groq is skipped while it cools down and probed every 5 min. So Claude answers most requests until Groq's daily budget refills, about US$0.10–0.15 an hour of interview (spec research R3). A stalled Groq skips Claude and goes to Gemini |
+    | `openai/gpt-oss-120b,claude-haiku-5-5,openai/gpt-oss-20b` | Three segments (Groq, Claude, Groq), each with its own rules. The two Groq segments share the cooldown registry |
 - **Keys.** `getCurrentModelInfo('llm')` returns `keys` (§9); the three LLM call sites pass them;
   the factory removes them before any provider call. Each segment gets only its own key as
   `apiKey`. A caller that passes no `keys` still works: the first provider uses `apiKey`, and the

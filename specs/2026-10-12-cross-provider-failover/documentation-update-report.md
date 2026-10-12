@@ -38,3 +38,14 @@
 
 - Line references into `askService.js` and `summaryService.js` in `README.md`, `ARCHITECTURE.md` and `docs/LIVE_INSIGHTS_AND_ASK.md` were already off on `main`: they point at other code than they describe, e.g. `summaryService.js:807` is prompt text. This branch adds one line to `askService.js` and two to `summaryService.js`. These references were left for a separate pass.
 - `docs/diagrams/11-gemini-failover.mmd` and its copy in `ARCHITECTURE.md` §10.1 still use `call` as a node ID, which current Mermaid rejects (found in the Anthropic spec).
+
+## Added after review (2026-10-12)
+
+The user asked whether Claude can go in the middle of the list. The answer is now in the docs:
+- Order is priority, and any position after the first entry works, more than once. The first entry decides the field.
+- Where to put Claude Haiku 5.5 and what it costs.
+- How position interacts with the 60 s deadline and the 15 s reserve: a first provider that stalls to its deadline skips the middle one. This was checked over fake providers with an injected clock.
+
+Updated: `ARCHITECTURE.md` §10.4 (intro, Time, a new "Order and position" bullet), `specs/…/quickstart.md` §2, `specs/…/research.md` R13, `docs/LIVE_INSIGHTS_AND_ASK.md` §4.6, `README.md`, `CHANGELOG.md`.
+
+Not changed: the Settings help line still says "You can end the list with another provider's models". That is true but incomplete, and it is UI copy, not a doc.

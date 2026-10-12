@@ -74,7 +74,7 @@ npm run setup
 - Deepgram (STT): Get Deepgram API Key [here](https://console.deepgram.com/)
 - Local: Ollama (LLM) & Whisper (STT)
 
-A Gemini, Anthropic or Groq model list can end in another provider's models whose key is saved, e.g. `openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b,gemini-3.5-flash-lite,gemini-3.1-flash-lite` in the Groq field. When every Groq model fails, such as when its free daily budget runs out, Gemini answers ([`ARCHITECTURE.md` §10.4](ARCHITECTURE.md#104-lists-across-providers)).
+A Gemini, Anthropic or Groq model list can include another provider's models whose key is saved, in any position after the first entry. The order is the priority. For example, put `openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b,gemini-3.5-flash-lite,gemini-3.1-flash-lite` in the Groq field. When every Groq model fails, such as when its free daily budget runs out, Gemini answers. Where to put a paid Claude model, and how position affects timing: [`ARCHITECTURE.md` §10.4](ARCHITECTURE.md#104-lists-across-providers).
 
 See [`docs/AUDIO_AND_STT.md` §3](docs/AUDIO_AND_STT.md#3-stt--llm-provider-matrix) for the full STT/LLM capability matrix.
 

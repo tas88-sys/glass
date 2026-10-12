@@ -30,13 +30,22 @@ What that means (research R2, R3, R13):
 
 ## 2. Choose a list
 
-In Settings, type the whole list in the **first provider's** model field (the Groq field for the lists below) and save. The first entry must be that provider's model. Every other provider named must have a saved key.
+In Settings, type the whole list in the **first provider's** model field (the Groq field for the lists below) and save. The first entry must be that provider's model; a list that starts with `claude-…` goes in the Anthropic field. Every other provider named must have a saved key.
+
+**Order is priority**, left to right. After the first entry, another provider's models can go in any position, and more than once. Consecutive models of one provider form one block. That provider tries them in the order typed, and the next block runs only when all of them fail.
 
 | List | When |
 |------|------|
 | `openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b,gemini-3.5-flash-lite,gemini-3.1-flash-lite` | **Recommended.** Uses only keys already saved. Groq first; Gemini when Groq fails or is spent |
-| the recommended list + `,claude-haiku-5-5` | After saving an Anthropic key with credit: a paid answer when Gemini's free tier sheds load |
-| `openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b,claude-haiku-5-5,gemini-3.5-flash-lite` | Claude before Gemini, when fallback quality matters more than its small cost |
+| the recommended list + `,claude-haiku-5-5` | After saving an Anthropic key with credit. Claude answers only when Gemini's free tier also fails (e.g. 503 at peak hours), so it costs almost nothing. **Recommended place for Claude** |
+| `openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b,claude-haiku-5-5,gemini-3.5-flash-lite,gemini-3.1-flash-lite` | Claude before Gemini, when steady fallback quality matters more than cost. Once Groq is spent it is skipped while it cools down, so Claude answers most requests until Groq's daily budget refills: about US$0.10–0.15 an hour of interview |
+| `openai/gpt-oss-120b,claude-haiku-5-5,openai/gpt-oss-20b` | Also valid: three blocks (Groq, Claude, Groq) |
+
+**Time by position.** An answer must start within 60 s across providers, and a block with another behind it keeps 15 s for that one. With three providers, the middle one depends on how Groq failed:
+- **Groq spent** (429s, under a second): the middle provider gets about 44 s.
+- **Groq stalled** until its 45 s deadline: the middle provider is skipped (`skipped-deadline`), and the last one answers with the 15 s left. With Claude at the end, a stalled Groq therefore goes to Claude; with Claude in the middle, it goes to Gemini.
+
+**Screenshots** reorder the blocks: those that see images go first. Claude and Gemini always do; Groq only when its block has `qwen/qwen3.8-27b`. The lists above all have it, so nothing moves.
 
 Optional tuning in `.env` at the repo root:
 
