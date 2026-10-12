@@ -210,3 +210,35 @@ Which key and model to use. One run is about 120 model calls (an answer and a ju
 - [ ] A script (or an `--answers` mode of the eval) prints the four checks for the full set and the holdout.
 - [ ] Judge agreement with the candidate's ratings is reported.
 - [ ] The targets are recorded in the spec as success criteria.
+
+---
+
+## 5. Live Answer career context — open routing and retrieval items
+
+**Status:** Pending. Found on 2026-10-11 while comparing questions in English and Portuguese; not started.
+**Spec:** `specs/2026-10-11-live-answer-career-context/` (research R15 to R17)
+
+### Summary
+
+Four gaps are still open after T038 to T040. Each was measured with the eval, `scripts/ask-career-kb.js` or a set of questions written for the check. The questions and notes stay in the private notes repo; the examples below are invented.
+
+| Item | What happens | Example |
+|------|--------------|---------|
+| **Live-coding talk routed personal** | Older experience cues also match a turn about the code on screen. The answer then gets notes and the first-person addendum. | "Have you created the index on that column?" (`experience:you-past`), "Conte sobre uma estrutura de dados que você conhece" (`experience:pt-voce-habito`), "Have you handled the nil case?" (`experience:have-you`) |
+| **English questions about the candidate that still route general** | No cue matches, so no notes are sent. These six were R16's held-out misses; they are no longer held out. | "What's pushing you to look for something new?", "When could you join if we made an offer?", "Is there something you'd like to add that we didn't ask about?", "What's the reason behind your job search?", "What was it like working at a startup?", "Would you be comfortable working with Python?" |
+| **English question, note written in Portuguese** | The route is right, but the note ranks too low: its words do not match and the vectors match across languages less surely. | "Have you ever built a system from scratch?" (the story's note ranks 8th, not sent); "What's the biggest thing you've built from the ground up?" (not in the top 40); one eval item hits in Portuguese and misses in English |
+| **Ambiguous gate just under the threshold** | A turn routed ambiguous sends nothing when its closest note scores just under the 0.35 gate. The threshold is not calibrated yet (T027). | Before R17, "Conte sobre um lançamento que deu certo" routed ambiguous and its closest note scored 0.349. R17 routes that one personal, but any other ambiguous turn can fall just under. |
+
+### Proposed
+
+- **Live-coding talk.** Collect 30 to 50 turns an interviewer says about code on screen, in both languages, and route them through `classifyCareerIntent`. Then try a guard: an experience verb followed by a definite object about code ("the index", "this function", "that error") routes general or ambiguous. Keep it only if R16's and R17's held-out sets do not lose questions about the candidate.
+- **English questions still general.** Write general patterns (the reason behind a job search, a start date with "when could you join", "that we didn't ask about"), not one cue per question. Measure on a new held-out set written before the change.
+- **English question, Portuguese note.** Add an English summary line to the other Portuguese-only story notes in the notes repo, as was done for the main story file (+5 points for the eval's Portuguese questions asked in English). Measure with the same scripts.
+- **Ambiguous gate.** Part of T027: label turns "should inject" or "should not" and set the threshold from them.
+
+### Acceptance
+
+- [ ] A live-coding turn set exists, and its turns routed personal are counted before and after any guard.
+- [ ] On a new English held-out set, questions about the candidate routed general are counted before and after.
+- [ ] The eval's Portuguese questions asked in English send the right note as often as in Portuguese, or the gap is explained.
+- [ ] The ambiguous threshold is set from labeled turns (T027).
