@@ -1,7 +1,7 @@
 {
   "spec_id": "2026-10-12-live-features-toggle",
   "spec_name": "live-features-toggle",
-  "updated": "2026-10-12T17:10:07Z",
+  "updated": "2026-10-12T17:14:22Z",
   "anthropic_patterns": [
     "Ralph looping",
     "JSON task state"
@@ -216,7 +216,7 @@
       "description": "SettingsView (FR-017, FR-018): import liveFeatures.js; state liveFeatures ('both') and liveFeaturesLoading; load via window.api.settingsView.getLiveFeatures() where loadAutoUpdateSetting is called (connectedCallback and the user-state refresh), try/catch keeping 'both'; handleCycleLiveFeatures calls setLiveFeatures(nextLiveFeatures(current)), applies the returned mode only on success, logs the error otherwise, and is disabled while loading; a settings-button full-width 'Live panels: <liveFeaturesLabel>' below Automatic Updates plus the one-line grey help from FR-018."
     },
     {
-      "status": "pending",
+      "status": "completed",
       "parallel": false,
       "target_file": null,
       "gate": "T017",
@@ -226,8 +226,8 @@
       "gate_type": null,
       "scope": null,
       "block_on": null,
-      "completed_at": null,
-      "evidence": null,
+      "completed_at": "2026-10-12T17:14:22Z",
+      "evidence": "Real ListenView + LiveAnswerView + SummaryView + SettingsView bundled with esbuild and rendered on 127.0.0.1 with a stubbed window.api (Settings setLiveFeatures saves and pushes listen:liveFeaturesChanged, as featureBridge does). answer: title Live answer, only the answer pane, Waiting for a question... (pane 120 px, adjustWindowHeight 165); two pushed answers -> 211 (269 with longer ones), hover Copy Glass Answer, copy = \"What is a channel?\nA typed pipe between goroutines.\n\nHow does GC work in Go?\nConcurrent mark and sweep.\n- low pauses\"; transcript toggle reads Show Answer. Settings press with a 400 ms save: button disabled during the call, label kept until it returns, then Insights only (answer pane hidden, title Live insights), then Answer + Insights (both panes, hover Copy Glass Analysis), then Answer only with the 2 answers still there (hiding does not reset). A failed save keeps Answer only and re-enables the button. Session start (isActive true) re-reads the mode (listen.get). Disconnect removes the same handler (1 -> 0). With Insights on the height is 700 in the harness in both and insights modes: .assistant-container is 100vh and the summary container fills it (809 = 854 - 45), the same as before this change. Help line wraps to 3 lines in the 240 px window. Main process (instead of npm start, which cannot change the mode without clicking the app): the real featureBridge loaded with electron/settingsService/listenService/windowManager stubbed: get -> state of the saved mode; invalid mode refused with no save/apply/push; insights saved, applied, pushed once; failed save returned as is, nothing applied; no listen window -> saved and applied, no push; missing value -> both. The real listenService.initializeNewSession: saved answer -> answer; missing -> both; read failure -> [Live] error with the message only, mode both. The npm start check moves to T-VERIFY-MANUAL",
       "evidence_type": "execution",
       "auto_skill": null,
       "auto_skill_timing": null,
