@@ -33,6 +33,12 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 const calls = [];
 let tapInstalled = false;
+// --block-providers with no model left: every LLM call is answered by the local
+// stub (offline.js), still through the tap, so calls are recorded as usual.
+let stubLlm = false;
+function useStubLlm(on) {
+    stubLlm = !!on;
+}
 
 function tapStream(response, call) {
     const body = response?.body;
@@ -94,8 +100,9 @@ function installLlmTap() {
     const factory = req('features/common/ai/factory');
     const origStreaming = factory.createStreamingLLM;
     const origLlm = factory.createLLM;
+    const offline = require('./offline');
     factory.createStreamingLLM = (provider, opts) => {
-        const llm = origStreaming(provider, opts);
+        const llm = stubLlm ? offline.createStubStreamingLLM() : origStreaming(provider, opts);
         return {
             ...llm,
             streamChat: async (messages, ...rest) => {
@@ -130,7 +137,7 @@ function installLlmTap() {
         };
     };
     factory.createLLM = (provider, opts) => {
-        const llm = origLlm(provider, opts);
+        const llm = stubLlm ? offline.createStubLLM() : origLlm(provider, opts);
         return {
             ...llm,
             chat: async (...a) => {
@@ -171,13 +178,18 @@ async function setupModels(cfg, log) {
     catalog.configure({ store: memoryStore(cfg.catalogRows), fetchers: catalog.defaultFetchers ? catalog.defaultFetchers() : undefined });
     if (typeof catalog.load === 'function') catalog.load();
     const refreshed = {};
+    const blocked = cfg.blocked || [];
     for (const p of catalog.CATALOG_PROVIDERS) {
-        if (!cfg.keys[p]) continue;
+        if (!cfg.keys[p] || blocked.includes(p)) continue;
         refreshed[p] = await catalog.refresh(p, cfg.keys[p], { force: true }).catch(() => false);
     }
     log(`[models] catalog refreshed: ${Object.entries(refreshed).map(([p, ok]) => `${p}=${ok ? 'ok' : 'failed'}`).join(' ') || 'none'}`);
 
     const llmInfo = () => {
+        if (stubLlm) {
+            const { STUB_PROVIDER, STUB_MODEL } = require('./offline');
+            return { provider: STUB_PROVIDER, model: STUB_MODEL, apiKey: 'offline', keys: {} };
+        }
         const { provider, model } = cfg.llm;
         if (!provider || !model) return null;
         const keys = {};
@@ -466,4 +478,4 @@ function inAskContext(tag, fn) {
     return als.run({ lane: 'ask', tag }, fn);
 }
 
-module.exports = { installLlmTap, setupModels, setupCareer, createSession, inAskContext, calls };
+module.exports = { installLlmTap, useStubLlm, setupModels, setupCareer, createSession, inAskContext, calls };

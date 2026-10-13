@@ -34,21 +34,24 @@ const ROUTE_INSTRUCTIONS =
     '`candidate_names` are the candidate\'s own past employers and projects; `note_companies` are companies the candidate prepared for; ' +
     '`interviewer_company` is the company running this interview, when known.';
 
+// personal, company and ambiguous ask the candidate something; a turn that only
+// tells (the interviewer presenting their company or the role) is general.
 const ROUTE_CRITERIA = {
     personal:
-        'About the candidate\'s own background: past experience, something they did, their career, strengths and weaknesses, ' +
+        'Asks the candidate about their own background: past experience, something they did, their career, strengths and weaknesses, ' +
         'motivations, why they are leaving, salary, availability, or one of `candidate_names`. ' +
         'E.g. "Tell me about a time you disagreed with a teammate" / "Me conta de uma vez que você discordou do seu time".',
     company:
-        'About the interviewer\'s company or this role: why the candidate wants to join, what they know about the company, ' +
-        'the job opening, or a company from `note_companies` named as the one interviewing. ' +
+        'Asks the candidate about the interviewer\'s company or this role: why they want to join, what they know about the company, ' +
+        'what they think of the job opening, or a company from `note_companies` named as the one interviewing. ' +
         'E.g. "Why do you want to join us?" / "Por que você quer trabalhar com a gente?"',
     ambiguous:
-        'A hypothetical, habitual or opinion question to the candidate, where their experience may help but is not asked for directly. ' +
+        'Asks the candidate a hypothetical, habitual or opinion question, where their experience may help but is not asked for directly. ' +
         'E.g. "How would you handle a production outage?" / "Como você lida com prazos apertados?"',
     general:
-        'Anything else: a technical or factual question that is not about the candidate, small talk, or a statement. ' +
-        'E.g. "What is the difference between a process and a thread?" / "Qual a diferença entre processo e thread?"',
+        'Anything else: a technical or factual question that is not about the candidate, small talk, or a statement that asks nothing, ' +
+        'such as the interviewer presenting themselves, their company or the role. ' +
+        'E.g. "What is the difference between a process and a thread?" / "Aqui na empresa a gente faz deploy toda semana."',
 };
 
 const FOLLOW_UP_INSTRUCTIONS =

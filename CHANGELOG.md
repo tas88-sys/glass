@@ -23,6 +23,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
   - with `jev`, compares Jev with the regex router on the same items and reports the Jev call p50/p95 and the fallbacks;
   - adds the release checks R-SC-001..004.
 - **`ask-career-kb.js` and the live eval** show who decided each route and the Jev time.
+- **`npm run eval:live -- --block-providers groq,gemini,deepgram`** (or `LIVE_EVAL_BLOCK_PROVIDERS`) runs the live eval without spending those services' quota:
+  - requests to their hosts fail before leaving the machine, and the run reports the count;
+  - their models leave the LLM list, and when none is left a local stub answers;
+  - the gate, the Jev router, retrieval and the answer lane still run;
+  - checks on the answer's words become info, and the Ask phases are skipped.
+
+#### Fixed (found by the live eval with Jev)
+
+- **Intros got answers.** A company intro with no question ("Here at <company> we…") was routed `company` by Jev and answered. The criteria now say that personal, company and ambiguous turns ask the candidate something, and that a statement presenting the company or the role is general.
 
 #### Changed
 

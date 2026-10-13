@@ -666,6 +666,21 @@ and numbers only.
 - `--out`: the report folder.
 - `--verbose`: also print the app's log.
 - `--judge`, `--judge-model`, `--rejudge <dir>`: the judge (see Cost).
+- `--block-providers groq,gemini,deepgram` (or `LIVE_EVAL_BLOCK_PROVIDERS`): never call these
+  services, to save the day's quota. Known names: `groq`, `gemini`, `deepgram`, `anthropic`,
+  `openai`, `typesafe`.
+  - **No request leaves.** A request to a blocked API host (fetch, http, https, so SDKs and
+    WebSockets too) fails before leaving the machine. The run ends with the count
+    (`blockedRequests`); 0 means no code path even tried.
+  - **The blocked models leave the LLM list.** When none is left, a local stub streams a fixed
+    answer. The gate, the career router (Jev, which is not blocked unless you name `typesafe`),
+    retrieval, the prompt and the answer lane still run for real. Checks on what the answer
+    says become info, and phases C, D, E (Ask) are skipped.
+  - **Other services:** a blocked STT provider or a blocked Gemini (the TTS) means `--text`. A
+    blocked Gemini also turns `--judge` off.
+
+  `npm run eval:live -- --block-providers groq,gemini,deepgram --fast` checks the gate and the
+  career routes with Jev in about 80 s, at no LLM or STT cost.
 
 `--help` lists all of them. The exit code is 1 when any check that fails the run did not pass.
 
