@@ -14,7 +14,7 @@ const getWindowPool = () => {
 
 const sessionRepository = require('../common/repositories/session');
 const askRepository = require('./repositories');
-const { getSystemPrompt } = require('../common/prompts/promptBuilder');
+const { buildAskMessages, formatConversationForAsk } = require('./askPrompt');
 const settingsService = require('../settings/settingsService');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -210,10 +210,7 @@ class AskService {
      * @private
      */
     _formatConversationForPrompt(conversationTexts) {
-        if (!conversationTexts || conversationTexts.length === 0) {
-            return 'No conversation history available.';
-        }
-        return conversationTexts.slice(-30).join('\n');
+        return formatConversationForAsk(conversationTexts);
     }
 
     /**
@@ -267,51 +264,16 @@ class AskService {
             // Read mode + language from settings (single source of truth).
             const currentSettings = await settingsService.getSettings();
 
-            const VALID_MODES = ['default', 'code', 'debug', 'system_design'];
-            const rawMode = currentSettings.askMode;
-            const askMode = VALID_MODES.includes(rawMode) ? rawMode : 'default'; // defensive coerce
-
-            const PROFILE_BY_MODE = {
-                default: 'pickle_glass_analysis',
-                code: 'pickle_glass_code',
-                debug: 'pickle_glass_debug',
-                system_design: 'pickle_glass_system_design',
-            };
-            const profile = PROFILE_BY_MODE[askMode];
+            // Prompt and messages: askPrompt.js (the live eval builds the same ones).
+            const { askMode, profile, systemPrompt, messages } = buildAskMessages({
+                askMode: currentSettings.askMode,
+                userPrompt,
+                conversationHistory,
+                preferredCodeLanguage: currentSettings.preferredCodeLanguage,
+                screenshotBase64,
+            });
             console.log(`[AskService] askMode='${askMode}', profile='${profile}'`);
 
-            // preferredCodeLanguage only meaningful for 'code' mode; trim + empty fallback.
-            let language = '';
-            if (askMode === 'code') {
-                language = (currentSettings.preferredCodeLanguage || '').trim();
-            }
-
-            // Build prompt. For code mode, inject language via token replacement.
-            let systemPrompt;
-            if (askMode === 'code') {
-                const base = getSystemPrompt(profile, conversationHistory, false);
-                systemPrompt = base.replace('{{PREFERRED_LANGUAGE}}', language || '__INFER_FROM_SCREENSHOT__');
-            } else {
-                systemPrompt = getSystemPrompt(profile, conversationHistory, false);
-            }
-
-            const messages = [
-                { role: 'system', content: systemPrompt },
-                {
-                    role: 'user',
-                    content: [
-                        { type: 'text', text: `User Request: ${userPrompt.trim()}` },
-                    ],
-                },
-            ];
-
-            if (screenshotBase64) {
-                messages[1].content.push({
-                    type: 'image_url',
-                    image_url: { url: `data:image/jpeg;base64,${screenshotBase64}` },
-                });
-            }
-            
             const streamingLLM = createStreamingLLM(modelInfo.provider, {
                 apiKey: modelInfo.apiKey,
                 model: modelInfo.model,

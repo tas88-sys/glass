@@ -178,6 +178,7 @@ table('ambiguous (hypothetical, habitual, opinion)', 'ambiguous', [
     'What would you do if a release broke production?',
     'Imagine you are leading a team of five.',
     'How do you ensure the reliability of a system?',
+    'Do you ensure the reliability of a system,',   // the STT dropped "How" (live eval)
     'How do you adapt to changing priorities?',
     'How do you stay technically up to date?',
     "What's your approach to code reviews?",

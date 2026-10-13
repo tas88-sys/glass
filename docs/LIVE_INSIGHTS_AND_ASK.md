@@ -56,7 +56,7 @@ sttService  ──onTranscriptionComplete(speaker, text)──►  listenService
 ```
 
 So **every** `"Me"`/`"Them"` turn that lands in the transcript is also pushed into the insights
-engine as a string `"me: …"` / `"them: …"` (`summaryService.js:688-698`).
+engine as a string `"me: …"` / `"them: …"` (`summaryService.js:763-773`).
 
 ---
 
@@ -92,7 +92,7 @@ session** — it is not an error.
 ### 3.3 When it gets filled — the every-5-turns rule
 
 Insights are produced by `summaryService.triggerAnalysisIfNeeded()`, which runs after **every**
-conversation turn but only *fires an analysis* on multiples of 5 (`summaryService.js:1024`).
+conversation turn but only *fires an analysis* on multiples of 5 (`summaryService.js:1083`).
 With Live Insights off it returns before this test (`:1023`, §3.6):
 
 ```js
@@ -125,13 +125,13 @@ manual "analyze now"** button — the cadence is purely turn-count driven.
 
 ### 3.4 What populates each section
 
-`makeOutlineAndRequests()` (`summaryService.js:769-886`) builds the prompt and calls the LLM:
+`makeOutlineAndRequests()` (`summaryService.js:844-962`) builds the prompt and calls the LLM:
 
 1. **Prompt** = the `pickle_glass_analysis` system profile with its `{{CONVERSATION_HISTORY}}`
-   token replaced by the **last 30 turns** (`summaryService.js:792-793`,
-   `formatConversationForPrompt`, `:723-726`), plus the **previous analysis** folded back in for
-   continuity (`:739-749`), plus a hardcoded user message that requests this exact shape
-   (`:772-792`):
+   token replaced by the **last 30 turns** (`summaryService.js:852`, `:868`,
+   `formatConversationForPrompt`, `:839-842`), plus the **previous analysis** folded back in for
+   continuity (`:855-865`), plus a hardcoded user message that requests this exact shape
+   (`:886-907`):
 
    ```
    **Summary Overview**      → parsed into  data.summary[]    (≤5 bullets)
@@ -141,7 +141,7 @@ manual "analyze now"** button — the cadence is purely turn-count driven.
    ```
 
 2. **LLM call** is **non-streaming** — `createLLM(provider).chat(messages)`
-   (`summaryService.js:839-848`) — unlike Ask, which streams.
+   (`summaryService.js:914-924`) — unlike Ask, which streams.
 
 3. **Parse** — `parseResponseText()` (`:847-958`) turns the markdown into
    `{ summary, topic{header,bullets}, actions, followUps }` and always appends the default
@@ -175,7 +175,7 @@ the **clicked text** crosses over (see §4). It is **rejected unless Ask is in `
 Settings → **Live panels: Answer only** turns this lane off (the setting is described in §4.8).
 From the next turn:
 
-- `triggerAnalysisIfNeeded` returns before the every-5-turns test (`summaryService.js:1023`): no
+- `triggerAnalysisIfNeeded` returns before the every-5-turns test (`summaryService.js:1082`): no
   `llm.chat()` call, no `summary-update`, and **no summary is saved** for the session. The web
   Activity page shows the transcript and no summary block, as it does today for a session shorter
   than 5 turns.
@@ -201,7 +201,7 @@ deleting either leaves the other unchanged.
 ### 4.1 How it triggers
 
 After every `addConversationTurn(speaker, text)` call, `triggerAnswerIfNeeded` runs beside
-`triggerAnalysisIfNeeded`. With Live Answer off it returns at once (`summaryService.js:581`,
+`triggerAnalysisIfNeeded`. With Live Answer off it returns at once (`summaryService.js:640`,
 §4.8). Otherwise four gates decide whether an answer stream starts:
 
 1. **Speaker gate** — `speaker.toLowerCase() !== 'them'` → skip. Only the interviewer's turns trigger answers (FR-001).
@@ -210,6 +210,8 @@ After every `addConversationTurn(speaker, text)` call, `triggerAnswerIfNeeded` r
    - an interview cue appears (`tell me`, `walk me through`, `describe`, `design`, `compare`, `difference between`, `trade-offs`, …);
    - an embedded question appears ("the question is what…", "I'm curious how…");
    - a wh-word or yes/no auxiliary leads any clause, after peeling discourse markers ("okay so how does X work").
+
+   Each signal has a Portuguese twin, since the STT often leaves the `?` off a Portuguese question: requests (`me explica`, `me fala`, `descreva`, `compare`, `diferença entre`, `prós e contras`, …), question words leading a clause (`o que`, `qual`, `por que`, `e se`, `você já…`, `pode me explicar…`), and markers peeled first (`então`, `tá`, `bom`, `e`, …). `como` counts only before a verb or `você`, because "Como arquiteta, …" is not a question. They match accent-folded text.
 
    Declarative monologue is skipped to save quota. When the career module is ready, a turn with a career cue also passes ("your biggest weakness", §4.7); while it is off, the gate is exactly the one above.
 3. **800 ms debounce** — multi-segment utterances (STT delivers words in fragments) coalesce into one trigger (FR-003).
@@ -228,6 +230,10 @@ then calls `parseAnswerOrPassive(prefix)`:
   `"Not sure what you need help with right now"` → suppress. No IPC emit; the panel holds the
   last rendered answer unchanged (never blanks — Q1/G3/FR-010).
 - Otherwise → flush the buffered prefix as the first emit and stream subsequent deltas live.
+
+The same instruction asks for the answer in the language of the question (Portuguese if it was
+asked in Portuguese), with technical terms as they are commonly said. Without it, the live eval
+got English answers to Portuguese questions.
 
 ### 4.3 IPC channel: `live-answer-update`
 
@@ -314,7 +320,7 @@ is used from outside). Spec: `specs/2026-10-11-live-answer-career-context/`.
 | Variable | Meaning |
 |---|---|
 | `CAREER_KB_PATH` | Folder of markdown/text notes. Unset or missing → the feature is off and Live Answer behaves exactly as before |
-| `CAREER_KB_COMPANY` | Optional. The interviewing company, as the manifest aliases spell it (or a folder name without aliases). Otherwise the first company named by the interviewer in a company-context phrase ("here at X", "aqui na X", "conhece a X") is used |
+| `CAREER_KB_COMPANY` | Optional. The interviewing company, as the manifest aliases spell it (or a folder name without aliases). Otherwise the first company named by the interviewer in a company-context phrase ("here at X", "aqui na X", "conhece a X") is used. A name of 7+ letters also matches when the STT got one letter wrong ("Orbit Pai" for "Orbit Pay"; two letters from 11), if the first letter is right; shorter names must match exactly |
 | `CAREER_KB_VECTORS` | Optional. `off` keeps retrieval keyword-only (BM25) and never starts the embedding model, saving ~0.7 GB of RAM |
 
 **Manifest.** An optional `glass-kb.json` at the notes root:
@@ -508,13 +514,13 @@ Each press saves the next one:
 | **Insights only** | off | runs |
 
 **Insights only.** `triggerAnswerIfNeeded` returns as its first statement
-(`summaryService.js:581`): no company detection, no prefetch, no debounce, no stream, no
+(`summaryService.js:640`): no company detection, no prefetch, no debounce, no stream, no
 `live-answer-update`. The answer pane is hidden; the window keeps its "Live insights" labels.
 The career notes still warm up at session start (`listenService.js:182`); that work is local and
 spends no tokens, so the lane is ready if it is turned back on mid-call.
 
 **Turned off mid-question.** `setLiveFeatures` calls `pauseLiveAnswer()`
-(`summaryService.js:727`): the pending debounce is cleared and a streaming answer is aborted
+(`summaryService.js:786`): the pending debounce is cleared and a streaming answer is aborted
 through the abort-and-replace path. The cut answer stays in the pane as far as it got, and no more
 answer text, `unverified` payload or error follows; only `status: 'idle'` may follow, to clear a
 "Trying …" line. Unlike `resetLiveAnswer()` (§4.5), the pause keeps `lastAnsweredTail`,
@@ -536,6 +542,94 @@ answer text, `unverified` payload or error follows; only `status: 'idle'` may fo
 - A change applies from the next turn, with no restart and no new session. Each change logs
   `[Live] features=<mode>` (the mode name only).
 
+### 4.9 Live eval: a simulated interview with real audio and real models
+
+`npm run eval:live` runs Live Answer and Ask end to end with the real services, the way an
+interview would. It runs on the Node inside Electron (`scripts/live-eval/launch.js`), so it can
+read the app's own settings without writing anything to them.
+
+```
+TTS (Gemini, cached) → 100 ms PCM chunks → SttService (Deepgram/Gemini live) → them:/me: turn
+  → SummaryService gate → career context → provider chain → live-answer-update (recorded)
+```
+
+**What is real and what is not.**
+
+- **Real:**
+  - `SttService` and `SummaryService`, wired as `listenService` wires them;
+  - the provider chain and its failover;
+  - the model catalog, read from the providers' APIs;
+  - the career module over `CAREER_KB_PATH`, with the app's vector cache;
+  - the Ask prompt (`askPrompt.buildAskMessages`) and the stream reducer;
+  - the keys, the model lists and the STT provider from the app's DB, opened read-only.
+- **Not real:**
+  - the windows: `sendToRenderer` is replaced by a recorder;
+  - the screen capture: an SVG fixture rendered to the 1920×1080 JPEG (quality 70) that Windows sends;
+  - the microphone: the TTS clip, streamed in real time, with low noise between turns.
+- `--text` drops TTS and STT: each turn goes in as the final transcript, after the time it takes to
+  say it.
+
+**Phases.**
+
+| | What | Checks that fail the run |
+|---|---|---|
+| A | Invented interview in pt-BR then en-US (`fixtures/interview.json`): direct questions, a request with no question mark, context then question, follow-ups, monologue, the candidate's own question | answer shown or not, as each turn expects; a key term; no error |
+| B | Questions sampled per route from `glass-eval/questions.jsonl` in the notes; a company question is preceded by "here at <company>…" | route; notes injected (personal/company) or not (general); company detected; answer shown. When the router gives the script text itself another route than its label, the route and notes checks only warn: that is a router gap, which `scripts/eval-career-kb.js` measures; the live eval fails only when audio and STT change a route the router gets right |
+| C | Ask, default mode, on an ops screen | order id, latency and error code read from the image; the screenshot was sent; a model that sees images answered |
+| D | Ask, code mode, on a hard grid problem; once in JavaScript and once in the saved language | five sections in order; a code block; **the JavaScript runs against 22 hidden tests**, one of them a 220×220 grid that a quadratic solution cannot finish |
+| E | Ask, system design mode, on a global rate limiter prompt | sections 0–11 in order; ≥ 8 numbers with units; ≥ 5 of 7 requirements from the image |
+| F | `--stress`: a burst of 5 questions 1 s apart; 32 filler turns then a question with both lanes on; Answer off | last question answered and no late update from a replaced answer; prompt holds the last 30 turns; Insights every 5 turns; no answer call with Answer off |
+
+- **Warnings** (they do not fail the run):
+  - STT word error rate above 0.25;
+  - the first token more than 6 s after the final transcript;
+  - the answer in a different language from the question;
+  - a fallback to another model;
+  - a long headline;
+  - `unverified` marks.
+- **`--judge`** has a Gemini model score each answer from 1 to 5, with a rubric for each kind. For
+  career answers it also checks that the answer agrees with the notes it was given. The score is
+  reported and never decides pass or fail.
+
+**Privacy.** The career questions, their audio and every answer stay outside the repo. The report
+(`report.md`, `report.json`, `app.log`) goes to `%LOCALAPPDATA%\glass-live-eval\<time>\` and the
+TTS cache to `…\glass-live-eval\tts-cache\`. For career questions the console shows ids, routes
+and numbers only.
+
+**Cost.**
+- A full audio run (A–F, `--kb-sample 3`; measured 2026-10-12) takes about 17 minutes. It uses:
+  - 42 LLM calls (36 answers and Asks, and 6 Insights), plus one per answer with `--judge`;
+  - about 12 minutes on each of the two live STT sessions. Both stream all the time, as in a
+    call.
+- **TTS is the bottleneck on a free Gemini key:**
+  - each TTS model allows 10 requests a day, and a full run needs about 30 clips;
+  - when the quota runs out, the English turns fall back to the Windows voices, and the
+    Portuguese ones fail;
+  - the clips are cached, so after one or two days the eval needs no TTS at all.
+- With Groq's free tier, the turns hit the per-minute token limits (each Live Answer prompt is
+  about 2,200 tokens). The chain then moves to the next Groq model, and finally to Gemini. The
+  report counts these fallbacks.
+- **The judge** tries `gemini-3.1-pro-preview`, then `gemini-pro-latest`, then
+  `gemini-3.5-flash-lite`:
+  - a free key has no Pro quota, so it ends on Flash-Lite, a weak judge that may also be the model
+    that answered;
+  - `--judge-model` picks another;
+  - `--rejudge <report folder>` scores a finished run again without running it.
+
+**Options.**
+- `--text`: no TTS or STT. `--fast` also skips the time each turn takes to say.
+- `--only A,C`: run only the listed phases.
+- `--kb-sample N`: questions per career route.
+- `--repeat N`: run phase A N times, for latency percentiles.
+- `--llm-models`, `--stt-provider`: use another list or STT provider than the app's.
+- `--code-language`: the language of the second code run.
+- `--bm25-only`: career retrieval without vectors.
+- `--out`: the report folder.
+- `--verbose`: also print the app's log.
+- `--judge`, `--judge-model`, `--rejudge <dir>`: the judge (see Cost).
+
+`--help` lists all of them. The exit code is 1 when any check that fails the run did not pass.
+
 ---
 
 ## 5. Ask — and why it does not hear the interviewer
@@ -544,14 +638,14 @@ The full Ask mechanics live in [`../ARCHITECTURE.md` §6](../ARCHITECTURE.md). T
 matters most for the interview scenario:
 
 > **Ask never receives the live transcript.** `askService.sendMessage(userPrompt,
-> conversationHistoryRaw=[])` (`askService.js:219`) *can* accept conversation history and would
-> format the last 30 turns (`_formatConversationForPrompt`, `:207-212`) — but **every** caller
+> conversationHistoryRaw=[])` (`askService.js:221`) *can* accept conversation history and would
+> format the last 30 turns (`_formatConversationForPrompt`, `:212-214`, through `askPrompt.formatConversationForAsk`) — but **every** caller
 > passes only the prompt: `ask:sendQuestionFromAsk` and `ask:sendQuestionFromSummary` both call
 > `askService.sendMessage(userPrompt)` with no second argument (`featureBridge.js:159`, `:168`),
-> and the screenshot-only path passes `[]` explicitly (`askService.js:154`).
+> and the screenshot-only path passes `[]` explicitly (`askService.js:157`).
 
 So when you press Ask, the model receives exactly: **the system prompt + your typed text + one
-fresh screenshot** (`askService.js:291-306`). It does **not** see what the interviewer just
+fresh screenshot** (`buildAskMessages`, `askPrompt.js:49-85`, called at `askService.js:268`). It does **not** see what the interviewer just
 said unless that text is on the screen or you typed/pasted it yourself. This is wiring, not a
 model limitation — see [`../ARCHITECTURE.md` §16](../ARCHITECTURE.md) ("Listen → Ask context is
 not wired").
@@ -561,7 +655,7 @@ not wired").
 | Path | How | What's sent |
 |---|---|---|
 | Typed question | Type in the Ask box, press Enter (`AskView.js:1287-1299`, `:1301-1314`) | your text + screenshot |
-| Screenshot-only | `Ctrl/Cmd+Enter` (`nextStep`) while the Ask box is open → `toggleAskButton(true)` → `sendMessage('', [])` (`shortcutsService.js:213-214`, `askService.js:148-156`) | empty text + screenshot only |
+| Screenshot-only | `Ctrl/Cmd+Enter` (`nextStep`) while the Ask box is open → `toggleAskButton(true)` → `sendMessage('', [])` (`shortcutsService.js:213-214`, `askService.js:151-159`) | empty text + screenshot only |
 
 The screenshot-only path leans on the `pickle_glass_analysis` decision hierarchy: with no
 typed question, the model falls through to **"solve the clear problem visible on screen"**
@@ -650,17 +744,17 @@ Pick based on what kind of question it is:
 - **Insights never auto-open Ask.** A `summary-update` only repaints the panel; it never
   launches an answer. Producing an answer always requires one of the §6.2 user actions.
 - **Stray template token in Ask `default` mode.** The Ask path builds the prompt with
-  `getSystemPrompt('pickle_glass_analysis', conversationHistory, false)` (`askService.js:288`),
+  `getSystemPrompt('pickle_glass_analysis', conversationHistory, false)` (`askPrompt.js:65`),
   which places the (empty) history in the *"User-provided context"* slot but does **not** replace
   the profile's trailing `{{CONVERSATION_HISTORY}}` token (`promptTemplates.js:402`) — only the
-  *summary* path calls `.replace('{{CONVERSATION_HISTORY}}', …)` (`summaryService.js:793`). So in
+  *summary* path calls `.replace('{{CONVERSATION_HISTORY}}', …)` (`summaryService.js:868`). So in
   `default` Ask mode the literal string `{{CONVERSATION_HISTORY}}` reaches the model. Cosmetic
   today (models ignore it); it would matter if/when Listen→Ask history is wired.
 - **Insights are non-streaming; Ask streams.** The panel updates in one shot per analysis
-  (`summaryService.js:848`); Ask renders token-by-token (`askService._processStream`,
+  (`summaryService.js:924`); Ask renders token-by-token (`askService._processStream`,
   `:401-474`).
 - **One summary row per session.** The `summaries` table is UPSERTed, not appended
-  (`summaryService.js:854-867`) — the panel reflects the latest rolling analysis, not a history.
+  (`summaryService.js:930-943`) — the panel reflects the latest rolling analysis, not a history.
 - **Follow-Ups appear only after Stop.** They're gated on `hasCompletedRecording`
   (`ListenView.js:484-488`, `SummaryView.js:528`), so they show up once the session ends, not
   mid-conversation.
@@ -681,6 +775,8 @@ Pick based on what kind of question it is:
 | Career context (router, retrieval, context block, embedder) | `src/features/common/career/` (entry point `index.js`) |
 | Career context eval | `scripts/eval-career-kb.js` |
 | Career retrieval for one question | `scripts/ask-career-kb.js` |
+| Live eval (simulated interview, real audio and models, §4.9) | `scripts/live-eval/` (`npm run eval:live`; unit tests `scripts/live-eval/__tests__/`) |
+| Ask prompt and messages (shared by the app and the live eval) | `src/features/ask/askPrompt.js` (tests `src/features/ask/__tests__/askPrompt.test.js`) |
 | Listen window / insights-vs-transcript toggle | `src/ui/listen/ListenView.js` |
 | Ask answer engine | `src/features/ask/askService.js` |
 | Ask UI | `src/ui/ask/AskView.js` |

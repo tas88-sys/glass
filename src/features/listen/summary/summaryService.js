@@ -57,22 +57,81 @@ const CONTENT_CUE_RE = new RegExp(
 const EMBEDDED_Q_RE =
     /\b(?:is|are|was|were|wonder|wondering|curious|know|asking|ask|want(?:ed)? to know|looking at|question is)\s+(?:what|how|why|when|where|which|who|whether|if)\b/i;
 
+// Portuguese twins of the signals above. The STT often leaves the '?' off a
+// Portuguese question ("Me explica a diferença entre…"), so the gate needs its
+// own words. PT_CLAUSE_LEAD_RE and PT_CONTENT_CUE_RE match accent-folded,
+// lowercase text (foldPt); PT_LEAD_STRIP_RE peels the original text, so it
+// spells the accents itself. "aí", "legal" and "show" are left out: peeled
+// from English ("AI is…", "Legal is…") they would expose an auxiliary.
+const PT_LEAD_STRIP_RE =
+    /^(?:ent[aã]o|e(?!\s+se(?![\p{L}\p{N}]))|mas|agora|bom|bem|beleza|t[aá]|ok|certo|tipo|n[eé]|olha|enfim|perfeito|[oó]timo|hum|ah)(?![\p{L}\p{N}])[\s,]*/iu;
+// Question words and "você + verb" openers. "Como" alone also means "as"
+// ("Como arquiteta, …"), so it counts only before a verb or "você".
+const PT_CLAUSE_LEAD_RE = new RegExp(
+    '^(?:o que|oque|que tipo|qual|quais|quem|quando|onde|aonde|por que|pra que|para que|' +
+    'quanto|quantos|quantas|sera que|e se|' +
+    'como (?:que |e que )?(?:se )?(?:voce|vc|voces|a gente|e|era|foi|seria|ficaria|funciona|funcionaria|' +
+    'faz|faria|fazer|lida|lidaria|lidar|garante|garantiria|garantir|escala|escalaria|escalar|resolve|' +
+    'resolveria|resolver|implementa|implementaria|implementar|projeta|projetaria|projetar|evita|evitaria|' +
+    'evitar|trata|trataria|tratar|mede|mediria|medir|calcula|calcularia|calcular|testa|testaria|testar)|' +
+    '(?:voce|vc|voces) (?:ja|conhece|sabe|tem|teve|pode|poderia|consegue|conseguiria|costuma|prefere|acha|' +
+    'usaria|faria|gosta|usa|trabalha|trabalhou|usou|lidou|participou)|' +
+    '(?:pode|poderia|consegue|conseguiria) (?:me |nos )?(?:explicar|falar|contar|dar|mostrar|descrever|detalhar|' +
+    'comentar|resumir|dizer)|' +
+    'tem (?:algum|alguma|alguns|algumas|experiencia|exemplo)|ja (?:trabalhou|usou|teve|fez|lidou|participou|precisou))\\b'
+);
+// Requests and interview cues anywhere in the turn.
+const PT_CONTENT_CUE_RE = new RegExp(
+    '\\b(?:me (?:explica|explique|fala|fale|conta|conte|diz|diga|descreve|descreva|mostra|mostre|passa|passe|' +
+    'lista|liste|ajuda a entender|ajude a entender)|me (?:da|de) (?:um|uma|alguns|algumas|exemplo)|' +
+    'explique|descreva|compare|defina|projete|desenhe|implemente|escreva|resolva|otimize|elabore|liste|' +
+    'comente|considere|suponha|imagine|imagina|pense em|pensa em|' +
+    '(?:fala|fale|conta|conte|explica) (?:sobre|um pouco|mais|pra mim|pra gente)|' +
+    'explica (?:como|o que|a diferenca|por que|qual)|' +
+    'diferenca entre|pros e contras|vantagens e desvantagens|o que (?:voce|vc) acha|na sua (?:opiniao|visao)|' +
+    'sua (?:opiniao|visao) sobre|(?:gostaria de|queria|quero) (?:saber|ouvir|entender)|' +
+    '(?:gostaria|queria) que (?:voce|vc)|sabe (?:me )?dizer|saberia (?:me )?dizer|que tal|vamos supor|digamos que)\\b'
+);
+
+/** Accents folded, lowercase: the space the Portuguese regexes match in. */
+function foldPt(text) {
+    return text.normalize('NFD').replace(/\p{M}+/gu, '').toLowerCase();
+}
+
+/** Discourse markers peeled from the start of a clause, English and Portuguese. */
+function peelLead(clause) {
+    let c = clause.trim();
+    let prev;
+    do {
+        prev = c;
+        c = c.replace(LEAD_STRIP_RE, '').trim();
+        c = c.replace(PT_LEAD_STRIP_RE, '').trim();
+    } while (c !== prev);
+    return c;
+}
+
+/** A wh-word / auxiliary (or its Portuguese twin) leads the peeled clause. */
+function leadsQuestion(peeled) {
+    return CLAUSE_LEAD_RE.test(peeled) || PT_CLAUSE_LEAD_RE.test(foldPt(peeled));
+}
+
+function hasContentCue(text) {
+    return CONTENT_CUE_RE.test(text) || PT_CONTENT_CUE_RE.test(foldPt(text));
+}
+
 function isLikelyQuestion(text) {
     if (typeof text !== 'string') return false;
     const trimmed = text.trim();
     if (trimmed.length === 0) return false;
 
     if (trimmed.includes('?')) return true;            // 1. explicit question mark
-    if (CONTENT_CUE_RE.test(trimmed)) return true;     // 2. imperative/interview cue
+    if (hasContentCue(trimmed)) return true;           // 2. imperative/interview cue
     if (EMBEDDED_Q_RE.test(trimmed)) return true;      // 3. embedded/indirect question
 
     // 4. wh-word / auxiliary leading any clause (peel leading discourse markers
     //    so "okay so how does X work" still counts).
     for (const clause of trimmed.split(/[.!?;,\n]+/)) {
-        let c = clause.trim();
-        let prev;
-        do { prev = c; c = c.replace(LEAD_STRIP_RE, '').trim(); } while (c !== prev);
-        if (CLAUSE_LEAD_RE.test(c)) return true;
+        if (leadsQuestion(peelLead(clause))) return true;
     }
 
     // 5. No question signal — declarative monologue; skip to save quota (PASSIVE
@@ -121,14 +180,12 @@ function extractQuestion(text) {
         const hasQuestionMark = nextChar === '?';
 
         // Peel leading discourse markers
-        let c = rawClause;
-        let prev;
-        do { prev = c; c = c.replace(LEAD_STRIP_RE, '').trim(); } while (c !== prev);
+        const c = peelLead(rawClause);
 
         if (c.length === 0) continue;
 
-        const hasClauseLead = CLAUSE_LEAD_RE.test(c);
-        const hasCue = CONTENT_CUE_RE.test(c);
+        const hasClauseLead = leadsQuestion(c);
+        const hasCue = hasContentCue(c);
         const hasEmbedded = EMBEDDED_Q_RE.test(c);
 
         // Strong signal: explicit '?' or CLAUSE_LEAD_RE (wh-word / auxiliary leading
@@ -383,6 +440,8 @@ class SummaryService {
                     'When there are supporting points, format them as a markdown bullet list ' +
                     '(each point on its own line beginning with "- "). ' +
                     'Do not fabricate bullets for a trivial one-line answer. ' +
+                    'Write the answer in the language of that question (Portuguese if it was asked in Portuguese), ' +
+                    'keeping technical terms as they are commonly said. ' +
                     'If there is no clear question or nothing useful to answer, reply EXACTLY: PASSIVE' +
                     (career && career.addendum ? `\n\n${career.addendum}` : ''),
             },

@@ -6,6 +6,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 
 ## [Unreleased]
 
+### Live eval: a simulated interview with real audio and real models (branch `2026-10-12-live-eval`)
+
+#### Added
+
+- **`npm run eval:live`** (`scripts/live-eval/`) runs Live Answer and Ask end to end with the app's own services (`docs/LIVE_INSIGHTS_AND_ASK.md` §4.9):
+  - the interviewer's questions are said by TTS (Gemini, cached outside the repo) into the real STT sessions;
+  - each turn then goes through the real question gate, career context and provider chain.
+- **Phases:**
+  - **A**, an invented interview in pt-BR and en-US;
+  - **B**, career-route questions sampled from your notes' eval set;
+  - **C**, Ask with a screenshot;
+  - **D**, Ask in code mode on a hard problem; the JavaScript answer runs against hidden tests;
+  - **E**, Ask in system design mode;
+  - **F**, stress: a burst of questions, a long session, Answer off.
+- **Results:** each item gets deterministic checks and warnings, and optionally an LLM judge score (`--judge`). The report goes to `%LOCALAPPDATA%\glass-live-eval\`. The exit code is 1 when a check fails.
+- **`src/features/ask/askPrompt.js`:** `buildAskMessages`, the Ask messages that `askService.sendMessage` used to build inline. The app and the eval now send the same prompt. A test checks that the messages are byte-identical to the inline code in every mode, with and without a screenshot.
+- **STT keyterms** (`src/features/listen/sttKeyterms.js`): Deepgram now gets up to 90 `keyterm` parameters per session, in pt-BR too. They are the career notes' company and entity names, plus a fixed list of technical names (`LINQ`, `gRPC`, `Kafka`, …). The career module exposes the names through `keyterms()`.
+
+#### Fixed (found by the first full run)
+
+- **A Portuguese question without `?` got no answer.** The question gate knew English cues only, so "Me explica a diferença entre…" and "como que você faz para…" were skipped. `isLikelyQuestion` now has Portuguese twins of each signal. `como` counts only before a verb or `você`, so "Como arquiteta, …" is not taken as a question.
+- **Portuguese questions sometimes got English answers.** The Live Answer instruction now asks for the answer in the language of the question.
+- **A company name the STT misspelled by one letter was not detected.** Names of 7+ letters now match one edit away (two from 11 letters) in a company-context phrase, if the first letter is right.
+- **"Do you ensure…" routed general when the STT dropped a leading "How".** A turn that opens on "do you" plus an approach verb now routes ambiguous, like "How do you…".
+- **"LINQ" was transcribed as "link".** Fixed by the keyterms above.
+- **Eval:** when the router itself routes a career question's script text away from its label, phase B now warns instead of failing. That gap belongs to `scripts/eval-career-kb.js`.
+
 ### STT language: Portuguese (Brazil) or English, chosen in Settings
 
 #### Fixed

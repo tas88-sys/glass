@@ -61,14 +61,16 @@ const { shouldTriggerAnswer, extractQuestion } = SummaryService;
 const { getSystemPrompt } = require('../../../common/prompts/promptBuilder.js');
 const realCareer = require('../../../common/career');
 
-// Today's user instruction, copied verbatim from makeLiveAnswer before this
-// feature. SC-005 compares against it byte for byte.
+// Today's user instruction, copied verbatim from makeLiveAnswer (with the
+// language line the live eval asked for). SC-005 compares against it byte for byte.
 const TODAY_USER =
     'Answer the interviewer\'s most recent question directly and concisely. ' +
     'Start with a short headline answer (one sentence). ' +
     'When there are supporting points, format them as a markdown bullet list ' +
     '(each point on its own line beginning with "- "). ' +
     'Do not fabricate bullets for a trivial one-line answer. ' +
+    'Write the answer in the language of that question (Portuguese if it was asked in Portuguese), ' +
+    'keeping technical terms as they are commonly said. ' +
     'If there is no clear question or nothing useful to answer, reply EXACTLY: PASSIVE';
 
 const HISTORY = ['me: hello there', 'them: Tell me about a time you disagreed with a teammate.'];

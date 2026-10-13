@@ -263,6 +263,19 @@ describe('isLikelyQuestion (balanced, quota-aware question gate)', () => {
       'the thing we are gonna look at is what types can a map use as a key in ' +
       'the Go programming language? And this could',
     'For this question here, the thing we are gonna look at is what types a map can use as a key',
+    // Portuguese, with the '?' the STT often leaves off (live eval, 2026-10-12)
+    'Me explica a diferença entre consistência forte e consistência eventual.',
+    'Como arquiteta, ou mesmo antes disso, como que você faz para revisar um design grande',
+    'Então, como você garantiria que um pagamento não seja cobrado duas vezes',
+    'E se uma das réplicas ficar atrasada',
+    'O que acontece quando o cache expira',
+    'Qual a vantagem de usar filas aqui',
+    'Por que você escolheu Postgres',
+    'Você já trabalhou com Kafka',
+    'Pode me explicar como funciona o garbage collector',
+    'Fala um pouco sobre o seu último projeto',
+    'Descreva como você testaria esse serviço',
+    'Tá, e como é que funciona o deploy de vocês hoje',
   ];
   for (const t of triggers) {
     it(`triggers: ${JSON.stringify(t.length > 48 ? t.slice(0, 45) + '…' : t)}`, () => {
@@ -289,6 +302,18 @@ describe('isLikelyQuestion (balanced, quota-aware question gate)', () => {
     'Okay, great, let me share my screen',
     // KNOWN by-design gap: cue-less statement-form prompt (backstop = manual trigger)
     'Your biggest weakness',
+    // Portuguese monologue and backchannel
+    'Nosso time cuida da plataforma de pagamentos e processa alguns milhões de transações por dia.',
+    'Oi, tudo bem, obrigado por vir hoje',
+    'Como eu disse, a gente usa Kafka para os eventos',
+    'Como arquiteta, eu cuidava do time de pagamentos',
+    'Beleza, faz sentido',
+    'Show, vamos para a próxima parte',
+    'Porque a gente precisava escalar rápido',
+    'Pensando nessa plataforma de pagamentos com picos enormes na Black Friday.',
+    // peeling Portuguese markers must not expose an English auxiliary
+    'AI is a big part of our roadmap',
+    'Legal is reviewing the contract this week',
   ];
   for (const s of skipped) {
     it(`skips (no question signal): ${JSON.stringify(s.length > 48 ? s.slice(0, 45) + '…' : s)}`, () => {
@@ -1018,6 +1043,12 @@ describe('extractQuestion', () => {
     // Should be the full trimmed sentence (no interrogative clause found)
     assert.ok(result.length > 0, 'result must be non-empty');
     assert.equal(result, input.trim());
+  });
+
+  // Portuguese: "Como <role>, …" is framing; the clause that asks is the label.
+  it('extracts the Portuguese clause that asks, past a "Como <role>" framing', () => {
+    const input = 'Como arquiteta, ou mesmo antes disso, como que você faz para revisar um design grande.';
+    assert.equal(extractQuestion(input), 'como que você faz para revisar um design grande');
   });
 
   // T4: cue with no '?' → cue-bearing clause or full text, never empty

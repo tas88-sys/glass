@@ -3,6 +3,8 @@ const { spawn } = require('child_process');
 const { createSTT } = require('../../common/ai/factory');
 const modelStateService = require('../../common/services/modelStateService');
 const { DEFAULT_STT_LANGUAGE, normalizeSttLanguage, toProviderLanguage } = require('../sttLanguage');
+const { buildKeyterms } = require('../sttKeyterms');
+const careerContext = require('../../common/career');
 
 const COMPLETION_DEBOUNCE_MS = 2000;
 
@@ -45,7 +47,10 @@ class SttService {
         this.onTranscriptionComplete = null;
         this.onStatusUpdate = null;
 
-        this.modelInfo = null; 
+        this.modelInfo = null;
+
+        // Career notes: their names become STT keyterms (the live eval swaps in its own module).
+        this.career = careerContext;
     }
 
     setCallbacks({ onTranscriptionComplete, onStatusUpdate }) {
@@ -165,6 +170,17 @@ class SttService {
             console.error('[SttService] could not read the saved STT language:', err.message);
             return DEFAULT_STT_LANGUAGE;
         }
+    }
+
+    /** Terms the STT should favor: the career notes' names and the fixed technical list. */
+    _keyterms() {
+        let names = [];
+        try {
+            names = this.career.keyterms();
+        } catch {
+            /* the career module is optional */
+        }
+        return buildKeyterms(names);
     }
 
     async initializeSttSessions(language) {
@@ -477,6 +493,7 @@ class SttService {
             apiKey: this.modelInfo.apiKey,
             model: this.modelInfo.model,
             language: effectiveLanguage,
+            keyterms: this._keyterms(),
             usePortkey: this.modelInfo.provider === 'openai-glass',
             portkeyVirtualKey: this.modelInfo.provider === 'openai-glass' ? this.modelInfo.apiKey : undefined,
         };
