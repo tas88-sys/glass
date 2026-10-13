@@ -21,7 +21,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 - **`scripts/eval-career-kb.js --router regex|jev`:**
   - prints the router confusion per language;
   - with `jev`, compares Jev with the regex router on the same items and reports the Jev call p50/p95 and the fallbacks;
-  - adds the release checks R-SC-001..004.
+  - adds the release checks R-SC-001..004;
+  - `--questions <file>` runs another items file, such as a synthetic set kept apart from the real questions.
 - **`ask-career-kb.js` and the live eval** show who decided each route and the Jev time.
 - **`npm run eval:live -- --block-providers groq,gemini,deepgram`** (or `LIVE_EVAL_BLOCK_PROVIDERS`) runs the live eval without spending those services' quota:
   - requests to their hosts fail before leaving the machine, and the run reports the count;

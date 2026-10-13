@@ -3,7 +3,11 @@
 
 // Career context eval (spec 2026-10-11, FR-019, T027).
 //
-//   node scripts/eval-career-kb.js [--kb <dir>] [--router regex|jev] [--bm25-only] [--json] [--cache-dir <dir>] [--min-cosine <x>]
+//   node scripts/eval-career-kb.js [--kb <dir>] [--questions <file>] [--router regex|jev] [--bm25-only] [--json] [--cache-dir <dir>] [--min-cosine <x>]
+//
+// --questions: another items file in the same format (default
+// <KB>/glass-eval/questions.jsonl), relative to the KB or absolute; e.g. a
+// synthetic set kept apart from the real questions.
 //
 // Reads the KB at --kb or CAREER_KB_PATH (also read from .env) and its
 // glass-eval/questions.jsonl, with the vectors the app already built (the
@@ -81,6 +85,7 @@ function parseArgs(argv) {
         else if (k === '--cache-dir') a.cacheDir = argv[++i];
         else if (k === '--min-cosine') a.minCosine = Number(argv[++i]);
         else if (k === '--router') a.router = argv[++i];
+        else if (k === '--questions') a.questions = argv[++i];
         else throw new Error(`unknown argument: ${k}`);
     }
     if (!a.kb) throw new Error('set CAREER_KB_PATH or pass --kb <dir>');
@@ -97,13 +102,14 @@ const pct = (xs, p) => {
 const rate = (n, d) => (d ? Math.round((n / d) * 1000) / 1000 : null);
 const pts = x => (x == null ? '-' : `${(x * 100).toFixed(1)}%`);
 
-function readItems(kb) {
-    const file = path.join(kb, 'glass-eval', 'questions.jsonl');
+function readItems(kb, questions) {
+    const file = questions ? path.resolve(kb, questions) : path.join(kb, 'glass-eval', 'questions.jsonl');
+    const name = path.basename(file);
     return fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(l => l.trim()).map((l, i) => {
         try {
             return JSON.parse(l);
         } catch {
-            throw new Error(`questions.jsonl line ${i + 1} is not valid JSON`);
+            throw new Error(`${name} line ${i + 1} is not valid JSON`);
         }
     });
 }
@@ -111,7 +117,7 @@ function readItems(kb) {
 async function main() {
     const args = parseArgs(process.argv.slice(2));
     const kb = path.resolve(args.kb);
-    const items = readItems(kb);
+    const items = readItems(kb, args.questions);
 
     // The card paths come from the manifest the module also reads.
     const snap = await createKbService({ root: kb }).refresh();

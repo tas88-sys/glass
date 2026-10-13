@@ -520,8 +520,8 @@ lines report a missing key, a disabled key, and the circuit opening and closing.
 
 After an answer that used notes, `[career] check unverified=N` gives the count of flagged items (never the items).
 
-**Quality check.** `node scripts/eval-career-kb.js [--router regex|jev] [--bm25-only] [--json]` reads
-`<KB>/glass-eval/questions.jsonl` and reports:
+**Quality check.** `node scripts/eval-career-kb.js [--router regex|jev] [--questions <file>] [--bm25-only] [--json]` reads
+`<KB>/glass-eval/questions.jsonl` (or `--questions`, another file in the same format) and reports:
 - router accuracy, also per language (the item's `lang`); with `--router jev` (the default when
   the key is set; every question goes to TypeSafe), Jev against the regex router on the same
   items, the Jev call p50/p95, the fallbacks, and the release checks R-SC-001..004;

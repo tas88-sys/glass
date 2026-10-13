@@ -40,6 +40,25 @@ Follows research R1–R17 of `specs/2026-10-11-live-answer-career-context/resear
 - **A local embedding fallback** (nearest prepared question with the Arctic Embed model already loaded). Free and offline. Left for later: it would replace the regex as the fallback, not Jev.
 - **SDK (`@typesafe-ai/sdk`).** Its retries do not fit the live budget, and native `fetch` covers the rest.
 
+### Results (2026-10-13, jev-1.13.0, confidence floor 0.5)
+
+The owner's set grew from 100 to 133 items. q101–q133 are new holdout items: 33 real English
+interviewer turns taken from the app's own transcripts, deduplicated against the existing items
+and labeled before any router ran. A separate synthetic set has 40 items (30 PT, 10 EN), written
+by the author of the Jev criteria, so it is biased toward Jev: a signal, not proof.
+
+| Set | Jev | Regex |
+|---|---|---|
+| New real holdout (33, EN), exact route | 33/33 | 29/33 |
+| Synthetic (40), exact route | 40/40 | 35/40 (all 5 misses PT) |
+| Old PT items (75, all used to tune the regex), personal → personal | 91.1% | 95.6% |
+| Whole real set, general → personal | 0% | 0% |
+
+- Jev call p50/p95: about 280/340 ms from the owner's machine.
+- 6 of 133 turns fall below the floor (4.5%), and the regex decides them. With the floor at 0 there is one more miss (q126), so the floor stays at 0.5. The fallback earns its place, and R-SC-004 (≤ 2%) reads as too strict.
+- **Release checks:** R-SC-001 fails only on Portuguese. All 75 Portuguese items are tuning items for the regex, and no real Portuguese item is fresh, so that comparison favors the regex. Fresh real Portuguese questions are what would settle it.
+- **Live eval with Groq, Gemini and Deepgram blocked:** no blocked request was attempted, routes came back 11/12, and the route wait was p95 0.3 ms. It also found company intros being answered, which was fixed in the criteria.
+
 ### Superseded
 
 R6's "an LLM classifier is rejected" still holds for generative LLMs. Jev is a decision model with bounded output and sub-second latency, and the latency it does add is hidden inside the debounce.

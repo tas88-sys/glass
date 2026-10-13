@@ -82,12 +82,12 @@
       "id": "T-VERIFY-RELEASE",
       "phase": "verify",
       "description": "Owner: TYPESAFE_API_KEY in .env, about 40 fresh holdout questions (half PT, half EN) in the KB repo, then node scripts/eval-career-kb.js --router jev until R-SC-001..004 pass; live eval with PT and EN audio for R-SC-005.",
-      "status": "pending",
+      "status": "in-progress",
       "target_file": null,
       "verify": "eval-career-kb.js --router jev prints PASS for every R-SC check; live eval aggregates routeWaitMs.p95 ≤ 50",
-      "evidence": null,
+      "evidence": "2026-10-13 with the key: 33 real EN holdout items added (q101–q133). Jev 33/33 against regex 29/33 on them; synthetic 40/40 against 35/40; old PT tuning items 91.1% against 95.6% (R-SC-001 pt FAIL); fallbacks 4.5% (R-SC-004 FAIL); Jev p95 341 ms (R-SC-003 PASS); live eval with groq/gemini/deepgram blocked: route wait p95 0.3 ms (R-SC-005 PASS). Details in research.md R18 Results",
       "completed_at": null,
-      "block_on": "No TypeSafe key yet (early access waitlist)"
+      "block_on": "Owner decision: no fresh real PT questions yet; R-SC-001 pt is measured only on regex tuning items"
     }
   ]
 }
