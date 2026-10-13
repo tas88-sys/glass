@@ -1,0 +1,61 @@
+{
+  "about": "Scenario A of the live eval: an invented interview, said by TTS into the STT sessions. Each turn says what Live Answer should do. expect.answer: yes = one answer shown; no = nothing shown (the question gate, or the speaker gate, keeps it out); any = whatever, but no error. mentionsAny: the answer names at least one of these (accent- and case-insensitive; '/re/' is a regex). text as a list is said in parts, pauseMs apart. No personal or career data here: this file is in a public repo.",
+  "phases": [
+    {
+      "id": "pt",
+      "lang": "pt-BR",
+      "turns": [
+        { "id": "pt-greeting", "speaker": "them", "text": "Oi, tudo bem? Obrigado por vir hoje. Vamos começar daqui a pouco.", "expect": { "answer": "any" } },
+        { "id": "pt-monologue", "speaker": "them", "text": "Nosso time cuida da plataforma de pagamentos e processa alguns milhões de transações por dia.", "expect": { "answer": "no" }, "note": "declarative monologue: the gate should skip it" },
+        { "id": "pt-direct", "speaker": "them", "text": "Como você garantiria que um pagamento não seja cobrado duas vezes quando o cliente clica no botão de novo?", "expect": { "answer": "yes", "mentionsAny": ["idempot", "chave", "token", "/dedup/"], "lang": "pt" } },
+        { "id": "pt-me-question", "speaker": "me", "text": "Posso perguntar como vocês fazem deploy hoje?", "expect": { "answer": "no" }, "note": "the candidate's own question: the speaker gate keeps it out" },
+        { "id": "pt-imperative", "speaker": "them", "text": "Me explica a diferença entre consistência forte e consistência eventual.", "expect": { "answer": "yes", "mentionsAny": ["eventual", "forte", "consisten"], "lang": "pt" }, "note": "a request with no question mark: the gate's cues are English, so this checks the Portuguese path" },
+        { "id": "pt-split", "speaker": "them", "text": ["Pensando nessa plataforma de pagamentos com picos enormes na Black Friday.", "Como você escalaria o banco de dados?"], "pauseMs": 2600, "expect": { "answer": "yes", "mentionsAny": ["shard", "partic", "replica", "réplica", "cache", "leitura"], "lang": "pt" }, "note": "context first, the question after a pause longer than the STT turn debounce: two them turns, one answer" },
+        { "id": "pt-followup", "speaker": "them", "text": "E se uma das réplicas ficar atrasada?", "expect": { "answer": "yes", "mentionsAny": ["replica", "réplica", "lag", "atras", "leitura", "consisten", "primar"], "lang": "pt" } },
+        { "id": "pt-behavioral", "speaker": "them", "text": "Me fala sobre uma vez em que você discordou de uma decisão técnica do seu time.", "expect": { "answer": "yes", "lang": "pt" }, "note": "statement-form behavioral prompt: needs the career cue (or STT punctuation) to pass the gate" }
+      ]
+    },
+    {
+      "id": "en",
+      "lang": "en-US",
+      "turns": [
+        { "id": "en-switch", "speaker": "them", "text": "Let's switch to English for this next part, if that's fine with you.", "expect": { "answer": "any" } },
+        { "id": "en-direct", "speaker": "them", "text": "What's the difference between a process and a thread?", "expect": { "answer": "yes", "mentionsAny": ["memory", "address space", "share"], "lang": "en" } },
+        { "id": "en-walkthrough", "speaker": "them", "text": "Walk me through what happens when you type a URL in the browser and press enter.", "expect": { "answer": "yes", "mentionsAny": ["dns", "tcp", "tls", "http"], "lang": "en" } },
+        { "id": "en-monologue", "speaker": "them", "text": "We have about forty engineers split across four product teams in two time zones.", "expect": { "answer": "no" } },
+        { "id": "en-me-question", "speaker": "me", "text": "Can I ask how on-call works on your team?", "expect": { "answer": "no" } },
+        { "id": "en-design", "speaker": "them", "text": "How would you design a rate limiter for a public API?", "expect": { "answer": "yes", "mentionsAny": ["token bucket", "sliding window", "leaky bucket", "fixed window", "redis"], "lang": "en" } },
+        { "id": "en-followup", "speaker": "them", "text": "And how would that work across several regions?", "expect": { "answer": "yes", "mentionsAny": ["region", "global", "sync", "replicat", "eventual", "consisten"], "lang": "en" } }
+      ]
+    }
+  ],
+  "burst": {
+    "lang": "en-US",
+    "gapMs": 1000,
+    "questions": [
+      "What is a hash map?",
+      "Actually, what is a binary search tree?",
+      "Sorry, let me rephrase: when would you use a heap?",
+      "Or rather, what is a trie used for?",
+      "Final one: what is the time complexity of quicksort?"
+    ],
+    "lastMentionsAny": ["n log n", "/o\\(n\\s*log\\s*n\\)/", "n²", "n^2", "/o\\(n2\\)/"]
+  },
+  "filler": {
+    "about": "Turns for the long-session stress test: statements only, so the answer lane stays quiet and only the turn count grows.",
+    "them": [
+      "We started the platform about five years ago.",
+      "Most of the traffic comes from mobile clients.",
+      "The team moved to Kubernetes last year.",
+      "We still run a few legacy batch jobs at night.",
+      "Our biggest customers are in retail."
+    ],
+    "me": [
+      "That makes sense.",
+      "I worked with a similar setup before.",
+      "Sounds like an interesting migration.",
+      "I see.",
+      "Right, I understand."
+    ]
+  }
+}

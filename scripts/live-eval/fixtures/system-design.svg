@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <!-- Ask (system design mode) scenario: an invented interview prompt with
+       scale numbers and a sketch whose middle box is left for the candidate. -->
+  <defs>
+    <marker id="a" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <rect width="1920" height="1080" fill="#f8fafc"/>
+  <rect x="0" y="0" width="1920" height="60" fill="#e2e8f0"/>
+  <text x="28" y="40" font-family="Segoe UI, Arial, sans-serif" font-size="24" fill="#0f172a" font-weight="bold">Whiteboard · System design round</text>
+
+  <g font-family="Segoe UI, Arial, sans-serif" fill="#0f172a">
+    <text x="48" y="128" font-size="34" font-weight="bold">Design a global rate limiter for a public API platform</text>
+    <text x="48" y="190" font-size="25" font-weight="bold">Requirements</text>
+    <g font-size="22">
+      <text x="68" y="232">• 50 million API keys; each key has a per-minute quota and a per-second burst limit</text>
+      <text x="68" y="268">• Peak traffic: 2 million requests per second, spread over 5 regions</text>
+      <text x="68" y="304">• Added latency per request: p99 under 5 ms</text>
+      <text x="68" y="340">• A key's quota is global: it applies across all regions together, within ±5%</text>
+      <text x="68" y="376">• Losing one whole region must not block traffic in the other four</text>
+      <text x="68" y="412">• Quota changes made by customers take effect in under 10 seconds</text>
+      <text x="68" y="448">• Rejected calls get HTTP 429 with a Retry-After header</text>
+    </g>
+  </g>
+
+  <!-- Sketch -->
+  <g font-family="Segoe UI, Arial, sans-serif" font-size="22" fill="#0f172a" text-anchor="middle">
+    <rect x="80" y="600" width="240" height="110" rx="12" fill="#dbeafe" stroke="#3b82f6" stroke-width="3"/>
+    <text x="200" y="662">Clients</text>
+    <rect x="440" y="600" width="280" height="110" rx="12" fill="#dcfce7" stroke="#22c55e" stroke-width="3"/>
+    <text x="580" y="648">API Gateway</text>
+    <text x="580" y="680" font-size="18">(x5 regions)</text>
+    <rect x="840" y="600" width="280" height="110" rx="12" fill="#fff" stroke="#ef4444" stroke-width="3" stroke-dasharray="10 8"/>
+    <text x="980" y="648" font-size="40" fill="#ef4444">?</text>
+    <text x="980" y="690" font-size="18" fill="#ef4444">rate limiting</text>
+    <rect x="1240" y="600" width="280" height="110" rx="12" fill="#fef9c3" stroke="#eab308" stroke-width="3"/>
+    <text x="1380" y="662">Backend services</text>
+    <rect x="840" y="860" width="280" height="100" rx="12" fill="#f3e8ff" stroke="#a855f7" stroke-width="3"/>
+    <text x="980" y="905">Quota config</text>
+    <text x="980" y="935" font-size="18">(customer plans)</text>
+  </g>
+  <g stroke="#475569" stroke-width="3" marker-end="url(#a)">
+    <line x1="320" y1="655" x2="432" y2="655"/>
+    <line x1="720" y1="655" x2="832" y2="655"/>
+    <line x1="1120" y1="655" x2="1232" y2="655"/>
+    <line x1="980" y1="860" x2="980" y2="718"/>
+  </g>
+</svg>

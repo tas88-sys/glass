@@ -6,6 +6,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 
 ## [Unreleased]
 
+### Live eval: a simulated interview with real audio and real models (branch `2026-10-12-live-eval`)
+
+#### Added
+
+- **`npm run eval:live`** (`scripts/live-eval/`) runs Live Answer and Ask end to end with the app's own services (`docs/LIVE_INSIGHTS_AND_ASK.md` §4.9):
+  - the interviewer's questions are said by TTS (Gemini, cached outside the repo) into the real STT sessions;
+  - each turn then goes through the real question gate, career context and provider chain.
+- **Phases:**
+  - **A**, an invented interview in pt-BR and en-US;
+  - **B**, career-route questions sampled from your notes' eval set;
+  - **C**, Ask with a screenshot;
+  - **D**, Ask in code mode on a hard problem; the JavaScript answer runs against hidden tests;
+  - **E**, Ask in system design mode;
+  - **F**, stress: a burst of questions, a long session, Answer off.
+- **Results:** each item gets deterministic checks and warnings, and optionally an LLM judge score (`--judge`). The report goes to `%LOCALAPPDATA%\glass-live-eval\`. The exit code is 1 when a check fails.
+- **`src/features/ask/askPrompt.js`:** `buildAskMessages`, the Ask messages that `askService.sendMessage` used to build inline. The app and the eval now send the same prompt. A test checks that the messages are byte-identical to the inline code in every mode, with and without a screenshot.
+
 ### STT language: Portuguese (Brazil) or English, chosen in Settings
 
 #### Fixed

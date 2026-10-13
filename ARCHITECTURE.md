@@ -52,8 +52,8 @@ are excluded from screen recordings by default, which is what makes it "invisibl
 
 **Does the screen image have to be static for it to work?**
 No. There is no requirement that the screen hold still. Each Ask press captures a **single,
-fresh JPEG of the current screen at that instant** (`askService.js:255`, `captureScreenshot`
-at `askService.js:39`). The model sees one frozen frame — whatever was on screen the moment
+fresh JPEG of the current screen at that instant** (`askService.js:259`, `captureScreenshot`
+at `askService.js:40`). The model sees one frozen frame — whatever was on screen the moment
 you pressed the key. It does not watch a live video feed and does not need the screen to
 remain unchanged.
 
@@ -62,7 +62,7 @@ The screen must be showing what you care about **at the moment you press Ask** �
 the only image sent. The model does **not** recall earlier screenshots. Glass *stores* every
 Q&A in the `ai_messages` table, but that history powers the transcript UI, **not** the next
 prompt: `sendMessage(userPrompt, conversationHistoryRaw=[])` accepts a history argument
-(`askService.js:219`), yet the IPC handlers that call it never pass one
+(`askService.js:221`), yet the IPC handlers that call it never pass one
 (`featureBridge.js:159`, `:160-169`). So each Ask is independent from the LLM's perspective.
 
 **Does it take several screenshots?**
@@ -328,7 +328,7 @@ connections before exiting.
 ## 6. The Ask (vision) feature
 
 **Trigger:** `Ctrl/Cmd + Enter` (`nextStep` keybind, `shortcutsService.js:68`,`:213-214`) →
-`askService.toggleAskButton(true)` → `askService.sendMessage(...)` (`askService.js:219`).
+`askService.toggleAskButton(true)` → `askService.sendMessage(...)` (`askService.js:221`).
 
 ```mermaid
 sequenceDiagram

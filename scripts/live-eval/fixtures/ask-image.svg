@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <!-- Ask (default mode) scenario: an invented operations screen. The order id,
+       latency and error code exist only here, so an answer that states them
+       proves the image reached the model. -->
+  <rect width="1920" height="1080" fill="#0f172a"/>
+  <rect x="0" y="0" width="1920" height="64" fill="#1e293b"/>
+  <text x="32" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="26" fill="#e2e8f0" font-weight="bold">Checkout Ops · Payments incident view</text>
+  <text x="1500" y="42" font-family="Segoe UI, Arial, sans-serif" font-size="20" fill="#94a3b8">Region: sa-east-1 · last 15 min</text>
+
+  <rect x="32" y="96" width="420" height="140" rx="12" fill="#1e293b"/>
+  <text x="56" y="140" font-family="Segoe UI, Arial, sans-serif" font-size="20" fill="#94a3b8">Authorizations / min</text>
+  <text x="56" y="200" font-family="Segoe UI, Arial, sans-serif" font-size="48" fill="#e2e8f0" font-weight="bold">12,480</text>
+
+  <rect x="484" y="96" width="420" height="140" rx="12" fill="#1e293b"/>
+  <text x="508" y="140" font-family="Segoe UI, Arial, sans-serif" font-size="20" fill="#94a3b8">Approval rate</text>
+  <text x="508" y="200" font-family="Segoe UI, Arial, sans-serif" font-size="48" fill="#22c55e" font-weight="bold">97.3%</text>
+
+  <rect x="936" y="96" width="420" height="140" rx="12" fill="#1e293b"/>
+  <text x="960" y="140" font-family="Segoe UI, Arial, sans-serif" font-size="20" fill="#94a3b8">p99 latency</text>
+  <text x="960" y="200" font-family="Segoe UI, Arial, sans-serif" font-size="48" fill="#f59e0b" font-weight="bold">1,940 ms</text>
+
+  <rect x="32" y="272" width="1856" height="760" rx="12" fill="#1e293b"/>
+  <text x="56" y="320" font-family="Segoe UI, Arial, sans-serif" font-size="24" fill="#e2e8f0" font-weight="bold">Recent orders</text>
+  <g font-family="Consolas, 'Courier New', monospace" font-size="24" fill="#cbd5e1">
+    <text x="56" y="380" fill="#64748b">ORDER ID          AMOUNT       STATUS     LATENCY    ERROR CODE</text>
+    <line x1="56" y1="396" x2="1860" y2="396" stroke="#334155" stroke-width="2"/>
+    <text x="56" y="446">ORD-58190-QA      R$ 129.90    APPROVED   412 ms     -</text>
+    <text x="56" y="500">ORD-58197-LM      R$ 2,349.00  APPROVED   655 ms     -</text>
+    <text x="56" y="554">ORD-58204-TZ      R$ 59.00     APPROVED   388 ms     -</text>
+    <rect x="44" y="574" width="1820" height="44" fill="#7f1d1d" opacity="0.55"/>
+    <text x="56" y="608" fill="#fecaca">ORD-58213-KX      R$ 874.50    FAILED     4,870 ms   issuer_timeout</text>
+    <text x="56" y="662">ORD-58219-PB      R$ 18.75     APPROVED   301 ms     -</text>
+    <text x="56" y="716">ORD-58226-HN      R$ 499.99    APPROVED   720 ms     -</text>
+    <text x="56" y="770">ORD-58231-WE      R$ 1,050.00  APPROVED   598 ms     -</text>
+  </g>
+  <text x="56" y="860" font-family="Segoe UI, Arial, sans-serif" font-size="20" fill="#94a3b8">Retry policy: 1 automatic retry after 2 s · Timeout to issuer: 4,500 ms</text>
+</svg>

@@ -120,19 +120,19 @@ Data is persisted to **SQLite** locally, or **Firebase** when signed in (the rep
 
 ### Ask feature
 
-**Trigger:** `Ctrl/Cmd + Enter` invokes `askService.sendMessage()` (`src/features/ask/askService.js:218`).
+**Trigger:** `Ctrl/Cmd + Enter` invokes `askService.sendMessage()` (`src/features/ask/askService.js:221`).
 
 **Per-query flow:**
 
-1. **Screenshot capture** (`askService.js:38-120`):
+1. **Screenshot capture** (`askService.js:40-122`):
    - macOS → native `screencapture -x -t jpg`, then resized via `sharp` to max **384px height** at JPEG quality 80
    - Windows/Linux → Electron `desktopCapturer.getSources()` at 1920×1080, JPEG quality 70
    - Image is base64-encoded and attached inline to the LLM message
-2. **Message build** (`askService.js:259-274`) — system prompt + user text + the single screenshot (multimodal `image_url` part)
+2. **Message build** (`buildAskMessages`, `src/features/ask/askPrompt.js:49-85`, called at `askService.js:268`) — system prompt + user text + the single screenshot (multimodal `image_url` part)
 3. **Streaming call** through `createStreamingLLM(provider)` — supports Anthropic Claude, Groq, OpenAI, Gemini, Ollama, Whisper
-4. **Stream parsing** (`_processStream`, `askService.js:369-425`) — SSE chunks broadcast to the Ask window in real time
+4. **Stream parsing** (`_processStream`, `askService.js:373-451`) — SSE chunks broadcast to the Ask window in real time
 5. **Persistence** — user prompt and assistant response written to the `ai_messages` table tied to a session id from `sessionRepository.getOrCreateActive('ask')`
-6. **Multimodal fallback** (`askService.js:303-338`) — if the provider rejects the image, the request is retried text-only
+6. **Multimodal fallback** (`askService.js:305-340`) — if the provider rejects the image, the request is retried text-only
 
 **Important runtime behavior:**
 

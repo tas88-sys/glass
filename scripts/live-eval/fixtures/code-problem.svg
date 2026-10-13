@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <!-- Ask (code mode) scenario: a hard problem in a coding-interview page,
+       written in our own words. Hidden tests: fixtures/code-problem.js. -->
+  <rect width="1920" height="1080" fill="#1a1a1a"/>
+  <rect x="0" y="0" width="1920" height="56" fill="#262626"/>
+  <text x="28" y="37" font-family="Segoe UI, Arial, sans-serif" font-size="22" fill="#e5e5e5" font-weight="bold">CodePractice · Problem 4</text>
+
+  <!-- Statement -->
+  <rect x="16" y="72" width="940" height="992" rx="10" fill="#262626"/>
+  <g font-family="Segoe UI, Arial, sans-serif" fill="#e5e5e5">
+    <text x="44" y="124" font-size="30" font-weight="bold">4. Rainwater on a Terrain Grid</text>
+    <rect x="44" y="142" width="64" height="30" rx="15" fill="#7f1d1d"/>
+    <text x="58" y="164" font-size="18" fill="#fca5a5">Hard</text>
+    <g font-size="21">
+      <text x="44" y="220">You are given an m x n matrix heightMap of non-negative integers,</text>
+      <text x="44" y="250">where heightMap[r][c] is the height of a unit-square column of terrain.</text>
+      <text x="44" y="296">After a heavy rain, water settles on top of the columns. Water can flow</text>
+      <text x="44" y="326">to the four neighbouring cells (up, down, left, right) and escapes when</text>
+      <text x="44" y="356">it reaches any cell on the outer edge of the grid.</text>
+      <text x="44" y="402">Return the total volume of water that stays trapped on the grid.</text>
+    </g>
+    <text x="44" y="462" font-size="23" font-weight="bold">Example</text>
+    <g font-family="Consolas, 'Courier New', monospace" font-size="20" fill="#d4d4d4">
+      <text x="44" y="502">Input:  heightMap = [[4,4,4,4,4],</text>
+      <text x="44" y="530">                     [4,1,2,1,4],</text>
+      <text x="44" y="558">                     [4,2,0,2,4],</text>
+      <text x="44" y="586">                     [4,4,3,4,4]]</text>
+      <text x="44" y="620">Output: 10</text>
+    </g>
+    <g font-size="20" fill="#a3a3a3">
+      <text x="44" y="660">Explanation: the lowest wall on the edge has height 3, so the inner</text>
+      <text x="44" y="688">basin fills up to level 3 before the water spills out.</text>
+    </g>
+    <text x="44" y="752" font-size="23" font-weight="bold">Constraints</text>
+    <g font-size="20" fill="#d4d4d4">
+      <text x="64" y="792">• 0 &lt;= m, n &lt;= 220</text>
+      <text x="64" y="824">• 0 &lt;= heightMap[r][c] &lt;= 20000</text>
+      <text x="64" y="856">• The grid may be empty, or have fewer than 3 rows or columns.</text>
+      <text x="64" y="888">• Your solution must finish well under one second on a 220 x 220 grid.</text>
+    </g>
+  </g>
+
+  <!-- Editor -->
+  <rect x="972" y="72" width="932" height="992" rx="10" fill="#1e1e1e"/>
+  <rect x="972" y="72" width="932" height="48" rx="10" fill="#2d2d2d"/>
+  <text x="996" y="104" font-family="Segoe UI, Arial, sans-serif" font-size="19" fill="#d4d4d4">JavaScript ▾</text>
+  <g font-family="Consolas, 'Courier New', monospace" font-size="21">
+    <text x="996" y="166" fill="#6a9955">/**</text>
+    <text x="996" y="194" fill="#6a9955"> * @param {number[][]} heightMap</text>
+    <text x="996" y="222" fill="#6a9955"> * @return {number}</text>
+    <text x="996" y="250" fill="#6a9955"> */</text>
+    <text x="996" y="278"><tspan fill="#569cd6">function</tspan><tspan fill="#dcdcaa"> trapWater</tspan><tspan fill="#d4d4d4">(heightMap) {</tspan></text>
+    <text x="996" y="306" fill="#d4d4d4">    </text>
+    <text x="996" y="334" fill="#d4d4d4">}</text>
+  </g>
+</svg>
