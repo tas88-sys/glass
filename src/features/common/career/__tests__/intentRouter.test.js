@@ -141,6 +141,13 @@ table('personal (Portuguese)', 'personal', [
     'Tem algum tema que não abordamos em que você mandaria bem?',
     'Conte sobre um lançamento que deu certo.',
     'Fale sobre uma entrega que atrasou.',
+    'Compartilhe, de forma rápida e objetiva, um dos seus desafios mais técnicos: a complexidade, sua atuação, suas contribuições e os resultados.',
+    'Me dê exemplos de cases de sucesso, cases de falha, impactos.',
+    'Qual foi a sua atuação nesse projeto?',
+    'Quais foram suas principais contribuições?',
+    'Me dê exemplos concretos.',
+    'Tem alguma história de fracasso pra compartilhar?',
+    'Any success stories from last year?',
 ]);
 
 table('personal (employer/project names from the CV)', 'personal', [
@@ -229,6 +236,10 @@ table('general (no second-person background cue)', 'general', [
     'Do you test this function with a table?',
     "What's your stack trace showing?",
     'Tell me about the actor model.',
+    'Quais os desafios do Kafka e seus impactos na latência?',
+    'Quais casos de falha um circuit breaker cobre?',
+    'Dê exemplos de race condition.',
+    'Microsserviços e suas vantagens: quando usar?',
     '',
 ]);
 
@@ -323,6 +334,11 @@ describe('stripCuePhrases', () => {
         assert.equal(stripCuePhrases('Do you have hands-on experience with stream processing?'), 'stream processing');
         assert.equal(stripCuePhrases('Possui experiência com aplicativos móveis?'), 'aplicativos moveis');
         assert.equal(stripCuePhrases('Como lidou? Quais ações tomou?'), '');
+    });
+
+    it('removes plural example requests and "de forma rápida e objetiva"', () => {
+        assert.equal(stripCuePhrases('Me dê exemplos de cases de sucesso'), 'cases de sucesso');
+        assert.equal(stripCuePhrases('Compartilhe, de forma rápida e objetiva, um desafio técnico'), 'um desafio tecnico');
     });
 
     it('removes the wrapper of company questions (the company name supplies the query)', () => {

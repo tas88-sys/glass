@@ -82,14 +82,22 @@ const PERSONAL_CUES = [
     // Portuguese
     ['behavioral:pt-uma-vez', /\b(?:uma|alguma) (?:vez|situacao|ocasiao|experiencia|historia) (?:em que|que|onde|na qual|quando)\b/],
     ['behavioral:pt-um-momento', /\b(?:um|algum) (?:momento|exemplo|caso|projeto) (?:em que|que|onde|no qual|quando|de quando)\b/],
-    ['behavioral:pt-de-um-exemplo', /\b(?:me )?(?:de|da) um exemplo(?: (?:de quando|em que|seu|sua|real|pessoal|pratico|concreto)\b|$)/],
+    ['behavioral:pt-de-um-exemplo', /\b(?:me )?(?:de|da) (?:um exemplo|(?:alguns |uns )?exemplos)(?: (?:de quando|em que|seu|sua|seus|suas|real|reais|pessoal|pessoais|pratico|praticos|concreto|concretos)\b|$)/],
+    // "Cases de sucesso", "histórias de fracasso": stories the candidate lived. "Casos de
+    // falha" stays out: in a technical question it means failure modes.
+    ['behavioral:pt-cases', /\b(?:cases?|historias?) de (?:sucesso|falha|fracasso|insucesso)\b|\b(?:casos?|exemplos?) de (?:sucesso|fracasso|insucesso)\b/],
+    ['behavioral:success-stories', /\b(?:success|failure) stor(?:y|ies)\b/],
     ['behavioral:pt-ja-aconteceu', /\bja aconteceu (?:de|com voce|com vc)\b/],
     ['background:pt-fale-de-voce', new RegExp(`\\b(?:fale|fala|conte|conta)(?: (?:um pouco|mais))? (?:sobre|de) (?:${YOU}|sua|seu|suas|seus|tua|teu)\\b`)],
     ['behavioral:pt-conte-sobre-um-passado', new RegExp(`\\b(?:conte|conta|fale|fala)(?: um pouco| mais)? (?:sobre|de) (?:um|uma|algum|alguma) (?:\\w+ ){1,4}que (?:${YOU} )?(?:ja )?(?:\\w+ou|\\w+eu|\\w+iu|deu|fez|foi|teve|trouxe|disse|quis|veio|pos|soube)\\b`)],
     ['background:pt-apresente', /\b(?:se apresent\w*|apresente se|apresenta se)\b/],
-    ['background:pt-sua-trajetoria', /\b(?:sua|tua) (?:experiencia|trajetoria|carreira|historia|jornada|formacao|funcao|rotina|stack|maior|principal|ultima|atual)\b/],
+    ['background:pt-sua-trajetoria', /\b(?:sua|tua) (?:experiencia|trajetoria|carreira|historia|jornada|formacao|funcao|rotina|stack|maior|principal|ultima|atual|atuacao|contribuicao)\b/],
     ['background:pt-seu-momento', /\b(?:seu|teu) (?:momento|maior|principal|ultimo|atual|trabalho|emprego|cargo|papel|time|projeto|perfil|curriculo|background|ponto|pacote)\b/],
-    ['background:pt-seus-pontos', /\b(?:seus|suas|teus|tuas) (?:pontos|qualidades|defeitos|conquistas|realizacoes|experiencias|projetos|responsabilidades)\b/],
+    // Only nouns that name a person's record: "seus/suas" is also "its" ("Kafka e seus
+    // desafios"), so "desafios", "impactos" and "resultados" alone stay out.
+    ['background:pt-seus-pontos', /\b(?:seus|suas|teus|tuas) (?:\w+ )?(?:pontos|qualidades|defeitos|conquistas|realizacoes|experiencias|projetos|responsabilidades|contribuicoes|aprendizados)\b/],
+    // "Um dos seus desafios", "qual das suas entregas": picking one from the candidate's own.
+    ['background:pt-um-dos-seus', /\b(?:um|uma|algum|alguma|qual|quais) (?:dos|das) (?:seus|suas|teus|tuas)\b/],
     ['background:pt-salario', /\b(?:salario|salarial|remuneracao|pretensao|beneficios)\b/],
     ['background:pt-mudar', /\b(?:por ?que|qual (?:e )?o motivo|o que (?:e que )?(?:te )?(?:faria|faz|levaria))\b.*\b(?:mudar|sair|saindo|deixar|trocar|mudanca)\b/],
     ['background:pt-comecar', /\bquanto tempo (?:\w+ )?precisaria\b|\bquando (?:voce |vc )?(?:pode|poderia) comecar\b|\breceber (?:uma|a) oferta\b/],
@@ -190,7 +198,8 @@ const FRAMING = [
     /\bi (?:would|d) (?:like|love) to hear (?:about)?\b/g,
     /\b(?:me )?(?:conta|conte|fala|fale)(?: (?:um pouco|mais))?(?: (?:sobre|de|pra mim|pra gente))?\b/g,
     /\b(?:pode|poderia) (?:me )?(?:contar|falar|compartilhar|descrever|dar)\b/g,
-    /\b(?:me )?(?:de|da) um exemplo(?: de)?\b/g,
+    /\b(?:me )?(?:de|da) (?:um exemplo|(?:alguns |uns )?exemplos)(?: de)?\b/g,
+    /\bde (?:forma|maneira|modo) (?:rapida|breve|resumida|objetiva|sucinta|direta)(?: e (?:rapida|breve|resumida|objetiva|sucinta|direta))?\b/g,
     /\b(?:uma|alguma) (?:vez|situacao|ocasiao|experiencia) (?:em que|que|onde|na qual|quando)?\b/g,
     /\b(?:um|algum) (?:momento|exemplo|caso) (?:em que|que|onde|no qual|quando|de quando)?\b/g,
     /\b(?:descreva|compartilhe|explique)\b/g,
