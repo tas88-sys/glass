@@ -281,6 +281,171 @@ describe('FR-007: question gate widened by career cues', () => {
     });
 });
 
+describe('FR-007 with the Jev router (spec 2026-10-13-career-router-jev)', () => {
+    // A career stub whose router uses Jev: classifyTurn answers when the test says so.
+    function jevStub(overrides = {}) {
+        const pending = [];
+        const stub = stubCareer({
+            gateUsesJev: () => true,
+            hasCareerCue: () => { throw new Error('the regex gate is not used for statements while Jev is on'); },
+            classifyTurn: (text, session) => new Promise(resolve => pending.push({ text, session, resolve })),
+            ...overrides,
+        });
+        stub.pending = pending;
+        return stub;
+    }
+    const personal = { route: 'personal', cue: 'jev:personal@0.90', source: 'jev', fallback: null };
+
+    it('a question keeps the synchronous gate: armed at once, Jev not asked', () => {
+        const { s } = service();
+        const stub = jevStub();
+        s.career = stub;
+        s.triggerAnswerIfNeeded('Them', 'How does garbage collection work?');
+        assert.notEqual(s.answerDebounceTimer, null);
+        assert.equal(stub.pending.length, 0);
+        assert.deepEqual(stub.calls.prefetch, ['How does garbage collection work?']);
+        clearTimeout(s.answerDebounceTimer);
+    });
+
+    it('a statement-form career prompt is armed once Jev says personal, with the session it was asked with', async () => {
+        const { s } = service();
+        const stub = jevStub();
+        s.career = stub;
+        s.activeCompany = 'Bridge';
+        s.triggerAnswerIfNeeded('Them', 'your biggest weakness');
+        assert.equal(s.answerDebounceTimer, null, 'not armed before Jev answers');
+        assert.equal(stub.pending.length, 1);
+        assert.deepEqual(stub.pending[0].session, { prev: null, activeCompany: 'Bridge' });
+        stub.pending[0].resolve(personal);
+        await flush();
+        assert.notEqual(s.answerDebounceTimer, null);
+        assert.deepEqual(stub.calls.prefetch, ['your biggest weakness']);
+        clearTimeout(s.answerDebounceTimer);
+    });
+
+    it('company arms too; general, ambiguous or null do not', async () => {
+        for (const [decision, armed] of [
+            [{ route: 'company', source: 'jev', fallback: null }, true],
+            [{ route: 'general', source: 'jev', fallback: null }, false],
+            [{ route: 'ambiguous', source: 'jev', fallback: null }, false],
+            [null, false],
+        ]) {
+            const { s } = service();
+            const stub = jevStub();
+            s.career = stub;
+            s.triggerAnswerIfNeeded('Them', 'a statement');
+            stub.pending[0].resolve(decision);
+            await flush();
+            assert.equal(s.answerDebounceTimer !== null, armed, JSON.stringify(decision));
+            if (s.answerDebounceTimer) clearTimeout(s.answerDebounceTimer);
+        }
+    });
+
+    it('a regex fallback decision arms the same way', async () => {
+        const { s } = service();
+        const stub = jevStub();
+        s.career = stub;
+        s.triggerAnswerIfNeeded('Them', 'your biggest weakness');
+        stub.pending[0].resolve({ route: 'personal', cue: 'background:your-trait', source: 'regex', fallback: 'timeout' });
+        await flush();
+        assert.notEqual(s.answerDebounceTimer, null);
+        clearTimeout(s.answerDebounceTimer);
+    });
+
+    it('a newer question armed while Jev answered → the older statement is dropped', async () => {
+        const { s } = service();
+        const stub = jevStub();
+        s.career = stub;
+        s.triggerAnswerIfNeeded('Them', 'your biggest weakness');
+        s.triggerAnswerIfNeeded('Them', 'What is a mutex?');
+        const timer = s.answerDebounceTimer;
+        stub.pending[0].resolve(personal);
+        await flush();
+        assert.equal(s.answerDebounceTimer, timer, 'the newer question keeps its timer');
+        assert.deepEqual(stub.calls.prefetch, ['What is a mutex?']);
+        clearTimeout(s.answerDebounceTimer);
+    });
+
+    it('a non-career statement after a career one does not cancel it', async () => {
+        const { s } = service();
+        const stub = jevStub();
+        s.career = stub;
+        s.triggerAnswerIfNeeded('Them', 'your biggest weakness');
+        s.triggerAnswerIfNeeded('Them', 'take your time');
+        stub.pending[1].resolve({ route: 'general', source: 'jev', fallback: null });
+        stub.pending[0].resolve(personal);
+        await flush();
+        assert.notEqual(s.answerDebounceTimer, null);
+        assert.deepEqual(stub.calls.prefetch, ['your biggest weakness']);
+        clearTimeout(s.answerDebounceTimer);
+    });
+
+    it('a reset, a pause or Answer turned off while Jev answers → nothing is armed', async () => {
+        for (const act of [s => s.resetLiveAnswer(), s => s.pauseLiveAnswer(), s => s.setLiveFeatures('insights')]) {
+            const { s } = service();
+            const stub = jevStub();
+            s.career = stub;
+            s.triggerAnswerIfNeeded('Them', 'your biggest weakness');
+            act(s);
+            stub.pending[0].resolve(personal);
+            await flush();
+            assert.equal(s.answerDebounceTimer, null);
+        }
+    });
+
+    it('de-dup still applies to a statement Jev accepts', async () => {
+        const { s } = service();
+        const stub = jevStub();
+        s.career = stub;
+        s.lastAnsweredTail = 'your biggest weakness';
+        s.triggerAnswerIfNeeded('Them', 'your biggest weakness');
+        stub.pending[0].resolve(personal);
+        await flush();
+        assert.equal(s.answerDebounceTimer, null);
+    });
+
+    it('me turns never ask Jev; a rejecting or throwing classifyTurn never breaks the gate', async () => {
+        const { s } = service();
+        const stub = jevStub();
+        s.career = stub;
+        s.triggerAnswerIfNeeded('Me', 'my biggest weakness');
+        assert.equal(stub.pending.length, 0);
+        s.career = jevStub({ classifyTurn: async () => { throw new Error('boom'); } });
+        s.triggerAnswerIfNeeded('Them', 'your biggest weakness');
+        await flush();
+        assert.equal(s.answerDebounceTimer, null);
+        s.career = jevStub({ classifyTurn: () => { throw new Error('sync boom'); } });
+        s.triggerAnswerIfNeeded('Them', 'your biggest weakness');
+        assert.equal(s.answerDebounceTimer, null);
+    });
+
+    it('gateUsesJev false (no key, open circuit) → today\'s synchronous regex gate', () => {
+        const { s } = service();
+        s.career = stubCareer({ gateUsesJev: () => false, hasCareerCue: () => true, classifyTurn: () => { throw new Error('not called'); } });
+        s.triggerAnswerIfNeeded('Them', 'your biggest weakness');
+        assert.notEqual(s.answerDebounceTimer, null);
+        clearTimeout(s.answerDebounceTimer);
+    });
+
+    it('the full path: Jev gate, debounce, then the context and the answer', async () => {
+        mock.timers.enable({ apis: ['setTimeout'] });
+        const { s } = service();
+        const stub = jevStub({ getCareerContext: async (text, session) => { stub.calls.getCareerContext.push({ text, session }); return PERSONAL; } });
+        s.career = stub;
+        let meta = null;
+        s.makeLiveAnswer = async (texts, signal, m) => { meta = m; return null; };
+        s.conversationHistory = ['them: your biggest weakness'];
+        s.triggerAnswerIfNeeded('Them', 'your biggest weakness');
+        stub.pending[0].resolve(personal);
+        await flush();
+        mock.timers.tick(800);
+        for (let i = 0; i < 5; i++) await flush();
+        assert.equal(stub.calls.getCareerContext.length, 1);
+        assert.equal(meta.career, PERSONAL);
+        assert.equal(s.careerPrev.route, 'personal');
+    });
+});
+
 describe('triggerAnswerIfNeeded and the debounce callback', () => {
     it('prefetches on accepted turns only, and passes the session to getCareerContext', async () => {
         mock.timers.enable({ apis: ['setTimeout'] });
@@ -293,7 +458,7 @@ describe('triggerAnswerIfNeeded and the debounce callback', () => {
         s.triggerAnswerIfNeeded('Them', 'just a statement');
         s.triggerAnswerIfNeeded('Them', q);
         assert.deepEqual(stub.calls.prefetch, [q]);
-        assert.deepEqual(stub.calls.prefetchSessions, [{ prev: null }]);
+        assert.deepEqual(stub.calls.prefetchSessions, [{ prev: null, activeCompany: null }]);
         mock.timers.tick(800);
         for (let i = 0; i < 5; i++) await flush();
         assert.equal(stub.calls.getCareerContext.length, 1);

@@ -2,7 +2,8 @@
 'use strict';
 
 // Ask the career notes a question and see what Live Answer would retrieve
-// (spec 2026-10-11, FR-008 to FR-013). Same code path as the app: the router,
+// (spec 2026-10-11, FR-008 to FR-013). Same code path as the app: the router
+// (Jev when .env has TYPESAFE_API_KEY, else the regex; spec 2026-10-13),
 // BM25 and vectors fused, one section per note file, the 9,000-char block.
 //
 //   node scripts/ask-career-kb.js [options] "question"   one question
@@ -70,6 +71,13 @@ function sectionOf(hit) {
     return hit.title.startsWith(`${stem} › `) ? hit.title.slice(stem.length + 3) : hit.title;
 }
 
+// Who decided the route: Jev, the regex router, or the regex because Jev could not (spec 2026-10-13).
+function decidedBy(ctx) {
+    const jev = ctx.jevMs == null ? '' : `, Jev ${ctx.jevMs} ms`;
+    if (ctx.routeFallback) return `regex, Jev ${ctx.routeFallback}${jev}`;
+    return `${ctx.routeSource || 'regex'}${jev}`;
+}
+
 function report(ctx, trace, args) {
     const out = [];
     if (!ctx) {
@@ -77,12 +85,12 @@ function report(ctx, trace, args) {
         return out;
     }
     if (ctx.route === 'general') {
-        out.push('route: general');
+        out.push(`route: general · decided by: ${decidedBy(ctx)}`);
         out.push('Nothing is added: Live Answer answers this one without your notes.');
         return out;
     }
     const vectors = args.bm25Only ? 'off' : ctx.timings.vectorUsed ? 'used' : 'not used (keywords only)';
-    out.push(`route: ${ctx.route}${ctx.cue ? ` (${ctx.cue})` : ''} · vectors: ${vectors} · company: ${trace.activeCompany || '-'}`);
+    out.push(`route: ${ctx.route}${ctx.cue ? ` (${ctx.cue})` : ''} · decided by: ${decidedBy(ctx)} · vectors: ${vectors} · company: ${trace.activeCompany || '-'}`);
     if (ctx.cue === 'follow-up') out.push('Follow-up: the search also uses the question it follows.');
 
     const hits = (trace.hits || []).slice(0, args.top);
@@ -126,7 +134,11 @@ function report(ctx, trace, args) {
 async function main() {
     const args = parseArgs(process.argv.slice(2));
     const kb = path.resolve(args.kb);
+    // The router follows .env as the app does: Jev with a TYPESAFE_API_KEY, the regex otherwise.
     const env = { CAREER_KB_PATH: kb, CAREER_KB_COMPANY: args.company };
+    for (const k of ['TYPESAFE_API_KEY', 'CAREER_ROUTER', 'CAREER_ROUTER_JEV_MODEL', 'CAREER_ROUTER_JEV_MIN_CONF']) {
+        if (process.env[k]) env[k] = process.env[k];
+    }
 
     const snap = await createKbService({ root: kb }).refresh();
     if (!snap) throw new Error('notes folder missing or unreadable');
@@ -135,7 +147,8 @@ async function main() {
     // here nothing starts early, so give the prefetch the time it needs.
     const mod = createCareerModule({ env, embedder, debug: false, prefetchTimeoutMs: 10_000 });
     await mod.warm();
-    process.stderr.write(`[ask] ${snap.files} files, ${snap.chunks.length} sections\n`);
+    const router = mod.routerStats();
+    process.stderr.write(`[ask] ${snap.files} files, ${snap.chunks.length} sections, router ${router && router.state === 'on' ? `jev (${router.model})` : 'regex'}\n`);
     if (embedder) {
         process.stderr.write('[ask] loading the model; only new or edited sections get embedded...\n');
         const t0 = Date.now();
@@ -147,9 +160,14 @@ async function main() {
     const session = { prev: null, activeCompany: null };
     async function ask(text) {
         if (!session.activeCompany) session.activeCompany = mod.detectCompany(text) || null;
-        if (embedder) mod.prefetch(text, { prev: session.prev });
+        if (embedder) mod.prefetch(text, { prev: session.prev, activeCompany: session.activeCompany });
         const trace = { k: args.top };
-        const ctx = await mod.getCareerContext(text, { prev: session.prev, activeCompany: session.activeCompany }, { trace, bm25Only: args.bm25Only });
+        // Nothing starts 800 ms early here either: wait for the whole Jev call.
+        const ctx = await mod.getCareerContext(
+            text,
+            { prev: session.prev, activeCompany: session.activeCompany },
+            { trace, bm25Only: args.bm25Only, routeBudgetMs: 5000 },
+        );
         // Follow-ups stick only to the last personal/company question, as in summaryService.
         session.prev = ctx && (ctx.route === 'personal' || ctx.route === 'company')
             ? { route: ctx.route, queryTerms: ctx.queryTerms || [], anchorText: ctx.anchorText || '', ts: Date.now() }

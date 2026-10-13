@@ -355,6 +355,9 @@ class SummaryService {
         // question. Lets the renderer coalesce streaming deltas into one history
         // entry vs. pushing a new one (in-session answer history).
         this.answerSeq = 0;
+        // Bumped when an answer is armed, paused or reset: a gate decision that
+        // arrives after a bump is stale (career router gate, spec 2026-10-13).
+        this.answerEpoch = 0;
 
         // Career context (spec 2026-10-11): the module (replaceable in tests),
         // the last answered personal/company question for follow-ups, and the
@@ -630,7 +633,9 @@ class SummaryService {
      *
      * Gates (in order):
      * 1. Speaker gate: only 'them' triggers (FR-001)
-     * 2. Question heuristic: shouldTriggerAnswer (FR-002/FR-004)
+     * 2. Question heuristic: shouldTriggerAnswer (FR-002/FR-004). A them turn
+     *    with no question form asks the career router (Jev) when it is on, and
+     *    is armed when the answer comes back personal or company
      * 3. 800ms debounce: re-set on each new 'them:' turn so multi-segment
      *    questions coalesce into a single trigger (FR-003)
      * 4. De-dup + abort-or-suppress in the debounce callback (FR-004)
@@ -653,15 +658,68 @@ class SummaryService {
             }
         }
 
+        // Career FR-007 with Jev (spec 2026-10-13): a them turn with no question
+        // form ("your biggest weakness") waits for the Jev route instead of the
+        // regex cue. Questions keep the synchronous path below.
+        if (fromThem && !isLikelyQuestion(text) && this.careerGateUsesJev()) {
+            this.gateWithCareerRouter(text);
+            return;
+        }
+
         const willTrigger = shouldTriggerAnswer(speaker, text, this.lastAnsweredTail, this.inFlight, t => this.career.hasCareerCue(t));
         // [diagnostic] trigger-gate trace — decision metadata only, never answer text
         laDebug(`[live-answer] trigger gate: speaker=${speaker} likelyQuestion=${isLikelyQuestion(text)} inFlight=${this.inFlight} → willTrigger=${willTrigger}`);
         if (!willTrigger) return;
+        this.armAnswer(text);
+    }
 
-        // Career FR-009: start the query embedding now so it is ready when the
-        // debounce fires (a no-op while the module is disabled or BM25-only).
+    careerGateUsesJev() {
         try {
-            this.career.prefetch(text, { prev: this.careerPrev });
+            return typeof this.career.gateUsesJev === 'function' && this.career.gateUsesJev() === true;
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * The gate for a statement-form them turn when the career router uses Jev.
+     * Arms the answer when the route is personal or company, unless a newer
+     * question was armed (or the session reset or paused) while Jev answered.
+     * The career module falls back to the regex by itself on a timeout or error.
+     */
+    gateWithCareerRouter(text) {
+        const epoch = this.answerEpoch;
+        let pending;
+        try {
+            pending = Promise.resolve(this.career.classifyTurn(text, { prev: this.careerPrev, activeCompany: this.activeCompany }));
+        } catch {
+            return;
+        }
+        pending
+            .then(decision => {
+                if (epoch !== this.answerEpoch || !answerEnabled(this.liveFeatures)) {
+                    laDebug('[live-answer] trigger gate (router): superseded — dropped');
+                    return;
+                }
+                const cue = !!decision && (decision.route === 'personal' || decision.route === 'company');
+                const willTrigger = shouldTriggerAnswer('them', text, this.lastAnsweredTail, this.inFlight, () => cue);
+                const src = decision ? (decision.fallback ? `regex(${decision.fallback})` : decision.source) : '-';
+                laDebug(`[live-answer] trigger gate (router): route=${decision ? decision.route : '-'} src=${src} inFlight=${this.inFlight} → willTrigger=${willTrigger}`);
+                if (willTrigger) this.armAnswer(text);
+            })
+            .catch(() => {
+                /* the career module is optional */
+            });
+    }
+
+    /** Prefetch and (re)arm the 800 ms debounce for an accepted turn (FR-003). */
+    armAnswer(text) {
+        this.answerEpoch++;
+
+        // Career FR-009: start the route call and the query embedding now so
+        // they are ready when the debounce fires (no-ops while the module is disabled).
+        try {
+            this.career.prefetch(text, { prev: this.careerPrev, activeCompany: this.activeCompany });
         } catch {
             /* the career module is optional */
         }
@@ -793,6 +851,7 @@ class SummaryService {
             this.inFlightController = null;
         }
         this.inFlight = false;
+        this.answerEpoch++;
     }
 
     /**
@@ -818,6 +877,7 @@ class SummaryService {
         this.lastAnswerTs = 0;
         this.careerPrev = null;
         this.activeCompany = null;
+        this.answerEpoch++;
         console.log('[live-answer] resetLiveAnswer — debounce cleared, in-flight aborted');
     }
 

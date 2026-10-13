@@ -331,6 +331,10 @@ async function phaseB(ctx, session, questions, lang) {
                 unverified: a?.unverified?.length || 0,
                 careerMs: decision?.totalMs ?? null,
                 vectorUsed: decision?.vectorUsed ?? null,
+                routeSource: decision?.routeSource ?? null,
+                routeFallback: decision?.routeFallback ?? null,
+                jevMs: decision?.jevMs ?? null,
+                routeWaitMs: decision?.routeWaitMs ?? null,
             }),
             notes: ex.career.find(d => d._block)?._block || '',
         };
@@ -347,6 +351,11 @@ async function phaseB(ctx, session, questions, lang) {
             item.checks.push(check('sources on the panel', item.metrics.sources > 0, 'warn'));
         }
         if (q.route === 'general') item.checks.push(check('no notes injected', decision ? !decision.hasBlock : true, 'fail'));
+        // Router R-SC-005: the Jev call starts at the gate, so the answer should
+        // barely wait for it once the debounce fires.
+        if (decision && decision.jevMs != null) {
+            item.checks.push(check('route ready at the debounce', decision.routeWaitMs <= 50, 'warn', `waited ${decision.routeWaitMs} ms, src=${decision.routeFallback ? `regex(${decision.routeFallback})` : decision.routeSource}`));
+        }
         item.checks.push(check('no unverified names or numbers', item.metrics.unverified === 0, 'warn', `${item.metrics.unverified} marked`));
         if (a?.text) {
             const got = checks.detectLang(a.text);
@@ -615,6 +624,12 @@ function aggregate(items) {
     const wers = items.map(i => i.metrics?.wer).filter(Number.isFinite);
     const b = items.filter(i => i.phase === 'B' && i.kind === 'live-career');
     const routeOk = b.filter(i => i.metrics.route === i.metrics.expectedRoute).length;
+    const bPick = k => b.map(i => i.metrics[k]).filter(Number.isFinite);
+    const routeSources = {};
+    for (const i of b) {
+        const src = i.metrics.routeFallback ? `regex(${i.metrics.routeFallback})` : i.metrics.routeSource;
+        if (src) routeSources[src] = (routeSources[src] || 0) + 1;
+    }
     return {
         liveAnswers: live.length,
         firstTokenMs: { p50: q(pick('firstTokenMs'), 0.5), p95: q(pick('firstTokenMs'), 0.95) },
@@ -624,6 +639,9 @@ function aggregate(items) {
         fallbacks: items.reduce((s, i) => s + (i.metrics?.resets || 0), 0),
         answeredBy: models,
         careerRoutes: b.length ? `${routeOk}/${b.length}` : null,
+        routeSources,
+        routeWaitMs: { p50: q(bPick('routeWaitMs'), 0.5), p95: q(bPick('routeWaitMs'), 0.95) },
+        jevMs: { p50: q(bPick('jevMs'), 0.5), p95: q(bPick('jevMs'), 0.95) },
         judgeMean: (() => {
             const s = items.map(i => i.judge?.score).filter(Number.isFinite);
             return s.length ? Math.round((s.reduce((a, x) => a + x, 0) / s.length) * 100) / 100 : null;

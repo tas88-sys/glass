@@ -22,6 +22,7 @@ function consoleLine(item) {
     const m = item.metrics || {};
     const bits = [];
     if (m.route) bits.push(`route=${m.route}${m.expectedRoute && m.expectedRoute !== m.route ? `(want ${m.expectedRoute})` : ''}`);
+    if (m.routeSource) bits.push(`src=${m.routeFallback ? `regex(${m.routeFallback})` : m.routeSource}${m.jevMs != null ? `/${m.jevMs}ms` : ''}`);
     if (m.firstTokenMs != null) bits.push(`first=${sec(m.firstTokenMs)}`);
     if (m.totalMs != null) bits.push(`total=${sec(m.totalMs)}`);
     if (m.model) bits.push(`model=${m.model}`);

@@ -6,6 +6,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 
 ## [Unreleased]
 
+### Career router: Jev in place of the regex cue tables (branch `2026-10-13-jev-router-poc`)
+
+#### Added
+
+- **Jev router** (`src/features/common/career/jevRouter.js`, `jevClient.js`). With `TYPESAFE_API_KEY` in `.env`, Jev (TypeSafe AI) decides the career route of each interviewer turn: personal, company, ambiguous or general. The criteria are in English, with an English and a Portuguese example each, so pt-BR and en-US turns route alike. Spec: `specs/2026-10-13-career-router-jev/`.
+  - **Sent to TypeSafe:** the turn, the previous career question, the interviewer's company and the manifest's names.
+  - **Model:** fixed at `jev-1.13.0`, since an alias changes routes without notice.
+  - **Latency:** the call starts when the gate accepts the turn, inside the 800 ms debounce. The answer then waits at most 250 ms more.
+  - **Cost:** about $0.00002 per turn.
+- **Fallback:** the regex router decides, and the debug line says why (`src=regex(timeout)`), on a timeout, 429/529, a network error, a malformed answer, low confidence, or an open circuit (three failures in a row → regex only for 60 s). A 401/422 turns Jev off until restart.
+- **Gate:** a turn with no question form ("your biggest weakness") waits for Jev, at most 700 ms, before the debounce. Questions never wait.
+- **Config:** `CAREER_ROUTER=jev|regex` (the kill switch; a typo reads as `regex`), `CAREER_ROUTER_JEV_MODEL`, `CAREER_ROUTER_JEV_MIN_CONF`, `CAREER_ROUTER_GATE_TIMEOUT_MS`, `CAREER_ROUTER_RESOLVE_BUDGET_MS`.
+- **`scripts/eval-career-kb.js --router regex|jev`:**
+  - prints the router confusion per language;
+  - with `jev`, compares Jev with the regex router on the same items and reports the Jev call p50/p95 and the fallbacks;
+  - adds the release checks R-SC-001..004.
+- **`ask-career-kb.js` and the live eval** show who decided each route and the Jev time.
+
+#### Changed
+
+- `intentRouter.js` is frozen: no new cues. A phrasing Jev misses is fixed in the Jev criteria and measured with the eval.
+- The eval's answer path now counts from the route on, because the route call runs inside the debounce.
+- Without a key, or with `CAREER_ROUTER=regex`, routes, cues, the gate and prompts are exactly as before.
+
 ### Live eval: a simulated interview with real audio and real models (branch `2026-10-12-live-eval`)
 
 #### Added

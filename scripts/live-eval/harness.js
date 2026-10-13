@@ -308,6 +308,11 @@ function createSession({ cfg, career, tts, audio, log, liveFeatures = 'answer', 
             sources: (c.sources || []).length,
             totalMs: c.timings?.totalMs ?? null,
             vectorUsed: !!c.timings?.vectorUsed,
+            // Router (spec 2026-10-13): who decided, and how long the answer waited for the route.
+            routeSource: c.routeSource || null,
+            routeFallback: c.routeFallback || null,
+            jevMs: c.jevMs ?? null,
+            routeWaitMs: c.timings?.routeMs ?? null,
         };
     }
 

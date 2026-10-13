@@ -596,6 +596,161 @@ describe('career module: follow-up vector query (FR-006, FR-009; E41)', () => {
     });
 });
 
+describe('career module: Jev router (spec 2026-10-13-career-router-jev)', () => {
+    const answer = (route, confidence = 0.9, followUp) => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+            model: 'jev-1.13.0',
+            answers: {
+                route: { type: 'choice', choice: route, probabilities: { [route]: confidence }, confidence },
+                ...(followUp === undefined ? {} : { follow_up: { type: 'noul', noul: followUp } }),
+            },
+            usage: { input_tokens: 400, output_tokens: 20 },
+        }),
+    });
+    function fakeFetch(reply) {
+        const bodies = [];
+        const fn = async (url, init) => {
+            bodies.push(JSON.parse(init.body));
+            return typeof reply === 'function' ? reply(JSON.parse(init.body)) : reply;
+        };
+        fn.bodies = bodies;
+        return fn;
+    }
+    async function jevCareer(reply, envExtra = {}, extra = {}) {
+        const fetchImpl = fakeFetch(reply);
+        const env = { CAREER_KB_PATH: await kb(), TYPESAFE_API_KEY: 'test-key', ...envExtra };
+        const { mod, lines } = career(env, { fetchImpl, ...extra });
+        await mod.warm();
+        return { mod, lines, fetchImpl };
+    }
+
+    it('without a key the module routes by regex and the gate does not wait (SC-006)', async () => {
+        const fetchImpl = fakeFetch(answer('general'));
+        const { mod } = career({ CAREER_KB_PATH: await kb() }, { fetchImpl });
+        await mod.warm();
+        assert.equal(mod.gateUsesJev(), false);
+        const ctx = await mod.getCareerContext('Tell me about a time you disagreed with a teammate.', { prev: null });
+        assert.equal(ctx.route, 'personal');
+        assert.equal(ctx.cue, 'behavioral:tell-me-about-a-time');
+        assert.equal(ctx.routeSource, 'regex');
+        assert.equal(ctx.routeFallback, null);
+        assert.equal(fetchImpl.bodies.length, 0);
+        assert.equal(mod.routerStats().state, 'no-key');
+    });
+
+    it('Jev decides the route; the query is built from the turn as before', async () => {
+        const { mod, fetchImpl, lines } = await jevCareer(answer('personal', 0.88));
+        const q = 'Me conta como foi a migração do tide service';
+        const ctx = await mod.getCareerContext(q, { prev: null, activeCompany: null });
+        assert.equal(ctx.route, 'personal');
+        assert.equal(ctx.cue, 'jev:personal@0.88');
+        assert.equal(ctx.routeSource, 'jev');
+        assert.equal(ctx.routeConfidence, 0.88);
+        assert.equal(typeof ctx.jevMs, 'number');
+        assert.match(ctx.block, /\[migration-2024-05 › Migration of the tide service\]/);
+        assert.ok(ctx.queryTerms.includes('tide'));
+        const sent = fetchImpl.bodies[0];
+        assert.equal(sent.state.turn, q);
+        assert.deepEqual(sent.state.candidate_names, ['Quillsoft']);
+        assert.ok(sent.state.note_companies.includes('Bridge'));
+        assert.ok(lines.some(l => /route=personal cue=jev:personal@0\.88 .* src=jev jev=[\d.]+ms/.test(l)));
+        for (const l of lines) assert.ok(!l.includes('tide service') && !l.includes('Quillsoft'), 'no text in the log');
+    });
+
+    it('a Jev general answer injects nothing, even where the regex saw a cue', async () => {
+        const { mod } = await jevCareer(answer('general', 0.9));
+        const ctx = await mod.getCareerContext('Tell me about a time you disagreed with a teammate.', { prev: null });
+        assert.deepEqual(
+            { route: ctx.route, block: ctx.block, addendum: ctx.addendum, sources: ctx.sources },
+            { route: 'general', block: '', addendum: '', sources: [] },
+        );
+    });
+
+    it('the interviewer\'s company goes in the state: CAREER_KB_COMPANY first, then the session\'s', async () => {
+        const { mod, fetchImpl } = await jevCareer(answer('company', 0.9), { CAREER_KB_COMPANY: 'lumen works' });
+        const ctx = await mod.getCareerContext('Por que você quer entrar aqui?', { prev: null, activeCompany: 'Bridge' });
+        assert.equal(ctx.route, 'company');
+        assert.equal(fetchImpl.bodies[0].state.interviewer_company, 'Lumen Works');
+        assert.match(ctx.addendum, /The interviewer's company is Lumen Works\./);
+    });
+
+    it('prefetch, classifyTurn and getCareerContext share one Jev call per turn', async () => {
+        const { mod, fetchImpl } = await jevCareer(answer('personal', 0.9));
+        const session = { prev: null, activeCompany: 'Bridge' };
+        mod.prefetch('your biggest weakness', session);
+        const gate = await mod.classifyTurn('your biggest weakness', session);
+        assert.equal(gate.route, 'personal');
+        assert.equal(gate.source, 'jev');
+        const ctx = await mod.getCareerContext('your biggest weakness', { ...session, question: 'your biggest weakness' });
+        assert.equal(ctx.route, 'personal');
+        assert.equal(fetchImpl.bodies.length, 1);
+    });
+
+    it('a slow Jev falls back to the regex within the resolve budget', async () => {
+        const { mod } = await jevCareer(() => new Promise(() => {}), { CAREER_ROUTER_RESOLVE_BUDGET_MS: '20' });
+        const t0 = Date.now();
+        const ctx = await mod.getCareerContext('Tell me about a time you disagreed with a teammate.', { prev: null });
+        assert.ok(Date.now() - t0 < 500);
+        assert.equal(ctx.route, 'personal');
+        assert.equal(ctx.cue, 'behavioral:tell-me-about-a-time');
+        assert.equal(ctx.routeSource, 'regex');
+        assert.equal(ctx.routeFallback, 'budget');
+    });
+
+    it('a failing Jev falls back to the regex and the answer still gets its notes', async () => {
+        const { mod, lines } = await jevCareer({ ok: false, status: 529, json: async () => ({}) });
+        const ctx = await mod.getCareerContext('Tell me about a time you disagreed with a teammate.', { prev: null });
+        assert.equal(ctx.route, 'personal');
+        assert.equal(ctx.routeFallback, 'overload');
+        assert.match(ctx.block, /Disagreement with a teammate/);
+        assert.ok(lines.some(l => /src=regex\(overload\)/.test(l)));
+    });
+
+    it('a Jev follow-up carries the previous terms and prefetches the anchored text once Jev answers', async () => {
+        const prefetched = [];
+        const fakeEmbedder = {
+            minCosine: 0.35,
+            sync: async () => {},
+            isReadyFor: () => true,
+            vectorCount: () => 1,
+            indexFor: () => ({ size: 1, search: () => [], searchTitles: () => [] }),
+            prefetch: text => { prefetched.push(text); },
+            query: async () => null,
+        };
+        const { mod } = await jevCareer(body => (body.questions.follow_up ? answer('general', 0.6, 0.9) : answer('personal', 0.9)), {}, { embedder: fakeEmbedder });
+        const Q1 = 'Tell me about a time you disagreed with a teammate.';
+        const first = await mod.getCareerContext(Q1, { prev: null });
+        const prev = { route: first.route, queryTerms: first.queryTerms, anchorText: first.anchorText, ts: Date.now() };
+        prefetched.length = 0;
+        const FOLLOW = 'E como isso terminou';        // no regex follow-up marker
+        mod.prefetch(FOLLOW, { prev });
+        assert.deepEqual(prefetched, [FOLLOW], 'the regex sees no follow-up');
+        for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r));
+        assert.deepEqual(prefetched, [FOLLOW, `${Q1}\n${FOLLOW}`], 'Jev does');
+        const ctx = await mod.getCareerContext(FOLLOW, { prev });
+        assert.equal(ctx.route, 'personal');
+        assert.equal(ctx.cue, 'follow-up');
+        assert.equal(ctx.routeSource, 'jev');
+        assert.ok(ctx.queryTerms.includes('teammat'), 'previous terms carried');
+        assert.equal(ctx.anchorText, Q1);
+    });
+
+    it('classifyTurn: null while disabled; the gate waits only while Jev can answer', async () => {
+        const { mod: off } = career({ CAREER_KB_PATH: '' }, { fetchImpl: fakeFetch(answer('personal')) });
+        assert.equal(await off.classifyTurn('your biggest weakness', {}), null);
+        assert.equal(off.gateUsesJev(), false);
+        const { mod } = await jevCareer({ ok: false, status: 401, json: async () => ({}) });
+        assert.equal(mod.gateUsesJev(), true);
+        const d = await mod.classifyTurn('your biggest weakness', { prev: null });
+        assert.equal(d.route, 'personal', 'the regex decides after the 401');
+        assert.equal(d.fallback, 'auth');
+        assert.equal(mod.gateUsesJev(), false);
+        assert.equal(mod.routerStats().state, 'disabled:auth');
+    });
+});
+
 describe('career module: load isolation (C4)', () => {
     it('requiring index.js under plain Node loads neither Electron nor the model runtime', () => {
         const entry = path.resolve(__dirname, '..', 'index.js');

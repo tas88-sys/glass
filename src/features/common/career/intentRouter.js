@@ -1,7 +1,17 @@
 'use strict';
 
 // Deterministic intent router (FR-006, research R6). Provider-agnostic and pure:
-// no LLM call, no fs. Classifies one interviewer turn as
+// no LLM call, no fs.
+//
+// FROZEN (spec 2026-10-13-career-router-jev, R18): Jev (jevRouter.js) routes
+// turns now; this router decides only when Jev cannot (no key, CAREER_ROUTER=
+// regex, a network error, a timeout, an open circuit, low confidence), and
+// stays the synchronous gate while Jev is off. Do not add cues for phrasings
+// Jev misses: measure them with scripts/eval-career-kb.js --router jev and
+// change the Jev criteria (jevClient.js) instead. stripCuePhrases still builds
+// every retrieval query.
+//
+// Classifies one interviewer turn as
 //   personal  — about the candidate's own background (inject notes)
 //   company   — about the interviewer's company ("why us"; inject scoped notes)
 //   ambiguous — hypothetical / habitual / opinion (inject only above a threshold)
@@ -9,8 +19,8 @@
 //
 // Cue tables are data: [ruleName, RegExp] pairs matched against
 // normalizeForMatch(text) (accents folded, lowercase, contractions expanded,
-// punctuation removed). The rule name is what the debug log shows; the turn
-// text never leaves this module.
+// punctuation removed). The rule name is what the debug log shows; this module
+// sends nothing anywhere (with Jev on, jevRouter.js sends the turn to TypeSafe).
 
 const { normalizeForMatch } = require('./textNormalize');
 

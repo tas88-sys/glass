@@ -8,6 +8,9 @@
 // Nothing heavy loads at require time: no Electron, no model runtime (C4).
 // Debug lines go through careerDebug under LIVE_ANSWER_DEBUG and carry route,
 // cue, chunk ids, scores and timings only, never note or turn text (C2).
+//
+// The route comes from the Jev router (jevRouter.js, spec 2026-10-13), which
+// falls back to the frozen regex router (intentRouter.js) by itself.
 
 const nodePath = require('node:path');
 const { performance } = require('node:perf_hooks');
@@ -18,6 +21,7 @@ const { tokenize, normalizeForMatch, slugify } = require('./textNormalize');
 const { fuseAndFilter, passesAmbiguousThreshold } = require('./retriever');
 const { buildContextBlock, buildAddendum } = require('./contextBuilder');
 const { findUnsupported } = require('./answerCheck');
+const { createJevRouter } = require('./jevRouter');
 
 const TOP_K = 6;                   // sections fused into the block, one per file (FR-010)
 const CANDIDATES = 60;             // per ranking, before company scope and leave-source-out
@@ -137,6 +141,8 @@ function compileCompanyDetector(names) {
  *   embedder?: object|null|'auto',
  *   minCosine?: number,
  *   prefetchTimeoutMs?: number,
+ *   router?: object,
+ *   fetchImpl?: typeof fetch,
  * }} [options]
  */
 function createCareerModule(options = {}) {
@@ -162,6 +168,9 @@ function createCareerModule(options = {}) {
     let disabledReason = null;
     let embedder = null;
     let embedderResolved = false;
+    // Jev first, the regex router when Jev cannot answer (R18). Tests inject a
+    // router or a fake fetch; with no TYPESAFE_API_KEY it is the regex router.
+    const router = options.router || createJevRouter({ env, fetchImpl: options.fetchImpl, log: careerDebug });
 
     // The real embedder is created on first use and only when asked for
     // ('auto'): tests and the plain-Node load path never touch the model runtime.
@@ -260,27 +269,6 @@ function createCareerModule(options = {}) {
         return warming;
     }
 
-    /**
-     * Start the query embedding for a gated turn (FR-009). With the session, a
-     * follow-up prefetches the same text its vector query will use.
-     * @param {string} turnText
-     * @param {{ prev?: object|null }} [session]
-     */
-    function prefetch(turnText, session) {
-        try {
-            if (!isReady() || typeof turnText !== 'string' || !turnText.trim()) return;
-            const emb = getEmbedder();
-            if (!emb) return;
-            const prev = (session && session.prev) || null;
-            const decision = prev
-                ? classifyCareerIntent(turnText, { prev, entities: snap.entities, companies: snap.companyNames, now: Date.now() })
-                : null;
-            emb.prefetch(decision ? vectorQueryText(turnText, decision, prev) : turnText);
-        } catch {
-            /* total: a failed prefetch only means BM25 for that answer */
-        }
-    }
-
     function configuredCompany(s) {
         const raw = typeof env.CAREER_KB_COMPANY === 'string' ? env.CAREER_KB_COMPANY.trim() : '';
         if (!raw) return null;
@@ -288,11 +276,61 @@ function createCareerModule(options = {}) {
         return s.companyNames.find(n => slugify(n) === slug) || raw;
     }
 
+    // What the router sees for a turn. prefetch, classifyTurn and resolve build
+    // it the same way, so the Jev call one starts is the one the others reuse.
+    function routeContext(s, session) {
+        const ss = session || {};
+        return {
+            prev: ss.prev || null,
+            entities: s.entities,
+            companies: s.companyNames,
+            activeCompany: configuredCompany(s) || ss.activeCompany || null,
+            now: Date.now(),
+        };
+    }
+
+    /**
+     * Start the route call and the query embedding for a gated turn (FR-009).
+     * With the session, a follow-up prefetches the same text its vector query
+     * will use: at once when the regex sees the follow-up, or once Jev does.
+     * @param {string} turnText
+     * @param {{ prev?: object|null, activeCompany?: string|null }} [session]
+     */
+    function prefetch(turnText, session) {
+        try {
+            if (!isReady() || typeof turnText !== 'string' || !turnText.trim()) return;
+            const ctx = routeContext(snap, session);
+            router.prefetch(turnText, ctx);
+            const emb = getEmbedder();
+            if (!emb) return;
+            const prev = ctx.prev;
+            const decision = prev ? classifyCareerIntent(turnText, ctx) : null;
+            const first = decision ? vectorQueryText(turnText, decision, prev) : turnText;
+            emb.prefetch(first);
+            if (prev && router.gateUsesJev()) {
+                router.decide(turnText, ctx, { budgetMs: Infinity })
+                    .then(d => {
+                        const text = vectorQueryText(turnText, d, prev);
+                        if (text !== first) emb.prefetch(text);
+                    })
+                    .catch(() => {});
+            }
+        } catch {
+            /* total: a failed prefetch only means BM25 for that answer */
+        }
+    }
+
+    // src=jev, src=regex, or src=regex(timeout) when Jev was asked and could not answer.
+    function routeNote(result) {
+        const src = result.routeFallback ? `src=regex(${result.routeFallback})` : `src=${result.routeSource}`;
+        return result.jevMs == null ? src : `${src} jev=${result.jevMs}ms`;
+    }
+
     function logDecision(result, hits, vectorNote, extra) {
         if (!debugOn()) return;
         const t = result.timings;
         if (result.route === 'general') {
-            careerDebug(`[career] route=general total=${t.totalMs}ms`);
+            careerDebug(`[career] route=general total=${t.totalMs}ms ${routeNote(result)}`);
             return;
         }
         const top = hits[0];
@@ -305,6 +343,7 @@ function createCareerModule(options = {}) {
             `bm25=${t.bm25Ms}ms`,
             `vector=${vectorNote}`,
             `total=${t.totalMs}ms`,
+            routeNote(result),
         ];
         if (extra) parts.push(extra);
         careerDebug(parts.join(' '));
@@ -312,18 +351,18 @@ function createCareerModule(options = {}) {
 
     async function resolve(s, turnText, session, opts) {
         const t0 = performance.now();
-        const prev = session.prev || null;
-        const activeCompany = configuredCompany(s) || session.activeCompany || null;
-        const decision = classifyCareerIntent(turnText, {
-            prev,
-            entities: s.entities,
-            companies: s.companyNames,
-            now: Date.now(),
-        });
+        const ctx = routeContext(s, session);
+        const prev = ctx.prev;
+        const activeCompany = ctx.activeCompany;
+        const decision = await router.decide(turnText, ctx, Number.isFinite(opts.routeBudgetMs) ? { budgetMs: opts.routeBudgetMs } : {});
         const timings = { routeMs: ms(performance.now() - t0), bm25Ms: 0, vectorMs: 0, vectorUsed: false, totalMs: 0 };
         const result = {
             route: decision.route,
             cue: decision.cue,
+            routeSource: decision.source,
+            routeFallback: decision.fallback,
+            routeConfidence: decision.confidence,
+            jevMs: decision.jevMs,
             block: '',
             addendum: '',
             sources: [],
@@ -441,7 +480,7 @@ function createCareerModule(options = {}) {
     /**
      * @param {string} turnText
      * @param {{ prev?: { route: string, ts: number, queryTerms?: string[], anchorText?: string }|null, activeCompany?: string|null, question?: string }} [session]
-     * @param {{ excludePaths?: string[], bm25Only?: boolean, trace?: { k?: number } }} [opts]  eval and ask scripts only
+     * @param {{ excludePaths?: string[], bm25Only?: boolean, trace?: { k?: number }, routeBudgetMs?: number }} [opts]  eval and ask scripts only
      */
     async function getCareerContext(turnText, session, opts) {
         if (!isReady() || typeof turnText !== 'string' || !turnText.trim()) return null;
@@ -453,11 +492,38 @@ function createCareerModule(options = {}) {
         }
     }
 
+    /** FR-007 gate, synchronous: the regex router (the fallback when Jev cannot answer in time). */
     function hasCareerCue(turnText) {
         try {
             return isReady() && routerHasCareerCue(turnText, snap.entities, snap.companyNames);
         } catch {
             return false;
+        }
+    }
+
+    /** Whether the question gate should ask classifyTurn about a turn with no question form. */
+    function gateUsesJev() {
+        try {
+            return isReady() && router.gateUsesJev();
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * FR-007 gate with Jev: the route of a statement-form turn ("your biggest
+     * weakness"), waiting at most CAREER_ROUTER_GATE_TIMEOUT_MS, then the regex.
+     * The call is the one resolve() reuses. Never rejects; null while disabled.
+     * @param {string} turnText
+     * @param {{ prev?: object|null, activeCompany?: string|null }} [session]
+     * @returns {Promise<{ route: string, cue: string|null, source: string, fallback: string|null }|null>}
+     */
+    async function classifyTurn(turnText, session) {
+        try {
+            if (!isReady() || typeof turnText !== 'string' || !turnText.trim()) return null;
+            return await router.decide(turnText, routeContext(snap, session), { budgetMs: router.gateTimeoutMs() });
+        } catch {
+            return null;
         }
     }
 
@@ -511,7 +577,28 @@ function createCareerModule(options = {}) {
         return { state: live, chunks: snap ? snap.chunks.length : 0, vectors: v.vectors };
     }
 
-    return { warm, prefetch, getCareerContext, hasCareerCue, detectCompany, checkAnswer, keyterms, status };
+    /** The router's state and counters (no text), for the eval and ask scripts. */
+    function routerStats() {
+        try {
+            return router.stats();
+        } catch {
+            return null;
+        }
+    }
+
+    return {
+        warm,
+        prefetch,
+        getCareerContext,
+        hasCareerCue,
+        gateUsesJev,
+        classifyTurn,
+        detectCompany,
+        checkAnswer,
+        keyterms,
+        status,
+        routerStats,
+    };
 }
 
 const career = createCareerModule({ embedder: 'auto' });

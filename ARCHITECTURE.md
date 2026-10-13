@@ -1296,6 +1296,9 @@ the slot stays empty, as for Live Insights. When such an answer finishes, number
 states that the notes lack are flagged under it. See
 [`docs/LIVE_INSIGHTS_AND_ASK.md`](docs/LIVE_INSIGHTS_AND_ASK.md) §4.7, which also shows how the
 intent router picks a route ([`docs/diagrams/14-career-intent-router.mmd`](docs/diagrams/14-career-intent-router.mmd)).
+With `TYPESAFE_API_KEY` set, the route comes from Jev (TypeSafe AI, one network call per turn,
+started inside the answer debounce); the regex router is the frozen fallback for timeouts,
+errors and low confidence (`specs/2026-10-13-career-router-jev/`).
 
 > Note: `ask:sendQuestionFromSummary` (the Listen "suggested action" buttons) only works in
 > `default` mode and is rejected in the other modes (`featureBridge.js:160-169`).
