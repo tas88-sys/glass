@@ -3,6 +3,7 @@ const { getSystemPrompt } = require('../../common/prompts/promptBuilder.js');
 const { createLLM, createStreamingLLM } = require('../../common/ai/factory');
 const sessionRepository = require('../../common/repositories/session');
 const summaryRepository = require('./repositories');
+const { liveAnswerRepository } = require('./repositories/liveAnswers');
 const modelStateService = require('../../common/services/modelStateService');
 const careerContext = require('../../common/career');
 const { DEFAULT_LIVE_FEATURES, normalizeLiveFeatures, answerEnabled, insightsEnabled } = require('../liveFeatures');
@@ -221,6 +222,10 @@ class SummaryService {
         // 'answer' or 'insights'. Set by listenService at session start and
         // when the user changes it in Settings.
         this.liveFeatures = DEFAULT_LIVE_FEATURES;
+
+        // Where each answer is kept for later review (spec 2026-10-13-live-answer-history):
+        // the app DB, resolved on first use; replaceable in tests.
+        this.liveAnswers = null;
     }
 
     setCallbacks({ onAnalysisComplete, onStatusUpdate }) {
@@ -273,6 +278,9 @@ class SummaryService {
         // renderer can build an in-session history (newest-first).
         const answerId = meta.id != null ? meta.id : Date.now();
         const question = meta.question || '';
+        // The caller's history record (spec 2026-10-13-live-answer-history): filled
+        // here with the model, the first token and how the answer ended.
+        const rec = meta.record || null;
         // Career context (career FR-014): used only when it carries a block. With
         // no block (feature off, general route, nothing found) the messages are
         // byte-identical to today's (career SC-005). Its note titles ride on
@@ -308,6 +316,7 @@ class SummaryService {
         }
         // [diagnostic] confirms model resolved — provider/model only, never the apiKey or answer
         laDebug(`[live-answer] makeLiveAnswer streaming via ${modelInfo.provider}/${modelInfo.model}`);
+        if (rec) rec.model = String(modelInfo.model || '').split(',')[0].trim() || null;
 
         // TWO-ARG createStreamingLLM (C1/FR-008 — NOT createLLM single-arg)
         const llm = createStreamingLLM(modelInfo.provider, {
@@ -377,6 +386,7 @@ class SummaryService {
                     }
                     if (parsed.finalModel) {
                         finalModel = parsed.finalModel;
+                        if (rec) rec.model = finalModel;
                         continue;
                     }
                     if (parsed.delta) {
@@ -396,6 +406,7 @@ class SummaryService {
                                     laDebug('[live-answer] prefix → ANSWER — flushing first token to renderer');
                                     // Flush the buffered prefix as first emit
                                     fullResponse += decision.flush;
+                                    if (rec && rec.firstTokenAt == null) rec.firstTokenAt = Date.now();
                                     this.sendToRenderer('live-answer-update', {
                                         id: answerId,
                                         question,
@@ -436,10 +447,15 @@ class SummaryService {
                 passiveSuppressed = true;
             } else if (decision.flush) {
                 fullResponse += decision.flush;
+                if (rec && rec.firstTokenAt == null) rec.firstTokenAt = Date.now();
                 this.sendToRenderer('live-answer-update', { id: answerId, question, answer: fullResponse, ts: Date.now(), ...extra });
             }
         }
 
+        if (rec) {
+            rec.answer = fullResponse;
+            rec.status = signal && signal.aborted ? 'replaced' : passiveSuppressed ? 'passive' : fullResponse ? 'answer' : 'empty';
+        }
         if (passiveSuppressed) return null;
         if (!fullResponse) {
             laDebug('[live-answer] stream ended with no answer content');
@@ -472,6 +488,7 @@ class SummaryService {
                 /* the check never blocks an answer */
             }
             if (unverified.length) {
+                if (rec) rec.unverified = unverified;
                 this.sendToRenderer('live-answer-update', { id: answerId, question, answer: fullResponse, ts, ...extra, unverified });
             }
         }
@@ -686,22 +703,32 @@ class SummaryService {
             // New id per accepted answer — the renderer keys its history on this.
             const answerId = ++this.answerSeq;
             const question = extractQuestion(text);
+            // What the history keeps of this answer (spec 2026-10-13-live-answer-history).
+            const record = { sessionId: this.currentSessionId, askedAt: Date.now(), turn: text, question, status: null };
 
             try {
                 // Career context is resolved after the controller exists, so a newer
                 // question or a session reset can cancel this answer meanwhile (career E22).
                 const career = await this.resolveCareerContext(text, question, before);
+                if (career) {
+                    record.route = career.route || null;
+                    record.routeSource = career.routeFallback ? `regex(${career.routeFallback})` : career.routeSource || null;
+                    record.cue = career.cue || null;
+                    record.sources = Array.isArray(career.sources) ? career.sources : [];
+                }
                 if (signal.aborted) return;
                 // Follow-ups stick only to the last answered personal/company question (career FR-006, E17).
                 this.careerPrev = career && (career.route === 'personal' || career.route === 'company')
                     ? { route: career.route, queryTerms: career.queryTerms || [], anchorText: career.anchorText || '', ts: Date.now() }
                     : null;
-                await this.makeLiveAnswer(this.conversationHistory, signal, { id: answerId, question, career });
+                await this.makeLiveAnswer(this.conversationHistory, signal, { id: answerId, question, career, record });
             } catch (err) {
                 if (signal.aborted) {
                     // Expected control flow on abort-and-replace — swallow (FR-009)
                     return;
                 }
+                record.status = 'error';
+                record.error = err.userMessage || err.message || 'Unknown error';
                 // Non-abort stream error: log trigger info (NEVER log answer text)
                 console.error('[live-answer] stream error (trigger retained):', err.message);
                 // Retain last rendered answer; show why this question got none
@@ -720,8 +747,26 @@ class SummaryService {
                     this.inFlight = false;
                     this.inFlightController = null;
                 }
+                if (!record.status || signal.aborted) record.status = 'replaced';
+                if (record.firstTokenAt != null) record.firstTokenMs = record.firstTokenAt - record.askedAt;
+                record.totalMs = Date.now() - record.askedAt;
+                this.saveLiveAnswer(record);
             }
         }, 800);
+    }
+
+    /**
+     * Keeps one answer in the local history (spec 2026-10-13-live-answer-history).
+     * Never throws and never logs the text: a failed write costs the row, not the answer.
+     */
+    saveLiveAnswer(record) {
+        if (!record || !record.sessionId) return;
+        try {
+            if (!this.liveAnswers) this.liveAnswers = liveAnswerRepository();
+            this.liveAnswers.save(record);
+        } catch (err) {
+            console.error('[live-answer] history row not saved:', err && err.message ? err.message : err);
+        }
     }
 
     /**

@@ -69,6 +69,7 @@ function deleteById(uid) {
             db.prepare(`DELETE FROM transcripts WHERE session_id IN (${placeholders})`).run(...sessionIds);
             db.prepare(`DELETE FROM ai_messages WHERE session_id IN (${placeholders})`).run(...sessionIds);
             db.prepare(`DELETE FROM summaries WHERE session_id IN (${placeholders})`).run(...sessionIds);
+            db.prepare(`DELETE FROM live_answers WHERE session_id IN (${placeholders})`).run(...sessionIds);
             db.prepare(`DELETE FROM sessions WHERE uid = ?`).run(uid);
         }
         db.prepare('DELETE FROM prompt_presets WHERE uid = ? AND is_default = 0').run(uid);

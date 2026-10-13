@@ -6,6 +6,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 
 ## [Unreleased]
 
+### Live answers are kept for review (spec `2026-10-13-live-answer-history`)
+
+After a real interview the owner asked how good its 101 answers had been, and they were gone: the panel was their only copy.
+
+- **Every answer is kept in the local DB** (`live_answers`): the interviewer's turn, the answer as the panel showed it, how it ended (answered, PASSIVE, cut off by a newer question, failed), the model that answered, the career route and its notes, the live check's flags and the timings. Local sessions only, never synced, deleted with the session; `LIVE_ANSWER_HISTORY=0` turns it off. This lifts C8 of the original Live Answer spec.
+- **`scripts/export-live-answers.js`** writes a session's answers, and optionally its transcript, to a file outside the repo for review.
+- **`scripts/replay-career-session.js --answers <file>`** rebuilds the answers of a recorded session with the app's own prompt, notes and LLM chain (`--no-llm`: only the notes each answer would get; `--resume` after a quota stop).
+
 ### Career router: Jev in place of the regex cue tables (branch `2026-10-13-jev-router-poc`)
 
 #### Added

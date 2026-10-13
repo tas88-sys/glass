@@ -47,6 +47,28 @@ const LATEST_SCHEMA = {
             { name: 'sync_state', type: 'TEXT DEFAULT \'clean\'' }
         ]
     },
+    // Live answers kept locally (spec 2026-10-13-live-answer-history); never synced.
+    live_answers: {
+        columns: [
+            { name: 'id', type: 'TEXT PRIMARY KEY' },
+            { name: 'session_id', type: 'TEXT NOT NULL' },
+            { name: 'asked_at_ms', type: 'INTEGER' },
+            { name: 'turn', type: 'TEXT' },
+            { name: 'question', type: 'TEXT' },
+            { name: 'answer', type: 'TEXT' },
+            { name: 'status', type: 'TEXT' },
+            { name: 'error', type: 'TEXT' },
+            { name: 'model', type: 'TEXT' },
+            { name: 'route', type: 'TEXT' },
+            { name: 'route_source', type: 'TEXT' },
+            { name: 'cue', type: 'TEXT' },
+            { name: 'sources_json', type: 'TEXT' },
+            { name: 'unverified_json', type: 'TEXT' },
+            { name: 'first_token_ms', type: 'INTEGER' },
+            { name: 'total_ms', type: 'INTEGER' },
+            { name: 'created_at', type: 'INTEGER' }
+        ]
+    },
     summaries: {
         columns: [
             { name: 'session_id', type: 'TEXT PRIMARY KEY' },

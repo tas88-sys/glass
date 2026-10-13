@@ -284,6 +284,19 @@ needed). It clears the debounce timer, aborts any in-flight `AbortController`, a
 `lastAnsweredTail`, `inFlight`, `hadFallback`, and the career session state (`careerPrev`,
 `activeCompany`, §4.7).
 
+### 4.5a Answer history (spec `2026-10-13-live-answer-history`)
+
+Each answer the debounce starts is kept in the app DB (`live_answers`): the interviewer's turn and
+the extracted question, the answer as it last stood on the panel, how it ended (`answer`, `passive`,
+`empty`, `replaced` by a newer question, `error`), the model that answered, the career route and who
+decided it, the note titles it drew on, the live check's flags, and the time to the first token and
+to the end. Local sessions only (never synced; skipped while signed in to Firebase), deleted with the
+session, and `LIVE_ANSWER_HISTORY=0` turns it off. The text is never logged.
+
+To review a session: `node scripts/export-live-answers.js --list`, then
+`node scripts/export-live-answers.js [--session <id>] --with-transcript --out <file outside the repo>`
+(default: the latest Listen session with answers).
+
 ### 4.6 Failover (Gemini, Anthropic, Groq, across providers) and debugging
 
 With Gemini, `createStreamingLLM` (`src/features/common/ai/providers/gemini.js`) keeps one
@@ -549,6 +562,15 @@ runs a recorded interview, one JSONL line per segment (`{ i, speaker, t, text, a
 reports the answers armed, the `y` segments missed, the `n` segments answered (LLM calls wasted),
 route errors, sources and the Jev call time: ids and counts only. Keep the session files with the
 KB, never in this repo. Spec R19 has the first results.
+
+With `--answers <out.jsonl>` it also writes, for each armed `y` segment (`--answers-for armed`: every
+armed one), the answer the app would give: the real `makeLiveAnswer`, the session's transcript up to
+that segment, the career context with vectors and the LLM chain from the app's settings (or
+`--llm-provider`/`--llm-models`; `--block-providers gemini` drops a provider). One LLM call per answer,
+about 5,000 input tokens: a 429 waits and retries, a daily quota stops the run, and `--resume` picks up
+without asking again for the answers the file has. `--no-llm` writes the route, the note titles and the
+notes text each answer would get, with no LLM call. The file holds note text, so it must be outside
+this repo (the script refuses a path inside it).
 
 Each item's own source note is left out.
 
