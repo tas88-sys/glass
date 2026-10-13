@@ -36,13 +36,14 @@ class DeepgramProvider {
     }
 }
 
-function createSTT({
-    apiKey,
-    language = 'en-US',
-    sampleRate = 24000,
-    callbacks = {},
-  }) {
-    const qs = new URLSearchParams({
+/**
+ * The query string of the live-transcription WebSocket. `language` is the
+ * only thing that decides what Deepgram listens for.
+ * @param {{language: string, sampleRate?: number}} opts
+ * @returns {URLSearchParams}
+ */
+function buildListenQuery({ language, sampleRate = 24000 }) {
+    return new URLSearchParams({
       model: 'nova-3',
       encoding: 'linear16',
       sample_rate: sampleRate.toString(),
@@ -51,9 +52,17 @@ function createSTT({
       interim_results: 'true',
       channels: '1',
     });
-  
-    const url = `wss://api.deepgram.com/v1/listen?${qs}`;
-  
+}
+
+function createSTT({
+    apiKey,
+    language = 'pt-BR',
+    sampleRate = 24000,
+    callbacks = {},
+  }) {
+    const url = `wss://api.deepgram.com/v1/listen?${buildListenQuery({ language, sampleRate })}`;
+    console.log(`[Deepgram] Opening live STT, language=${language}`);
+
     const ws = new WebSocket(url, {
       headers: { Authorization: `Token ${apiKey}` },
     });
@@ -106,6 +115,7 @@ function createStreamingLLM(opts) {
 module.exports = {
     DeepgramProvider,
     createSTT,
+    buildListenQuery,
     createLLM,
     createStreamingLLM
 };

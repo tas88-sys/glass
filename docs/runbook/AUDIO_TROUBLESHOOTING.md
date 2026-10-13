@@ -68,6 +68,21 @@ This is the AEC (acoustic echo cancellation) path failing to subtract speaker bl
 
 ---
 
+## 4b. "I speak Portuguese but it is transcribed as English"
+
+- Both STT sessions listen for one language, the **Transcription language** setting in
+  Settings (**Português (Brasil)** by default, or **English (US)**). Before this setting the
+  language was fixed to English and never reached the provider from the UI.
+- Check the log line `[SttService] STT language: pt-BR (deepgram)` at **Listen**. For Deepgram
+  the language is the `language=` parameter of the WebSocket URL (`[Deepgram] Opening live STT,
+  language=…`).
+- A change applies to the next Listen session (or the next 20-min renewal).
+- One language per session: if the other party speaks another language, that side comes out
+  wrong. Per-side language and Deepgram `language=multi` are not implemented.
+- `OPENAI_TRANSCRIBE_LANG`, when set, overrides the setting (debugging).
+
+---
+
 ## 5. "Latency / cost is high" or "I want offline"
 
 - Switch STT to **Whisper (local)** and LLM to **Ollama (local)** in Settings — fully offline,

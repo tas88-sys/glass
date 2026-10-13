@@ -11,6 +11,7 @@ const localAIManager = require('../features/common/services/localAIManager');
 const askService = require('../features/ask/askService');
 const listenService = require('../features/listen/listenService');
 const { LIVE_FEATURES, liveFeaturesState } = require('../features/listen/liveFeatures');
+const { STT_LANGUAGES, normalizeSttLanguage } = require('../features/listen/sttLanguage');
 const permissionService = require('../features/common/services/permissionService');
 const encryptionService = require('../features/common/services/encryptionService');
 
@@ -153,6 +154,22 @@ module.exports = {
             listenWin.webContents.send('listen:liveFeaturesChanged', state);
         }
         return { success: true, ...state };
+    });
+
+    // STT language: the language both speech-to-text sessions listen for
+    ipcMain.handle('settings:getSttLanguage', async () => {
+        const s = await settingsService.getSettings();
+        return { language: normalizeSttLanguage(s.sttLanguage) };
+    });
+
+    ipcMain.handle('settings:setSttLanguage', async (event, language) => {
+        if (!STT_LANGUAGES.includes(language)) {
+            console.error('[FeatureBridge] settings:setSttLanguage refused an invalid language');
+            return { success: false, error: 'Invalid STT language.' };
+        }
+        const saved = await settingsService.saveSettings({ sttLanguage: language });
+        if (!saved || !saved.success) return saved;
+        return { success: true, language };
     });
 
     // Ask

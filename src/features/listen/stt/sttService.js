@@ -2,6 +2,7 @@ const { BrowserWindow } = require('electron');
 const { spawn } = require('child_process');
 const { createSTT } = require('../../common/ai/factory');
 const modelStateService = require('../../common/services/modelStateService');
+const { DEFAULT_STT_LANGUAGE, normalizeSttLanguage, toProviderLanguage } = require('../sttLanguage');
 
 const COMPLETION_DEBOUNCE_MS = 2000;
 
@@ -149,15 +150,33 @@ class SttService {
         this.theirCompletionTimer = setTimeout(() => this.flushTheirCompletion(), COMPLETION_DEBOUNCE_MS);
     }
 
-    async initializeSttSessions(language = 'en') {
-        const effectiveLanguage = process.env.OPENAI_TRANSCRIBE_LANG || language || 'en';
+    /**
+     * The language the sessions listen for: an explicit value when the caller
+     * passes one, else the saved `sttLanguage` setting (pt-BR by default).
+     * (OPENAI_TRANSCRIBE_LANG, applied by the caller, still overrides both.)
+     */
+    async _resolveSttLanguage(language) {
+        if (language) return normalizeSttLanguage(language);
+        try {
+            const settingsService = require('../../settings/settingsService');
+            const settings = await settingsService.getSettings();
+            return normalizeSttLanguage(settings.sttLanguage);
+        } catch (err) {
+            console.error('[SttService] could not read the saved STT language:', err.message);
+            return DEFAULT_STT_LANGUAGE;
+        }
+    }
 
+    async initializeSttSessions(language) {
         const modelInfo = await modelStateService.getCurrentModelInfo('stt');
         if (!modelInfo || !modelInfo.apiKey) {
             throw new Error('AI model or API key is not configured.');
         }
         this.modelInfo = modelInfo;
+        const effectiveLanguage = process.env.OPENAI_TRANSCRIBE_LANG
+            || toProviderLanguage(modelInfo.provider, await this._resolveSttLanguage(language));
         console.log(`[SttService] Initializing STT for ${modelInfo.provider} using model ${modelInfo.model}`);
+        console.log(`[SttService] STT language: ${effectiveLanguage} (${modelInfo.provider})`);
 
         const handleMyMessage = message => {
             if (!this.modelInfo) {
@@ -515,7 +534,7 @@ class SttService {
      * Gracefully tears down then recreates the STT sessions. Should be invoked
      * on a timer to avoid provider-side hard timeouts.
      */
-    async renewSessions(language = 'en') {
+    async renewSessions(language) {
         if (!this.isSessionActive()) {
             console.warn('[SttService] renewSessions called but no active session.');
             return;
