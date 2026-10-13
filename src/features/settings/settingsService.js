@@ -219,6 +219,7 @@ function getDefaultSettings() {
         askMode: 'default',                // 'default' | 'code' | 'debug' | 'system_design'
         preferredCodeLanguage: 'go',       // free-text; empty → infer from screenshot
         liveFeatures: 'both',              // 'both' | 'answer' | 'insights' — which Listen lanes run
+        sttLanguage: 'pt-BR',              // 'pt-BR' | 'en-US' — language both STT sessions listen for
     };
 }
 

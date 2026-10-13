@@ -109,6 +109,14 @@ channels=1, smart_format=true, interim_results=true` — matching the capture pi
 PCM16/mono/24 kHz output. Two sockets are opened (Me + Them). Messages are parsed in
 `sttService.js:240` / `:382` (`message.channel.alternatives[0].transcript`, `is_final`).
 
+**Language.** Deepgram listens for one language, sent as `language=` in the WebSocket URL
+(`buildListenQuery` in `deepgram.js`). The language comes from the **Transcription language**
+setting (`sttLanguage`: `pt-BR` default, or `en-US`), read by
+`sttService._resolveSttLanguage` at every session start and renewal and translated per provider
+by `toProviderLanguage` (`sttLanguage.js`): Deepgram and Gemini get the full tag, OpenAI gets
+`pt` / `en`. Nova-3 supports `pt-BR`. `language=multi` (code-switching) and `detect_language`
+are not used. Per-side (Me / Them) language is not implemented.
+
 **Caveats:**
 - **STT-only.** `createLLM`/`createStreamingLLM` are stubs that throw (`deepgram.js:97-104`).
   You still need a separate LLM provider (OpenAI / Gemini / Anthropic / Groq / Ollama) for Ask and

@@ -264,6 +264,8 @@ contextBridge.exposeInMainWorld('api', {
     setAutoUpdate: (isEnabled) => ipcRenderer.invoke('settings:set-auto-update', isEnabled),
     getLiveFeatures: () => ipcRenderer.invoke('settings:getLiveFeatures'),
     setLiveFeatures: (mode) => ipcRenderer.invoke('settings:setLiveFeatures', mode),
+    getSttLanguage: () => ipcRenderer.invoke('settings:getSttLanguage'),
+    setSttLanguage: (language) => ipcRenderer.invoke('settings:setSttLanguage', language),
     getContentProtectionStatus: () => ipcRenderer.invoke('get-content-protection-status'),
     toggleContentProtection: () => ipcRenderer.invoke('toggle-content-protection'),
     getCurrentShortcuts: () => ipcRenderer.invoke('settings:getCurrentShortcuts'),

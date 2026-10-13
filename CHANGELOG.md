@@ -6,6 +6,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 
 ## [Unreleased]
 
+### STT language: Portuguese (Brazil) or English, chosen in Settings
+
+#### Fixed
+
+- **Portuguese was transcribed as English.** `listenService.initializeSession` defaulted the language to `'en'`, so Deepgram always got `language=en`; the UI language never reached the STT sessions.
+
+#### Added
+
+- **Transcription language** setting (`sttLanguage`: `pt-BR` default, or `en-US`) in Settings. It sets the language of both STT sessions (Me and Them) at every Listen start and every 20-min renewal. `sttLanguage.js` maps it to the code each provider expects (Deepgram and Gemini: `pt-BR`; OpenAI: `pt`).
+- `buildListenQuery` in the Deepgram provider, tested for the `language` it sends.
+
 ### Model catalog: what each model can do comes from the providers' APIs (branch `2026-10-12-groq-otpm-images`)
 
 #### Changed

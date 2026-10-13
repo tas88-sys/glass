@@ -5,6 +5,12 @@ import {
     nextLiveFeatures,
     liveFeaturesLabel,
 } from '../../features/listen/liveFeatures.js';
+import {
+    DEFAULT_STT_LANGUAGE,
+    normalizeSttLanguage,
+    nextSttLanguage,
+    sttLanguageLabel,
+} from '../../features/listen/sttLanguage.js';
 // import { getOllamaProgressTracker } from '../../features/common/services/localProgressTracker.js'; // 제거됨
 
 // The cap Ask runs with on Groq (it sets none; the provider default). A model
@@ -520,6 +526,9 @@ export class SettingsView extends LitElement {
         // Live features: which Listen lanes run
         liveFeatures: { type: String, state: true },
         liveFeaturesLoading: { type: Boolean, state: true },
+        // STT language: what the speech-to-text sessions listen for
+        sttLanguage: { type: String, state: true },
+        sttLanguageLoading: { type: Boolean, state: true },
         // Ollama related properties
         ollamaStatus: { type: Object, state: true },
         ollamaModels: { type: Array, state: true },
@@ -566,6 +575,8 @@ export class SettingsView extends LitElement {
         this.autoUpdateLoading = true;
         this.liveFeatures = DEFAULT_LIVE_FEATURES;
         this.liveFeaturesLoading = true;
+        this.sttLanguage = DEFAULT_STT_LANGUAGE;
+        this.sttLanguageLoading = true;
         // Ask Mode Shortcuts
         this.preferredCodeLanguage = 'go';
         this.loadInitialData();
@@ -618,6 +629,39 @@ export class SettingsView extends LitElement {
             this.liveFeatures = DEFAULT_LIVE_FEATURES;
         }
         this.liveFeaturesLoading = false;
+        this.requestUpdate();
+    }
+
+    // STT language: Português (Brasil) <-> English (US)
+    async loadSttLanguage() {
+        if (!window.api) return;
+        this.sttLanguageLoading = true;
+        try {
+            const state = await window.api.settingsView.getSttLanguage();
+            this.sttLanguage = normalizeSttLanguage(state && state.language);
+        } catch (e) {
+            console.error('Error loading STT language setting:', e);
+            this.sttLanguage = DEFAULT_STT_LANGUAGE;
+        }
+        this.sttLanguageLoading = false;
+        this.requestUpdate();
+    }
+
+    async handleToggleSttLanguage() {
+        if (!window.api || this.sttLanguageLoading) return;
+        this.sttLanguageLoading = true;
+        this.requestUpdate();
+        try {
+            const result = await window.api.settingsView.setSttLanguage(nextSttLanguage(this.sttLanguage));
+            if (result && result.success) {
+                this.sttLanguage = normalizeSttLanguage(result.language);
+            } else {
+                console.error('Failed to update STT language setting:', result && result.error);
+            }
+        } catch (e) {
+            console.error('Error changing STT language:', e);
+        }
+        this.sttLanguageLoading = false;
         this.requestUpdate();
     }
 
@@ -1289,6 +1333,7 @@ export class SettingsView extends LitElement {
         this.setupWindowResize();
         this.loadAutoUpdateSetting();
         this.loadLiveFeatures();
+        this.loadSttLanguage();
         // Force one height calculation immediately (innerHeight may be 0 at first)
         setTimeout(() => this.updateScrollHeight(), 0);
     }
@@ -1330,6 +1375,7 @@ export class SettingsView extends LitElement {
             }
             this.loadAutoUpdateSetting();
             this.loadLiveFeatures();
+            this.loadSttLanguage();
             // Reload model settings when user state changes (Firebase login/logout)
             this.loadInitialData();
         };
@@ -1877,6 +1923,12 @@ export class SettingsView extends LitElement {
                     </button>
                     <div style="font-size: 9px; color: rgba(255,255,255,0.5); margin-top: -2px;">
                         Off means no calls for that panel. Insights off: no summary is made or saved. Takes effect on the next turn.
+                    </div>
+                    <button class="settings-button full-width" @click=${this.handleToggleSttLanguage} ?disabled=${this.sttLanguageLoading}>
+                        <span>Transcription language: ${sttLanguageLabel(this.sttLanguage)}</span>
+                    </button>
+                    <div style="font-size: 9px; color: rgba(255,255,255,0.5); margin-top: -2px;">
+                        The language the speech-to-text listens for, on both sides. Applies to the next Listen session.
                     </div>
                     
                     <div class="move-buttons">
