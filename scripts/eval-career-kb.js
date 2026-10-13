@@ -62,7 +62,7 @@ const TARGETS = {
     queryEmbeddingP95Ms: 800,   // SC-004
     overfitGapPts: 10,          // FR-019
     jevCallP95Ms: 600,          // router R-SC-003: fits inside the 800 ms debounce
-    fallbackRate: 0.02,         // router R-SC-004
+    fallbackRate: 0.05,         // router R-SC-004 (raised from 2%: the low-confidence fallback saves misses, R18)
 };
 // Without the debounce in front, the eval waits for the whole Jev call.
 const EVAL_ROUTE_BUDGET_MS = 5000;

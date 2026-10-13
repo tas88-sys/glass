@@ -55,8 +55,8 @@ by the author of the Jev criteria, so it is biased toward Jev: a signal, not pro
 | Whole real set, general → personal | 0% | 0% |
 
 - Jev call p50/p95: about 280/340 ms from the owner's machine.
-- 6 of 133 turns fall below the floor (4.5%), and the regex decides them. With the floor at 0 there is one more miss (q126), so the floor stays at 0.5. The fallback earns its place, and R-SC-004 (≤ 2%) reads as too strict.
-- **Release checks:** R-SC-001 fails only on Portuguese. All 75 Portuguese items are tuning items for the regex, and no real Portuguese item is fresh, so that comparison favors the regex. Fresh real Portuguese questions are what would settle it.
+- 6 of 133 turns fall below the floor (4.5%), and the regex decides them. With the floor at 0 there is one more miss (q126), so the floor stays at 0.5. The fallback earns its place, so R-SC-004 moves from ≤ 2% to ≤ 5% (owner decision, 2026-10-13).
+- **Release checks:** R-SC-001 fails only on Portuguese. All 75 Portuguese items are tuning items for the regex, and no real Portuguese item is fresh, so that comparison favors the regex. R-SC-001 stays as written (owner decision, 2026-10-13): measuring it on the holdout per language would leave Portuguese untested, since the holdout has no Portuguese items yet. Fresh real Portuguese questions are what would settle it.
 - **Live eval with Groq, Gemini and Deepgram blocked:** no blocked request was attempted, routes came back 11/12, and the route wait was p95 0.3 ms. It also found company intros being answered, which was fixed in the criteria.
 
 ### Superseded

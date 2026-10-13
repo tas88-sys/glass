@@ -97,7 +97,8 @@ the tables never saw.
   `general → personal` with Jev ≤ with the regex router.
 - **R-SC-002** No company leak (the existing SC-003 stays 0).
 - **R-SC-003** Jev call p95 ≤ 600 ms, measured from the owner's machine.
-- **R-SC-004** Fallbacks ≤ 2% of the eval items with no injected failure.
+- **R-SC-004** Fallbacks ≤ 5% of the eval items with no injected failure. It was 2% until
+  2026-10-13: most fallbacks are low-confidence turns, where the regex decision saves misses (R18).
 - **R-SC-005** Live: the answer's wait for the route ≤ 50 ms at p95 (live eval), never above 250 ms.
 - **R-SC-006** With Jev off, today's results exactly (C1).
 - The old SC-004 (answer path p95 ≤ 20 ms) now counts from the route on: the route call runs inside the debounce.
