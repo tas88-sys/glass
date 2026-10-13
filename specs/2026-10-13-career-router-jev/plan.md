@@ -1,6 +1,6 @@
 # Plan: career router with Jev
 
-Spec: [spec.md](spec.md) · Research: [research.md](research.md) (R18, R19)
+Spec: [spec.md](spec.md) · Research: [research.md](research.md) (R18, R19, R20)
 
 ## Architecture
 

@@ -70,6 +70,12 @@ describe('buildRequest (FR-002, FR-011)', () => {
         for (const r of ROUTES) assert.match(q.criteria[r], /E\.g\. "[^"]+" \/ "[^"]+"/, r);
     });
 
+    it('routes the invitation to ask the interviewer questions as company (R20)', () => {
+        const { company } = buildRequest('x').questions.route.criteria;
+        assert.match(company, /inviting the candidate's own questions/);
+        assert.match(company, /"What would you like to know about us\?" \/ "[^"]+"/);
+    });
+
     it('always asks whether the turn wants an answer, bilingual and naming fillers and monologues (R19)', () => {
         const q = buildRequest('Aham.').questions.asks;
         assert.equal(q.type, 'noul');

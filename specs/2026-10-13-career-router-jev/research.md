@@ -168,3 +168,75 @@ replay is the Portuguese check from now on (R-SC-007).
 
 `asks` adds about 200 input tokens per call (under US$ 0.00003 a call). Jev p50/p95 in the replays:
 300/450 ms. The backchannel gate removes about a third of the calls in a session.
+
+## R20: a second transcript of the same session, the candidate's-questions moment, and Jev's variance
+
+**Decision**: the `company` criterion also names the interviewer inviting the candidate's own
+questions (about the company, the team, the role or the process). The regex stays frozen. The
+session labels were corrected where the second transcript shows what a segment was.
+
+### The second transcript
+
+The owner also recorded the R19 interview with another recorder (Wispr Flow): whole turns with the
+speakers named, no timestamps. It lives in the KB repo, never here (C5). Read against the app's own
+segments:
+
+- **What the app's STT lost.** Every interviewer question reached the app except the end of one (a
+  confirmation question lost in garbled speech). The app's recording started about a minute and a
+  half in, after the greetings.
+- **Split questions.** About 10 of the roughly 45 interviewer questions reached the app in two or
+  three segments. That confirms `interviewer_before` (R19) on evidence not used to design it.
+- **Labels.** 6 segments labeled `n` were parts of questions: the first words of one, a disbelieving
+  confirmation the candidate answered, a question whose end the STT lost. They are `e` now. Two
+  segments swapped `y` and `e`, since the question was in the first one. The corrections were made
+  after the R19 replay results were known, by the same rule for both routers, so the numbers below
+  give both label sets.
+
+### The miss: "do you have any questions for us?"
+
+The session ends with the interviewer inviting the candidate's questions about the company. Neither
+router armed an answer: Jev read it as general with low confidence, so the regex decided, and the
+regex found no cue. The KB has sections written for this moment (the candidate's questions for each
+company), and on the company route the retrieval ranks them first (checked with `ask-career-kb.js`).
+Only the routing was missing.
+
+Offline, with `interviewer_company` set: 6 invented invitations (3 PT, 3 EN, short and long), the
+session's own invitation, and 8 controls (2 company questions; 6 others, among them "take your time,
+feel free", "feel free to bring another project", the interviewer presenting the company, and "any
+questions about the problem before you start coding?"):
+
+| | Invented invitations, company ≥ 0.5 | The session's invitation | Controls kept right |
+|---|---|---|---|
+| Criterion before | 2/6 | no (general, 0.45) | 8/8 |
+| With the invitation clause | 6/6 (confidence 0.93–1.00) | yes (company, 1.00) | 8/8 (one went company at 0.27, below the floor, so the regex decides) |
+
+The interviewer's closing "if you have more questions, feel free", after the candidate's questions,
+stays general either way (asks 0.07; labeled `e`).
+
+### Results with the change
+
+- **Eval (133 real items):** routing identical but for q040, a miss before and after (personal →
+  general, now → company in one of two runs). Synthetic set: 40/40.
+- **The session:** the invitation routes company at 1.00 in both runs and is armed.
+
+  | Corrected labels (43 `y`, 27 `e`, 109 `n`) | `y` armed | `n` armed | Route errors |
+  |---|---|---|---|
+  | Jev, before the change | 42/43 | 20 | 1 |
+  | Jev, with the change, run 1 | 43/43 | 22 | 1 |
+  | Jev, with the change, run 2 | 42/43 | 21 | 1 |
+  | Regex | 36/43 | 25 | 27 |
+
+  With the R19 labels the same runs read: Jev before 42/43, 24 wasted; after 43/43, 26; regex 36/43, 26.
+- **The five validation sessions:** `y` 61/62 and 27 wasted (7 on the coherent sessions), against
+  61/62 and 28 (7) before the change.
+
+### Jev is not deterministic
+
+Two replays of the session with the same code and the same inputs differ in 4 of 179 armed
+decisions (2%): the probabilities move by up to about 0.05, so turns near asks 0.3, the 0.2 veto or
+the 0.5 floor flip. In the evening the eval had 11, 12 and 11 items below the floor over three runs
+(8.3–9.0%), against 9 (6.8%) in the morning. The KB also gained notes in between, which changes the
+names in the state, so the two causes are not separated. What follows from it:
+
+- Differences of one or two segments or items between single runs are noise.
+- A release check near its limit (R-SC-004) needs several runs; it fails in all of them today.

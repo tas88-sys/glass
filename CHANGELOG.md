@@ -41,6 +41,7 @@ A 71-minute Portuguese interview with Jev on armed 114 answers, 56 of them on ac
 - **Criteria:** details of a project the candidate did or described count as personal. Eval: personal routed 96.1% (was 94.7%), holdout 100% (was 95.8%), Portuguese 93.3% (was 91.1%).
 - **`scripts/replay-career-session.js`** replays a labeled recorded session through the app's gate and router (Jev live, no LLM).
 - The question gate moved out of `summaryService.js` into `questionGate.js` (pure, no Electron) so scripts can run it.
+- **"Do you have any questions for us?" routes company** (spec R20): the same interview ended with the interviewer inviting the candidate's questions, and no answer came, with either router. With Jev, the company criterion now names that invitation, so the company's notes, where the candidate keeps their questions for it, go in. Invented invitations: 6/6 company (was 2/6); the eval is unchanged.
 
 #### Fixed (found by the live eval with Jev)
 

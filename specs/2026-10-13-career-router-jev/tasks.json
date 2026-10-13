@@ -99,6 +99,16 @@
       "completed_at": "2026-10-13T22:00:00Z"
     },
     {
+      "id": "T072",
+      "phase": "7-r19",
+      "description": "R20: the company criterion names the interviewer inviting the candidate's own questions (company, team, role, process), with an EN and a PT example; session labels corrected from a second transcript (KB repo).",
+      "status": "completed",
+      "target_file": "src/features/common/career/jevClient.js",
+      "verify": "node --test src/features/common/career/__tests__/jevClient.test.js; eval-career-kb.js --router jev; replay-career-session.js on the six sessions",
+      "evidence": "Invented invitations 6/6 company (was 2/6), controls 8/8; eval routing unchanged but q040 (a miss either way); synthetic 40/40; session invitation armed as company 1.00 in two runs. Results in research.md R20",
+      "completed_at": "2026-10-14T01:00:00Z"
+    },
+    {
       "id": "T-VERIFY-RELEASE",
       "phase": "verify",
       "description": "Owner: TYPESAFE_API_KEY in .env, about 40 fresh holdout questions (half PT, half EN) in the KB repo, then node scripts/eval-career-kb.js --router jev until R-SC-001..004 pass; live eval with PT and EN audio for R-SC-005.",
@@ -108,7 +118,8 @@
       "evidence": "2026-10-13 with the key: 33 real EN holdout items added (q101–q133). Jev 33/33 against regex 29/33 on them; synthetic 40/40 against 35/40; old PT tuning items 91.1% against 95.6% (R-SC-001 pt FAIL); fallbacks 4.5% (R-SC-004 PASS after the owner raised its limit from 2% to 5%; R-SC-001 kept as written); Jev p95 341 ms (R-SC-003 PASS); live eval with groq/gemini/deepgram blocked: route wait p95 0.3 ms (R-SC-005 PASS). Details in research.md R18 Results",
       "completed_at": null,
       "update_2026_10_13_r19": "Fresh real PT exists now (the 2026-10-13 session): R-SC-007 replay y 42/43 vs regex 36/43, wasted 24 vs 26, route errors 1 vs 26 (PASS); per the owner's R18 decision it settles R-SC-001 for PT. Eval after R19: all 96.1%, holdout 100%, pt 93.3% (tuning items), fallbacks 9/133 = 6.8% (R-SC-004 FAIL by two items, all low-confidence). Held-out EN sessions: y 61/62 both, wasted 28 vs regex 18 (17 from one wrong-language STT session; coherent sessions 7 vs 8)",
-      "block_on": "R-SC-004 at 6.8% (9 low-confidence items) against the 5% limit; live run with real audio and a real LLM still pending"
+      "update_2026_10_13_r20": "Jev is not deterministic: two identical session replays differ in 4/179 armed decisions; eval fallbacks 11, 12, 11 of 133 over three evening runs (8.3–9.0%), 9 in the morning (the KB also changed). R-SC-007 with corrected labels: y 43/43 and 42/43 vs regex 36/43, wasted 22 and 21 vs 25, route errors 1 vs 27",
+      "block_on": "R-SC-004 at 8.3–9.0% over three runs (11–12 low-confidence items) against the 5% limit; live run with real audio and a real LLM still pending"
     }
   ]
 }

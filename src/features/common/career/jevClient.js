@@ -52,8 +52,10 @@ const ROUTE_CRITERIA = {
         '"And how many services did you end up with?" / "Quando você diz que o serviço era assíncrono, o que você quer dizer?"',
     company:
         'Asks the candidate about the interviewer\'s company or this role: why they want to join, what they know about the company, ' +
-        'what they think of the job opening, or a company from `note_companies` named as the one interviewing. ' +
-        'E.g. "Why do you want to join us?" / "Por que você quer trabalhar com a gente?"',
+        'what they think of the job opening, or a company from `note_companies` named as the one interviewing; ' +
+        'also the interviewer inviting the candidate\'s own questions about the company, the team, the role or the process. ' +
+        'E.g. "Why do you want to join us?" / "Por que você quer trabalhar com a gente?"; ' +
+        '"What would you like to know about us?" / "Queria abrir pra você perguntar o que quiser sobre a gente."',
     ambiguous:
         'Asks the candidate a hypothetical, habitual or opinion question, where their experience may help but is not asked for directly. ' +
         'E.g. "How would you handle a production outage?" / "Como você lida com prazos apertados?"',

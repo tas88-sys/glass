@@ -4,7 +4,7 @@ meta:
   spec_id: 2026-10-13-career-router-jev
   spec_name: career-router-jev
   status: in-progress    # draft | in-progress | approved | completed
-  phase: verify          # code and unit tests done; R19 (real-session gate) added 2026-10-13
+  phase: verify          # code and unit tests done; R19 (real-session gate) and R20 (candidate's questions) added 2026-10-13
   created: 2026-10-13
   updated: 2026-10-13
 
@@ -125,13 +125,16 @@ the tables never saw.
 - **R-SC-003** Jev call p95 ≤ 600 ms, measured from the owner's machine.
 - **R-SC-004** Fallbacks ≤ 5% of the eval items with no injected failure. It was 2% until
   2026-10-13: most fallbacks are low-confidence turns, where the regex decision saves misses (R18).
+  Jev is not deterministic (R20): judge it on several runs.
 - **R-SC-005** Live: the answer's wait for the route ≤ 50 ms at p95 (live eval), never above 250 ms.
 - **R-SC-006** With Jev off, today's results exactly (C1).
 - **R-SC-007** On each labeled real session with working STT (replay, FR-015), with the defaults:
   Jev arms at least the regex's `y` segments, wastes no more `n` segments than the regex, and makes
   no more route errors. For Portuguese this replaces the regex-tuning items in R-SC-001 (owner
   decision of R18: fresh real Portuguese questions settle it). 2026-10-13 session: `y` 42/43 against
-  36/43, `n` 24 against 26, route errors 1 against 26 (R19).
+  36/43, `n` 24 against 26, route errors 1 against 26 (R19). With the labels corrected from a
+  second transcript (R20): `y` 43/43 and 42/43 over two runs against 36/43, `n` 22 and 21 against 25,
+  route errors 1 against 27.
 - The old SC-004 (answer path p95 ≤ 20 ms) now counts from the route on: the route call runs inside the debounce.
 
 ## Edge cases
@@ -149,6 +152,9 @@ the tables never saw.
   dropped on the debounce when asks < 0.2 (FR-013).
 - **E10** STT in the wrong language (garbage text): Jev may read meaning into it and arm answers;
   the fix is the STT language (R19 known limit).
+- **E11** "Do you have any questions for us?" / "fica à vontade pra tirar suas dúvidas sobre a empresa":
+  company, so the company's notes, which hold the candidate's questions for it, go in (R20). The regex
+  router has no cue for it and stays frozen.
 
 ## Out of scope
 
