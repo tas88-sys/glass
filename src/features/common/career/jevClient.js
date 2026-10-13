@@ -10,6 +10,10 @@
 // answers.<id>.{choice, probabilities, confidence}; a `noul` question in
 // answers.<id>.noul (0..1). Errors: 401, 422 (names the field), 429, 529.
 //
+// One call asks up to three questions about the turn: route (choice), asks
+// (noul: does the turn ask the candidate for something now?) and follow_up
+// (noul, only with a previous question).
+//
 // Errors carry a kind and an HTTP status only, never the request or the
 // response body: the turn text and the manifest's names stay out of logs (C2).
 
@@ -20,6 +24,7 @@ const ROUTES = ['personal', 'company', 'ambiguous', 'general'];
 
 const MAX_TURN_CHARS = 2000;
 const MAX_PREV_CHARS = 600;
+const MAX_BEFORE_CHARS = 400;
 const MAX_NAMES = 60;
 const MAX_NAME_CHARS = 60;
 
@@ -31,6 +36,7 @@ const ROUTE_INSTRUCTIONS =
     'Classify `turn`, the interviewer\'s latest words in a job interview, by what the candidate should draw on to answer. ' +
     'The turn may be in English or Brazilian Portuguese and may contain speech-to-text errors. ' +
     '`previous_question` is the last question the candidate answered, for context. ' +
+    '`interviewer_before` is what the interviewer said just before `turn`, when recent: speech-to-text cuts one question into pieces, so `turn` may finish it. ' +
     '`candidate_names` are the candidate\'s own past employers and projects; `note_companies` are companies the candidate prepared for; ' +
     '`interviewer_company` is the company running this interview, when known.';
 
@@ -39,8 +45,11 @@ const ROUTE_INSTRUCTIONS =
 const ROUTE_CRITERIA = {
     personal:
         'Asks the candidate about their own background: past experience, something they did, their career, strengths and weaknesses, ' +
-        'motivations, why they are leaving, salary, availability, or one of `candidate_names`. ' +
-        'E.g. "Tell me about a time you disagreed with a teammate" / "Me conta de uma vez que você discordou do seu time".',
+        'motivations, why they are leaving, salary, availability, or one of `candidate_names`; ' +
+        'also the details of a project or system the candidate did or described: how it worked, its numbers, their choices, ' +
+        'or what they meant by something they said. ' +
+        'E.g. "Tell me about a time you disagreed with a teammate" / "Me conta de uma vez que você discordou do seu time"; ' +
+        '"And how many services did you end up with?" / "Quando você diz que o serviço era assíncrono, o que você quer dizer?"',
     company:
         'Asks the candidate about the interviewer\'s company or this role: why they want to join, what they know about the company, ' +
         'what they think of the job opening, or a company from `note_companies` named as the one interviewing. ' +
@@ -49,10 +58,23 @@ const ROUTE_CRITERIA = {
         'Asks the candidate a hypothetical, habitual or opinion question, where their experience may help but is not asked for directly. ' +
         'E.g. "How would you handle a production outage?" / "Como você lida com prazos apertados?"',
     general:
-        'Anything else: a technical or factual question that is not about the candidate, small talk, or a statement that asks nothing, ' +
+        'Anything else: a technical or factual question that is not about the candidate\'s own work, small talk, or a statement that asks nothing, ' +
         'such as the interviewer presenting themselves, their company or the role. ' +
         'E.g. "What is the difference between a process and a thread?" / "Aqui na empresa a gente faz deploy toda semana."',
 };
+
+// Whether the turn wants an answer from the candidate now (R19). The live gate
+// uses it: statement-form turns arm only when it is high, and question-form
+// turns are dropped when it is low (an acknowledgment that ends in "?", a
+// monologue with a rhetorical question in it).
+const ASKS_INSTRUCTIONS =
+    'Does `turn` ask the candidate for something to answer now: a question, a request, or a check that they should confirm or explain, ' +
+    'even without a question mark, in broken speech, or as the end of a question begun in `interviewer_before`? ' +
+    'Interviewers often ask by stating their understanding of what the candidate did and pausing for them to confirm or correct it ' +
+    '(e.g. "so you owned the rollout and the team only reviewed it" / "então era você que fazia o deploy e o time só revisava"); that is asking. ' +
+    'Answer no for an acknowledgment, filler or reaction ("aham", "entendi", "beleza", "got it", "hã?"), small talk, ' +
+    'a fragment that asks nothing yet, or the interviewer telling or explaining something (about themselves, their company, the role or the process), ' +
+    'even when it contains a rhetorical question. The turn may be in English or Brazilian Portuguese and may contain speech-to-text errors.';
 
 const FOLLOW_UP_INSTRUCTIONS =
     'Is `turn` a short follow-up asking for more about `previous_question` (the outcome, what happened next, what was learned), ' +
@@ -94,7 +116,7 @@ function names(list) {
 /**
  * The request body for one turn.
  * @param {string} text
- * @param {{ previousQuestion?: string|null, previousRoute?: string|null, interviewerCompany?: string|null,
+ * @param {{ previousQuestion?: string|null, previousRoute?: string|null, previousTurn?: string|null, interviewerCompany?: string|null,
  *           entities?: string[], companies?: string[] }} [ctx]
  * @param {string} [model]
  */
@@ -106,6 +128,9 @@ function buildRequest(text, ctx = {}, model = DEFAULT_MODEL) {
         state.previous_question = tail(prevQ, MAX_PREV_CHARS);
         if (typeof c.previousRoute === 'string' && c.previousRoute) state.previous_route = c.previousRoute;
     }
+    // The interviewer's segment just before this one (R19): its end, where a split question begins.
+    const before = typeof c.previousTurn === 'string' ? c.previousTurn.trim() : '';
+    if (before) state.interviewer_before = tail(before, MAX_BEFORE_CHARS);
     const company = typeof c.interviewerCompany === 'string' ? clip(c.interviewerCompany.trim(), MAX_NAME_CHARS) : '';
     if (company) state.interviewer_company = company;
     const candidate = names(c.entities);
@@ -115,6 +140,7 @@ function buildRequest(text, ctx = {}, model = DEFAULT_MODEL) {
 
     const questions = {
         route: { type: 'choice', instructions: ROUTE_INSTRUCTIONS, criteria: { ...ROUTE_CRITERIA } },
+        asks: { type: 'noul', instructions: ASKS_INSTRUCTIONS },
     };
     if (prevQ) questions.follow_up = { type: 'noul', instructions: FOLLOW_UP_INSTRUCTIONS };
     return { model, state, questions };
@@ -125,7 +151,7 @@ const unit = x => typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= 
 /**
  * The answers we use, or null when the body is not what the API documents.
  * @param {unknown} json
- * @returns {{ route: string, confidence: number, probabilities: Record<string, number>, followUp: number|null, model: string|null }|null}
+ * @returns {{ route: string, confidence: number, probabilities: Record<string, number>, asks: number|null, followUp: number|null, model: string|null }|null}
  */
 function parseResponse(json) {
     if (!json || typeof json !== 'object') return null;
@@ -137,13 +163,13 @@ function parseResponse(json) {
     if (r.probabilities && typeof r.probabilities === 'object') {
         for (const k of ROUTES) if (unit(r.probabilities[k])) probabilities[k] = r.probabilities[k];
     }
-    const f = answers.follow_up;
-    const followUp = f && typeof f === 'object' && unit(f.noul) ? f.noul : null;
+    const noul = a => (a && typeof a === 'object' && unit(a.noul) ? a.noul : null);
     return {
         route: r.choice,
         confidence: r.confidence,
         probabilities,
-        followUp,
+        asks: noul(answers.asks),
+        followUp: noul(answers.follow_up),
         model: typeof json.model === 'string' ? json.model : null,
     };
 }
@@ -258,6 +284,7 @@ module.exports = {
     MAX_NAME_CHARS,
     MAX_TURN_CHARS,
     MAX_PREV_CHARS,
+    MAX_BEFORE_CHARS,
     JevError,
     buildRequest,
     parseResponse,

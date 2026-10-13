@@ -18,6 +18,8 @@ _references:
     - "src/features/common/career/intentRouter.js"
     - "src/features/listen/summary/summaryService.js"
     - "scripts/eval-career-kb.js"
+    - "src/features/listen/summary/questionGate.js"
+    - "scripts/replay-career-session.js"
 
 tests:
   - id: AT-001
@@ -25,6 +27,13 @@ tests:
     requirement: [FR-001, FR-002, FR-003, FR-004, FR-005, FR-006, FR-007, FR-008, FR-010, FR-011]
     type: command
     command: "node --test src/features/common/career/__tests__/jevClient.test.js src/features/common/career/__tests__/jevRouter.test.js src/features/common/career/__tests__/kbService.test.js src/features/listen/summary/__tests__/liveAnswerCareer.test.js"
+    expect: {exit_code: 0}
+
+  - id: AT-005
+    title: "R19 gate: backchannels, asks, the debounce drop and the previous segment"
+    requirement: [FR-002, FR-007, FR-013, FR-014]
+    type: command
+    command: "node --test src/features/listen/summary/__tests__/questionGate.test.js src/features/listen/summary/__tests__/liveAnswerCareer.test.js"
     expect: {exit_code: 0}
 
   - id: AT-002
@@ -71,6 +80,15 @@ tests:
     environment: local-kb
     command: "node scripts/eval-career-kb.js --router regex"
     expect: {routing_equals_previous_release: true}
+
+  - id: AT-REL-004
+    title: "Session replay against the regex router"
+    requirement: [R-SC-007, FR-015]
+    type: command
+    environment: jev
+    command: "node scripts/replay-career-session.js --session glass-eval/sessions/<file>.jsonl --router jev; then --router regex"
+    expect: {jev_y_armed_gte_regex: true, jev_n_armed_lte_regex: true, jev_route_errors_lte_regex: true}
+    note: "Sessions whose STT ran in the wrong language are reported apart (R19 known limit)"
 
   - id: AT-REL-003
     title: "Live route wait"

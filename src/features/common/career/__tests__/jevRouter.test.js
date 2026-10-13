@@ -12,7 +12,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { createJevRouter, readConfig, DEFAULTS, BREAKER_FAILURES, BREAKER_COOL_MS, CACHE_SIZE } = require('../jevRouter');
+const { createJevRouter, readConfig, DEFAULTS, BREAKER_FAILURES, BREAKER_COOL_MS, CACHE_SIZE, BEFORE_WINDOW_MS } = require('../jevRouter');
 const { classifyCareerIntent, FOLLOW_UP_WINDOW_MS } = require('../intentRouter');
 
 const KEY = { TYPESAFE_API_KEY: 'test-key' };
@@ -447,5 +447,49 @@ describe('logs and stats carry no text (FR-010, C2)', () => {
         assert.deepEqual(s.failed, { rate: 1 });
         assert.deepEqual(s.fallbacks, { rate: 1 });
         assert.equal(s.model, 'jev-1.13.0');
+    });
+});
+
+describe('asks and the segment before (R19)', () => {
+    const withAsks = (route, confidence, asks, followUp) => {
+        const b = body(route, confidence, followUp);
+        b.answers.asks = { type: 'noul', noul: asks };
+        return b;
+    };
+
+    it('every decision Jev answered carries its asks; a regex decision carries null', async () => {
+        const jev = await router(ok(withAsks('personal', 0.9, 0.81))).r.decide('Me conta do seu último projeto', ctx());
+        assert.equal(jev.asks, 0.81);
+        const follow = await router(ok(withAsks('general', 0.6, 0.77, 0.9))).r.decide('E como terminou?', ctx({ prev: prevPersonal() }));
+        assert.deepEqual([follow.cue, follow.asks], ['follow-up', 0.77]);
+        const low = await router(ok(withAsks('general', 0.3, 0.12))).r.decide('Aham, sei.', ctx());
+        assert.deepEqual([low.fallback, low.asks], ['low', 0.12], 'below the floor the regex routes, Jev\'s asks stays');
+        const failed = await router(status(529)).r.decide('Aham, sei.', ctx());
+        assert.equal(failed.asks, null);
+        const off = await router(ok(withAsks('general', 0.9, 0.1)), { env: {} }).r.decide('Aham, sei.', ctx());
+        assert.equal(off.asks, null);
+        const none = await router(ok(body('general', 0.9))).r.decide('O que é um mutex?', ctx());
+        assert.equal(none.asks, null, 'an answer without asks');
+    });
+
+    it('askPolicy: defaults, env, and out-of-range values fall back', () => {
+        assert.deepEqual(router(ok(body('general'))).r.askPolicy(), { min: DEFAULTS.askMin, veto: DEFAULTS.askVeto });
+        assert.deepEqual(router(ok(body('general')), { env: { ...KEY, CAREER_ROUTER_ASK_MIN: '0.6', CAREER_ROUTER_ASK_VETO: '0' } }).r.askPolicy(), { min: 0.6, veto: 0 });
+        assert.deepEqual(router(ok(body('general')), { env: { ...KEY, CAREER_ROUTER_ASK_MIN: '7', CAREER_ROUTER_ASK_VETO: 'x' } }).r.askPolicy(), { min: DEFAULTS.askMin, veto: DEFAULTS.askVeto });
+        assert.ok(DEFAULTS.askVeto < DEFAULTS.askMin, 'a question-form turn is dropped only below what a statement needs');
+    });
+
+    it(`sends the interviewer's segment before when it began at most ${BEFORE_WINDOW_MS / 1000}s earlier, and keys the cache on it`, async () => {
+        const { r, fetchImpl } = router(ok(withAsks('personal', 0.9, 0.7)));
+        const before = { text: 'e aí, quando vocês migraram para o Kubernetes,', ts: T0 - 3000 };
+        await r.decide('ficaram quantos pods no fim?', ctx({ before }));
+        assert.equal(fetchImpl.bodies[0].state.interviewer_before, before.text);
+        await r.decide('ficaram quantos pods no fim?', ctx());
+        assert.equal(fetchImpl.bodies.length, 2, 'without the segment it is another call');
+        assert.ok(!('interviewer_before' in fetchImpl.bodies[1].state));
+        await r.decide('e o banco?', ctx({ before: { ...before, ts: T0 - BEFORE_WINDOW_MS - 1 } }));
+        assert.ok(!('interviewer_before' in fetchImpl.bodies[2].state), 'too old');
+        await r.decide('e a fila?', ctx({ before: { text: '   ', ts: T0 } }));
+        assert.ok(!('interviewer_before' in fetchImpl.bodies[3].state), 'blank');
     });
 });

@@ -21,6 +21,7 @@ const {
     MAX_NAME_CHARS,
     MAX_TURN_CHARS,
     MAX_PREV_CHARS,
+    MAX_BEFORE_CHARS,
     JevError,
     buildRequest,
     parseResponse,
@@ -54,7 +55,7 @@ describe('buildRequest (FR-002, FR-011)', () => {
         assert.equal(body.model, DEFAULT_MODEL);
         assert.match(body.model, /^jev-\d+\.\d+\.\d+$/, 'a version, never an alias');
         assert.deepEqual(body.state, { turn: 'Tell me about a time you led a migration.' });
-        assert.deepEqual(Object.keys(body.questions), ['route']);
+        assert.deepEqual(Object.keys(body.questions), ['route', 'asks']);
         const q = body.questions.route;
         assert.equal(q.type, 'choice');
         assert.equal(typeof q.instructions, 'string');
@@ -67,6 +68,25 @@ describe('buildRequest (FR-002, FR-011)', () => {
         assert.match(q.instructions, /English or Brazilian Portuguese/);
         assert.match(q.instructions, /speech-to-text errors/);
         for (const r of ROUTES) assert.match(q.criteria[r], /E\.g\. "[^"]+" \/ "[^"]+"/, r);
+    });
+
+    it('always asks whether the turn wants an answer, bilingual and naming fillers and monologues (R19)', () => {
+        const q = buildRequest('Aham.').questions.asks;
+        assert.equal(q.type, 'noul');
+        assert.match(q.instructions, /English or Brazilian Portuguese/);
+        assert.match(q.instructions, /speech-to-text errors/);
+        assert.match(q.instructions, /acknowledgment, filler/);
+        assert.match(q.instructions, /telling or explaining/);
+    });
+
+    it('sends the interviewer segment before as interviewer_before, keeping its end; the instructions say what it is (R19)', () => {
+        const long = `${'blah '.repeat(200)}e aí, quando vocês migraram para o Kubernetes,`;
+        const body = buildRequest('ficaram quantos pods?', { previousTurn: long });
+        assert.equal(body.state.interviewer_before.length, MAX_BEFORE_CHARS);
+        assert.ok(body.state.interviewer_before.endsWith('para o Kubernetes,'));
+        assert.ok(!('interviewer_before' in buildRequest('x', { previousTurn: '  ' }).state));
+        assert.match(body.questions.route.instructions, /`interviewer_before`/);
+        assert.match(body.questions.asks.instructions, /`interviewer_before`/);
     });
 
     it('asks the follow-up question only with a previous question, and keeps its end', () => {
@@ -108,12 +128,14 @@ describe('buildRequest (FR-002, FR-011)', () => {
 
 describe('parseResponse (FR-003)', () => {
     it('reads the documented answer shape', () => {
-        const out = parseResponse(answer('company', 0.81, { follow_up: { type: 'noul', noul: 0.12 } }));
-        assert.deepEqual(out, { route: 'company', confidence: 0.81, probabilities: { company: 0.81 }, followUp: 0.12, model: 'jev-1.13.0' });
+        const out = parseResponse(answer('company', 0.81, { asks: { type: 'noul', noul: 0.93 }, follow_up: { type: 'noul', noul: 0.12 } }));
+        assert.deepEqual(out, { route: 'company', confidence: 0.81, probabilities: { company: 0.81 }, asks: 0.93, followUp: 0.12, model: 'jev-1.13.0' });
     });
 
-    it('no follow-up answer → followUp null', () => {
-        assert.equal(parseResponse(answer()).followUp, null);
+    it('no asks or follow-up answer → null for each, the route still parses', () => {
+        const out = parseResponse(answer());
+        assert.equal(out.asks, null);
+        assert.equal(out.followUp, null);
     });
 
     it('null for anything off the documented shape', () => {
@@ -133,7 +155,8 @@ describe('parseResponse (FR-003)', () => {
     });
 
     it('drops a malformed follow-up or probability instead of failing', () => {
-        const out = parseResponse(answer('general', 0.7, { follow_up: { noul: 'yes' } }));
+        const out = parseResponse(answer('general', 0.7, { asks: { noul: 2 }, follow_up: { noul: 'yes' } }));
+        assert.equal(out.asks, null);
         assert.equal(out.followUp, null);
         const odd = answer('general', 0.7);
         odd.answers.route.probabilities = { general: 0.7, bogus: 0.3, personal: 'x' };

@@ -79,6 +79,26 @@
       "completed_at": "2026-10-13T16:00:00Z"
     },
     {
+      "id": "T070",
+      "phase": "7-r19",
+      "description": "R19, from a real session: questionGate.js (gate out of summaryService, isBackchannel, shouldTriggerAnswer rejects backchannels); jevClient asks question, interviewer_before state, criteria name project details; jevRouter decisions carry asks, askPolicy (CAREER_ROUTER_ASK_MIN 0.3, CAREER_ROUTER_ASK_VETO 0.2), 20 s window for the previous segment; career module routeAsks, wantsAnswer, askPolicy, session.before; summaryService backchannel early return, asks check on the statement gate, drop on the debounce, lastThemTurn.",
+      "status": "completed",
+      "target_file": "src/features/listen/summary/questionGate.js",
+      "verify": "node --test src/features/listen/summary/__tests__/questionGate.test.js src/features/listen/summary/__tests__/liveAnswerCareer.test.js src/features/common/career/__tests__/jevClient.test.js src/features/common/career/__tests__/jevRouter.test.js src/features/common/career/__tests__/kbService.test.js",
+      "evidence": "All green; npm test 1420/1420 twice (one earlier run had the known groq timing flake, another a file-level liveAnswer.test.js failure that did not reproduce in 3 solo and 8 parallel runs)",
+      "completed_at": "2026-10-13T22:00:00Z"
+    },
+    {
+      "id": "T071",
+      "phase": "7-r19",
+      "description": "scripts/replay-career-session.js: replay a labeled session through the app's gate and router (Jev live, no LLM); report armed, missed, wasted, route errors, sources, fallbacks, Jev p50/p95; ids and counts only.",
+      "status": "completed",
+      "target_file": "scripts/replay-career-session.js",
+      "verify": "node scripts/replay-career-session.js --session glass-eval/sessions/<file>.jsonl --router jev",
+      "evidence": "Reproduces the 2026-10-13 session (115 armed against 114 in the log; 58 follow-ups against 59). Results in research.md R19",
+      "completed_at": "2026-10-13T22:00:00Z"
+    },
+    {
       "id": "T-VERIFY-RELEASE",
       "phase": "verify",
       "description": "Owner: TYPESAFE_API_KEY in .env, about 40 fresh holdout questions (half PT, half EN) in the KB repo, then node scripts/eval-career-kb.js --router jev until R-SC-001..004 pass; live eval with PT and EN audio for R-SC-005.",
@@ -87,7 +107,8 @@
       "verify": "eval-career-kb.js --router jev prints PASS for every R-SC check; live eval aggregates routeWaitMs.p95 ≤ 50",
       "evidence": "2026-10-13 with the key: 33 real EN holdout items added (q101–q133). Jev 33/33 against regex 29/33 on them; synthetic 40/40 against 35/40; old PT tuning items 91.1% against 95.6% (R-SC-001 pt FAIL); fallbacks 4.5% (R-SC-004 PASS after the owner raised its limit from 2% to 5%; R-SC-001 kept as written); Jev p95 341 ms (R-SC-003 PASS); live eval with groq/gemini/deepgram blocked: route wait p95 0.3 ms (R-SC-005 PASS). Details in research.md R18 Results",
       "completed_at": null,
-      "block_on": "Owner decision: no fresh real PT questions yet; R-SC-001 pt is measured only on regex tuning items"
+      "update_2026_10_13_r19": "Fresh real PT exists now (the 2026-10-13 session): R-SC-007 replay y 42/43 vs regex 36/43, wasted 24 vs 26, route errors 1 vs 26 (PASS); per the owner's R18 decision it settles R-SC-001 for PT. Eval after R19: all 96.1%, holdout 100%, pt 93.3% (tuning items), fallbacks 9/133 = 6.8% (R-SC-004 FAIL by two items, all low-confidence). Held-out EN sessions: y 61/62 both, wasted 28 vs regex 18 (17 from one wrong-language STT session; coherent sessions 7 vs 8)",
+      "block_on": "R-SC-004 at 6.8% (9 low-confidence items) against the 5% limit; live run with real audio and a real LLM still pending"
     }
   ]
 }

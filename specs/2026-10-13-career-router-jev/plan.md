@@ -1,21 +1,24 @@
 # Plan: career router with Jev
 
-Spec: [spec.md](spec.md) · Research: [research.md](research.md) (R18)
+Spec: [spec.md](spec.md) · Research: [research.md](research.md) (R18, R19)
 
 ## Architecture
 
 ```
-them turn ──► summaryService.triggerAnswerIfNeeded
+them turn ──► summaryService.triggerAnswerIfNeeded   (keeps the previous them segment: before)
                 │
-                ├─ isLikelyQuestion ──────────────► armAnswer(text)            (sync, as today)
+                ├─ isBackchannel ─────────────────► nothing (no Jev call)       (R19)
+                │
+                ├─ isLikelyQuestion ──────────────► armAnswer(text, before)    (sync, as today)
                 │
                 └─ statement + career.gateUsesJev()
                      └─ career.classifyTurn ──► jevRouter.decide (≤ 700 ms)
-                           personal/company and still current ──► armAnswer(text)
+                           personal/company, asks ≥ 0.3, still current ──► armAnswer(text, before)
 
 armAnswer ──► career.prefetch ──► jevRouter.prefetch (starts or reuses the call)
           │                   └─► embedder.prefetch (+ the anchored text when Jev sees a follow-up)
-          └─► 800 ms debounce ──► career.getCareerContext ──► jevRouter.decide (≤ 250 ms more)
+          └─► 800 ms debounce ──► career.wantsAnswer (Jev on: asks < 0.2 → dropped, R19)
+                              └─► career.getCareerContext ──► jevRouter.decide (≤ 250 ms more)
                                                                  │
                                     Jev answer ─► mapping (follow-up, floor) ─► route
                                     failure / budget / circuit / low ─► classifyCareerIntent (frozen)
@@ -33,6 +36,9 @@ armAnswer ──► career.prefetch ──► jevRouter.prefetch (starts or reus
 | `scripts/eval-career-kb.js` | `--router`, confusion per language, comparison with the regex router, Jev p50/p95, fallbacks, release checks; answer path counted from the route on. |
 | `scripts/ask-career-kb.js` | Router from `.env`; prints who decided and the Jev time. |
 | `scripts/live-eval/{harness,run,report}.js` | Route source, fallback, Jev time and route wait per item; a warn check on the wait; aggregates. |
+| `src/features/listen/summary/questionGate.js` | **New (R19).** The question gate moved out of summaryService (pure, no Electron) plus `isBackchannel`; `shouldTriggerAnswer` rejects backchannels. |
+| `scripts/replay-career-session.js` | **New (R19).** Replays a labeled recorded session through the gate and the router (Jev live, no LLM). |
+| `jevClient.js`, `jevRouter.js`, `index.js`, `summaryService.js` (R19) | `asks` question and `interviewer_before` state; decisions carry `asks`; `askPolicy`, `wantsAnswer`, `routeAsks`; the gate's asks check, the debounce drop and the previous them segment. |
 
 ## Defaults and why
 
@@ -45,6 +51,9 @@ armAnswer ──► career.prefetch ──► jevRouter.prefetch (starts or reus
 | request timeout | 1,500 ms | past both waits, so a slow answer still fills the cache |
 | circuit | 3 failures / 60 s | one blip is not an outage; a minute keeps the session on regex without retry storms |
 | cache | 64 entries | about ten minutes of turns |
+| asks min (statements) | 0.3 | R19: implicit questions scored 0.34–0.48, fragments and reactions mostly below 0.3 |
+| asks veto (questions) | 0.2 | R19: the lowest real questions scored 0.22 and 0.27; monologues below 0.2 |
+| previous segment window | 20 s | the STT splits one question into segments seconds apart |
 
 ## Rollout
 

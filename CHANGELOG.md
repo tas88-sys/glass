@@ -31,6 +31,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
   - the gate, the Jev router, retrieval and the answer lane still run;
   - checks on the answer's words become info, and the Ask phases are skipped.
 
+#### Changed after a real session (spec R19, 2026-10-13)
+
+A 71-minute Portuguese interview with Jev on armed 114 answers, 56 of them on acknowledgments ("Aham.", "Hã?", "1"), fragments and the interviewer's monologue: each one a Groq call (about 5,000 tokens) and a replaced answer on screen; Groq answered 429 56 times. Replayed with the changes below: 80 answers instead of 115, 24 wasted instead of 56, 42 of 43 real questions armed (41 before) and 1 route error instead of 5 (the regex router: 26). Five older English sessions, not used to tune, confirm it with a smaller margin: 28 wasted instead of 36, real questions 61/62 as before.
+
+- **Backchannels never trigger an answer** (`questionGate.js`, `isBackchannel`): an interviewer segment made only of acknowledgments, fillers or "pardon?" (EN and PT) arms nothing and costs no Jev call, in both router modes.
+- **Jev also answers "does the turn ask the candidate for something now?"** (`asks`, same call): a statement needs `asks` ≥ 0.3 (`CAREER_ROUTER_ASK_MIN`) to be answered, and a question is dropped when the debounce fires if `asks` < 0.2 (`CAREER_ROUTER_ASK_VETO`; `0` turns it off), before it costs an LLM call or replaces the answer on screen.
+- **The interviewer's previous segment goes to Jev** (`interviewer_before`, when it began at most 20 s earlier): the STT cuts one question into pieces. Interviewer speech only.
+- **Criteria:** details of a project the candidate did or described count as personal. Eval: personal routed 96.1% (was 94.7%), holdout 100% (was 95.8%), Portuguese 93.3% (was 91.1%).
+- **`scripts/replay-career-session.js`** replays a labeled recorded session through the app's gate and router (Jev live, no LLM).
+- The question gate moved out of `summaryService.js` into `questionGate.js` (pure, no Electron) so scripts can run it.
+
 #### Fixed (found by the live eval with Jev)
 
 - **Intros got answers.** A company intro with no question ("Here at <company> we…") was routed `company` by Jev and answered. The criteria now say that personal, company and ambiguous turns ask the candidate something, and that a statement presenting the company or the role is general.
@@ -40,6 +51,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 - `intentRouter.js` is frozen: no new cues. A phrasing Jev misses is fixed in the Jev criteria and measured with the eval.
 - The eval's answer path now counts from the route on, because the route call runs inside the debounce.
 - Without a key, or with `CAREER_ROUTER=regex`, routes, cues, the gate and prompts are exactly as before.
+
+### Fixed (found in a debug session log, 2026-10-13)
+
+- **Ask window: highlight and DOMPurify never loaded.** `AskView` loaded its libraries from `../../assets/`, which resolves to `src/assets` (it does not exist); they are in `src/ui/assets`. Now `../assets/`, as `SummaryView` already does.
+- **Log noise:** `[Layout Debug]` and `[Height Adjusted]` (58% of a session's log) print only with `GLASS_LAYOUT_DEBUG=1` (main) or the `LAYOUT_DEBUG` flag (renderer). With Ollama not running, its health check failure logs once per streak, and the local AI state logs only when it changes (it repeated every ~30 s).
 
 ### Live eval: a simulated interview with real audio and real models (branch `2026-10-12-live-eval`)
 

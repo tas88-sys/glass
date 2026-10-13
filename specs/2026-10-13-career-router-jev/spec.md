@@ -4,7 +4,7 @@ meta:
   spec_id: 2026-10-13-career-router-jev
   spec_name: career-router-jev
   status: in-progress    # draft | in-progress | approved | completed
-  phase: verify          # code and unit tests done; the release checks need a TypeSafe key
+  phase: verify          # code and unit tests done; R19 (real-session gate) added 2026-10-13
   created: 2026-10-13
   updated: 2026-10-13
 
@@ -14,9 +14,9 @@ summary:
     - {id: G2, description: "Bilingual as today: English and Brazilian Portuguese turns, with speech-to-text errors, route at least as well as with the regex router, per language", priority: HIGH}
     - {id: G3, description: "Production-ready: Live Answer never waits on, breaks on, or loses notes because of Jev. Any Jev failure falls back to the frozen regex router", priority: HIGH}
   constraints:
-    - {id: C1, description: "Without TYPESAFE_API_KEY, or with CAREER_ROUTER=regex, behavior is exactly today's (same routes, same cues, same synchronous gate, byte-identical prompts)", type: TECHNICAL}
+    - {id: C1, description: "Without TYPESAFE_API_KEY, or with CAREER_ROUTER=regex, routing is exactly today's (same routes, same cues, same synchronous gate, byte-identical prompts). The backchannel gate (FR-014, R19) applies in both modes", type: TECHNICAL}
     - {id: C2, description: "Logs carry route, cue, source, confidence, kinds, statuses and timings only: never the turn text, the manifest's names or the key", type: SECURITY}
-    - {id: C3, description: "Sent to TypeSafe (owner decision 2026-10-13): the turn, the previous question and its route, the interviewer's company and the manifest's names (candidate_names, note_companies). Nothing else", type: SECURITY}
+    - {id: C3, description: "Sent to TypeSafe (owner decision 2026-10-13): the turn, the interviewer's segment just before it (R19, interviewer speech like the turn), the previous question and its route, the interviewer's company and the manifest's names (candidate_names, note_companies). Nothing else; never the candidate's speech", type: SECURITY}
     - {id: C4, description: "The answer waits for the route at most CAREER_ROUTER_RESOLVE_BUDGET_MS (250 ms) after the 800 ms debounce fires; the gate waits at most CAREER_ROUTER_GATE_TIMEOUT_MS (700 ms) for a statement-form turn", type: TECHNICAL}
     - {id: C5, description: "No personal content enters this public repo: tests use invented fixtures; the eval prints ids and counts only", type: SECURITY}
     - {id: C6, description: "Native fetch only (Electron 30 main runs Node 20), no SDK, no new dependency", type: TECHNICAL}
@@ -28,6 +28,8 @@ summary:
     - {id: D5, decision: "One call per turn and context, cached and shared by the gate, the prefetch and the resolve", rationale: "The call starts when the gate accepts the turn, inside the 800 ms debounce, as the query embedding prefetch already does (research R10)"}
     - {id: D6, decision: "No retry on the live path; a circuit breaker instead", rationale: "The budgets leave no time for a retry; three failures in a row mean the service is down, so the regex router takes over for 60 s"}
     - {id: D7, decision: "Superseded calls are not aborted", rationale: "A later non-question segment would otherwise abort the call an armed question still needs; calls cost ~$0.00002 and the cache bounds them"}
+    - {id: D8, decision: "One call also asks whether the turn wants an answer now (asks); the live gate uses it both ways", rationale: "R19: a real session armed 56 answers on acknowledgments and monologues; the route alone cannot tell 'Aham' after a personal question from a follow-up. Same call, ~200 more tokens"}
+    - {id: D9, decision: "Acknowledgments and fillers are dropped locally, before Jev", rationale: "R19: 62 of 115 no-answer segments in the session were plain backchannels; a word list catches them with no false positive and saves the call"}
 
 critical_requirements:
   type: feature-major
@@ -54,10 +56,13 @@ the tables never saw.
   every career route (the answer path and the gate for statement-form turns) comes from Jev.
 - **FR-002 Request.** One `POST /v1/systemone` per turn and context:
   - `model`: `CAREER_ROUTER_JEV_MODEL`, default `jev-1.13.0`, never an alias;
-  - `state`: `turn` (≤ 2,000 chars), `previous_question` (its last 600 chars) and `previous_route`
-    when the last personal/company question is inside the 5-minute follow-up window,
-    `interviewer_company`, `candidate_names` and `note_companies` (≤ 60 names of ≤ 60 chars each);
+  - `state`: `turn` (≤ 2,000 chars), `interviewer_before` (the interviewer's previous segment, its
+    last 400 chars, when it began ≤ 20 s before the turn; R19), `previous_question` (its last 600
+    chars) and `previous_route` when the last personal/company question is inside the 5-minute
+    follow-up window, `interviewer_company`, `candidate_names` and `note_companies` (≤ 60 names of
+    ≤ 60 chars each);
   - `questions.route`: `choice` over the four routes;
+  - `questions.asks`: `noul`, always: does the turn ask the candidate for something to answer now (R19);
   - `questions.follow_up`: `noul`, only when `previous_question` is sent.
 - **FR-003 Mapping.**
   - follow-up ≥ 0.5, a previous personal/company question in the window and a route other
@@ -75,25 +80,42 @@ the tables never saw.
   prefetch and the resolve of one turn share one call; a late answer still fills the cache.
 - **FR-007 Gate.** A them turn that `isLikelyQuestion` accepts is armed at once, as today. A them
   turn it rejects asks the router (≤ the gate timeout) and is armed when the route is personal or
-  company, unless a newer answer was armed, or the session was reset or paused, meanwhile. When the
-  router cannot use Jev (no key, disabled, circuit open), the gate is today's synchronous regex gate.
+  company and Jev's `asks` is at least `CAREER_ROUTER_ASK_MIN` (0.3; a regex decision has no asks
+  and arms on its route), unless a newer answer was armed, or the session was reset or paused,
+  meanwhile. When the router cannot use Jev (no key, disabled, circuit open), the gate is today's
+  synchronous regex gate.
 - **FR-008 Resolve budget.** `getCareerContext` waits for the route at most
   `CAREER_ROUTER_RESOLVE_BUDGET_MS`. Scripts pass a longer `routeBudgetMs`.
 - **FR-009 Configuration.** `TYPESAFE_API_KEY`, `CAREER_ROUTER` (`jev` | `regex`; any other value
   reads as `regex`), `CAREER_ROUTER_JEV_MODEL`, `CAREER_ROUTER_JEV_MIN_CONF`,
-  `CAREER_ROUTER_GATE_TIMEOUT_MS`, `CAREER_ROUTER_RESOLVE_BUDGET_MS`, all from `.env`, read on use.
+  `CAREER_ROUTER_GATE_TIMEOUT_MS`, `CAREER_ROUTER_RESOLVE_BUDGET_MS`, `CAREER_ROUTER_ASK_MIN` (0.3),
+  `CAREER_ROUTER_ASK_VETO` (0.2; 0 turns the drop off), all from `.env`, read on use.
   The key can also be saved in Settings (a `provider_settings` row `typesafe`, encrypted like the
   providers' keys), which wins over `TYPESAFE_API_KEY`. Save checks it with one minimal call:
   401/403 rejects it, any other failure saves it unverified. Alone it does not count as an AI key
   (`hasValidApiKey`). A new key clears an `auth`/`validation` disable without a restart.
 - **FR-010 Observability.** `getCareerContext` returns `routeSource`, `routeFallback`,
-  `routeConfidence`, `jevMs`. The `[career]` line ends with `src=jev|regex|regex(<reason>)` and
-  `jev=<ms>`. `routerStats()` returns the state and counters.
+  `routeConfidence`, `routeAsks`, `jevMs`. The `[career]` line ends with
+  `src=jev|regex|regex(<reason>)`, `asks=<0..1>` when Jev answered, and `jev=<ms>`. The gate's
+  `[live-answer]` lines name backchannels, the asks and the drops. `routerStats()` returns the
+  state and counters.
 - **FR-011 Bilingual.** Instructions in English that name both languages and STT errors; each
   criterion carries an English and a Portuguese example.
 - **FR-012 Eval.** `eval-career-kb.js --router regex|jev` prints the confusion per language and,
   for `jev`, the comparison with the regex router on the same items, the Jev call p50/p95, the
   fallbacks, and the release checks.
+- **FR-013 Drop on the debounce (R19).** With Jev on, when the debounce fires for an armed turn, the
+  service waits for the turn's route call (at most the resolve budget; the call the prefetch started)
+  and drops the turn when Jev's `asks` is below `CAREER_ROUTER_ASK_VETO`: no context, no LLM call,
+  and the answer on screen is not replaced. A failure, a regex decision or no asks never drops. A
+  newer armed turn during that wait makes the older callback stop.
+- **FR-014 Backchannel gate (R19).** A them segment made only of acknowledgments, fillers or
+  "pardon?" (EN and PT word list, at most 8 words; a lone "1" is the STT's "um") arms nothing and
+  asks Jev nothing, in both router modes. It does not replace the interviewer's previous segment.
+- **FR-015 Session replay (R19).** `scripts/replay-career-session.js --session <file>` replays a
+  labeled recorded session (segments with `ask` y/e/n and the expected route) through the app's own
+  gate and router, with Jev live and no LLM, and prints armed, missed, wasted, route errors, sources
+  and Jev p50/p95: ids and counts only.
 
 ## Success criteria
 
@@ -105,6 +127,11 @@ the tables never saw.
   2026-10-13: most fallbacks are low-confidence turns, where the regex decision saves misses (R18).
 - **R-SC-005** Live: the answer's wait for the route ≤ 50 ms at p95 (live eval), never above 250 ms.
 - **R-SC-006** With Jev off, today's results exactly (C1).
+- **R-SC-007** On each labeled real session with working STT (replay, FR-015), with the defaults:
+  Jev arms at least the regex's `y` segments, wastes no more `n` segments than the regex, and makes
+  no more route errors. For Portuguese this replaces the regex-tuning items in R-SC-001 (owner
+  decision of R18: fresh real Portuguese questions settle it). 2026-10-13 session: `y` 42/43 against
+  36/43, `n` 24 against 26, route errors 1 against 26 (R19).
 - The old SC-004 (answer path p95 ≤ 20 ms) now counts from the route on: the route call runs inside the debounce.
 
 ## Edge cases
@@ -115,6 +142,13 @@ the tables never saw.
 - **E4** A follow-up the regex misses ("e como isso terminou"): Jev's follow-up carries the previous terms; the anchored embedding is prefetched when Jev answers.
 - **E5** A key revoked mid-session: one 401, one log line, regex until restart.
 - **E6** A typo in `CAREER_ROUTER`: regex, so turns never leave by mistake.
+- **E7** "Hã?" or "Pá. E aí?" from the interviewer: a backchannel; no answer, no Jev call (FR-014).
+- **E8** A question the STT splits ("e aí, quando vocês migraram para o Kubernetes," then "ficaram quantos pods?"):
+  the second segment goes with the first as `interviewer_before` and arms on its own asks.
+- **E9** The interviewer presenting the company with a rhetorical "sabe?": armed by the '?' rule,
+  dropped on the debounce when asks < 0.2 (FR-013).
+- **E10** STT in the wrong language (garbage text): Jev may read meaning into it and arm answers;
+  the fix is the STT language (R19 known limit).
 
 ## Out of scope
 

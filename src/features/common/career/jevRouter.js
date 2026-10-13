@@ -7,13 +7,17 @@
 // or an answer below the confidence floor.
 //
 // Every decision has the same shape:
-//   { route, cue, source: 'jev'|'regex', fallback: null|reason, confidence, jevMs }
+//   { route, cue, source: 'jev'|'regex', fallback: null|reason, confidence, asks, jevMs }
+// asks is Jev's "does the turn ask the candidate for something now" (0..1),
+// whenever Jev answered (also below the confidence floor), else null. The live
+// gate reads it against askPolicy() (R19).
 // A regex decision keeps the regex cue unchanged ('follow-up' still carries
 // the previous question's terms). A Jev decision's cue is 'jev:<route>@<conf>',
 // or 'follow-up'.
 //
-// What goes to TypeSafe: the turn, the previous question and its route, the
-// interviewer's company and the manifest's names (owner decision, R18). What
+// What goes to TypeSafe: the turn, the interviewer's segment just before it
+// (R19), the previous question and its route, the interviewer's company and
+// the manifest's names (owner decision, R18). What
 // goes to the log: kinds, statuses and counts only, never text or names (C2).
 
 const { performance } = require('node:perf_hooks');
@@ -26,8 +30,13 @@ const DEFAULTS = {
     gateTimeoutMs: 700,       // the question gate's wait for a statement-form turn
     resolveBudgetMs: 250,     // the answer path's wait once the debounce fires
     requestTimeoutMs: 1500,   // the call itself; past both waits above, so a slow answer still lands in the cache
+    askMin: 0.3,              // a statement-form turn arms only at or above it (CAREER_ROUTER_ASK_MIN)
+    askVeto: 0.2,             // a question-form turn is dropped below it; 0 turns the veto off (CAREER_ROUTER_ASK_VETO)
 };
 const FOLLOW_UP_MIN = 0.5;
+// The interviewer's previous segment goes along when it began at most this long
+// before the turn (R19): the STT cuts one question into segments seconds apart.
+const BEFORE_WINDOW_MS = 20 * 1000;
 const CACHE_SIZE = 64;
 const BREAKER_FAILURES = 3;
 const BREAKER_COOL_MS = 60 * 1000;
@@ -62,6 +71,8 @@ function readConfig(env) {
         minConfidence: bounded(e.CAREER_ROUTER_JEV_MIN_CONF, DEFAULTS.minConfidence, 0, 1),
         gateTimeoutMs: bounded(e.CAREER_ROUTER_GATE_TIMEOUT_MS, DEFAULTS.gateTimeoutMs, 0, 10000),
         resolveBudgetMs: bounded(e.CAREER_ROUTER_RESOLVE_BUDGET_MS, DEFAULTS.resolveBudgetMs, 0, 10000),
+        askMin: bounded(e.CAREER_ROUTER_ASK_MIN, DEFAULTS.askMin, 0, 1),
+        askVeto: bounded(e.CAREER_ROUTER_ASK_VETO, DEFAULTS.askVeto, 0, 1),
     };
 }
 
@@ -142,11 +153,19 @@ function createJevRouter(options = {}) {
         return t - p.ts <= FOLLOW_UP_WINDOW_MS ? p : null;
     }
 
+    function recentBefore(ctx) {
+        const b = ctx && ctx.before;
+        if (!b || typeof b.text !== 'string' || !b.text.trim() || !Number.isFinite(b.ts)) return null;
+        const t = Number.isFinite(ctx.now) ? ctx.now : now();
+        return t - b.ts <= BEFORE_WINDOW_MS ? b.text : null;
+    }
+
     function requestContext(ctx) {
         const p = eligiblePrev(ctx);
         return {
             previousQuestion: p && typeof p.anchorText === 'string' ? p.anchorText : null,
             previousRoute: p ? p.route : null,
+            previousTurn: recentBefore(ctx),
             interviewerCompany: ctx.activeCompany || null,
             entities: ctx.entities,
             companies: ctx.companies,
@@ -245,14 +264,14 @@ function createJevRouter(options = {}) {
     function regexDecision(text, ctx, fallback, extra = {}) {
         if (fallback) counts.fallbacks[fallback] = (counts.fallbacks[fallback] || 0) + 1;
         const d = classifyCareerIntent(text, ctx);
-        return { route: d.route, cue: d.cue, source: 'regex', fallback, confidence: null, jevMs: null, ...extra };
+        return { route: d.route, cue: d.cue, source: 'regex', fallback, confidence: null, asks: null, jevMs: null, ...extra };
     }
 
     /**
      * The route for one turn. Waits for Jev at most budgetMs (default: the
      * resolve budget), then decides by regex. Never rejects.
      * @param {string} text
-     * @param {{ prev?: object|null, entities?: string[], companies?: string[], activeCompany?: string|null, now?: number }} ctx
+     * @param {{ prev?: object|null, before?: { text: string, ts: number }|null, entities?: string[], companies?: string[], activeCompany?: string|null, now?: number }} ctx
      * @param {{ budgetMs?: number }} [opts]
      */
     async function decide(text, ctx = {}, opts = {}) {
@@ -269,10 +288,10 @@ function createJevRouter(options = {}) {
             const a = settled.answer;
             const p = eligiblePrev(c);
             if (p && a.followUp !== null && a.followUp >= FOLLOW_UP_MIN && a.route !== 'company') {
-                return { route: p.route, cue: 'follow-up', source: 'jev', fallback: null, confidence: a.followUp, jevMs: entry.ms };
+                return { route: p.route, cue: 'follow-up', source: 'jev', fallback: null, confidence: a.followUp, asks: a.asks, jevMs: entry.ms };
             }
             if (a.confidence < cfg.minConfidence) {
-                return regexDecision(text, c, 'low', { confidence: a.confidence, jevMs: entry.ms });
+                return regexDecision(text, c, 'low', { confidence: a.confidence, asks: a.asks, jevMs: entry.ms });
             }
             return {
                 route: a.route,
@@ -280,6 +299,7 @@ function createJevRouter(options = {}) {
                 source: 'jev',
                 fallback: null,
                 confidence: a.confidence,
+                asks: a.asks,
                 jevMs: entry.ms,
             };
         } catch {
@@ -310,6 +330,12 @@ function createJevRouter(options = {}) {
         return config().gateTimeoutMs;
     }
 
+    /** The live gate's thresholds on a decision's asks (R19). */
+    function askPolicy() {
+        const cfg = config();
+        return { min: cfg.askMin, veto: cfg.askVeto };
+    }
+
     /** The Settings key getter (the app wires it once the database is up). */
     function setApiKeySource(fn) {
         keySource = typeof fn === 'function' ? fn : null;
@@ -334,7 +360,7 @@ function createJevRouter(options = {}) {
         };
     }
 
-    return { decide, prefetch, gateUsesJev, gateTimeoutMs, setApiKeySource, stats };
+    return { decide, prefetch, gateUsesJev, gateTimeoutMs, askPolicy, setApiKeySource, stats };
 }
 
 module.exports = {
@@ -342,6 +368,7 @@ module.exports = {
     readConfig,
     DEFAULTS,
     FOLLOW_UP_MIN,
+    BEFORE_WINDOW_MS,
     CACHE_SIZE,
     BREAKER_FAILURES,
     BREAKER_COOL_MS,

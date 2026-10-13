@@ -62,3 +62,109 @@ by the author of the Jev criteria, so it is biased toward Jev: a signal, not pro
 ### Superseded
 
 R6's "an LLM classifier is rejected" still holds for generative LLMs. Jev is a decision model with bounded output and sub-second latency, and the latency it does add is hidden inside the debounce.
+
+## R19: what a real session showed, and the gate it led to
+
+**Decision**: the live gate drops acknowledgments locally and asks Jev, in the same call, whether
+the turn asks the candidate for something now (`asks`). The interviewer's previous segment goes
+with the turn. The criteria name project details as personal. Floor unchanged (0.5).
+
+### The session (2026-10-13)
+
+A 71-minute Portuguese interview with Jev on (deep dive into the candidate's projects, then the
+candidate's questions about the company), recorded with `LIVE_ANSWER_DEBUG=1`. 385 segments, 179
+from the interviewer. Each interviewer segment was labeled by hand, before any replay:
+`y` an answer should appear (43), `n` it should not (115: acknowledgments, fillers, "pardon?",
+the interviewer telling something), `e` either (21: a fragment the next segment completes, a
+confirmation). The labeled file lives in the KB repo (`glass-eval/sessions/`), never here (C5).
+
+What the log showed:
+
+- 114 answers in 71 minutes, 56 of them on `n` segments. "Aham.", "É.", "1" (the STT's "um")
+  and "Boa." armed answers: as statements they went to Jev, and with a previous personal question
+  in the window, Jev read them as follow-ups. "Hã?" passed the '?' rule.
+- Each answer costs about 5,000 Groq input tokens. Groq answered 429 56 times in the session, most
+  in the 20 minutes with about three answers a minute; a wasted answer also replaces the one on screen.
+- Below the floor (13% of answers, against 4.5% in the eval) the regex misrouted both ways:
+  clarifications about the candidate's own project went general; the interviewer presenting the
+  company went personal.
+
+### Replay
+
+`scripts/replay-career-session.js` runs a labeled session through the app's own gate and router
+(Jev live, no LLM). It reproduces the session: 115 armed against 114 in the log, 58 follow-ups
+against 59.
+
+Calibration session (the one above):
+
+| | Jev before | Jev after | Regex (with the backchannel gate) |
+|---|---|---|---|
+| Answers armed | 115 | 80 | 77 |
+| `y` armed | 41/43 | 42/43 | 36/43 |
+| `n` armed (wasted LLM calls) | 56 | 24 | 26 |
+| Route errors on armed `y`/`e` | 5/59 | 1/56 | 26/51 |
+
+Without the backchannel gate the regex armed 82 (31 wasted). The thresholds were set on this
+session, so it is not evidence for them. Five older sessions are: English, 2026-07, labeled before
+any replay (62 `y`, 24 `e`, 165 `n`), two coherent interviews and three whose STT ran in English
+on Portuguese speech:
+
+| | Jev before | Jev after | Regex |
+|---|---|---|---|
+| Answers armed | 115 | 109 | 93 |
+| `y` armed | 61/62 | 61/62 | 60/62 |
+| `n` armed | 36 | 28 | 18 |
+| `n` armed, coherent sessions only | 13 | 7 | 8 |
+| Route errors on armed `y`/`e` | 18/79 | 19/81 | 29/75 |
+
+Most route errors on the older sessions are personal against ambiguous on "how do you…" turns,
+where the labels themselves are soft. 17 of the 28 wasted come from one wrong-language session:
+Jev reads meaning into STT garbage (asks 0.34–0.63) where the regex finds no cue. Known limit; the
+STT language is the fix.
+
+### What changed
+
+- **Backchannel gate (local).** A them segment whose words are all acknowledgments, fillers or
+  "pardon?" (EN and PT, at most 8 words, "1" included) arms nothing and costs no Jev call. 62 of the
+  115 `n` segments, no `y` or `e` among them.
+- **`asks` (noul, every call).** A statement-form turn arms when the route is personal or company
+  and asks ≥ 0.3 (a regex decision, with no asks, arms on its route as before). A question-form turn
+  is still armed at once, and is dropped when the debounce fires if asks < 0.2: before it costs an
+  LLM call or replaces the answer on screen. Calibration: on question-form segments the lowest real
+  questions scored 0.22 and 0.27, while 8 monologue segments with a rhetorical question scored
+  below 0.2; on statement-form segments implicit questions (the interviewer restating what the candidate did and pausing)
+  scored 0.34–0.48, and fragments and reactions mostly 0.14–0.29.
+- **`interviewer_before`.** The STT cuts one question into segments seconds apart, and Jev saw only
+  the last piece. The interviewer's previous segment (≤ 400 chars, when it began ≤ 20 s earlier)
+  goes in the state. It is interviewer speech, the same kind of data as the turn (C3 updated).
+- **Criteria.** `personal` now names the details of a project the candidate did or described (how
+  it worked, numbers, choices, what they meant); `general` is a technical question not about the
+  candidate's own work. Route errors on the session went from 7 to 0 with this change alone.
+
+### Eval after the change (133 real items, jev-1.13.0, floor 0.5)
+
+| | Before R19 | After |
+|---|---|---|
+| personal → personal, all | 94.7% | 96.1% (regex 96.1%) |
+| holdout (47) | 95.8% | 100% (regex 95.8%) |
+| en (58) | 100% | 100% (regex 96.8%) |
+| pt (75, regex tuning items) | 91.1% | 93.3% (regex 95.6%) |
+| general → personal | 0% | 0% |
+| below the floor | 6 (4.5%) | 9 (6.8%) |
+| routing misses | 5 | 6: q090 fixed; q119 and q121 new, both ambiguous items |
+| SC-001 (personal → personal ≥ 95%) | FAIL | PASS |
+
+Synthetic set: 40/40, unchanged. Floor 0 was tried: best on the session (43/43 armed, no route
+error) but 94.7% on the eval (SC-001 fails, q040 and q090 go wrong), so the floor stays at 0.5.
+0.45 and 0.4 lose q090 too. R-SC-004 now fails by two items (6.8% against 5%), every one of them
+below the floor, none a service failure.
+
+**R-SC-001 for Portuguese.** The owner kept R-SC-001 as written until fresh real Portuguese
+questions existed (R18). The session is that: on its 56 armed `y`/`e` segments (all personal),
+Jev routes 55 personal, the regex 25 of 51. The old Portuguese items stay in the eval, and the
+replay is the Portuguese check from now on (R-SC-007).
+
+### Cost and latency
+
+`asks` adds about 200 input tokens per call (under US$ 0.00003 a call). Jev p50/p95 in the replays:
+300/450 ms. The backchannel gate removes about a third of the calls in a session.

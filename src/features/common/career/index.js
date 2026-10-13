@@ -284,6 +284,7 @@ function createCareerModule(options = {}) {
         const ss = session || {};
         return {
             prev: ss.prev || null,
+            before: ss.before || null,
             entities: s.entities,
             companies: s.companyNames,
             activeCompany: configuredCompany(s) || ss.activeCompany || null,
@@ -296,7 +297,7 @@ function createCareerModule(options = {}) {
      * With the session, a follow-up prefetches the same text its vector query
      * will use: at once when the regex sees the follow-up, or once Jev does.
      * @param {string} turnText
-     * @param {{ prev?: object|null, activeCompany?: string|null }} [session]
+     * @param {{ prev?: object|null, before?: { text: string, ts: number }|null, activeCompany?: string|null }} [session]  before: the interviewer's previous segment (R19)
      */
     function prefetch(turnText, session) {
         try {
@@ -322,10 +323,12 @@ function createCareerModule(options = {}) {
         }
     }
 
-    // src=jev, src=regex, or src=regex(timeout) when Jev was asked and could not answer.
+    // src=jev, src=regex, or src=regex(timeout) when Jev was asked and could not answer;
+    // then Jev's asks (R19) and call time when it answered.
     function routeNote(result) {
         const src = result.routeFallback ? `src=regex(${result.routeFallback})` : `src=${result.routeSource}`;
-        return result.jevMs == null ? src : `${src} jev=${result.jevMs}ms`;
+        const asks = result.routeAsks == null ? '' : ` asks=${result.routeAsks.toFixed(2)}`;
+        return result.jevMs == null ? `${src}${asks}` : `${src}${asks} jev=${result.jevMs}ms`;
     }
 
     function logDecision(result, hits, vectorNote, extra) {
@@ -364,6 +367,7 @@ function createCareerModule(options = {}) {
             routeSource: decision.source,
             routeFallback: decision.fallback,
             routeConfidence: decision.confidence,
+            routeAsks: decision.asks == null ? null : decision.asks,
             jevMs: decision.jevMs,
             block: '',
             addendum: '',
@@ -481,7 +485,7 @@ function createCareerModule(options = {}) {
 
     /**
      * @param {string} turnText
-     * @param {{ prev?: { route: string, ts: number, queryTerms?: string[], anchorText?: string }|null, activeCompany?: string|null, question?: string }} [session]
+     * @param {{ prev?: { route: string, ts: number, queryTerms?: string[], anchorText?: string }|null, before?: { text: string, ts: number }|null, activeCompany?: string|null, question?: string }} [session]
      * @param {{ excludePaths?: string[], bm25Only?: boolean, trace?: { k?: number }, routeBudgetMs?: number }} [opts]  eval and ask scripts only
      */
     async function getCareerContext(turnText, session, opts) {
@@ -517,7 +521,7 @@ function createCareerModule(options = {}) {
      * weakness"), waiting at most CAREER_ROUTER_GATE_TIMEOUT_MS, then the regex.
      * The call is the one resolve() reuses. Never rejects; null while disabled.
      * @param {string} turnText
-     * @param {{ prev?: object|null, activeCompany?: string|null }} [session]
+     * @param {{ prev?: object|null, before?: { text: string, ts: number }|null, activeCompany?: string|null }} [session]  before: the interviewer's previous segment (R19)
      * @returns {Promise<{ route: string, cue: string|null, source: string, fallback: string|null }|null>}
      */
     async function classifyTurn(turnText, session) {
@@ -526,6 +530,27 @@ function createCareerModule(options = {}) {
             return await router.decide(turnText, routeContext(snap, session), { budgetMs: router.gateTimeoutMs() });
         } catch {
             return null;
+        }
+    }
+
+    /**
+     * R19: whether a question-form turn still wants an answer, by Jev's asks.
+     * false only when Jev answered with asks below the veto; true otherwise
+     * (Jev off or failing, no asks, the veto at 0). Waits at most the resolve
+     * budget, on the call resolve() then reuses. Never rejects.
+     * @param {string} turnText
+     * @param {{ prev?: object|null, before?: { text: string, ts: number }|null, activeCompany?: string|null }} [session]  before: the interviewer's previous segment (R19)
+     * @returns {Promise<boolean>}
+     */
+    async function wantsAnswer(turnText, session) {
+        try {
+            if (!isReady() || typeof turnText !== 'string' || !turnText.trim() || !router.gateUsesJev()) return true;
+            const policy = router.askPolicy();
+            if (!policy || !(policy.veto > 0)) return true;
+            const d = await router.decide(turnText, routeContext(snap, session));
+            return !(d && typeof d.asks === 'number' && d.asks < policy.veto);
+        } catch {
+            return true;
         }
     }
 
@@ -593,6 +618,20 @@ function createCareerModule(options = {}) {
         }
     }
 
+    /**
+     * The live gate's thresholds on a decision's asks (R19): a statement-form
+     * turn arms at or above min; a question-form turn is dropped below veto.
+     * Never throws; null when the router has none.
+     * @returns {{ min: number, veto: number }|null}
+     */
+    function askPolicy() {
+        try {
+            return typeof router.askPolicy === 'function' ? router.askPolicy() : null;
+        } catch {
+            return null;
+        }
+    }
+
     /** The router's state and counters (no text), for the eval and ask scripts. */
     function routerStats() {
         try {
@@ -609,11 +648,13 @@ function createCareerModule(options = {}) {
         hasCareerCue,
         gateUsesJev,
         classifyTurn,
+        wantsAnswer,
         detectCompany,
         checkAnswer,
         keyterms,
         status,
         routerStats,
+        askPolicy,
         setRouterKeySource,
     };
 }

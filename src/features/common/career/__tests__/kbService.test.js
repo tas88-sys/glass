@@ -765,6 +765,58 @@ describe('career module: Jev router (spec 2026-10-13-career-router-jev)', () => 
         assert.equal(mod.gateUsesJev(), false);
         assert.equal(mod.routerStats().state, 'disabled:auth');
     });
+
+    // R19: Jev's asks (does the turn ask the candidate for something now?).
+    const withAsks = (route, confidence, asks) => {
+        const r = answer(route, confidence);
+        return { ...r, json: async () => { const b = await answer(route, confidence).json(); b.answers.asks = { type: 'noul', noul: asks }; return b; } };
+    };
+
+    it('getCareerContext returns Jev\'s asks, and the log line carries it (R19)', async () => {
+        const { mod, lines } = await jevCareer(withAsks('personal', 0.9, 0.82));
+        const ctx = await mod.getCareerContext('Me conta como foi a migração do tide service', { prev: null });
+        assert.equal(ctx.routeAsks, 0.82);
+        assert.ok(lines.some(l => /src=jev asks=0\.82 jev=/.test(l)));
+        const { mod: regexMod } = career({ CAREER_KB_PATH: await kb() }, { fetchImpl: fakeFetch(answer('general')) });
+        await regexMod.warm();
+        assert.equal((await regexMod.getCareerContext('Tell me about a time you disagreed with a teammate.', { prev: null })).routeAsks, null);
+    });
+
+    it('wantsAnswer: false only when Jev answered asks below the veto (R19)', async () => {
+        const low = await jevCareer(withAsks('general', 0.9, 0.1));
+        assert.equal(await low.mod.wantsAnswer('E aqui a gente faz deploy toda semana, sabe?', { prev: null }), false);
+        const high = await jevCareer(withAsks('general', 0.9, 0.6));
+        assert.equal(await high.mod.wantsAnswer('O que é um mutex?', { prev: null }), true);
+        const noAsks = await jevCareer(answer('general', 0.9));
+        assert.equal(await noAsks.mod.wantsAnswer('O que é um mutex?', { prev: null }), true, 'no asks in the answer');
+        const vetoOff = await jevCareer(withAsks('general', 0.9, 0.1), { CAREER_ROUTER_ASK_VETO: '0' });
+        assert.equal(await vetoOff.mod.wantsAnswer('Aham, sabe?', { prev: null }), true, 'veto 0 turns it off');
+        assert.equal(vetoOff.fetchImpl.bodies.length, 0, 'and asks Jev nothing');
+        const failing = await jevCareer({ ok: false, status: 529, json: async () => ({}) });
+        assert.equal(await failing.mod.wantsAnswer('O que é um mutex?', { prev: null }), true, 'a failure never drops a question');
+        const { mod: off } = career({ CAREER_KB_PATH: await kb() }, { fetchImpl: fakeFetch(withAsks('general', 0.9, 0.1)) });
+        await off.warm();
+        assert.equal(await off.wantsAnswer('Aham, sabe?', { prev: null }), true, 'Jev off');
+    });
+
+    it('wantsAnswer reuses the call the prefetch started; askPolicy reads the env (R19)', async () => {
+        const { mod, fetchImpl } = await jevCareer(withAsks('personal', 0.9, 0.9), { CAREER_ROUTER_ASK_MIN: '0.4', CAREER_ROUTER_ASK_VETO: '0.25' });
+        assert.deepEqual(mod.askPolicy(), { min: 0.4, veto: 0.25 });
+        const session = { prev: null, activeCompany: null };
+        mod.prefetch('Como foi a migração?', session);
+        assert.equal(await mod.wantsAnswer('Como foi a migração?', session), true);
+        await mod.getCareerContext('Como foi a migração?', { ...session, question: 'Como foi a migração?' });
+        assert.equal(fetchImpl.bodies.length, 1);
+    });
+
+    it('the interviewer\'s segment before goes to Jev with the turn (R19)', async () => {
+        const { mod, fetchImpl } = await jevCareer(withAsks('personal', 0.9, 0.7));
+        const before = { text: 'e aí, quando vocês migraram para o Kubernetes,', ts: Date.now() - 3000 };
+        await mod.classifyTurn('ficaram quantos pods no fim?', { prev: null, before });
+        assert.equal(fetchImpl.bodies[0].state.interviewer_before, before.text);
+        await mod.classifyTurn('e o banco?', { prev: null, before: { ...before, ts: Date.now() - 60_000 } });
+        assert.ok(!('interviewer_before' in fetchImpl.bodies[1].state), 'an old segment stays out');
+    });
 });
 
 describe('career module: load isolation (C4)', () => {
