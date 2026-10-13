@@ -7,6 +7,12 @@ const shortcutsService = require('../features/shortcuts/shortcutsService');
 const internalBridge = require('../bridge/internalBridge');
 const permissionRepository = require('../features/common/repositories/permission');
 
+// Window height traces run on every content change (thousands of lines a
+// session); they print only with GLASS_LAYOUT_DEBUG=1.
+const layoutDebug = (...args) => {
+    if (process.env.GLASS_LAYOUT_DEBUG === '1') console.log(...args);
+};
+
 /* ────────────────[ GLASS BYPASS ]─────────────── */
 let liquidGlass;
 const isLiquidGlassSupported = () => {
@@ -209,7 +215,7 @@ function setupWindowController(windowPool, layoutManager, movementManager) {
         }
     });
     internalBridge.on('window:adjustWindowHeight', ({ winName, targetHeight }) => {
-        console.log(`[Layout Debug] adjustWindowHeight: targetHeight=${targetHeight}`);
+        layoutDebug(`[Layout Debug] adjustWindowHeight: targetHeight=${targetHeight}`);
         const senderWindow = windowPool.get(winName);
         if (senderWindow) {
             const newBounds = layoutManager.calculateWindowHeightAdjustment(senderWindow, targetHeight);

@@ -10,6 +10,9 @@ import {
     viewLabels,
 } from '../../features/listen/liveFeatures.js';
 
+// The window height trace ([Height Adjusted]) logs on every content change; true while debugging layout.
+const LAYOUT_DEBUG = false;
+
 export class ListenView extends LitElement {
     static styles = css`
         :host {
@@ -611,7 +614,8 @@ export class ListenView extends LitElement {
 
                 const targetHeight = Math.min(700, idealHeight);
 
-                console.log(
+                // The height trace prints on every content change; on only while debugging layout.
+                if (LAYOUT_DEBUG) console.log(
                     `[Height Adjusted] Mode: ${this.viewMode}, TopBar: ${topBarHeight}px, Content: ${contentHeight}px, Ideal: ${idealHeight}px, Target: ${targetHeight}px`
                 );
 

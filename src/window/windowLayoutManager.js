@@ -1,5 +1,11 @@
 const { screen } = require('electron');
 
+// Window height traces run on every content change (thousands of lines a
+// session); they print only with GLASS_LAYOUT_DEBUG=1.
+const layoutDebug = (...args) => {
+    if (process.env.GLASS_LAYOUT_DEBUG === '1') console.log(...args);
+};
+
 /**
  * 
  * @param {BrowserWindow} window 
@@ -161,7 +167,7 @@ class WindowLayoutManager {
         if (maxHeight > 0) {
             adjustedHeight = Math.min(maxHeight, adjustedHeight);
         }
-        console.log(`[Layout Debug] calculateWindowHeightAdjustment: targetHeight=${targetHeight}`);
+        layoutDebug(`[Layout Debug] calculateWindowHeightAdjustment: targetHeight=${targetHeight}`);
         return { ...currentBounds, height: adjustedHeight };
     }
     
@@ -206,10 +212,10 @@ class WindowLayoutManager {
         const listenB = listenVis ? listen.getBounds() : null;
 
         if (askVis) {
-            console.log(`[Layout Debug] Ask Window Bounds: height=${askB.height}, width=${askB.width}`);
+            layoutDebug(`[Layout Debug] Ask Window Bounds: height=${askB.height}, width=${askB.width}`);
         }
         if (listenVis) {
-            console.log(`[Layout Debug] Listen Window Bounds: height=${listenB.height}, width=${listenB.width}`);
+            layoutDebug(`[Layout Debug] Listen Window Bounds: height=${listenB.height}, width=${listenB.width}`);
         }
     
         const layout = {};

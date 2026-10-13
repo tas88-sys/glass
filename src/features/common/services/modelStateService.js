@@ -198,7 +198,18 @@ class ModelStateService extends EventEmitter {
     }
 
     async handleLocalAIStateChange(service, state) {
-        console.log(`[ModelStateService] LocalAI state changed: ${service}`, state);
+        // The local AI poll reports its state every ~30 s, changed or not: log a change only.
+        this._lastLocalAIState = this._lastLocalAIState || {};
+        let snapshot;
+        try {
+            snapshot = JSON.stringify(state);
+        } catch {
+            snapshot = String(Math.random());
+        }
+        if (this._lastLocalAIState[service] !== snapshot) {
+            this._lastLocalAIState[service] = snapshot;
+            console.log(`[ModelStateService] LocalAI state changed: ${service}`, state);
+        }
         if (!state.installed || !state.running) {
             const candidateTypes = service === 'ollama' ? ['llm'] : service === 'whisper' ? ['stt'] : [];
             const types = [];
