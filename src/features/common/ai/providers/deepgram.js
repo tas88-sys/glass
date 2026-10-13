@@ -37,13 +37,14 @@ class DeepgramProvider {
 }
 
 /**
- * The query string of the live-transcription WebSocket. `language` is the
- * only thing that decides what Deepgram listens for.
- * @param {{language: string, sampleRate?: number}} opts
+ * The query string of the live-transcription WebSocket. `language` decides
+ * what Deepgram listens for; each of `keyterms` (sttKeyterms.js) goes as its
+ * own `keyterm` parameter, which nova-3 favors in pt-BR and en-US alike.
+ * @param {{language: string, sampleRate?: number, keyterms?: string[]}} opts
  * @returns {URLSearchParams}
  */
-function buildListenQuery({ language, sampleRate = 24000 }) {
-    return new URLSearchParams({
+function buildListenQuery({ language, sampleRate = 24000, keyterms = [] }) {
+    const qs = new URLSearchParams({
       model: 'nova-3',
       encoding: 'linear16',
       sample_rate: sampleRate.toString(),
@@ -52,16 +53,22 @@ function buildListenQuery({ language, sampleRate = 24000 }) {
       interim_results: 'true',
       channels: '1',
     });
+    for (const term of Array.isArray(keyterms) ? keyterms : []) {
+      if (typeof term === 'string' && term.trim()) qs.append('keyterm', term.trim());
+    }
+    return qs;
 }
 
 function createSTT({
     apiKey,
     language = 'pt-BR',
     sampleRate = 24000,
+    keyterms = [],
     callbacks = {},
   }) {
-    const url = `wss://api.deepgram.com/v1/listen?${buildListenQuery({ language, sampleRate })}`;
-    console.log(`[Deepgram] Opening live STT, language=${language}`);
+    const url = `wss://api.deepgram.com/v1/listen?${buildListenQuery({ language, sampleRate, keyterms })}`;
+    // The count only: the terms include names from the user's career notes.
+    console.log(`[Deepgram] Opening live STT, language=${language}, keyterms=${Array.isArray(keyterms) ? keyterms.length : 0}`);
 
     const ws = new WebSocket(url, {
       headers: { Authorization: `Token ${apiKey}` },

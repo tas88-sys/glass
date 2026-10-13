@@ -136,7 +136,9 @@ const AMBIGUOUS_CUES = [
     ['hypothetical:how-you-would', /\bhow you would\b/],
     ['hypothetical:if-you', /\bif you (?:were|had to|could|need to|needed to|join|joined)\b/],
     ['hypothetical:imagine', /\b(?:imagine|suppose|assume) (?:that )?you\b|\blet (?:is|us) say\b|\blets say\b/],
-    ['habitual:how-do-you', /\bhow do you (?:\w+ )?(?:approach|handle|deal|manage|decide|prioritize|prioritise|ensure|keep|structure|organize|organise|balance|measure|review|onboard|mentor|go about|think about|adapt|stay|learn|grow|motivate|communicate|explain|give|receive|resolve|estimate|plan|lead|work with|make sure|raise|develop|level up|upskill|coach|support|help|teach|train|share|spread)\b/],
+    // A turn that opens on "do you" counts too: the STT often drops a leading
+    // "how" ("Do you ensure the reliability of a system?").
+    ['habitual:how-do-you', /(?:\bhow |^(?:and |so )?)do you (?:\w+ )?(?:approach|handle|deal|manage|decide|prioritize|prioritise|ensure|keep|structure|organize|organise|balance|measure|review|onboard|mentor|go about|think about|adapt|stay|learn|grow|motivate|communicate|explain|give|receive|resolve|estimate|plan|lead|work with|make sure|raise|develop|level up|upskill|coach|support|help|teach|train|share|spread)\b/],
     // "Give an example." closing a turn, and "your team", also open technical prompts
     // ("What's a closure? Give an example.", "Your team needs to process...").
     ['habitual:give-an-example', /\b(?:give|share) (?:me |us )?(?:an|one|a|some) (?:real |concrete |specific |practical |personal )?examples?$/],

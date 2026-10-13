@@ -29,4 +29,15 @@ describe('deepgram buildListenQuery', () => {
     it('defaults the sample rate to 24000', () => {
         assert.equal(buildListenQuery({ language: 'pt-BR' }).get('sample_rate'), '24000');
     });
+
+    it('sends each keyterm as its own parameter, skipping blanks', () => {
+        const qs = buildListenQuery({ language: 'pt-BR', keyterms: ['LINQ', ' Spring Boot ', '', null, 'gRPC'] });
+        assert.deepEqual(qs.getAll('keyterm'), ['LINQ', 'Spring Boot', 'gRPC']);
+        assert.match(qs.toString(), /keyterm=LINQ&keyterm=Spring\+Boot&keyterm=gRPC/);
+    });
+
+    it('sends no keyterm without a list', () => {
+        assert.deepEqual(buildListenQuery({ language: 'en-US' }).getAll('keyterm'), []);
+        assert.deepEqual(buildListenQuery({ language: 'en-US', keyterms: 'LINQ' }).getAll('keyterm'), []);
+    });
 });

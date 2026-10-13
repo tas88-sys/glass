@@ -75,8 +75,8 @@ is audio-only.)
 **If I run it right now, do I get "Speaker Diarization"?**
 You get **source attribution, not voice diarization** — and only after configuring a provider.
 Glass runs two separate STT sessions and tags text by **which audio channel it arrived on**:
-your microphone is `"Me"` (`sttService.js:82`), the system/loopback audio is `"Them"`
-(`sttService.js:109`). It never analyzes voice characteristics. So a Zoom call cleanly splits
+your microphone is `"Me"` (`sttService.js:88`), the system/loopback audio is `"Them"`
+(`sttService.js:115`). It never analyzes voice characteristics. So a Zoom call cleanly splits
 "interviewer vs you" because the other person comes through system audio — but **two people
 sharing your one microphone are both tagged `"Me"`.** And nothing transcribes at all until you
 have both an LLM key and an STT key configured (`modelStateService.areProvidersConfigured`,
@@ -396,7 +396,7 @@ and nothing else. No prior questions, answers, or screenshots are replayed.
 > is the architectural summary.
 
 Glass runs **two independent STT sessions** created in parallel at listen start
-(`sttService.js:469-472`) and tags each transcript by **the channel it arrived on** — this is
+(`sttService.js:505-508`) and tags each transcript by **the channel it arrived on** — this is
 **source attribution, not voice diarization** (see [§0](#0-tldr--the-questions-everyone-asks-first)).
 
 ### 7.1 Capture pipeline (dual channel)
@@ -437,7 +437,7 @@ flowchart TB
 - **Windows** captures both mic (`getUserMedia`) and system audio (`getDisplayMedia({audio:true})`
   → native loopback) separately (`listenCapture.js:515-565`).
 - **macOS** captures mic via `getUserMedia` and system audio via the spawned `SystemAudioDump`
-  binary in the main process (`sttService.js:630-721`), which is `darwin`-gated (`:631`).
+  binary in the main process (`sttService.js:666-757`), which is `darwin`-gated (`:667`).
 - **Linux** disables system audio (`getDisplayMedia({audio:false})`, `listenCapture.js:488`) —
   mic only.
 - **AEC** (acoustic echo cancellation) runs the mic through a Rust/WASM module
@@ -489,15 +489,15 @@ stateDiagram-v2
 ```
 
 - **Init retry**: up to **10×** at 300 ms on listen start (`listenService.js:189-209`).
-- **Keep-alive**: every **60 s**, OpenAI only (`sttService.js:478`, `:501-512`); Gemini's SDK
+- **Keep-alive**: every **60 s**, OpenAI only (`sttService.js:513-516`, `:537-548`); Gemini's SDK
   self-heartbeats.
 - **Proactive renewal**: every **20 min** both sessions are recreated with a **2 s overlap** so
-  no audio is dropped, dodging provider hard timeouts (`sttService.js:482-491`, `renewSessions`
-  `:518-545`).
+  no audio is dropped, dodging provider hard timeouts (`sttService.js:518-527`, `renewSessions`
+  `:554-581`).
 - **Debounce**: finalized utterances flush through a **2 s** debounce (`COMPLETION_DEBOUNCE_MS`,
-  `sttService.js:6`) before being persisted and summarized.
+  `sttService.js:9`) before being persisted and summarized.
 - **No STT failover** — by design (see §10). A socket that drops mid-session is **only logged**
-  (`sttService.js:443-444`, `:452-453`); recovery requires a manual Stop → Listen.
+  (`sttService.js:478-479`, `:487-488`); recovery requires a manual Stop → Listen.
 
 Each finalized utterance lands in the `transcripts` table tagged with `session_id`, `speaker`,
 `text`, `start_at` (`listenService.saveConversationTurn`, `:109-127`).
@@ -1265,7 +1265,7 @@ Glass can run fully local — no cloud, no API key:
 - **Whisper** (local STT) runs **only in the main process** — the factory returns a stub in the
   renderer (`factory.js:91-102`). Models (tiny/base/small/medium) are downloaded with SHA-256
   verification from the manifest in `checksums.js`. STT output is filtered for noise tokens like
-  `[BLANK_AUDIO]` (`sttService.js:175-205`).
+  `[BLANK_AUDIO]` (`sttService.js:204-230`).
 - `localAIManager` periodically syncs service health and, if a local service goes down,
   `modelStateService` auto-reselects another available model
   (`handleLocalAIStateChange`, `:104-123`).
@@ -1321,7 +1321,7 @@ intent router picks a route ([`docs/diagrams/14-career-intent-router.mmd`](docs/
 - **Auto-update**: `electron-updater` checks GitHub releases in production (`index.js:697-728`).
 
 The `SystemAudioDump` binary (~179 KB) is committed under `src/ui/assets/` and is a macOS Mach-O
-executable — it is never spawned on Windows/Linux (`sttService.js:631`).
+executable — it is never spawned on Windows/Linux (`sttService.js:680`).
 
 ---
 

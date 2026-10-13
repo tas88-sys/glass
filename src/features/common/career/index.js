@@ -60,6 +60,31 @@ function vectorQueryText(turnText, decision, prev) {
     return anchor ? `${anchor.slice(-MAX_ANCHOR_CHARS)}\n${turnText}` : turnText;
 }
 
+// The STT spells an unfamiliar name by its sound ("Orbit Pay" heard as
+// "Orbit Pai"). After the exact pass, a name of FUZZY_MIN_LEN+ letters also
+// matches the words right after a company-context phrase when they are one
+// edit away (two from FUZZY_TWO_EDITS_LEN letters) and start with the same
+// letter. Shorter names stay exact: one edit from "Bridge" is "Bridget".
+const FUZZY_MIN_LEN = 7;
+const FUZZY_TWO_EDITS_LEN = 11;
+
+/** Levenshtein distance, or max + 1 once it is known to exceed max. */
+function editDistance(a, b, max) {
+    if (Math.abs(a.length - b.length) > max) return max + 1;
+    let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+    for (let i = 1; i <= a.length; i++) {
+        const cur = [i];
+        let rowMin = i;
+        for (let j = 1; j <= b.length; j++) {
+            cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+            if (cur[j] < rowMin) rowMin = cur[j];
+        }
+        if (rowMin > max) return max + 1;
+        prev = cur;
+    }
+    return prev[b.length];
+}
+
 function compileCompanyDetector(names) {
     const entries = [];
     for (const name of names || []) {
@@ -67,14 +92,40 @@ function compileCompanyDetector(names) {
         if (!words.length) continue;
         const pat = words.join(' ?');                  // "orbitpay" matches "Orbit Pay"
         const res = COMPANY_CONTEXT.map(([before, after]) => new RegExp(`\\b${before} ${pat}${after ? ` ${after}` : ''}\\b`));
-        entries.push({ name, len: words.join('').length, res });
+        const slug = words.join('');
+        entries.push({ name, len: slug.length, slug, words: words.length, res });
     }
     entries.sort((a, b) => b.len - a.len);             // longest first (E31)
+    const fuzzy = entries.filter(e => e.len >= FUZZY_MIN_LEN);
+    const contexts = COMPANY_CONTEXT.map(([before, after]) => [before.split(' '), after ? after.split(' ') : []]);
+
+    function fuzzyMatch(tokens) {
+        let best = null;
+        for (const [before, after] of contexts) {
+            for (let i = 0; i + before.length < tokens.length; i++) {
+                if (!before.every((w, k) => tokens[i + k] === w)) continue;
+                const start = i + before.length;
+                for (const e of fuzzy) {
+                    const max = e.len >= FUZZY_TWO_EDITS_LEN ? 2 : 1;
+                    // The name's words, or one more or fewer (the STT splits and joins words).
+                    for (let n = Math.max(1, e.words - 1); n <= e.words + 1 && start + n <= tokens.length; n++) {
+                        if (!after.every((w, k) => tokens[start + n + k] === w)) continue;
+                        const span = tokens.slice(start, start + n).join('');
+                        if (span[0] !== e.slug[0]) continue;
+                        const d = editDistance(span, e.slug, max);
+                        if (d <= max && (!best || d < best.d)) best = { name: e.name, d };
+                    }
+                }
+            }
+        }
+        return best ? best.name : null;
+    }
+
     return text => {
         const s = normalizeForMatch(text);
         if (!s) return null;
         for (const e of entries) if (e.res.some(re => re.test(s))) return e.name;
-        return null;
+        return fuzzy.length ? fuzzyMatch(s.split(' ')) : null;
     };
 }
 
@@ -439,6 +490,20 @@ function createCareerModule(options = {}) {
         }
     }
 
+    /**
+     * Names the speech-to-text should favor (sttKeyterms.js): the company names
+     * first (the interviewer's company is the one the STT most often misspells),
+     * then the manifest's entities. [] until the notes are loaded; never throws.
+     * @returns {string[]}
+     */
+    function keyterms() {
+        try {
+            return isReady() ? [...snap.companyNames, ...snap.entities].filter(n => typeof n === 'string') : [];
+        } catch {
+            return [];
+        }
+    }
+
     function status() {
         const v = snap ? vectorState() : { ready: false, vectors: 0 };
         // Hybrid only while vectors can actually be used (a crashed worker drops back, E21).
@@ -446,7 +511,7 @@ function createCareerModule(options = {}) {
         return { state: live, chunks: snap ? snap.chunks.length : 0, vectors: v.vectors };
     }
 
-    return { warm, prefetch, getCareerContext, hasCareerCue, detectCompany, checkAnswer, status };
+    return { warm, prefetch, getCareerContext, hasCareerCue, detectCompany, checkAnswer, keyterms, status };
 }
 
 const career = createCareerModule({ embedder: 'auto' });

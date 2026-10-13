@@ -14,10 +14,10 @@ This is **source attribution, not speaker diarization**.
 
 | Speaker tag | Fed from | STT session | Code |
 |---|---|---|---|
-| `"Me"` | Your **microphone** | `mySttSession` | `sttService.js:547` `sendMicAudioContent()` → `flushMyCompletion()` tags `'Me'` (`:82`) |
-| `"Them"` | **System / loopback** audio | `theirSttSession` | `sttService.js:575` `sendSystemAudioContent()` → `flushTheirCompletion()` tags `'Them'` (`:109`) |
+| `"Me"` | Your **microphone** | `mySttSession` | `sttService.js:583` `sendMicAudioContent()` → `flushMyCompletion()` tags `'Me'` (`:88`) |
+| `"Them"` | **System / loopback** audio | `theirSttSession` | `sttService.js:611` `sendSystemAudioContent()` → `flushTheirCompletion()` tags `'Them'` (`:115`) |
 
-- Both sessions are created in parallel at listen start (`sttService.js:469-472`).
+- Both sessions are created in parallel at listen start (`sttService.js:505-508`).
 - The mic stream and the system stream never mix — separate `getUserMedia` /
   loopback pipelines in `listenCapture.js` feed `sendMicAudioContent` (`:331`) and
   `sendSystemAudioContent` (`:398`) respectively.
@@ -39,7 +39,7 @@ captured**. Entry point: `listenCapture.js:417` `startCapture()`, which branches
 | Platform | Mic ("Me") | System audio ("Them") | Echo cancellation |
 |---|---|---|---|
 | **Windows** | `getUserMedia` | **Electron native loopback** — `getDisplayMedia({video:true, audio:true})` resolved to `audio: 'loopback'` by the handler in `index.js:175-182`. No external binary. (`listenCapture.js:515-566`) | ✅ WASM/Rust AEC |
-| **macOS** | `getUserMedia` | Bundled **`SystemAudioDump`** native binary, spawned and streamed as PCM (`sttService.js:630-721`, `startMacOSAudioCapture`). Gated to `darwin` only (`:631`). (`listenCapture.js:424-473`) | ✅ WASM/Rust AEC |
+| **macOS** | `getUserMedia` | Bundled **`SystemAudioDump`** native binary, spawned and streamed as PCM (`sttService.js:666-757`, `startMacOSAudioCapture`). Gated to `darwin` only (`:667`). (`listenCapture.js:424-473`) | ✅ WASM/Rust AEC |
 | **Linux** | `getUserMedia` | ❌ **Disabled** — `getDisplayMedia({audio:false})`. Mic only; no "Them" channel. (`listenCapture.js:474-514`) | ❌ |
 
 > **Note:** This corrects an earlier README claim that system audio was "macOS only" and
@@ -70,7 +70,7 @@ to surface it in the UI.
 
 | Provider | STT | LLM | Notes |
 |---|---|---|---|
-| **OpenAI** | ✅ `gpt-4o-mini-transcribe` | ✅ `gpt-4.1` | Realtime STT; gets a 60 s keep-alive heartbeat (`sttService.js:504`) |
+| **OpenAI** | ✅ `gpt-4o-mini-transcribe` | ✅ `gpt-4.1` | Realtime STT; gets a 60 s keep-alive heartbeat (`sttService.js:537-548`) |
 | **OpenAI (Glass)** | ✅ | ✅ | Pickle-hosted key via Portkey; same OpenAI handler |
 | **Gemini** | ✅ `gemini-3.8-live` | ✅ `gemini-3-flash-preview` | LLM supports CSV failover; STT does **not** (see §5) |
 | **Anthropic** | ❌ | ✅ `claude-opus-5-5` · `claude-sonnet-5-5` · `claude-haiku-5-5` | LLM only — `sttModels: []`; LLM supports CSV failover |
@@ -103,11 +103,11 @@ Deepgram is a fully-wired, selectable STT provider — no code change required.
 3. **Change STT Model** → pick **"Nova-3 (General)"** (appears in `getAvailableModels('stt')`
    once the key is saved — `SettingsView.js:1559`).
 
-**How it streams:** `createSTT` (`deepgram.js:39-94`) opens a WebSocket to
+**How it streams:** `createSTT` (`deepgram.js:39-101`) opens a WebSocket to
 `wss://api.deepgram.com/v1/listen` configured `encoding=linear16, sample_rate=24000,
 channels=1, smart_format=true, interim_results=true` — matching the capture pipeline's
 PCM16/mono/24 kHz output. Two sockets are opened (Me + Them). Messages are parsed in
-`sttService.js:240` / `:382` (`message.channel.alternatives[0].transcript`, `is_final`).
+`sttService.js:276` / `:418` (`message.channel.alternatives[0].transcript`, `is_final`).
 
 **Language.** Deepgram listens for one language, sent as `language=` in the WebSocket URL
 (`buildListenQuery` in `deepgram.js`). The language comes from the **Transcription language**
@@ -117,14 +117,26 @@ by `toProviderLanguage` (`sttLanguage.js`): Deepgram and Gemini get the full tag
 `pt` / `en`. Nova-3 supports `pt-BR`. `language=multi` (code-switching) and `detect_language`
 are not used. Per-side (Me / Them) language is not implemented.
 
+**Keyterms.** Each session also sends up to 90 `keyterm=` parameters, words nova-3 should favor
+(`sttKeyterms.js`, built by `sttService._keyterms` at every session start and renewal). It works
+in `pt-BR` as well as `en-US`: in the live eval, "O que é LINQ?" was heard as "O que é link?"
+without them and right with them. The list has two parts:
+- the career notes' company names and manifest entities, first (at most 50; the interviewer's
+  company is the name the STT most often misspells). There are none until the notes have loaded;
+- a fixed list of technical names an STT hears as plain words (`LINQ`, `gRPC`, `Kafka`,
+  `goroutine`, …).
+
+The log line shows only how many terms were sent, since some come from the notes. Other STT
+providers ignore the list.
+
 **Caveats:**
-- **STT-only.** `createLLM`/`createStreamingLLM` are stubs that throw (`deepgram.js:97-104`).
+- **STT-only.** `createLLM`/`createStreamingLLM` are stubs that throw (`deepgram.js:104-111`).
   You still need a separate LLM provider (OpenAI / Gemini / Anthropic / Groq / Ollama) for Ask and
   summaries.
 - **Model pinned to `nova-3`.** `createSTT` does not read the `model` option — it hardcodes
-  `model: 'nova-3'` in the query string (`deepgram.js:45-46`). Adding other Deepgram models
+  `model: 'nova-3'` in the query string (`deepgram.js:46-48`). Adding other Deepgram models
   to the registry will not take effect without editing the provider.
-- **No app-level keep-alive.** `_sendKeepAlive` only fires for OpenAI (`sttService.js:504`).
+- **No app-level keep-alive.** `_sendKeepAlive` only fires for OpenAI (`sttService.js:537-548`).
   In practice fine during active listening (audio flows every 100 ms), but a dropped socket
   mid-session is only logged, not recovered (see §5).
 
@@ -158,13 +170,13 @@ or Whisper). The provider is whatever is selected in Settings, and it stays ther
 | Mechanism | Where | Behavior |
 |---|---|---|
 | **Init retry** | `listenService.js:189-209` | Retries `initializeSttSessions` up to **10×** at 300 ms intervals on session start. Same model each time. |
-| **Proactive session renewal** | `sttService.js:482-491`, `renewSessions` `:518-545` | Every **20 min** (`SESSION_RENEW_INTERVAL_MS`) tears down and recreates both sessions to dodge provider hard-timeouts, with a **2 s overlap** (`SOCKET_OVERLAP_MS`) so no audio is dropped. |
-| **Keep-alive heartbeat** | `sttService.js:476-480`, `:501-512` | Every **60 s** (`KEEP_ALIVE_INTERVAL_MS`); OpenAI only (Gemini SDK self-heartbeats). |
+| **Proactive session renewal** | `sttService.js:518-527`, `renewSessions` `:554-581` | Every **20 min** (`SESSION_RENEW_INTERVAL_MS`) tears down and recreates both sessions to dodge provider hard-timeouts, with a **2 s overlap** (`SOCKET_OVERLAP_MS`) so no audio is dropped. |
+| **Keep-alive heartbeat** | `sttService.js:513-516`, `:537-548` | Every **60 s** (`KEEP_ALIVE_INTERVAL_MS`); OpenAI only (Gemini SDK self-heartbeats). |
 
 ### The gap
 
 A live STT socket that **drops or errors mid-session** is **not** automatically recovered —
-the `onerror`/`onclose` callbacks only log (`sttService.js:443-444`, `:452-453`). No
+the `onerror`/`onclose` callbacks only log (`sttService.js:478-479`, `:487-488`). No
 reconnect, no model switch, no provider fallback. The 20-min renewal is on a fixed timer; it
 does not react to a failure. Recovery requires a manual Stop → Listen.
 

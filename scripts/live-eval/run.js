@@ -335,9 +335,15 @@ async function phaseB(ctx, session, questions, lang) {
             notes: ex.career.find(d => d._block)?._block || '',
         };
         item.checks.push(check('answer shown', shown.length >= 1, 'fail', shown.length ? '' : `statuses: ${ex.answers.map(x => x.status).join(',') || 'gate did not fire'}`));
-        item.checks.push(check(`routed ${q.route}`, decision?.route === q.route, 'fail', `got ${decision?.route || 'none'}${scriptRoute && scriptRoute !== decision?.route ? `, script text routes ${scriptRoute}` : ''}`));
+        // A label the router misses on the script text itself is a router gap, which
+        // scripts/eval-career-kb.js measures: here it warns. The live path fails only
+        // when the audio and STT turn a route the router gets right into another one.
+        const routerGap = !!scriptRoute && scriptRoute !== q.route;
+        const routeLevel = routerGap ? 'warn' : 'fail';
+        const routeNote = routerGap ? `; the script text routes ${scriptRoute} too (router gap, see eval-career-kb)` : scriptRoute && scriptRoute !== decision?.route ? `, script text routes ${scriptRoute}` : '';
+        item.checks.push(check(`routed ${q.route}`, decision?.route === q.route, routeLevel, `got ${decision?.route || 'none'}${routeNote}`));
         if (q.route === 'personal' || q.route === 'company') {
-            item.checks.push(check('notes injected', decision?.hasBlock === true, 'fail', decision ? `${decision.chunks} sections` : ''));
+            item.checks.push(check('notes injected', decision?.hasBlock === true, routeLevel, decision ? `${decision.chunks} sections` : ''));
             item.checks.push(check('sources on the panel', item.metrics.sources > 0, 'warn'));
         }
         if (q.route === 'general') item.checks.push(check('no notes injected', decision ? !decision.hasBlock : true, 'fail'));

@@ -223,6 +223,7 @@ describe('career module: disabled (FR-001; E1, E2, E34, C1)', () => {
         assert.equal(mod.detectCompany('here at Bridge we ship'), null);
         assert.doesNotThrow(() => mod.prefetch('anything'));
         assert.deepEqual(mod.checkAnswer('We grew 40%.', { block: 'x' }, ''), []);
+        assert.deepEqual(mod.keyterms(), []);
     });
 
     it('folder missing → disabled, logged once (E2)', async () => {
@@ -406,6 +407,22 @@ describe('career module: ready (FR-008, FR-011, FR-012, FR-013, FR-014, FR-017)'
         assert.equal(mod.detectCompany('the Bridge team is great'), null, 'no company-context phrase');
         assert.equal(mod.detectCompany(''), null);
         assert.equal(mod.detectCompany(undefined), null);
+    });
+
+    it('keyterms: the company names, then the manifest entities (for the STT)', () => {
+        const terms = mod.keyterms();
+        for (const n of ['Lumen Works', 'Orbit Pay', 'Quillsoft']) assert.ok(terms.includes(n), n);
+        assert.ok(terms.indexOf('Orbit Pay') < terms.indexOf('Quillsoft'), 'companies first');
+    });
+
+    it('detectCompany: a name the STT misspelled by one letter still counts, in a company-context phrase', () => {
+        assert.equal(mod.detectCompany('aqui na orbitpai a gente usa filas'), 'Orbit Pay', 'one edit');
+        assert.equal(mod.detectCompany('Aqui na Orbit Pai a gente valoriza autonomia'), 'Orbit Pay', 'one edit, split words');
+        assert.equal(mod.detectCompany('thanks for joining kestral today'), 'kestrel');
+        assert.equal(mod.detectCompany('Here at Bridget we ship weekly.'), null, 'short names stay exact');
+        assert.equal(mod.detectCompany('aqui na orbita a gente usa filas'), null, 'two edits on a short name');
+        assert.equal(mod.detectCompany('aqui na korbitpay a gente'), null, 'first letter must match');
+        assert.equal(mod.detectCompany('the orbitpai team is great'), null, 'no company-context phrase');
     });
 
     it('checkAnswer flags numbers and known names that neither the block nor the conversation has (FR-021)', async () => {

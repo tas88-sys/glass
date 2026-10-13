@@ -328,6 +328,8 @@ function createSession({ cfg, career, tts, audio, log, liveFeatures = 'answer', 
     }
 
     const stt = audio ? new SttService() : null;
+    // The STT favors the notes' names, as in the app (sttKeyterms.js).
+    if (stt && career) stt.career = career.mod;
     let feeder = null;
     const onTurn = (speaker, text) => {
         sttFinals.push({ at: Date.now(), speaker, text });
