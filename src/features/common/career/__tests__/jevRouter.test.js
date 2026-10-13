@@ -116,7 +116,7 @@ describe('Jev off: the regex router, unchanged (FR-001, SC-006)', () => {
         const { r, lines } = router(ok(body('general')), { env: {} });
         await r.decide('a', ctx());
         await r.decide('b', ctx());
-        assert.deepEqual(lines, ['[career] router: no TYPESAFE_API_KEY; using the regex router']);
+        assert.deepEqual(lines, ['[career] router: no TypeSafe key (Settings or TYPESAFE_API_KEY); using the regex router']);
     });
 });
 
@@ -358,6 +358,69 @@ describe('cache and reuse (FR-006)', () => {
         const { r, fetchImpl } = router(ok(body('general')), { env: {} });
         r.prefetch('your biggest weakness', ctx());
         assert.equal(fetchImpl.bodies.length, 0);
+    });
+});
+
+describe('the key saved in Settings (FR-009)', () => {
+    function keyed(reply, { env = {}, key = null } = {}) {
+        const fetchImpl = async (url, init) => {
+            fetchImpl.auth.push(init.headers.Authorization);
+            return typeof reply === 'function' ? reply(fetchImpl.auth.length) : reply;
+        };
+        fetchImpl.auth = [];
+        const holder = { key };
+        const r = createJevRouter({ env, fetchImpl, now: () => T0, apiKey: () => holder.key, requestTimeoutMs: 200 });
+        return { r, fetchImpl, holder };
+    }
+
+    it('the Settings key turns Jev on without TYPESAFE_API_KEY', async () => {
+        const { r, fetchImpl } = keyed(ok(body('personal', 0.9)), { key: 'settings-key' });
+        assert.equal((await r.decide('x', ctx())).source, 'jev');
+        assert.deepEqual(fetchImpl.auth, ['Bearer settings-key']);
+        assert.equal(r.stats().keyFrom, 'settings');
+    });
+
+    it('it wins over TYPESAFE_API_KEY; without it the .env key is used', async () => {
+        const { r, fetchImpl, holder } = keyed(ok(body('general', 0.9)), { env: KEY, key: 'settings-key' });
+        await r.decide('a', ctx());
+        holder.key = null;
+        await r.decide('b', ctx());
+        assert.deepEqual(fetchImpl.auth, ['Bearer settings-key', 'Bearer test-key']);
+        assert.equal(r.stats().keyFrom, 'env');
+    });
+
+    it('Clear in Settings with no .env key → the regex router', async () => {
+        const { r, holder } = keyed(ok(body('general', 0.9)), { key: 'settings-key' });
+        holder.key = '';
+        assert.equal((await r.decide('a', ctx())).source, 'regex');
+        assert.equal(r.gateUsesJev(), false);
+        assert.equal(r.stats().state, 'no-key');
+    });
+
+    it('a 401 turns Jev off until a new key is saved', async () => {
+        const { r, fetchImpl, holder } = keyed(n => (n === 1 ? status(401) : ok(body('personal', 0.9))), { key: 'old-key' });
+        assert.equal((await r.decide('a', ctx())).fallback, 'auth');
+        assert.equal((await r.decide('b', ctx())).source, 'regex');
+        assert.equal(fetchImpl.auth.length, 1, 'no call with the refused key');
+        holder.key = 'new-key';
+        assert.equal(r.gateUsesJev(), true);
+        assert.equal((await r.decide('c', ctx())).source, 'jev');
+        assert.deepEqual(fetchImpl.auth, ['Bearer old-key', 'Bearer new-key']);
+    });
+
+    it('setApiKeySource wires the getter later, as the app does after the database is up', async () => {
+        const fetchImpl = async () => ok(body('personal', 0.9));
+        const r = createJevRouter({ env: {}, fetchImpl, now: () => T0 });
+        assert.equal((await r.decide('a', ctx())).source, 'regex');
+        r.setApiKeySource(() => 'late-key');
+        assert.equal((await r.decide('b', ctx())).source, 'jev');
+    });
+
+    it('a throwing getter falls back to the .env key', async () => {
+        const fetchImpl = async () => ok(body('personal', 0.9));
+        const r = createJevRouter({ env: KEY, fetchImpl, now: () => T0, apiKey: () => { throw new Error('db closed'); } });
+        assert.equal((await r.decide('a', ctx())).source, 'jev');
+        assert.equal(r.stats().keyFrom, 'env');
     });
 });
 

@@ -143,6 +143,7 @@ function compileCompanyDetector(names) {
  *   prefetchTimeoutMs?: number,
  *   router?: object,
  *   fetchImpl?: typeof fetch,
+ *   routerApiKey?: () => string|null,
  * }} [options]
  */
 function createCareerModule(options = {}) {
@@ -168,9 +169,10 @@ function createCareerModule(options = {}) {
     let disabledReason = null;
     let embedder = null;
     let embedderResolved = false;
-    // Jev first, the regex router when Jev cannot answer (R18). Tests inject a
-    // router or a fake fetch; with no TYPESAFE_API_KEY it is the regex router.
-    const router = options.router || createJevRouter({ env, fetchImpl: options.fetchImpl, log: careerDebug });
+    // Jev first, the regex router when Jev cannot answer (R18). The key comes
+    // from Settings (setRouterKeySource, wired by the app) or TYPESAFE_API_KEY;
+    // with neither it is the regex router. Tests inject a router or a fake fetch.
+    const router = options.router || createJevRouter({ env, fetchImpl: options.fetchImpl, log: careerDebug, apiKey: options.routerApiKey });
 
     // The real embedder is created on first use and only when asked for
     // ('auto'): tests and the plain-Node load path never touch the model runtime.
@@ -577,6 +579,20 @@ function createCareerModule(options = {}) {
         return { state: live, chunks: snap ? snap.chunks.length : 0, vectors: v.vectors };
     }
 
+    /**
+     * Where the router reads the TypeSafe key saved in Settings (src/index.js
+     * wires it once the database is up). A synchronous getter: it runs on each
+     * turn, so it should return a cached value. It wins over TYPESAFE_API_KEY.
+     * @param {() => string|null} fn
+     */
+    function setRouterKeySource(fn) {
+        try {
+            if (typeof router.setApiKeySource === 'function') router.setApiKeySource(fn);
+        } catch {
+            /* total: the router keeps the .env key */
+        }
+    }
+
     /** The router's state and counters (no text), for the eval and ask scripts. */
     function routerStats() {
         try {
@@ -598,6 +614,7 @@ function createCareerModule(options = {}) {
         keyterms,
         status,
         routerStats,
+        setRouterKeySource,
     };
 }
 

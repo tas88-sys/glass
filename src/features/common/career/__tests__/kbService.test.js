@@ -737,6 +737,22 @@ describe('career module: Jev router (spec 2026-10-13-career-router-jev)', () => 
         assert.equal(ctx.anchorText, Q1);
     });
 
+    it('the key saved in Settings turns Jev on with no TYPESAFE_API_KEY (setRouterKeySource)', async () => {
+        const fetchImpl = fakeFetch(answer('personal', 0.9));
+        const { mod } = career({ CAREER_KB_PATH: await kb() }, { fetchImpl });
+        await mod.warm();
+        assert.equal(mod.gateUsesJev(), false);
+        let saved = 'settings-key';
+        mod.setRouterKeySource(() => saved);
+        assert.equal(mod.gateUsesJev(), true);
+        const ctx = await mod.getCareerContext('Me fala do seu último projeto', { prev: null });
+        assert.equal(ctx.routeSource, 'jev');
+        assert.equal(mod.routerStats().keyFrom, 'settings');
+        saved = null;                                   // Clear in Settings
+        assert.equal(mod.gateUsesJev(), false);
+        assert.equal(mod.routerStats().state, 'no-key');
+    });
+
     it('classifyTurn: null while disabled; the gate waits only while Jev can answer', async () => {
         const { mod: off } = career({ CAREER_KB_PATH: '' }, { fetchImpl: fakeFetch(answer('personal')) });
         assert.equal(await off.classifyTurn('your biggest weakness', {}), null);

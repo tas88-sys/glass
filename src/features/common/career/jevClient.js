@@ -225,6 +225,31 @@ async function post({ apiKey, body, timeoutMs, signal, fetchImpl, endpoint }) {
     }
 }
 
+/**
+ * Settings' key check: one minimal call (a few tokens). Only a 401/403 rejects
+ * the key; any other failure (network, 429, 529) saves it unverified, since
+ * the router falls back to the regex on its own if the key turns out bad.
+ * @param {{ apiKey: string, model?: string, timeoutMs?: number, fetchImpl?: typeof fetch, endpoint?: string }} args
+ * @returns {Promise<{ success: boolean, error?: string, unverified?: string }>}
+ */
+async function validateKey({ apiKey, model = DEFAULT_MODEL, timeoutMs = 5000, fetchImpl, endpoint }) {
+    const key = typeof apiKey === 'string' ? apiKey.trim() : '';
+    if (!key) return { success: false, error: 'API key cannot be empty.' };
+    try {
+        await post({
+            apiKey: key,
+            body: { model, state: { turn: 'key check' }, questions: { ok: { type: 'noul', instructions: 'Is this a key check?' } } },
+            timeoutMs,
+            fetchImpl,
+            endpoint,
+        });
+        return { success: true };
+    } catch (err) {
+        if (err && err.kind === 'auth') return { success: false, error: `TypeSafe rejected the key (${err.status}).` };
+        return { success: true, unverified: (err && err.kind) || 'net' };
+    }
+}
+
 module.exports = {
     ENDPOINT,
     DEFAULT_MODEL,
@@ -237,4 +262,5 @@ module.exports = {
     buildRequest,
     parseResponse,
     post,
+    validateKey,
 };

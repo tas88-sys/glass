@@ -25,6 +25,7 @@ const {
     buildRequest,
     parseResponse,
     post,
+    validateKey,
 } = require('../jevClient');
 
 const answer = (route = 'personal', confidence = 0.9, extra = {}) => ({
@@ -218,5 +219,35 @@ describe('post (FR-004, FR-010)', () => {
             assert.equal(err.message, 'jev rate 429');
             return true;
         });
+    });
+});
+
+describe('validateKey (Settings)', () => {
+    it('one minimal call with the key; 200 → saved', async () => {
+        const f = fakeFetch(() => json(200, { model: 'jev-1.13.0', answers: { ok: { type: 'noul', noul: 0.9 } }, usage: { input_tokens: 20, output_tokens: 1 } }));
+        assert.deepEqual(await validateKey({ apiKey: ' k-1 ', fetchImpl: f }), { success: true });
+        assert.equal(f.calls[0].init.headers.Authorization, 'Bearer k-1');
+        assert.deepEqual(Object.keys(f.calls[0].body.questions), ['ok']);
+        assert.equal(f.calls[0].body.questions.ok.type, 'noul');
+        assert.ok(JSON.stringify(f.calls[0].body).length < 200, 'a few tokens, not the route criteria');
+    });
+
+    it('401/403 → rejected with the status', async () => {
+        for (const s of [401, 403]) {
+            const r = await validateKey({ apiKey: 'bad', fetchImpl: fakeFetch(() => json(s, {})) });
+            assert.equal(r.success, false);
+            assert.match(r.error, new RegExp(String(s)));
+        }
+    });
+
+    it('a failure that says nothing about the key → saved unverified', async () => {
+        assert.deepEqual(await validateKey({ apiKey: 'k', fetchImpl: fakeFetch(() => json(529, {})) }), { success: true, unverified: 'overload' });
+        assert.deepEqual(await validateKey({ apiKey: 'k', fetchImpl: async () => { throw new TypeError('fetch failed'); } }), { success: true, unverified: 'net' });
+    });
+
+    it('an empty key → refused without a call', async () => {
+        const f = fakeFetch(() => json(200, {}));
+        assert.equal((await validateKey({ apiKey: '  ', fetchImpl: f })).success, false);
+        assert.equal(f.calls.length, 0);
     });
 });

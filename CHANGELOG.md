@@ -18,6 +18,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 - **Fallback:** the regex router decides, and the debug line says why (`src=regex(timeout)`), on a timeout, 429/529, a network error, a malformed answer, low confidence, or an open circuit (three failures in a row → regex only for 60 s). A 401/422 turns Jev off until restart.
 - **Gate:** a turn with no question form ("your biggest weakness") waits for Jev, at most 700 ms, before the debounce. Questions never wait.
 - **Config:** `CAREER_ROUTER=jev|regex` (the kill switch; a typo reads as `regex`), `CAREER_ROUTER_JEV_MODEL`, `CAREER_ROUTER_JEV_MIN_CONF`, `CAREER_ROUTER_GATE_TIMEOUT_MS`, `CAREER_ROUTER_RESOLVE_BUDGET_MS`.
+- **Settings → TypeSafe (Jev) API Key:** the key is saved like the providers' keys (encrypted, Save/Clear) and wins over `TYPESAFE_API_KEY`, so an installed app, which ships no `.env`, can use Jev too. Save checks the key with one minimal call. A TypeSafe key alone does not count as an AI key, and a new key brings Jev back after a 401 without a restart.
 - **`scripts/eval-career-kb.js --router regex|jev`:**
   - prints the router confusion per language;
   - with `jev`, compares Jev with the regex router on the same items and reports the Jev call p50/p95 and the fallbacks;

@@ -213,7 +213,8 @@ async function setupCareer(cfg, { bm25Only, log }) {
     const { appCacheDir } = require('../career-cache-dir');
     const embedder = bm25Only ? null : createEmbedder({ cacheDir: () => appCacheDir() });
     const mod = createCareerModule({
-        env: { ...process.env, CAREER_KB_PATH: cfg.kbPath, LIVE_ANSWER_DEBUG: '' },
+        // The router key from .env or the app's Settings (config.js), as the app reads it.
+        env: { ...process.env, CAREER_KB_PATH: cfg.kbPath, LIVE_ANSWER_DEBUG: '', TYPESAFE_API_KEY: cfg.keys.typesafe || '' },
         embedder,
         debug: false,
     });

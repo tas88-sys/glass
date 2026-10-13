@@ -9,6 +9,9 @@ const modelCatalogRepository = require('../repositories/modelCatalog');
 // How long saving a model list waits for the catalog to learn its models, so
 // Settings shows what they can do right after Save.
 const SAVE_CATALOG_TIMEOUT_MS = 5_000;
+// The career router's key (Jev, TypeSafe AI): a provider_settings row like the
+// others (encrypted, same Save/Clear flow), but no LLM or STT models.
+const ROUTER_KEY_PROVIDER = 'typesafe';
 const authService = require('./authService');
 const ollamaModelRepository = require('../repositories/ollamaModel');
 
@@ -378,9 +381,10 @@ class ModelStateService extends EventEmitter {
      */
     async hasValidApiKey() {
         if (this.isLoggedInWithFirebase()) return true;
-        
+
         const allSettings = await providerSettingsRepository.getAll();
-        return allSettings.some(s => s.api_key && s.api_key.trim().length > 0);
+        // The TypeSafe key only routes career questions; alone it answers nothing.
+        return allSettings.some(s => s.provider !== ROUTER_KEY_PROVIDER && s.api_key && s.api_key.trim().length > 0);
     }
 
     /**
@@ -535,6 +539,11 @@ class ModelStateService extends EventEmitter {
     async validateApiKey(provider, key) {
         if (!key || (key.trim() === '' && provider !== 'ollama' && provider !== 'whisper')) {
             return { success: false, error: 'API key cannot be empty.' };
+        }
+        if (provider === ROUTER_KEY_PROVIDER) {
+            const result = await require('../career/jevClient').validateKey({ apiKey: key });
+            if (result.unverified) console.warn(`[ModelStateService] TypeSafe key saved unverified (${result.unverified})`);
+            return result;
         }
         const ProviderClass = getProviderClass(provider);
         if (!ProviderClass || typeof ProviderClass.validateApiKey !== 'function') {

@@ -75,10 +75,12 @@ const ms = x => Math.round(x * 10) / 10;
  *   log?: (line: string) => void,
  *   endpoint?: string,
  *   requestTimeoutMs?: number,
- * }} [options]
+ *   apiKey?: () => string|null,
+ * }} [options]  apiKey: the key saved in Settings; it wins over TYPESAFE_API_KEY
  */
 function createJevRouter(options = {}) {
     const env = options.env || process.env;
+    let keySource = typeof options.apiKey === 'function' ? options.apiKey : null;
     const now = typeof options.now === 'function' ? options.now : Date.now;
     const log = typeof options.log === 'function' ? options.log : () => {};
     const requestTimeoutMs = Number.isFinite(options.requestTimeoutMs) ? options.requestTimeoutMs : DEFAULTS.requestTimeoutMs;
@@ -88,6 +90,7 @@ function createJevRouter(options = {}) {
     let openUntil = 0;
     let probing = false;
     let disabled = null;              // 'auth' | 'validation' once Jev refused us
+    let disabledKey = null;           // the key it refused: a new key clears `disabled`
     const noted = new Set();
     const counts = { calls: 0, ok: 0, failed: {}, fallbacks: {} };
 
@@ -97,11 +100,35 @@ function createJevRouter(options = {}) {
         log(line);
     }
 
-    // env is read on each use: the app loads .env before the first turn, after this module exists.
-    function config() {
+    function savedKey() {
+        try {
+            const k = keySource ? keySource() : null;
+            return typeof k === 'string' ? k.trim() : '';
+        } catch {
+            return '';
+        }
+    }
+
+    // The settings, read on each use: the app loads .env, and the key saved in
+    // Settings can change, after this module exists. The saved key wins.
+    function currentConfig() {
         const cfg = readConfig(env);
+        const saved = savedKey();
+        if (saved) cfg.apiKey = saved;
+        cfg.keyFrom = saved ? 'settings' : cfg.apiKey ? 'env' : 'none';
+        if (disabled && cfg.apiKey !== disabledKey) {
+            disabled = null;          // a new key: try Jev again
+            disabledKey = null;
+            noted.delete('off:auth');
+            noted.delete('off:validation');
+        }
+        return cfg;
+    }
+
+    function config() {
+        const cfg = currentConfig();
         if (cfg.unknownMode) once('mode', '[career] router: unknown CAREER_ROUTER value; using the regex router');
-        else if (cfg.wanted === 'jev' && !cfg.apiKey) once('key', '[career] router: no TYPESAFE_API_KEY; using the regex router');
+        else if (cfg.wanted === 'jev' && !cfg.apiKey) once('key', '[career] router: no TypeSafe key (Settings or TYPESAFE_API_KEY); using the regex router');
         return cfg;
     }
 
@@ -132,13 +159,14 @@ function createJevRouter(options = {}) {
         openUntil = 0;
     }
 
-    function failed(err) {
+    function failed(err, apiKey) {
         const kind = (err && err.kind) || 'net';
         counts.failed[kind] = (counts.failed[kind] || 0) + 1;
         if (kind === 'auth' || kind === 'validation') {
             disabled = kind;
+            disabledKey = apiKey;
             const field = err && err.field ? ` field=${err.field}` : '';
-            once(`off:${kind}`, `[career] router: Jev ${kind} error (${(err && err.status) || '-'}${field}); regex router until restart`);
+            once(`off:${kind}`, `[career] router: Jev ${kind} error (${(err && err.status) || '-'}${field}); regex router until the key changes or the app restarts`);
             return kind;
         }
         if (!COUNTED.has(kind)) return kind;
@@ -189,7 +217,7 @@ function createJevRouter(options = {}) {
                     entry.settled = { ok: true, answer };
                 },
                 err => {
-                    entry.settled = { ok: false, kind: failed(err) };
+                    entry.settled = { ok: false, kind: failed(err, cfg.apiKey) };
                 },
             )
             .then(() => {
@@ -282,8 +310,14 @@ function createJevRouter(options = {}) {
         return config().gateTimeoutMs;
     }
 
+    /** The Settings key getter (the app wires it once the database is up). */
+    function setApiKeySource(fn) {
+        keySource = typeof fn === 'function' ? fn : null;
+        noted.delete('key');
+    }
+
     function stats() {
-        const cfg = readConfig(env);
+        const cfg = currentConfig();
         const state = cfg.wanted !== 'jev' ? 'off'
             : !cfg.apiKey ? 'no-key'
                 : disabled ? `disabled:${disabled}`
@@ -291,6 +325,7 @@ function createJevRouter(options = {}) {
                         : 'on';
         return {
             state,
+            keyFrom: cfg.keyFrom,
             model: cfg.model,
             calls: counts.calls,
             ok: counts.ok,
@@ -299,7 +334,7 @@ function createJevRouter(options = {}) {
         };
     }
 
-    return { decide, prefetch, gateUsesJev, gateTimeoutMs, stats };
+    return { decide, prefetch, gateUsesJev, gateTimeoutMs, setApiKeySource, stats };
 }
 
 module.exports = {

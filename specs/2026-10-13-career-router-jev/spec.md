@@ -82,6 +82,10 @@ the tables never saw.
 - **FR-009 Configuration.** `TYPESAFE_API_KEY`, `CAREER_ROUTER` (`jev` | `regex`; any other value
   reads as `regex`), `CAREER_ROUTER_JEV_MODEL`, `CAREER_ROUTER_JEV_MIN_CONF`,
   `CAREER_ROUTER_GATE_TIMEOUT_MS`, `CAREER_ROUTER_RESOLVE_BUDGET_MS`, all from `.env`, read on use.
+  The key can also be saved in Settings (a `provider_settings` row `typesafe`, encrypted like the
+  providers' keys), which wins over `TYPESAFE_API_KEY`. Save checks it with one minimal call:
+  401/403 rejects it, any other failure saves it unverified. Alone it does not count as an AI key
+  (`hasValidApiKey`). A new key clears an `auth`/`validation` disable without a restart.
 - **FR-010 Observability.** `getCareerContext` returns `routeSource`, `routeFallback`,
   `routeConfidence`, `jevMs`. The `[career]` line ends with `src=jev|regex|regex(<reason>)` and
   `jev=<ms>`. `routerStats()` returns the state and counters.
