@@ -3,6 +3,7 @@ const { getSystemPrompt } = require('../../common/prompts/promptBuilder.js');
 const { createLLM, createStreamingLLM } = require('../../common/ai/factory');
 const sessionRepository = require('../../common/repositories/session');
 const summaryRepository = require('./repositories');
+const { liveAnswerRepository } = require('./repositories/liveAnswers');
 const modelStateService = require('../../common/services/modelStateService');
 const careerContext = require('../../common/career');
 const { DEFAULT_LIVE_FEATURES, normalizeLiveFeatures, answerEnabled, insightsEnabled } = require('../liveFeatures');
@@ -15,130 +16,17 @@ function laDebug(...args) {
     if (LIVE_ANSWER_DEBUG) console.log(...args);
 }
 
-// ---------------------------------------------------------------------------
-// Pure helper: isLikelyQuestion (FR-002)
-// Recall-oriented: true when text ends with '?' OR starts with a question
-// opener (case-insensitive). When uncertain, favor true — PASSIVE suppresses.
-// ---------------------------------------------------------------------------
-// Balanced, quota-aware question gate (FR-002).
-//
-// Triggers when the turn carries a real question SIGNAL, and skips the
-// interviewer's declarative monologue so we don't spend LLM calls (and the
-// daily quota) on talk that isn't a question. Catches ~every real question;
-// the only by-design gap is a cue-less statement-form prompt ("your biggest
-// weakness"). PASSIVE still suppresses any false trigger.
-//
-// A turn triggers when ANY of these holds:
-//   1. a '?' appears anywhere (STT usually punctuates questions)
-//   2. an imperative/interview cue appears (design, compare, give me, ...)
-//   3. an embedded/indirect question appears ("...the question is what...")
-//   4. a wh-word or yes/no auxiliary LEADS any clause (after peeling leading
-//      discourse markers, so "okay so how does X" counts)
-// Otherwise it is treated as declarative monologue and skipped.
-
-// wh-words + yes/no auxiliaries/modals that lead an interrogative clause.
-const CLAUSE_LEAD_RE =
-    /^(?:what|how|why|when|where|which|who|whom|whose|whether|is|are|am|was|were|do|does|did|can|could|would|will|should|shall|may|might|have|has|had|must)\b/i;
-// Discourse markers / fillers that can precede the real clause start.
-const LEAD_STRIP_RE =
-    /^(?:so|and|but|now|well|okay|ok|alright|right|um|uh|er|like|you know|i mean|then|yeah|no|oh|hmm)\b[\s,]*/i;
-// Imperative / interview cues — a strong question signal anywhere in the turn.
-const CONTENT_CUE_RE = new RegExp(
-    '\\b(?:tell me|tell us|walk me|walk us|walk through|give me|give us|show me|' +
-    'show us|describe|explain|compare|contrast|define|design|implement|write|' +
-    'build|create|solve|optimi[sz]e|refactor|debug|consider|suppose|imagine|' +
-    'assume|elaborate|outline|discuss|go over|step through|reason about|' +
-    'think about|talk about|what about|how about|what if|let\'s say|lets say|' +
-    'name (?:a|an|some|the)|list (?:a|an|some|the|out)|your thoughts|any thoughts|' +
-    'your take|thoughts on|difference between|pros and cons|trade-?offs)\\b',
-    'i'
-);
-// Indirect / embedded question: a copula or asking-verb followed by a wh-word.
-const EMBEDDED_Q_RE =
-    /\b(?:is|are|was|were|wonder|wondering|curious|know|asking|ask|want(?:ed)? to know|looking at|question is)\s+(?:what|how|why|when|where|which|who|whether|if)\b/i;
-
-// Portuguese twins of the signals above. The STT often leaves the '?' off a
-// Portuguese question ("Me explica a diferença entre…"), so the gate needs its
-// own words. PT_CLAUSE_LEAD_RE and PT_CONTENT_CUE_RE match accent-folded,
-// lowercase text (foldPt); PT_LEAD_STRIP_RE peels the original text, so it
-// spells the accents itself. "aí", "legal" and "show" are left out: peeled
-// from English ("AI is…", "Legal is…") they would expose an auxiliary.
-const PT_LEAD_STRIP_RE =
-    /^(?:ent[aã]o|e(?!\s+se(?![\p{L}\p{N}]))|mas|agora|bom|bem|beleza|t[aá]|ok|certo|tipo|n[eé]|olha|enfim|perfeito|[oó]timo|hum|ah)(?![\p{L}\p{N}])[\s,]*/iu;
-// Question words and "você + verb" openers. "Como" alone also means "as"
-// ("Como arquiteta, …"), so it counts only before a verb or "você".
-const PT_CLAUSE_LEAD_RE = new RegExp(
-    '^(?:o que|oque|que tipo|qual|quais|quem|quando|onde|aonde|por que|pra que|para que|' +
-    'quanto|quantos|quantas|sera que|e se|' +
-    'como (?:que |e que )?(?:se )?(?:voce|vc|voces|a gente|e|era|foi|seria|ficaria|funciona|funcionaria|' +
-    'faz|faria|fazer|lida|lidaria|lidar|garante|garantiria|garantir|escala|escalaria|escalar|resolve|' +
-    'resolveria|resolver|implementa|implementaria|implementar|projeta|projetaria|projetar|evita|evitaria|' +
-    'evitar|trata|trataria|tratar|mede|mediria|medir|calcula|calcularia|calcular|testa|testaria|testar)|' +
-    '(?:voce|vc|voces) (?:ja|conhece|sabe|tem|teve|pode|poderia|consegue|conseguiria|costuma|prefere|acha|' +
-    'usaria|faria|gosta|usa|trabalha|trabalhou|usou|lidou|participou)|' +
-    '(?:pode|poderia|consegue|conseguiria) (?:me |nos )?(?:explicar|falar|contar|dar|mostrar|descrever|detalhar|' +
-    'comentar|resumir|dizer)|' +
-    'tem (?:algum|alguma|alguns|algumas|experiencia|exemplo)|ja (?:trabalhou|usou|teve|fez|lidou|participou|precisou))\\b'
-);
-// Requests and interview cues anywhere in the turn.
-const PT_CONTENT_CUE_RE = new RegExp(
-    '\\b(?:me (?:explica|explique|fala|fale|conta|conte|diz|diga|descreve|descreva|mostra|mostre|passa|passe|' +
-    'lista|liste|ajuda a entender|ajude a entender)|me (?:da|de) (?:um|uma|alguns|algumas|exemplo)|' +
-    'explique|descreva|compare|defina|projete|desenhe|implemente|escreva|resolva|otimize|elabore|liste|' +
-    'comente|considere|suponha|imagine|imagina|pense em|pensa em|' +
-    '(?:fala|fale|conta|conte|explica) (?:sobre|um pouco|mais|pra mim|pra gente)|' +
-    'explica (?:como|o que|a diferenca|por que|qual)|' +
-    'diferenca entre|pros e contras|vantagens e desvantagens|o que (?:voce|vc) acha|na sua (?:opiniao|visao)|' +
-    'sua (?:opiniao|visao) sobre|(?:gostaria de|queria|quero) (?:saber|ouvir|entender)|' +
-    '(?:gostaria|queria) que (?:voce|vc)|sabe (?:me )?dizer|saberia (?:me )?dizer|que tal|vamos supor|digamos que)\\b'
-);
-
-/** Accents folded, lowercase: the space the Portuguese regexes match in. */
-function foldPt(text) {
-    return text.normalize('NFD').replace(/\p{M}+/gu, '').toLowerCase();
-}
-
-/** Discourse markers peeled from the start of a clause, English and Portuguese. */
-function peelLead(clause) {
-    let c = clause.trim();
-    let prev;
-    do {
-        prev = c;
-        c = c.replace(LEAD_STRIP_RE, '').trim();
-        c = c.replace(PT_LEAD_STRIP_RE, '').trim();
-    } while (c !== prev);
-    return c;
-}
-
-/** A wh-word / auxiliary (or its Portuguese twin) leads the peeled clause. */
-function leadsQuestion(peeled) {
-    return CLAUSE_LEAD_RE.test(peeled) || PT_CLAUSE_LEAD_RE.test(foldPt(peeled));
-}
-
-function hasContentCue(text) {
-    return CONTENT_CUE_RE.test(text) || PT_CONTENT_CUE_RE.test(foldPt(text));
-}
-
-function isLikelyQuestion(text) {
-    if (typeof text !== 'string') return false;
-    const trimmed = text.trim();
-    if (trimmed.length === 0) return false;
-
-    if (trimmed.includes('?')) return true;            // 1. explicit question mark
-    if (hasContentCue(trimmed)) return true;           // 2. imperative/interview cue
-    if (EMBEDDED_Q_RE.test(trimmed)) return true;      // 3. embedded/indirect question
-
-    // 4. wh-word / auxiliary leading any clause (peel leading discourse markers
-    //    so "okay so how does X work" still counts).
-    for (const clause of trimmed.split(/[.!?;,\n]+/)) {
-        if (leadsQuestion(peelLead(clause))) return true;
-    }
-
-    // 5. No question signal — declarative monologue; skip to save quota (PASSIVE
-    //    would have suppressed it anyway). Cue-less statement-form prompts are
-    //    the known by-design gap (FR-002 / EDGE_CASES).
-    return false;
-}
+// The question gate (isLikelyQuestion, FR-002; shouldTriggerAnswer, FR-001/FR-004) lives in questionGate.js.
+const {
+    isLikelyQuestion,
+    peelLead,
+    leadsQuestion,
+    hasContentCue,
+    EMBEDDED_Q_RE,
+    normalizeTail,
+    shouldTriggerAnswer,
+    isBackchannel,
+} = require('./questionGate');
 
 // ---------------------------------------------------------------------------
 // Pure helper: extractQuestion (FR-006/FR-007/FR-009/FR-012)
@@ -264,45 +152,6 @@ function parseAnswerOrPassive(prefix) {
 }
 
 // ---------------------------------------------------------------------------
-// Pure helper: shouldTriggerAnswer (FR-001 + FR-004)
-// Decision-only: does not manage debounce or abort — orchestrator does that.
-// Returns false when:
-//   - speaker is not 'them' (case-insensitive mic gate)
-//   - text is not a likely question, and carries no career cue
-//   - normalized tail equals lastAnsweredTail (de-dup same question)
-// Returns true otherwise (including when inFlight with new tail — the caller
-// is responsible for aborting the in-flight request).
-//
-// hasCareerCue (optional) widens the question heuristic for statement-form
-// career prompts ("your biggest weakness", career FR-007). The career module
-// returns false while it is disabled, so the gate is then exactly today's.
-// ---------------------------------------------------------------------------
-function normalizeTail(text) {
-    if (!text) return '';
-    return text.trim().toLowerCase().replace(/\s+/g, ' ');
-}
-
-function hasCue(hasCareerCue, text) {
-    if (typeof hasCareerCue !== 'function') return false;
-    try {
-        return hasCareerCue(text) === true;
-    } catch {
-        return false;
-    }
-}
-
-function shouldTriggerAnswer(speaker, text, lastAnsweredTail, inFlight, hasCareerCue) {
-    // Speaker gate
-    if (typeof speaker !== 'string' || speaker.toLowerCase() !== 'them') return false;
-    // Question heuristic, widened by career cues (career FR-007)
-    if (!isLikelyQuestion(text) && !hasCue(hasCareerCue, text)) return false;
-    // De-dup: same normalized tail as last answered
-    const tail = normalizeTail(text);
-    if (lastAnsweredTail !== null && lastAnsweredTail !== undefined && tail === lastAnsweredTail) return false;
-    return true;
-}
-
-// ---------------------------------------------------------------------------
 // Pure helper: parseLiveAnswerSseLine (FR-009)
 // Extracted SSE line parser — mirrors askService._processStream sentinel
 // handling WITHOUT importing askService (FR-017 — CLOSED set).
@@ -355,6 +204,9 @@ class SummaryService {
         // question. Lets the renderer coalesce streaming deltas into one history
         // entry vs. pushing a new one (in-session answer history).
         this.answerSeq = 0;
+        // Bumped when an answer is armed, paused or reset: a gate decision that
+        // arrives after a bump is stale (career router gate, spec 2026-10-13).
+        this.answerEpoch = 0;
 
         // Career context (spec 2026-10-11): the module (replaceable in tests),
         // the last answered personal/company question for follow-ups, and the
@@ -362,11 +214,18 @@ class SummaryService {
         this.career = careerContext;
         this.careerPrev = null;
         this.activeCompany = null;
+        // The interviewer's last segment ({ text, ts }): the router reads it as
+        // the start of a question the STT split (R19).
+        this.lastThemTurn = null;
 
         // Which live lanes run (spec 2026-10-12-live-features-toggle): 'both',
         // 'answer' or 'insights'. Set by listenService at session start and
         // when the user changes it in Settings.
         this.liveFeatures = DEFAULT_LIVE_FEATURES;
+
+        // Where each answer is kept for later review (spec 2026-10-13-live-answer-history):
+        // the app DB, resolved on first use; replaceable in tests.
+        this.liveAnswers = null;
     }
 
     setCallbacks({ onAnalysisComplete, onStatusUpdate }) {
@@ -419,6 +278,9 @@ class SummaryService {
         // renderer can build an in-session history (newest-first).
         const answerId = meta.id != null ? meta.id : Date.now();
         const question = meta.question || '';
+        // The caller's history record (spec 2026-10-13-live-answer-history): filled
+        // here with the model, the first token and how the answer ended.
+        const rec = meta.record || null;
         // Career context (career FR-014): used only when it carries a block. With
         // no block (feature off, general route, nothing found) the messages are
         // byte-identical to today's (career SC-005). Its note titles ride on
@@ -454,6 +316,7 @@ class SummaryService {
         }
         // [diagnostic] confirms model resolved — provider/model only, never the apiKey or answer
         laDebug(`[live-answer] makeLiveAnswer streaming via ${modelInfo.provider}/${modelInfo.model}`);
+        if (rec) rec.model = String(modelInfo.model || '').split(',')[0].trim() || null;
 
         // TWO-ARG createStreamingLLM (C1/FR-008 — NOT createLLM single-arg)
         const llm = createStreamingLLM(modelInfo.provider, {
@@ -523,6 +386,7 @@ class SummaryService {
                     }
                     if (parsed.finalModel) {
                         finalModel = parsed.finalModel;
+                        if (rec) rec.model = finalModel;
                         continue;
                     }
                     if (parsed.delta) {
@@ -542,6 +406,7 @@ class SummaryService {
                                     laDebug('[live-answer] prefix → ANSWER — flushing first token to renderer');
                                     // Flush the buffered prefix as first emit
                                     fullResponse += decision.flush;
+                                    if (rec && rec.firstTokenAt == null) rec.firstTokenAt = Date.now();
                                     this.sendToRenderer('live-answer-update', {
                                         id: answerId,
                                         question,
@@ -582,10 +447,15 @@ class SummaryService {
                 passiveSuppressed = true;
             } else if (decision.flush) {
                 fullResponse += decision.flush;
+                if (rec && rec.firstTokenAt == null) rec.firstTokenAt = Date.now();
                 this.sendToRenderer('live-answer-update', { id: answerId, question, answer: fullResponse, ts: Date.now(), ...extra });
             }
         }
 
+        if (rec) {
+            rec.answer = fullResponse;
+            rec.status = signal && signal.aborted ? 'replaced' : passiveSuppressed ? 'passive' : fullResponse ? 'answer' : 'empty';
+        }
         if (passiveSuppressed) return null;
         if (!fullResponse) {
             laDebug('[live-answer] stream ended with no answer content');
@@ -618,6 +488,7 @@ class SummaryService {
                 /* the check never blocks an answer */
             }
             if (unverified.length) {
+                if (rec) rec.unverified = unverified;
                 this.sendToRenderer('live-answer-update', { id: answerId, question, answer: fullResponse, ts, ...extra, unverified });
             }
         }
@@ -630,7 +501,9 @@ class SummaryService {
      *
      * Gates (in order):
      * 1. Speaker gate: only 'them' triggers (FR-001)
-     * 2. Question heuristic: shouldTriggerAnswer (FR-002/FR-004)
+     * 2. Question heuristic: shouldTriggerAnswer (FR-002/FR-004). A them turn
+     *    with no question form asks the career router (Jev) when it is on, and
+     *    is armed when the answer comes back personal or company
      * 3. 800ms debounce: re-set on each new 'them:' turn so multi-segment
      *    questions coalesce into a single trigger (FR-003)
      * 4. De-dup + abort-or-suppress in the debounce callback (FR-004)
@@ -653,15 +526,123 @@ class SummaryService {
             }
         }
 
+        // R19: the interviewer's segment before this one goes to the router with
+        // it (the router keeps it only when recent). A backchannel does not
+        // replace it: it begins no question.
+        let before = null;
+        if (fromThem) {
+            before = this.lastThemTurn;
+            if (!isBackchannel(text)) this.lastThemTurn = { text, ts: Date.now() };
+        }
+
+        // R19: an acknowledgment or filler ("Aham.", "Hã?") wants no answer and
+        // costs no Jev call (shouldTriggerAnswer rejects it on the regex path too).
+        if (fromThem && isBackchannel(text)) {
+            laDebug(`[live-answer] trigger gate: speaker=${speaker} backchannel → willTrigger=false`);
+            return;
+        }
+
+        // Career FR-007 with Jev (spec 2026-10-13): a them turn with no question
+        // form ("your biggest weakness") waits for the Jev route instead of the
+        // regex cue. Questions keep the synchronous path below.
+        if (fromThem && !isLikelyQuestion(text) && this.careerGateUsesJev()) {
+            this.gateWithCareerRouter(text, before);
+            return;
+        }
+
         const willTrigger = shouldTriggerAnswer(speaker, text, this.lastAnsweredTail, this.inFlight, t => this.career.hasCareerCue(t));
         // [diagnostic] trigger-gate trace — decision metadata only, never answer text
         laDebug(`[live-answer] trigger gate: speaker=${speaker} likelyQuestion=${isLikelyQuestion(text)} inFlight=${this.inFlight} → willTrigger=${willTrigger}`);
         if (!willTrigger) return;
+        this.armAnswer(text, before);
+    }
 
-        // Career FR-009: start the query embedding now so it is ready when the
-        // debounce fires (a no-op while the module is disabled or BM25-only).
+    /**
+     * The career module's session for a turn: the follow-up state, the
+     * interviewer's company, and the interviewer's segment before this turn
+     * when there is one (R19).
+     */
+    careerSession(before) {
+        const session = { prev: this.careerPrev, activeCompany: this.activeCompany };
+        if (before) session.before = before;
+        return session;
+    }
+
+    careerGateUsesJev() {
         try {
-            this.career.prefetch(text, { prev: this.careerPrev });
+            return typeof this.career.gateUsesJev === 'function' && this.career.gateUsesJev() === true;
+        } catch {
+            return false;
+        }
+    }
+
+    /** The router's asks thresholds ({ min, veto }), or null (R19). */
+    careerAskPolicy() {
+        try {
+            const p = typeof this.career.askPolicy === 'function' ? this.career.askPolicy() : null;
+            return p && Number.isFinite(p.min) && Number.isFinite(p.veto) ? p : null;
+        } catch {
+            return null;
+        }
+    }
+
+    /** R19: false only when Jev answered that the turn wants no answer. */
+    async careerWantsAnswer(text, before) {
+        try {
+            if (typeof this.career.wantsAnswer !== 'function') return true;
+            return (await this.career.wantsAnswer(text, this.careerSession(before))) !== false;
+        } catch {
+            return true;
+        }
+    }
+
+    /**
+     * The gate for a statement-form them turn when the career router uses Jev.
+     * Arms the answer when the route is personal or company and Jev's asks is
+     * at or above the policy's min (R19: "Mas aí no caso," reads as a
+     * follow-up but asks nothing), unless a newer question was armed (or the
+     * session reset or paused) while Jev answered. The career module falls
+     * back to the regex by itself on a timeout or error; a regex decision has
+     * no asks and arms on its route alone.
+     */
+    gateWithCareerRouter(text, before) {
+        const epoch = this.answerEpoch;
+        let pending;
+        try {
+            pending = Promise.resolve(this.career.classifyTurn(text, this.careerSession(before)));
+        } catch {
+            return;
+        }
+        pending
+            .then(decision => {
+                if (epoch !== this.answerEpoch || !answerEnabled(this.liveFeatures)) {
+                    laDebug('[live-answer] trigger gate (router): superseded — dropped');
+                    return;
+                }
+                const policy = this.careerAskPolicy();
+                const asks = decision && typeof decision.asks === 'number' ? decision.asks : null;
+                const asksOk = asks === null || !policy || asks >= policy.min;
+                const cue = !!decision && (decision.route === 'personal' || decision.route === 'company') && asksOk;
+                const willTrigger = shouldTriggerAnswer('them', text, this.lastAnsweredTail, this.inFlight, () => cue);
+                const src = decision ? (decision.fallback ? `regex(${decision.fallback})` : decision.source) : '-';
+                const asksNote = asks === null ? '' : ` asks=${asks.toFixed(2)}`;
+                laDebug(`[live-answer] trigger gate (router): route=${decision ? decision.route : '-'} src=${src}${asksNote} inFlight=${this.inFlight} → willTrigger=${willTrigger}`);
+                if (willTrigger) this.armAnswer(text, before);
+            })
+            .catch(() => {
+                /* the career module is optional */
+            });
+    }
+
+    /** Prefetch and (re)arm the 800 ms debounce for an accepted turn (FR-003). */
+    armAnswer(text, before = null) {
+        this.answerEpoch++;
+        const epoch = this.answerEpoch;
+
+        // Career FR-009: start the route call and the query embedding now so
+        // they are ready when the debounce fires (no-ops while the module is disabled).
+        try {
+            this.career.prefetch(text, this.careerSession(before));
         } catch {
             /* the career module is optional */
         }
@@ -688,6 +669,23 @@ class SummaryService {
             // De-dup: same normalized tail already answered
             if (this.lastAnsweredTail !== null && currentTail === this.lastAnsweredTail) return;
 
+            // R19: with Jev on, a turn Jev says wants no answer (an
+            // acknowledgment ending in "?", a monologue with a rhetorical
+            // question) is dropped here, before it costs an LLM call or
+            // replaces the answer on screen. The wait is the route call the
+            // context reuses, at most the resolve budget.
+            if (this.careerGateUsesJev()) {
+                const wanted = await this.careerWantsAnswer(text, before);
+                if (epoch !== this.answerEpoch) {
+                    laDebug('[live-answer] debounce: superseded while Jev answered — dropped');
+                    return;
+                }
+                if (!wanted) {
+                    laDebug('[live-answer] debounce: Jev says no answer wanted — dropped');
+                    return;
+                }
+            }
+
             // Abort-and-replace: new question while in-flight
             if (this.inFlight && this.inFlightController) {
                 this.inFlightController.abort();
@@ -705,22 +703,32 @@ class SummaryService {
             // New id per accepted answer — the renderer keys its history on this.
             const answerId = ++this.answerSeq;
             const question = extractQuestion(text);
+            // What the history keeps of this answer (spec 2026-10-13-live-answer-history).
+            const record = { sessionId: this.currentSessionId, askedAt: Date.now(), turn: text, question, status: null };
 
             try {
                 // Career context is resolved after the controller exists, so a newer
                 // question or a session reset can cancel this answer meanwhile (career E22).
-                const career = await this.resolveCareerContext(text, question);
+                const career = await this.resolveCareerContext(text, question, before);
+                if (career) {
+                    record.route = career.route || null;
+                    record.routeSource = career.routeFallback ? `regex(${career.routeFallback})` : career.routeSource || null;
+                    record.cue = career.cue || null;
+                    record.sources = Array.isArray(career.sources) ? career.sources : [];
+                }
                 if (signal.aborted) return;
                 // Follow-ups stick only to the last answered personal/company question (career FR-006, E17).
                 this.careerPrev = career && (career.route === 'personal' || career.route === 'company')
                     ? { route: career.route, queryTerms: career.queryTerms || [], anchorText: career.anchorText || '', ts: Date.now() }
                     : null;
-                await this.makeLiveAnswer(this.conversationHistory, signal, { id: answerId, question, career });
+                await this.makeLiveAnswer(this.conversationHistory, signal, { id: answerId, question, career, record });
             } catch (err) {
                 if (signal.aborted) {
                     // Expected control flow on abort-and-replace — swallow (FR-009)
                     return;
                 }
+                record.status = 'error';
+                record.error = err.userMessage || err.message || 'Unknown error';
                 // Non-abort stream error: log trigger info (NEVER log answer text)
                 console.error('[live-answer] stream error (trigger retained):', err.message);
                 // Retain last rendered answer; show why this question got none
@@ -739,8 +747,26 @@ class SummaryService {
                     this.inFlight = false;
                     this.inFlightController = null;
                 }
+                if (!record.status || signal.aborted) record.status = 'replaced';
+                if (record.firstTokenAt != null) record.firstTokenMs = record.firstTokenAt - record.askedAt;
+                record.totalMs = Date.now() - record.askedAt;
+                this.saveLiveAnswer(record);
             }
         }, 800);
+    }
+
+    /**
+     * Keeps one answer in the local history (spec 2026-10-13-live-answer-history).
+     * Never throws and never logs the text: a failed write costs the row, not the answer.
+     */
+    saveLiveAnswer(record) {
+        if (!record || !record.sessionId) return;
+        try {
+            if (!this.liveAnswers) this.liveAnswers = liveAnswerRepository();
+            this.liveAnswers.save(record);
+        } catch (err) {
+            console.error('[live-answer] history row not saved:', err && err.message ? err.message : err);
+        }
     }
 
     /**
@@ -748,13 +774,9 @@ class SummaryService {
      * The module is total and returns null while disabled; the guard keeps any
      * failure from blocking the answer (career FR-017).
      */
-    async resolveCareerContext(text, question) {
+    async resolveCareerContext(text, question, before = null) {
         try {
-            return await this.career.getCareerContext(text, {
-                prev: this.careerPrev,
-                activeCompany: this.activeCompany,
-                question,
-            });
+            return await this.career.getCareerContext(text, { ...this.careerSession(before), question });
         } catch {
             return null;
         }
@@ -793,6 +815,7 @@ class SummaryService {
             this.inFlightController = null;
         }
         this.inFlight = false;
+        this.answerEpoch++;
     }
 
     /**
@@ -818,6 +841,8 @@ class SummaryService {
         this.lastAnswerTs = 0;
         this.careerPrev = null;
         this.activeCompany = null;
+        this.lastThemTurn = null;
+        this.answerEpoch++;
         console.log('[live-answer] resetLiveAnswer — debounce cleared, in-flight aborted');
     }
 

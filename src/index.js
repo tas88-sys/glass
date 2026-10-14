@@ -199,6 +199,16 @@ app.whenReady().then(async () => {
         await modelStateService.initialize();
         //////// after_modelStateService ////////
 
+        // Career router (Jev): the TypeSafe key saved in Settings, cached here and
+        // read on each turn; TYPESAFE_API_KEY in .env is the fallback.
+        let routerKey = null;
+        const refreshRouterKey = () => modelStateService.getAllApiKeys()
+            .then(keys => { routerKey = (keys && keys.typesafe) || null; })
+            .catch(() => {});
+        await refreshRouterKey();
+        modelStateService.on('settings-updated', refreshRouterKey);
+        careerContext.setRouterKeySource(() => routerKey);
+
         featureBridge.initialize();  // 추가: featureBridge 초기화
         windowBridge.initialize();
         setupWebDataHandlers();

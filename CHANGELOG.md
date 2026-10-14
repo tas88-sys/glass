@@ -6,6 +6,67 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 
 ## [Unreleased]
 
+### Live answers are kept for review (spec `2026-10-13-live-answer-history`)
+
+After a real interview the owner asked how good its 101 answers had been, and they were gone: the panel was their only copy.
+
+- **Every answer is kept in the local DB** (`live_answers`): the interviewer's turn, the answer as the panel showed it, how it ended (answered, PASSIVE, cut off by a newer question, failed), the model that answered, the career route and its notes, the live check's flags and the timings. Local sessions only, never synced, deleted with the session; `LIVE_ANSWER_HISTORY=0` turns it off. This lifts C8 of the original Live Answer spec.
+- **`scripts/export-live-answers.js`** writes a session's answers, and optionally its transcript, to a file outside the repo for review.
+- **`scripts/replay-career-session.js --answers <file>`** rebuilds the answers of a recorded session with the app's own prompt, notes and LLM chain (`--no-llm`: only the notes each answer would get; `--resume` after a quota stop).
+
+### Career router: Jev in place of the regex cue tables (branch `2026-10-13-jev-router-poc`)
+
+#### Added
+
+- **Jev router** (`src/features/common/career/jevRouter.js`, `jevClient.js`). With `TYPESAFE_API_KEY` in `.env`, Jev (TypeSafe AI) decides the career route of each interviewer turn: personal, company, ambiguous or general. The criteria are in English, with an English and a Portuguese example each, so pt-BR and en-US turns route alike. Spec: `specs/2026-10-13-career-router-jev/`.
+  - **Sent to TypeSafe:** the turn, the previous career question, the interviewer's company and the manifest's names.
+  - **Model:** fixed at `jev-1.13.0`, since an alias changes routes without notice.
+  - **Latency:** the call starts when the gate accepts the turn, inside the 800 ms debounce. The answer then waits at most 250 ms more.
+  - **Cost:** about $0.00002 per turn.
+- **Fallback:** the regex router decides, and the debug line says why (`src=regex(timeout)`), on a timeout, 429/529, a network error, a malformed answer, low confidence, or an open circuit (three failures in a row → regex only for 60 s). A 401/422 turns Jev off until restart.
+- **Gate:** a turn with no question form ("your biggest weakness") waits for Jev, at most 700 ms, before the debounce. Questions never wait.
+- **Config:** `CAREER_ROUTER=jev|regex` (the kill switch; a typo reads as `regex`), `CAREER_ROUTER_JEV_MODEL`, `CAREER_ROUTER_JEV_MIN_CONF`, `CAREER_ROUTER_GATE_TIMEOUT_MS`, `CAREER_ROUTER_RESOLVE_BUDGET_MS`.
+- **Settings → TypeSafe (Jev) API Key:** the key is saved like the providers' keys (encrypted, Save/Clear) and wins over `TYPESAFE_API_KEY`, so an installed app, which ships no `.env`, can use Jev too. Save checks the key with one minimal call. A TypeSafe key alone does not count as an AI key, and a new key brings Jev back after a 401 without a restart.
+- **`scripts/eval-career-kb.js --router regex|jev`:**
+  - prints the router confusion per language;
+  - with `jev`, compares Jev with the regex router on the same items and reports the Jev call p50/p95 and the fallbacks;
+  - adds the release checks R-SC-001..004;
+  - `--questions <file>` runs another items file, such as a synthetic set kept apart from the real questions.
+- **`ask-career-kb.js` and the live eval** show who decided each route and the Jev time.
+- **`npm run eval:live -- --block-providers groq,gemini,deepgram`** (or `LIVE_EVAL_BLOCK_PROVIDERS`) runs the live eval without spending those services' quota:
+  - requests to their hosts fail before leaving the machine, and the run reports the count;
+  - their models leave the LLM list, and when none is left a local stub answers;
+  - the gate, the Jev router, retrieval and the answer lane still run;
+  - checks on the answer's words become info, and the Ask phases are skipped.
+
+#### Changed after a real session (spec R19, 2026-10-13)
+
+A 71-minute Portuguese interview with Jev on armed 114 answers, 56 of them on acknowledgments ("Aham.", "Hã?", "1"), fragments and the interviewer's monologue: each one a Groq call (about 5,000 tokens) and a replaced answer on screen; Groq answered 429 56 times. Replayed with the changes below: 80 answers instead of 115, 24 wasted instead of 56, 42 of 43 real questions armed (41 before) and 1 route error instead of 5 (the regex router: 26). Five older English sessions, not used to tune, confirm it with a smaller margin: 28 wasted instead of 36, real questions 61/62 as before.
+
+- **Backchannels never trigger an answer** (`questionGate.js`, `isBackchannel`): an interviewer segment made only of acknowledgments, fillers or "pardon?" (EN and PT) arms nothing and costs no Jev call, in both router modes.
+- **Jev also answers "does the turn ask the candidate for something now?"** (`asks`, same call): a statement needs `asks` ≥ 0.3 (`CAREER_ROUTER_ASK_MIN`) to be answered, and a question is dropped when the debounce fires if `asks` < 0.2 (`CAREER_ROUTER_ASK_VETO`; `0` turns it off), before it costs an LLM call or replaces the answer on screen.
+- **The interviewer's previous segment goes to Jev** (`interviewer_before`, when it began at most 20 s earlier): the STT cuts one question into pieces. Interviewer speech only.
+- **Criteria:** details of a project the candidate did or described count as personal. Eval: personal routed 96.1% (was 94.7%), holdout 100% (was 95.8%), Portuguese 93.3% (was 91.1%).
+- **`scripts/replay-career-session.js`** replays a labeled recorded session through the app's gate and router (Jev live, no LLM).
+- The question gate moved out of `summaryService.js` into `questionGate.js` (pure, no Electron) so scripts can run it.
+- **"Do you have any questions for us?" routes company** (spec R20): the same interview ended with the interviewer inviting the candidate's questions, and no answer came, with either router. With Jev, the company criterion now names that invitation, so the company's notes, where the candidate keeps their questions for it, go in. Invented invitations: 6/6 company (was 2/6); the eval is unchanged.
+- **…and the answer is questions to ask** (spec R21): Jev also says, in the same call, whether the interviewer is inviting the candidate's questions (`invites`). Then the notes search looks for the candidate's questions-to-ask sections, not the invitation's own words ("tirar dúvidas sobre o processo" matched other notes), and the answer suggests two or three questions. For the real invitation, the three questions-to-ask sections now go in (none before); the eval is unchanged.
+
+#### Fixed (found by the live eval with Jev)
+
+- **Intros got answers.** A company intro with no question ("Here at <company> we…") was routed `company` by Jev and answered. The criteria now say that personal, company and ambiguous turns ask the candidate something, and that a statement presenting the company or the role is general.
+
+#### Changed
+
+- `intentRouter.js` is frozen: no new cues. A phrasing Jev misses is fixed in the Jev criteria and measured with the eval.
+- The eval's answer path now counts from the route on, because the route call runs inside the debounce.
+- Without a key, or with `CAREER_ROUTER=regex`, routes, cues, the gate and prompts are exactly as before.
+
+### Fixed (found in a debug session log, 2026-10-13)
+
+- **Ask window: highlight and DOMPurify never loaded.** `AskView` loaded its libraries from `../../assets/`, which resolves to `src/assets` (it does not exist); they are in `src/ui/assets`. Now `../assets/`, as `SummaryView` already does.
+- **Log noise:** `[Layout Debug]` and `[Height Adjusted]` (58% of a session's log) print only with `GLASS_LAYOUT_DEBUG=1` (main) or the `LAYOUT_DEBUG` flag (renderer). With Ollama not running, its health check failure logs once per streak, and the local AI state logs only when it changes (it repeated every ~30 s).
+
 ### Live eval: a simulated interview with real audio and real models (branch `2026-10-12-live-eval`)
 
 #### Added

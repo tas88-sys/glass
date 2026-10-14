@@ -13,7 +13,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const KEY_ENV = { groq: 'GROQ_API_KEY', gemini: 'GEMINI_API_KEY', anthropic: 'ANTHROPIC_API_KEY', deepgram: 'DEEPGRAM_API_KEY' };
+// typesafe: the career router's key (Jev), saved in Settings like the others.
+const KEY_ENV = { groq: 'GROQ_API_KEY', gemini: 'GEMINI_API_KEY', anthropic: 'ANTHROPIC_API_KEY', deepgram: 'DEEPGRAM_API_KEY', typesafe: 'TYPESAFE_API_KEY' };
 
 function appDataDir() {
     const home = os.homedir();

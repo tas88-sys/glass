@@ -23,7 +23,7 @@ summary:
     - {id: C5, description: "LiveAnswerView self-loads marked/hljs/DOMPurify idempotently, re-parses each delta, sanitizes, falls back to plain text, exposes resetAnswer()", type: TECHNICAL}
     - {id: C6, description: "Pure helpers (isLikelyQuestion, normalizePassive/parseAnswerOrPassive, shouldTriggerAnswer) extracted and unit-tested via node:test; makeLiveAnswer is a thin orchestrator", type: TECHNICAL}
     - {id: C7, description: "Reuse pickle_glass_analysis prompt UNCHANGED; promptTemplates.js stays closed", type: TECHNICAL}
-    - {id: C8, description: "In-memory only — do NOT persist live answers to the session DB for v1", type: TECHNICAL}
+    - {id: C8, description: "In-memory only — do NOT persist live answers to the session DB for v1. Lifted 2026-10-13 by owner decision: answers are kept locally for review (spec 2026-10-13-live-answer-history)", type: TECHNICAL}
   decisions:
     - {id: D1, decision: "Trigger = AUTO-ONLY for v1 (fires on detected them: question; no button/hotkey)", rationale: "Confirmed with user; manual override is explicit v2"}
     - {id: D2, decision: "Rendering = STREAMING (mirror askService._processStream)", rationale: "Confirmed with user; deviation from design doc's non-streaming llm.chat sketch"}

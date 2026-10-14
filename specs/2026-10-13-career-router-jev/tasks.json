@@ -1,0 +1,135 @@
+{
+  "spec_id": "2026-10-13-career-router-jev",
+  "spec_name": "career-router-jev",
+  "updated": "2026-10-13T16:00:00Z",
+  "anthropic_patterns": [
+    "Ralph looping",
+    "JSON task state"
+  ],
+  "completion_promise": "<promise>SPEC-2026-10-13-career-router-jev-COMPLETE</promise>",
+  "tasks": [
+    {
+      "id": "T-PRE-PATTERN",
+      "phase": "pre-impl",
+      "description": "Pattern check: new modules are CommonJS with use strict and JSDoc like the rest of common/career; every public career function stays total; logs only through careerDebug/laDebug and carry no text; env read lazily (the app loads .env after the module exists); tests use node:test with invented fixtures.",
+      "status": "completed",
+      "target_file": null,
+      "verify": "Manual review",
+      "evidence": "jevClient.js and jevRouter.js follow intentRouter.js/kbService.js style; decide() never rejects; config() reads env on each call; no new dependency (native fetch)",
+      "completed_at": "2026-10-13T16:00:00Z"
+    },
+    {
+      "id": "T010",
+      "phase": "1-client",
+      "description": "jevClient.js: buildRequest (fixed model, route choice with four criteria and EN/PT examples, follow_up noul only with a previous question, names deduplicated and capped), parseResponse (documented shape only), post (bearer, hard timeout that holds when fetch ignores the signal, JevError kinds; messages carry kind and status only).",
+      "status": "completed",
+      "target_file": "src/features/common/career/jevClient.js",
+      "verify": "node --test src/features/common/career/__tests__/jevClient.test.js",
+      "evidence": "jevClient.test.js green (request shape, bilingual criteria, caps, parse rejects off-shape bodies, 401/403/422/429/529/503/500, net, bad-body, timeout with a fetch that ignores abort, caller abort, no text in messages)",
+      "completed_at": "2026-10-13T16:00:00Z"
+    },
+    {
+      "id": "T020",
+      "phase": "2-router",
+      "description": "jevRouter.js: readConfig (unknown CAREER_ROUTER → regex), mapping (follow-up, confidence floor, jev cue), regex fallback with a reason for every failure, circuit breaker with one probe, auth/validation disable, LRU cache shared by prefetch and decide, stats with no text.",
+      "status": "completed",
+      "target_file": "src/features/common/career/jevRouter.js",
+      "verify": "node --test src/features/common/career/__tests__/jevRouter.test.js",
+      "evidence": "jevRouter.test.js green (off modes identical to classifyCareerIntent, mapping, each fallback kind, budget and late cache fill, circuit open/probe/close, single probe, 401 once, cache reuse and eviction, logs free of turn text, names and key)",
+      "completed_at": "2026-10-13T16:00:00Z"
+    },
+    {
+      "id": "T030",
+      "phase": "3-module",
+      "description": "index.js: routeContext shared by prefetch/classifyTurn/resolve; resolve awaits router.decide within the budget; classifyTurn, gateUsesJev, routerStats; result fields routeSource/routeFallback/routeConfidence/jevMs; log suffix src=… jev=…ms; Jev follow-up prefetches the anchored text.",
+      "status": "completed",
+      "target_file": "src/features/common/career/index.js",
+      "verify": "node --test src/features/common/career/__tests__/kbService.test.js",
+      "evidence": "Existing suite unchanged and green (C1); new 'career module: Jev router' block green (no key → regex, Jev route and query, general injects nothing, company from CAREER_KB_COMPANY, one shared call, budget fallback, 529 fallback keeps notes, Jev follow-up carry and anchored prefetch, 401 disables the gate)",
+      "completed_at": "2026-10-13T16:00:00Z"
+    },
+    {
+      "id": "T040",
+      "phase": "4-gate",
+      "description": "summaryService.js: statement-form them turns go through classifyTurn when gateUsesJev(); armAnswer holds prefetch (now with activeCompany) and the debounce; answerEpoch drops stale gate decisions after an arm, pause or reset.",
+      "status": "completed",
+      "target_file": "src/features/listen/summary/summaryService.js",
+      "verify": "node --test src/features/listen/summary/__tests__/liveAnswerCareer.test.js",
+      "evidence": "New 'FR-007 with the Jev router' block green (questions stay sync, personal/company arm, others do not, regex fallback arms, newer question wins, non-career statement does not cancel, reset/pause/off drop, de-dup, me turns, throwing classifyTurn, gateUsesJev false → regex gate, full path); one existing assertion updated for the prefetch session's activeCompany",
+      "completed_at": "2026-10-13T16:00:00Z"
+    },
+    {
+      "id": "T050",
+      "phase": "5-scripts",
+      "description": "eval-career-kb.js --router, confusion per language, comparison with the frozen regex, Jev p50/p95, fallbacks, R-SC-001/003/004 checks; ask-career-kb.js shows who decided; live eval records source, fallback, Jev time and route wait.",
+      "status": "completed",
+      "target_file": "scripts/eval-career-kb.js",
+      "verify": "node scripts/eval-career-kb.js --router regex --bm25-only --json, compared with HEAD's script",
+      "evidence": "Regex mode: confusion, recall, card-only, leaks, misses and checks identical to HEAD's script on the owner's set; answer path now excludes the route time",
+      "completed_at": "2026-10-13T16:00:00Z"
+    },
+    {
+      "id": "T060",
+      "phase": "6-docs",
+      "description": "spec/plan/research (R18) here; hybrid-plan.md superseded; docs/LIVE_INSIGHTS_AND_ASK.md router section and env vars; docs/diagrams/14-career-intent-router.mmd; ARCHITECTURE.md; pointer from the old R6; CHANGELOG.",
+      "status": "completed",
+      "target_file": "docs/LIVE_INSIGHTS_AND_ASK.md",
+      "verify": "Docs name every env var and what goes to TypeSafe",
+      "evidence": "Updated in the same change",
+      "completed_at": "2026-10-13T16:00:00Z"
+    },
+    {
+      "id": "T070",
+      "phase": "7-r19",
+      "description": "R19, from a real session: questionGate.js (gate out of summaryService, isBackchannel, shouldTriggerAnswer rejects backchannels); jevClient asks question, interviewer_before state, criteria name project details; jevRouter decisions carry asks, askPolicy (CAREER_ROUTER_ASK_MIN 0.3, CAREER_ROUTER_ASK_VETO 0.2), 20 s window for the previous segment; career module routeAsks, wantsAnswer, askPolicy, session.before; summaryService backchannel early return, asks check on the statement gate, drop on the debounce, lastThemTurn.",
+      "status": "completed",
+      "target_file": "src/features/listen/summary/questionGate.js",
+      "verify": "node --test src/features/listen/summary/__tests__/questionGate.test.js src/features/listen/summary/__tests__/liveAnswerCareer.test.js src/features/common/career/__tests__/jevClient.test.js src/features/common/career/__tests__/jevRouter.test.js src/features/common/career/__tests__/kbService.test.js",
+      "evidence": "All green; npm test 1420/1420 twice (one earlier run had the known groq timing flake, another a file-level liveAnswer.test.js failure that did not reproduce in 3 solo and 8 parallel runs)",
+      "completed_at": "2026-10-13T22:00:00Z"
+    },
+    {
+      "id": "T071",
+      "phase": "7-r19",
+      "description": "scripts/replay-career-session.js: replay a labeled session through the app's gate and router (Jev live, no LLM); report armed, missed, wasted, route errors, sources, fallbacks, Jev p50/p95; ids and counts only.",
+      "status": "completed",
+      "target_file": "scripts/replay-career-session.js",
+      "verify": "node scripts/replay-career-session.js --session glass-eval/sessions/<file>.jsonl --router jev",
+      "evidence": "Reproduces the 2026-10-13 session (115 armed against 114 in the log; 58 follow-ups against 59). Results in research.md R19",
+      "completed_at": "2026-10-13T22:00:00Z"
+    },
+    {
+      "id": "T072",
+      "phase": "7-r19",
+      "description": "R20: the company criterion names the interviewer inviting the candidate's own questions (company, team, role, process), with an EN and a PT example; session labels corrected from a second transcript (KB repo).",
+      "status": "completed",
+      "target_file": "src/features/common/career/jevClient.js",
+      "verify": "node --test src/features/common/career/__tests__/jevClient.test.js; eval-career-kb.js --router jev; replay-career-session.js on the six sessions",
+      "evidence": "Invented invitations 6/6 company (was 2/6), controls 8/8; eval routing unchanged but q040 (a miss either way); synthetic 40/40; session invitation armed as company 1.00 in two runs. Results in research.md R20",
+      "completed_at": "2026-10-14T01:00:00Z"
+    },
+    {
+      "id": "T073",
+      "phase": "7-r19",
+      "description": "R21: jevClient invites question; jevRouter decisions carry invites; career module: company + invites ≥ 0.5 → the questions-to-ask query (both languages, plus the company) and the invitation addendum; cue +invite in the debug line.",
+      "status": "completed",
+      "target_file": "src/features/common/career/index.js",
+      "verify": "node --test src/features/common/career/__tests__/*.test.js; ask-career-kb.js on the session's invitation; eval-career-kb.js --router jev; replays",
+      "evidence": "Invitations invites 0.82–0.96, controls ≤ 0.14 but one below the floor; the session's invitation now draws the three questions-to-ask sections (none before); eval unchanged; npm test 1433/1433. research.md R21",
+      "completed_at": "2026-10-14T03:00:00Z"
+    },
+    {
+      "id": "T-VERIFY-RELEASE",
+      "phase": "verify",
+      "description": "Owner: TYPESAFE_API_KEY in .env, about 40 fresh holdout questions (half PT, half EN) in the KB repo, then node scripts/eval-career-kb.js --router jev until R-SC-001..004 pass; live eval with PT and EN audio for R-SC-005.",
+      "status": "in-progress",
+      "target_file": null,
+      "verify": "eval-career-kb.js --router jev prints PASS for every R-SC check; live eval aggregates routeWaitMs.p95 ≤ 50",
+      "evidence": "2026-10-13 with the key: 33 real EN holdout items added (q101–q133). Jev 33/33 against regex 29/33 on them; synthetic 40/40 against 35/40; old PT tuning items 91.1% against 95.6% (R-SC-001 pt FAIL); fallbacks 4.5% (R-SC-004 PASS after the owner raised its limit from 2% to 5%; R-SC-001 kept as written); Jev p95 341 ms (R-SC-003 PASS); live eval with groq/gemini/deepgram blocked: route wait p95 0.3 ms (R-SC-005 PASS). Details in research.md R18 Results",
+      "completed_at": null,
+      "update_2026_10_13_r19": "Fresh real PT exists now (the 2026-10-13 session): R-SC-007 replay y 42/43 vs regex 36/43, wasted 24 vs 26, route errors 1 vs 26 (PASS); per the owner's R18 decision it settles R-SC-001 for PT. Eval after R19: all 96.1%, holdout 100%, pt 93.3% (tuning items), fallbacks 9/133 = 6.8% (R-SC-004 FAIL by two items, all low-confidence). Held-out EN sessions: y 61/62 both, wasted 28 vs regex 18 (17 from one wrong-language STT session; coherent sessions 7 vs 8)",
+      "update_2026_10_13_r20": "Jev is not deterministic: two identical session replays differ in 4/179 armed decisions; eval fallbacks 11, 12, 11 of 133 over three evening runs (8.3–9.0%), 9 in the morning (the KB also changed). R-SC-007 with corrected labels: y 43/43 and 42/43 vs regex 36/43, wasted 22 and 21 vs 25, route errors 1 vs 27",
+      "block_on": "R-SC-004 at 8.3–9.0% over three runs (11–12 low-confidence items) against the 5% limit; live run with real audio and a real LLM still pending"
+    }
+  ]
+}

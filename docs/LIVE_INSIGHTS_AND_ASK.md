@@ -213,7 +213,8 @@ After every `addConversationTurn(speaker, text)` call, `triggerAnswerIfNeeded` r
 
    Each signal has a Portuguese twin, since the STT often leaves the `?` off a Portuguese question: requests (`me explica`, `me fala`, `descreva`, `compare`, `diferença entre`, `prós e contras`, …), question words leading a clause (`o que`, `qual`, `por que`, `e se`, `você já…`, `pode me explicar…`), and markers peeled first (`então`, `tá`, `bom`, `e`, …). `como` counts only before a verb or `você`, because "Como arquiteta, …" is not a question. They match accent-folded text.
 
-   Declarative monologue is skipped to save quota. When the career module is ready, a turn with a career cue also passes ("your biggest weakness", §4.7); while it is off, the gate is exactly the one above.
+   Declarative monologue is skipped to save quota. When the career module is ready, a turn the career router calls personal or company also passes ("your biggest weakness", §4.7). With the Jev router on, that turn waits for Jev (at most 700 ms) before the debounce; questions never wait. While the module is off, the gate is exactly the one above.
+   An acknowledgment, a filler or a "pardon?" ("Aham.", "Hã?", "Got it.", a lone "1", which is the STT's "um") never triggers, in either router mode (`isBackchannel`, `questionGate.js`). With Jev on, a statement also needs Jev's `asks` ≥ 0.3, and a question is dropped when the debounce fires if Jev's `asks` < 0.2 (an interviewer monologue with a rhetorical "sabe?"), before it costs an LLM call or replaces the answer on screen.
 3. **800 ms debounce** — multi-segment utterances (STT delivers words in fragments) coalesce into one trigger (FR-003).
 4. **De-dup + abort-or-suppress** in the debounce callback:
    - Same normalized tail as `lastAnsweredTail` → skip (FR-004b).
@@ -283,6 +284,19 @@ needed). It clears the debounce timer, aborts any in-flight `AbortController`, a
 `lastAnsweredTail`, `inFlight`, `hadFallback`, and the career session state (`careerPrev`,
 `activeCompany`, §4.7).
 
+### 4.5a Answer history (spec `2026-10-13-live-answer-history`)
+
+Each answer the debounce starts is kept in the app DB (`live_answers`): the interviewer's turn and
+the extracted question, the answer as it last stood on the panel, how it ended (`answer`, `passive`,
+`empty`, `replaced` by a newer question, `error`), the model that answered, the career route and who
+decided it, the note titles it drew on, the live check's flags, and the time to the first token and
+to the end. Local sessions only (never synced; skipped while signed in to Firebase), deleted with the
+session, and `LIVE_ANSWER_HISTORY=0` turns it off. The text is never logged.
+
+To review a session: `node scripts/export-live-answers.js --list`, then
+`node scripts/export-live-answers.js [--session <id>] --with-transcript --out <file outside the repo>`
+(default: the latest Listen session with answers).
+
 ### 4.6 Failover (Gemini, Anthropic, Groq, across providers) and debugging
 
 With Gemini, `createStreamingLLM` (`src/features/common/ai/providers/gemini.js`) keeps one
@@ -322,6 +336,13 @@ is used from outside). Spec: `specs/2026-10-11-live-answer-career-context/`.
 | `CAREER_KB_PATH` | Folder of markdown/text notes. Unset or missing → the feature is off and Live Answer behaves exactly as before |
 | `CAREER_KB_COMPANY` | Optional. The interviewing company, as the manifest aliases spell it (or a folder name without aliases). Otherwise the first company named by the interviewer in a company-context phrase ("here at X", "aqui na X", "conhece a X") is used. A name of 7+ letters also matches when the STT got one letter wrong ("Orbit Pai" for "Orbit Pay"; two letters from 11), if the first letter is right; shorter names must match exactly |
 | `CAREER_KB_VECTORS` | Optional. `off` keeps retrieval keyword-only (BM25) and never starts the embedding model, saving ~0.7 GB of RAM |
+| `TYPESAFE_API_KEY` | Optional. Turns on the Jev router (TypeSafe AI). The key can also be saved in **Settings → TypeSafe (Jev) API Key**, which wins over this variable (stored encrypted like the providers' keys; Save checks it with one minimal call). With a key, each gated turn, the previous career question, the interviewer's company and the manifest's names go to TypeSafe. Without one, the regex router decides, as before. `eval-career-kb.js` and `ask-career-kb.js` run under plain Node and read this variable only; the live eval also reads the key saved in Settings |
+| `CAREER_ROUTER` | Optional. `jev` (default when the key is set) or `regex`, the kill switch. Any other value reads as `regex` |
+| `CAREER_ROUTER_JEV_MODEL` | Optional. Default `jev-1.13.0`. Use a fixed version: an alias (`jev-latest`) changes routes without notice |
+| `CAREER_ROUTER_JEV_MIN_CONF` | Optional. Default `0.5`. Below this confidence the regex router decides that turn |
+| `CAREER_ROUTER_GATE_TIMEOUT_MS` / `CAREER_ROUTER_RESOLVE_BUDGET_MS` | Optional. Defaults `700` / `250`. How long the gate waits for Jev on a turn with no question form, and how long the answer waits for the route once the debounce fires |
+| `CAREER_ROUTER_ASK_MIN` / `CAREER_ROUTER_ASK_VETO` | Optional. Defaults `0.3` / `0.2`. Jev's `asks` (does the turn ask the candidate for something now?) a statement needs to be answered, and below which a question is dropped when the debounce fires. `CAREER_ROUTER_ASK_VETO=0` turns the drop off |
+| `GLASS_LAYOUT_DEBUG` | Optional. `1` prints the window height traces (`[Layout Debug]`), off by default since they ran on every content change |
 
 **Manifest.** An optional `glass-kb.json` at the notes root:
 
@@ -338,7 +359,8 @@ is used from outside). Spec: `specs/2026-10-11-live-answer-career-context/`.
 
 - `core`: the canonical-facts card. It is injected whole whenever context is injected, wins over
   other notes, and is never chunked.
-- `entities`: employer and project names. The router treats them as personal cues.
+- `entities`: employer and project names. Jev gets them as `candidate_names`; the regex
+  fallback treats them as personal cues.
 - `include`/`exclude`: globs (`*`, `**`, `?`). Exclude wins; `.git` and `node_modules` are always
   excluded.
 - `companies`: each folder under `root` is one company's prep. Its chunks are tagged with the
@@ -349,10 +371,12 @@ never injected.
 
 **Per question** (the debounce callback, after the `AbortController` exists):
 
-1. **Route.** A deterministic, provider-agnostic router (`intentRouter.js`, English and
-   Portuguese cue tables) picks one of four routes:
+1. **Route.** Jev (`jevRouter.js`), or the frozen regex router (`intentRouter.js`, English and
+   Portuguese cue tables) when Jev is off or cannot answer in time, picks one of four routes:
    - `personal`: behavioral, background, experience, employer names;
-   - `company`: "why us", "what do you know about us";
+   - `company`: "why us", "what do you know about us"; with Jev, also "do you have any questions for us?":
+     Jev's `invites` then turns the query to the candidate's questions-to-ask notes and the answer
+     suggests questions to ask (spec R21);
    - `ambiguous`: "how would you…", "how do you usually…";
    - `general`: everything else.
 
@@ -379,9 +403,38 @@ never injected.
    an error, since a number worked out from the notes (years since a start date) is flagged too.
    Numbers written as words and names outside the manifest are not checked.
 
-**How the router picks a route.** `classifyCareerIntent` (`intentRouter.js`) runs four checks in
-a fixed order, and the first match wins. It calls no model and reads no files, so it takes well
-under a millisecond. Diagram source: [`diagrams/14-career-intent-router.mmd`](diagrams/14-career-intent-router.mmd).
+**How Jev picks a route** (spec `specs/2026-10-13-career-router-jev/`). With `TYPESAFE_API_KEY`
+set, each turn is one call to Jev, a decision model: it gets the text and typed questions and
+returns a choice with probabilities, without writing text.
+
+- **What is sent** (`jevClient.js`):
+  - `state`: the turn; the interviewer's previous segment (`interviewer_before`, when it began at
+    most 20 s earlier: the STT cuts one question into pieces); the previous personal/company
+    question and its route, when it was at most 5 minutes ago; the interviewer's company; the
+    manifest's entities and companies. Never the candidate's speech;
+  - a `choice` question over the four routes, in English (Jev's best language), naming both
+    languages and STT errors, with an English and a Portuguese example per route. Details of a
+    project the candidate did or described (how it worked, numbers, choices) count as personal;
+  - a yes/no (`noul`) "does the turn ask the candidate for something now?" (`asks`), always;
+  - a yes/no (`noul`) "is this a follow-up?", only when there is a previous question.
+- **What comes back.** A follow-up score of 0.5 or more (not on the company route) keeps the
+  previous route with cue `follow-up`, as the regex follow-up does. Otherwise the chosen route, with
+  cue `jev:<route>@<confidence>`. Below `CAREER_ROUTER_JEV_MIN_CONF` the regex router decides.
+  `asks` comes back with every answer (also below the floor) and drives the gate (§ The answer gate).
+- **When.** The call starts when the gate accepts the turn, inside the 800 ms debounce, as the
+  query embedding does. At debounce-fire the answer waits at most 250 ms more. The gate, the
+  prefetch and the answer share one call per turn.
+- **When Jev cannot answer**, the regex router decides and the debug line says why:
+  - `budget`: the answer could not wait any longer;
+  - `timeout`: the call passed 1.5 s;
+  - `rate` (429), `overload` (529), `http`, `net`, `bad-body`;
+  - `circuit`: three failures in a row; regex only for 60 s, then one test call;
+  - `auth` / `validation` (401, 422): Jev is off until the app restarts, with one log line.
+
+**The regex fallback** (frozen: no new cues; a miss is fixed in the Jev criteria). `classifyCareerIntent`
+(`intentRouter.js`) runs four checks in a fixed order, and the first match wins. It calls no model
+and reads no files, so it takes well under a millisecond. Diagram source: [`diagrams/14-career-intent-router.mmd`](diagrams/14-career-intent-router.mmd)
+(the file also draws the Jev step that runs before these checks).
 
 ```mermaid
 %%{init: {"flowchart": {"wrappingWidth": 360}}}%%
@@ -432,8 +485,12 @@ flowchart TB
   at least the model's threshold (0.35 for Arctic Embed); when the answer is keyword-only, at
   least half the query terms, and two or more, appear in one of them.
 - **The answer gate.** Live Answer answers turns that look like questions. While the notes are
-  loaded, a turn the router calls personal or company on its own (without the previous question)
-  is answered too, so a statement such as "Your biggest weakness." gets an answer.
+  loaded, a turn the router calls personal or company is answered too, so a statement such as
+  "Your biggest weakness." gets an answer. With Jev on, such a turn waits for Jev (at most
+  700 ms, then the regex) before the debounce starts, and needs `asks` ≥ 0.3; a question that
+  arrives meanwhile wins. With Jev off, the regex decides at once, on the turn alone (without the
+  previous question). Acknowledgments and fillers are never answered, and with Jev on a question
+  whose `asks` is below 0.2 is dropped when the debounce fires.
 
 | Interviewer says | Route | Cue |
 |---|---|---|
@@ -455,10 +512,11 @@ flowchart TB
 | "And what was the outcome?", 1 minute after a personal answer | personal | `follow-up` |
 | "And what was the outcome?", with no previous question or 6 minutes later | general | none |
 
-**Change it.** Add a `[name, regex]` pair to the right table in `intentRouter.js`, written for the
-normalized text, and a case to `__tests__/intentRouter.test.js`. `node scripts/ask-career-kb.js
-"question"` prints the route and cue of one question; the eval reports router accuracy over its
-questions.
+**Change it.** Edit the route criteria or the follow-up instructions in `jevClient.js`, then rerun
+`node scripts/eval-career-kb.js --router jev`: the Jev routes must stay at least as good as the
+regex router's, in each language. `node scripts/ask-career-kb.js "question"` prints the route, the
+cue and who decided (Jev or the regex, and why). The regex tables are frozen; change them only with
+a new research entry.
 
 **Lifecycle.** The index warms at app start and refreshes changed files (mtime) at every Listen
 session start, never on the answer path. The query embedding is prefetched when a gated turn
@@ -478,17 +536,42 @@ Any failure degrades to BM25 or to today's behavior (no context):
 **Debug line** (`LIVE_ANSWER_DEBUG=1`), ids and timings only, never note or turn text:
 
 ```
-[career] route=personal cue=behavioral:tell-me-about-a-time chunks=a1b2c3d4e5f6,… scores=0.0325,… top=cos:0.871/cov:0.67 bm25=0.4ms vector=used(0.1ms wait) total=3.2ms
+[career] route=personal cue=jev:personal@0.91 chunks=a1b2c3d4e5f6,… scores=0.0325,… top=cos:0.871/cov:0.67 bm25=0.4ms vector=used(0.1ms wait) total=3.2ms src=jev jev=212ms
+[career] route=general total=0.2ms src=regex(timeout) jev=1500ms
+[live-answer] trigger gate (router): route=personal src=jev asks=0.18 inFlight=false → willTrigger=false
+[live-answer] debounce: Jev says no answer wanted — dropped
 ```
+
+`src=` says who decided: `jev`, `regex` (Jev off), or `regex(<reason>)`; `asks=` is Jev's answer to
+"does the turn ask for something now". `[career] router: …`
+lines report a missing key, a disabled key, and the circuit opening and closing.
 
 After an answer that used notes, `[career] check unverified=N` gives the count of flagged items (never the items).
 
-**Quality check.** `node scripts/eval-career-kb.js [--bm25-only] [--json]` reads
-`<KB>/glass-eval/questions.jsonl` and reports:
-- router accuracy;
+**Quality check.** `node scripts/eval-career-kb.js [--router regex|jev] [--questions <file>] [--bm25-only] [--json]` reads
+`<KB>/glass-eval/questions.jsonl` (or `--questions`, another file in the same format) and reports:
+- router accuracy, also per language (the item's `lang`); with `--router jev` (the default when
+  the key is set; every question goes to TypeSafe), Jev against the regex router on the same
+  items, the Jev call p50/p95, the fallbacks, and the release checks R-SC-001..004;
 - recall;
 - company leaks;
 - latency.
+
+**Replay a real session.** `node scripts/replay-career-session.js --session <file> [--router regex|jev] [--list]`
+runs a recorded interview, one JSONL line per segment (`{ i, speaker, t, text, ask, route }`, with
+`ask` y/e/n labeled by hand), through the app's own gate and router, with Jev live and no LLM. It
+reports the answers armed, the `y` segments missed, the `n` segments answered (LLM calls wasted),
+route errors, sources and the Jev call time: ids and counts only. Keep the session files with the
+KB, never in this repo. Spec R19 has the first results.
+
+With `--answers <out.jsonl>` it also writes, for each armed `y` segment (`--answers-for armed`: every
+armed one), the answer the app would give: the real `makeLiveAnswer`, the session's transcript up to
+that segment, the career context with vectors and the LLM chain from the app's settings (or
+`--llm-provider`/`--llm-models`; `--block-providers gemini` drops a provider). One LLM call per answer,
+about 5,000 input tokens: a 429 waits and retries, a daily quota stops the run, and `--resume` picks up
+without asking again for the answers the file has. `--no-llm` writes the route, the note titles and the
+notes text each answer would get, with no LLM call. The file holds note text, so it must be outside
+this repo (the script refuses a path inside it).
 
 Each item's own source note is left out.
 
@@ -627,6 +710,21 @@ and numbers only.
 - `--out`: the report folder.
 - `--verbose`: also print the app's log.
 - `--judge`, `--judge-model`, `--rejudge <dir>`: the judge (see Cost).
+- `--block-providers groq,gemini,deepgram` (or `LIVE_EVAL_BLOCK_PROVIDERS`): never call these
+  services, to save the day's quota. Known names: `groq`, `gemini`, `deepgram`, `anthropic`,
+  `openai`, `typesafe`.
+  - **No request leaves.** A request to a blocked API host (fetch, http, https, so SDKs and
+    WebSockets too) fails before leaving the machine. The run ends with the count
+    (`blockedRequests`); 0 means no code path even tried.
+  - **The blocked models leave the LLM list.** When none is left, a local stub streams a fixed
+    answer. The gate, the career router (Jev, which is not blocked unless you name `typesafe`),
+    retrieval, the prompt and the answer lane still run for real. Checks on what the answer
+    says become info, and phases C, D, E (Ask) are skipped.
+  - **Other services:** a blocked STT provider or a blocked Gemini (the TTS) means `--text`. A
+    blocked Gemini also turns `--judge` off.
+
+  `npm run eval:live -- --block-providers groq,gemini,deepgram --fast` checks the gate and the
+  career routes with Jev in about 80 s, at no LLM or STT cost.
 
 `--help` lists all of them. The exit code is 1 when any check that fails the run did not pass.
 

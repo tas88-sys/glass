@@ -882,17 +882,21 @@ export class AskView extends LitElement {
 
 
     async loadLibraries() {
+        // Script srcs resolve against the document, src/ui/app/content.html, so
+        // the libraries are at ../assets/ (src/ui/assets), as in SummaryView.
+        // '../../assets/' pointed at src/assets, which does not exist: highlight
+        // and DOMPurify never loaded ("Failed to load libraries in AskView").
         try {
             if (!window.marked) {
-                await this.loadScript('../../assets/marked-4.3.0.min.js');
+                await this.loadScript('../assets/marked-4.3.0.min.js');
             }
 
             if (!window.hljs) {
-                await this.loadScript('../../assets/highlight-11.9.0.min.js');
+                await this.loadScript('../assets/highlight-11.9.0.min.js');
             }
 
             if (!window.DOMPurify) {
-                await this.loadScript('../../assets/dompurify-3.0.7.min.js');
+                await this.loadScript('../assets/dompurify-3.0.7.min.js');
             }
 
             this.marked = window.marked;

@@ -138,6 +138,8 @@ Rejected:
 - **Gate widening.** `isLikelyQuestion` (`summaryService.js:58`) documents a by-design gap for cue-less statement prompts ("your biggest weakness"). Career cues close most of it (FR-007).
 - **Future.** A semantic fallback for `ambiguous` (nearest prepared Q-line) can be added behind the same `{ route, cue }` contract without touching callers.
 
+> **Update 2026-10-13:** Jev (a decision model, not a generative LLM) now routes turns, and this cue router is its frozen fallback. See R18 in [`../2026-10-13-career-router-jev/research.md`](../2026-10-13-career-router-jev/research.md).
+
 ---
 
 ## R7: Company-specific notes

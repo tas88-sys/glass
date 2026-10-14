@@ -1,11 +1,21 @@
 %% 14 - Career context: the intent router (Live Answer)
-%% Source: src/features/common/career/intentRouter.js (classifyCareerIntent) and
-%% index.js (what each route does). Pure and deterministic: no LLM call, no file
-%% reads. The checks run in this order and the first match wins.
+%% Source: src/features/common/career/jevRouter.js (Jev, spec 2026-10-13),
+%% intentRouter.js (classifyCareerIntent, the frozen regex fallback) and
+%% index.js (what each route does). Jev decides when it can; otherwise the
+%% regex checks run in this order and the first match wins.
 %%{init: {"flowchart": {"wrappingWidth": 360}}}%%
 flowchart TB
     turn(["Interviewer turn<br/>+ the previous career question, if any<br/>+ the names in the notes manifest"])
-    turn --> norm["Normalize: lowercase, accents folded,<br/>contractions expanded, punctuation removed"]
+
+    turn --> j0{{"Jev on?<br/>TYPESAFE_API_KEY set, CAREER_ROUTER not regex,<br/>key not refused, circuit closed"}}
+    j0 -- yes --> j1["Jev call (started at the gate, inside the 800 ms debounce)<br/>state: turn, previous question, company, manifest names<br/>questions: route (choice of 4), follow-up (yes/no)"]
+    j1 --> j2{{"Answer in time, valid,<br/>confidence ≥ the floor?"}}
+    j2 -- "follow-up ≥ 0.5, not company" --> F
+    j2 -- yes --> J["<b>the route Jev chose</b><br/>cue jev:route@confidence"]
+    j2 -- "no: budget, timeout, 429, 529,<br/>network, bad body, low" --> norm
+    j0 -- no --> norm
+
+    norm["Regex fallback (frozen)<br/>Normalize: lowercase, accents folded,<br/>contractions expanded, punctuation removed"]
 
     norm --> c1{{"1 · About the interviewer's company?<br/>a cue: 'why do you want to join us', 'what do you know about us',<br/>'por que você quer trabalhar com a gente'<br/>or a manifest company after 'heard of', 'join', 'conhece'…"}}
     c1 -- yes --> C["<b>company</b><br/>search the notes with no company tag and the active company's prep;<br/>the company name joins the query"]
@@ -20,12 +30,16 @@ flowchart TB
     a1 -- yes --> A["<b>ambiguous</b><br/>search all notes;<br/>keep them only if the best match is close enough"]
     a1 -- no --> G["<b>general</b><br/>no search: the prompt is exactly<br/>what it was without the feature"]
 
+    J --> routes(["company · personal · ambiguous: as the boxes below<br/>general: no search"])
     C --> send(["Send the canonical facts and up to 6 sections<br/>(at most 9,000 characters) with the question"])
     F --> send
     P --> send
     A --> send
+    routes --> send
 
     classDef route fill:#e8f0fe,stroke:#4a6fa5,color:#1a1a1a
     classDef none fill:#f1f1f1,stroke:#999,color:#1a1a1a
+    classDef jev fill:#e6f4ea,stroke:#3c8d5a,color:#1a1a1a
     class C,F,P,A route
     class G none
+    class j1,J jev

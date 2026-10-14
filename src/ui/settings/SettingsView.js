@@ -1603,6 +1603,34 @@ export class SettingsView extends LitElement {
         }
     }
 
+    /**
+     * The career router's key (Jev, TypeSafe AI; spec 2026-10-13-career-router-jev).
+     * Saved like the providers' keys (provider 'typesafe'), but it picks no model:
+     * it decides whether a question is about the candidate. TYPESAFE_API_KEY in
+     * .env is the fallback.
+     */
+    renderRouterKey() {
+        const id = 'typesafe';
+        return html`
+            <div class="provider-key-group">
+                <label for="key-input-${id}">TypeSafe (Jev) API Key</label>
+                <input type="password" id="key-input-${id}"
+                    placeholder="Enter TypeSafe API Key"
+                    .value=${this.apiKeys[id] || ''}
+                >
+                <div class="key-buttons">
+                    <button class="settings-button" @click=${() => this.handleSaveKey(id)}>Save</button>
+                    <button class="settings-button danger" @click=${() => this.handleClearKey(id)}>Clear</button>
+                </div>
+                <p style="font-size: 11px; opacity: 0.6; margin: 4px 0 8px 0; line-height: 1.4;">
+                    Career router for Live Answer: Jev decides whether a question is about you, so your notes go in.
+                    With a key, each interviewer turn, the previous question, the company and your notes' names go to TypeSafe.
+                    Without one, the built-in rules decide.
+                </p>
+            </div>
+        `;
+    }
+
     //////// after_modelStateService ////////
     render() {
         if (this.isLoading) {
@@ -1758,9 +1786,10 @@ export class SettingsView extends LitElement {
                         </div>
                         `;
                     })}
+                ${this.renderRouterKey()}
             </div>
         `;
-        
+
         const getModelName = (type, id) => {
             const models = type === 'llm' ? this.availableLlmModels : this.availableSttModels;
             const model = models.find(m => m.id === id);

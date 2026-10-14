@@ -36,6 +36,15 @@
 //   --code-language <l>  language of the second code run (default: the app's setting)
 //   --kb <dir>           career notes (default CAREER_KB_PATH)
 //   --bm25-only          career retrieval without vectors
+//   --block-providers <csv>  never call these services, to save their quota (also
+//                        LIVE_EVAL_BLOCK_PROVIDERS): groq, gemini, deepgram, anthropic,
+//                        openai, typesafe. Requests to their hosts fail before leaving
+//                        the machine and are counted. Their models leave the LLM list;
+//                        a blocked STT or Gemini TTS means --text; a blocked Gemini
+//                        means no --judge. With no model left, a local stub answers:
+//                        the gate, the career router (Jev), retrieval and the answer
+//                        lane still run, checks on the answer's words become info,
+//                        and the Ask phases (C, D, E) are skipped
 //   --out <dir>          report folder (default %LOCALAPPDATA%\glass-live-eval\<time>)
 //   --verbose            echo the app's own log lines (always in app.log)
 //
@@ -60,6 +69,7 @@ const { createJudge } = require('./judge');
 const checks = require('./checks');
 const codeProblem = require('./fixtures/code-problem');
 const { consoleLine, writeReports, statusOf } = require('./report');
+const offline = require('./offline');
 
 const FIX = path.join(__dirname, 'fixtures');
 const PHASE_NAMES = {
@@ -97,10 +107,12 @@ function parseArgs(argv) {
         else if (k === '--out') a.out = v();
         else if (k === '--tts-cache') a.ttsCache = v();
         else if (k === '--no-app-data') a.noAppData = true;
+        else if (k === '--block-providers') a.blockProviders = v();
         else if (k === '--verbose') a.verbose = true;
         else if (k === '--help' || k === '-h') a.help = true;
         else throw new Error(`unknown argument: ${k}`);
     }
+    a.blocked = offline.parseBlocked(a.blockProviders != null ? a.blockProviders : process.env.LIVE_EVAL_BLOCK_PROVIDERS);
     const phases = a.only || ['A', 'B', 'C', 'D', 'E'];
     if (a.stress && !phases.includes('F')) phases.push('F');
     a.phases = phases;
@@ -157,6 +169,10 @@ function shuffle(xs, rand) {
 }
 
 const check = (name, ok, level = 'fail', detail = '') => ({ name, ok: !!ok, level, detail: detail || '' });
+// A check on what the answer says: with the stub LLM (--block-providers) it is info only.
+const answerCheck = (ctx, name, ok, level = 'fail', detail = '') => (ctx.stubLlm
+    ? check(name, ok, 'info', `not judged: stub LLM${detail ? ` (${detail})` : ''}`)
+    : check(name, ok, level, detail));
 const langTag = lang => (/^pt/i.test(lang) ? 'pt' : 'en');
 
 /** Read the career eval set and sample n per route, alternating languages. */
@@ -217,7 +233,7 @@ function sttChecks(item, ex, said, audio) {
 // Phase A
 // ---------------------------------------------------------------------------
 
-function evalLiveTurn(t, ex, { phase, audio, privateItem = false }) {
+function evalLiveTurn(t, ex, { phase, audio, privateItem = false, ctx = {} }) {
     const expect = t.expect || { answer: 'any' };
     const shown = ex.answers.filter(a => a.text);
     const errors = ex.answers.filter(a => a.status === 'error');
@@ -240,16 +256,16 @@ function evalLiveTurn(t, ex, { phase, audio, privateItem = false }) {
         item.checks.push(check('one answer for the turn', shown.length <= 1, 'warn', `${shown.length} answers`));
         if (expect.mentionsAny && a?.text) {
             const m = checks.mentions(a.text, expect.mentionsAny);
-            item.checks.push(check('names a key term', m.found.length > 0, 'fail', m.found.length ? `found ${m.found.join(', ')}` : `none of ${expect.mentionsAny.join(', ')}`));
+            item.checks.push(answerCheck(ctx, 'names a key term', m.found.length > 0, 'fail', m.found.length ? `found ${m.found.join(', ')}` : `none of ${expect.mentionsAny.join(', ')}`));
         }
         if (a?.text) {
             const shape = checks.answerShape(a.text);
             item.metrics.headlineWords = shape.headlineWords;
             item.metrics.bullets = shape.bullets;
-            item.checks.push(check('short headline first (≤ 20 words)', shape.headlineWords <= 20, 'warn', `${shape.headlineWords} words`));
+            item.checks.push(answerCheck(ctx, 'short headline first (≤ 20 words)', shape.headlineWords <= 20, 'warn', `${shape.headlineWords} words`));
             if (expect.lang) {
                 const got = checks.detectLang(a.text);
-                item.checks.push(check(`answer in ${expect.lang}`, got === expect.lang || got === 'unknown', 'warn', `detected ${got}`));
+                item.checks.push(answerCheck(ctx, `answer in ${expect.lang}`, got === expect.lang || got === 'unknown', 'warn', `detected ${got}`));
             }
         }
         if (item.metrics.firstTokenMs != null) {
@@ -257,7 +273,9 @@ function evalLiveTurn(t, ex, { phase, audio, privateItem = false }) {
         }
         if (item.metrics.resets) item.checks.push(check('answered without fallback', false, 'warn', `${item.metrics.resets} fallback(s), answered by ${item.metrics.model}`));
     } else if (expect.answer === 'no') {
-        item.checks.push(check('nothing shown', shown.length === 0, 'fail', shown.length ? `${shown.length} answer(s) shown` : ''));
+        // Past the gate, only the model can stay quiet (PASSIVE); the stub never does.
+        const nothingShown = ex.answers.length ? answerCheck : (c, ...rest) => check(...rest);
+        item.checks.push(nothingShown(ctx, 'nothing shown', shown.length === 0, 'fail', shown.length ? `${shown.length} answer(s) shown` : ''));
         item.checks.push(check('gate kept the LLM out', ex.answers.length === 0, 'warn', ex.answers.length ? `LLM called, model said ${ex.answers.map(x => x.status).join(',')}` : ''));
     }
     item.checks.push(check('no error', errors.length === 0, 'fail', errors.map(e => e.error).join('; ')));
@@ -269,7 +287,7 @@ async function phaseA(ctx, session, phaseDef) {
     const items = [];
     for (const t of phaseDef.turns) {
         const ex = await session.exchange({ speaker: t.speaker, text: t.text, lang: phaseDef.lang, pauseMs: t.pauseMs });
-        const item = evalLiveTurn({ ...t, lang: phaseDef.lang }, ex, { phase: 'A', audio: ctx.audio });
+        const item = evalLiveTurn({ ...t, lang: phaseDef.lang }, ex, { phase: 'A', audio: ctx.audio, ctx });
         item.history = session.history().slice(-8).join('\n');
         items.push(item);
         ctx.emit(item);
@@ -331,6 +349,10 @@ async function phaseB(ctx, session, questions, lang) {
                 unverified: a?.unverified?.length || 0,
                 careerMs: decision?.totalMs ?? null,
                 vectorUsed: decision?.vectorUsed ?? null,
+                routeSource: decision?.routeSource ?? null,
+                routeFallback: decision?.routeFallback ?? null,
+                jevMs: decision?.jevMs ?? null,
+                routeWaitMs: decision?.routeWaitMs ?? null,
             }),
             notes: ex.career.find(d => d._block)?._block || '',
         };
@@ -347,10 +369,15 @@ async function phaseB(ctx, session, questions, lang) {
             item.checks.push(check('sources on the panel', item.metrics.sources > 0, 'warn'));
         }
         if (q.route === 'general') item.checks.push(check('no notes injected', decision ? !decision.hasBlock : true, 'fail'));
+        // Router R-SC-005: the Jev call starts at the gate, so the answer should
+        // barely wait for it once the debounce fires.
+        if (decision && decision.jevMs != null) {
+            item.checks.push(check('route ready at the debounce', decision.routeWaitMs <= 50, 'warn', `waited ${decision.routeWaitMs} ms, src=${decision.routeFallback ? `regex(${decision.routeFallback})` : decision.routeSource}`));
+        }
         item.checks.push(check('no unverified names or numbers', item.metrics.unverified === 0, 'warn', `${item.metrics.unverified} marked`));
         if (a?.text) {
             const got = checks.detectLang(a.text);
-            item.checks.push(check(`answer in ${langTag(lang)}`, got === langTag(lang) || got === 'unknown', 'warn', `detected ${got}`));
+            item.checks.push(answerCheck(ctx, `answer in ${langTag(lang)}`, got === langTag(lang) || got === 'unknown', 'warn', `detected ${got}`));
         }
         if (item.metrics.firstTokenMs != null) item.checks.push(check(`first token ≤ ${FIRST_TOKEN_BUDGET_MS / 1000}s after the turn`, item.metrics.firstTokenMs <= FIRST_TOKEN_BUDGET_MS, 'warn', `${item.metrics.firstTokenMs} ms`));
         item.checks.push(check('no error', !ex.answers.some(x => x.status === 'error'), 'fail', ex.answers.filter(x => x.status === 'error').map(x => x.error).join('; ')));
@@ -522,7 +549,7 @@ async function phaseF(ctx, fixtures) {
         item.checks.push(check('last question answered', last && last.status === 'answer' && !!last.text, 'fail', last ? last.status : 'no answer'));
         if (last?.text) {
             const m = checks.mentions(last.text, burst.lastMentionsAny);
-            item.checks.push(check('the answer is to the last question', m.found.length > 0, 'fail', m.found.length ? '' : 'quicksort complexity not named'));
+            item.checks.push(answerCheck(ctx, 'the answer is to the last question', m.found.length > 0, 'fail', m.found.length ? '' : 'quicksort complexity not named'));
         }
         item.checks.push(check('no error in the burst', !answers.some(a => a.status === 'error'), 'fail', answers.filter(a => a.status === 'error').map(a => a.error).join('; ')));
         item.checks.push(check('no update from a replaced answer', interleaved === 0, 'fail', `${interleaved} late updates`));
@@ -615,6 +642,12 @@ function aggregate(items) {
     const wers = items.map(i => i.metrics?.wer).filter(Number.isFinite);
     const b = items.filter(i => i.phase === 'B' && i.kind === 'live-career');
     const routeOk = b.filter(i => i.metrics.route === i.metrics.expectedRoute).length;
+    const bPick = k => b.map(i => i.metrics[k]).filter(Number.isFinite);
+    const routeSources = {};
+    for (const i of b) {
+        const src = i.metrics.routeFallback ? `regex(${i.metrics.routeFallback})` : i.metrics.routeSource;
+        if (src) routeSources[src] = (routeSources[src] || 0) + 1;
+    }
     return {
         liveAnswers: live.length,
         firstTokenMs: { p50: q(pick('firstTokenMs'), 0.5), p95: q(pick('firstTokenMs'), 0.95) },
@@ -624,6 +657,9 @@ function aggregate(items) {
         fallbacks: items.reduce((s, i) => s + (i.metrics?.resets || 0), 0),
         answeredBy: models,
         careerRoutes: b.length ? `${routeOk}/${b.length}` : null,
+        routeSources,
+        routeWaitMs: { p50: q(bPick('routeWaitMs'), 0.5), p95: q(bPick('routeWaitMs'), 0.95) },
+        jevMs: { p50: q(bPick('jevMs'), 0.5), p95: q(bPick('jevMs'), 0.95) },
         judgeMean: (() => {
             const s = items.map(i => i.judge?.score).filter(Number.isFinite);
             return s.length ? Math.round((s.reduce((a, x) => a + x, 0) / s.length) * 100) / 100 : null;
@@ -669,14 +705,56 @@ async function main() {
     const outDir = args.out || localDir(stamp);
     const { out, close } = setupOutput(outDir, args.verbose);
     const startedAt = Date.now();
-    const audio = !args.text;
+    // --block-providers: the guard goes in before anything can reach the network.
+    const blocked = args.blocked;
+    const guard = offline.installNetGuard(blocked);
+    const blockNotes = [];
 
     const cfg = loadConfig(args);
+    cfg.blocked = blocked;
+    let audio = !args.text;
+    if (audio && blocked.includes(cfg.stt.provider)) {
+        audio = false;
+        blockNotes.push(`STT ${cfg.stt.provider} is blocked: text mode`);
+    } else if (audio && blocked.includes('gemini')) {
+        audio = false;
+        blockNotes.push('Gemini TTS is blocked: text mode');
+    }
+    let stubLlm = false;
+    if (blocked.length && cfg.llm.provider && cfg.llm.model) {
+        const { splitByProvider } = require('../../src/features/common/ai/factory');
+        const kept = offline.filterLlmList(cfg.llm.model, cfg.llm.provider, blocked, splitByProvider);
+        if (kept) {
+            if (kept.dropped.length) blockNotes.push(`LLM list without ${kept.dropped.join(',')}`);
+            cfg.llm = { provider: kept.provider, model: kept.model };
+        } else {
+            stubLlm = true;
+            blockNotes.push('every LLM in the list is blocked: a local stub answers (checks on the answer text are info only)');
+        }
+    } else if (blocked.length) {
+        stubLlm = true;
+        blockNotes.push('no LLM list: a local stub answers');
+    }
+    harness.useStubLlm(stubLlm);
+    if (stubLlm) {
+        const skipped = args.phases.filter(p => ['C', 'D', 'E'].includes(p));
+        if (skipped.length) {
+            args.phases = args.phases.filter(p => !skipped.includes(p));
+            blockNotes.push(`phases ${skipped.join(',')} skipped: Ask needs a real model`);
+        }
+    }
+    if (args.judge && blocked.includes('gemini')) {
+        args.judge = false;
+        blockNotes.push('--judge off: the judge is Gemini');
+    }
+
     out(`Live eval · ${audio ? 'audio' : 'text'} mode · phases ${args.phases.join(',')}`);
     const configLines = describe(cfg);
+    if (blocked.length) configLines.push(`blocked: ${blocked.join(',')}${blockNotes.length ? ` (${blockNotes.join('; ')})` : ''}`);
+    if (stubLlm) configLines[configLines.findIndex(l => l.startsWith('LLM:'))] = `LLM: ${offline.STUB_PROVIDER} (--block-providers)`;
     configLines.forEach(l => out(`  ${l}`));
     out(`  report: ${outDir}`);
-    if (!cfg.llm.provider || !cfg.llm.model) throw new Error('no LLM list: configure one in the app or pass --llm-models');
+    if (!stubLlm && (!cfg.llm.provider || !cfg.llm.model)) throw new Error('no LLM list: configure one in the app or pass --llm-models');
     if (audio && (!cfg.stt.provider || !cfg.stt.apiKey)) throw new Error('no STT provider with a key: configure one in the app, or run with --text');
 
     const models = await harness.setupModels(cfg, out);
@@ -700,6 +778,7 @@ async function main() {
         career,
         tts,
         audio,
+        stubLlm,
         outDir,
         out,
         emit: item => out(consoleLine(item)),
@@ -755,6 +834,11 @@ async function main() {
     if (career?.embedder) career.embedder.close();
 
     const aggregates = aggregate(items);
+    if (blocked.length) {
+        // Requests the guard stopped: each one is a path that would have spent quota.
+        aggregates.blockedRequests = { ...guard.attempts };
+        aggregates.stubLlm = stubLlm;
+    }
     const run = {
         startedAt: new Date(startedAt).toISOString(),
         elapsedMs: Date.now() - startedAt,
@@ -768,6 +852,12 @@ async function main() {
     const counts = writeReports(outDir, run);
     out('');
     out(`Aggregates: ${JSON.stringify(aggregates)}`);
+    if (blocked.length) {
+        const tried = Object.entries(guard.attempts).filter(([, n]) => n > 0);
+        out(tried.length
+            ? `Blocked requests (stopped before leaving the machine): ${tried.map(([p, n]) => `${p}=${n}`).join(' ')}`
+            : `Blocked providers: ${blocked.join(',')} — no request to them was attempted`);
+    }
     out(`${counts.PASS} pass · ${counts.WARN} warn · ${counts.FAIL} fail in ${Math.round(run.elapsedMs / 1000)} s`);
     out(`Report: ${path.join(outDir, 'report.md')}`);
     await close();

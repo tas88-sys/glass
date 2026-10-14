@@ -180,9 +180,15 @@ class OllamaService extends EventEmitter {
                 method: 'GET'
             });
             
+            this._healthFailureLogged = false;
             return response.ok;
         } catch (error) {
-            console.log(`[OllamaService] Service health check failed: ${error.message}`);
+            // The check repeats every ~30 s; with Ollama not running, log the
+            // first failure of a streak only.
+            if (!this._healthFailureLogged) {
+                console.log(`[OllamaService] Service health check failed: ${error.message} (logged once until it succeeds)`);
+                this._healthFailureLogged = true;
+            }
             return false;
         }
     }

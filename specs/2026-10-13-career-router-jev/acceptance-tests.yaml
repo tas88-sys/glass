@@ -1,0 +1,98 @@
+# Acceptance Tests Manifest (v2)
+# Feature: career router with Jev.
+# Hand-authored in the /tasks format (SpecKit not installed on this machine).
+# Deterministic checks run with no network (fake fetch). The release checks
+# need TYPESAFE_API_KEY and CAREER_KB_PATH and are tagged environment jev.
+
+_version: 2
+spec_id: "2026-10-13-career-router-jev"
+spec_name: "career-router-jev"
+
+_references:
+  tables: []
+  routes: []
+  files:
+    - "src/features/common/career/jevClient.js"
+    - "src/features/common/career/jevRouter.js"
+    - "src/features/common/career/index.js"
+    - "src/features/common/career/intentRouter.js"
+    - "src/features/listen/summary/summaryService.js"
+    - "scripts/eval-career-kb.js"
+    - "src/features/listen/summary/questionGate.js"
+    - "scripts/replay-career-session.js"
+
+tests:
+  - id: AT-001
+    title: "Unit suites green (client, router, module, gate)"
+    requirement: [FR-001, FR-002, FR-003, FR-004, FR-005, FR-006, FR-007, FR-008, FR-010, FR-011]
+    type: command
+    command: "node --test src/features/common/career/__tests__/jevClient.test.js src/features/common/career/__tests__/jevRouter.test.js src/features/common/career/__tests__/kbService.test.js src/features/listen/summary/__tests__/liveAnswerCareer.test.js"
+    expect: {exit_code: 0}
+
+  - id: AT-005
+    title: "R19 gate: backchannels, asks, the debounce drop and the previous segment"
+    requirement: [FR-002, FR-007, FR-013, FR-014]
+    type: command
+    command: "node --test src/features/listen/summary/__tests__/questionGate.test.js src/features/listen/summary/__tests__/liveAnswerCareer.test.js"
+    expect: {exit_code: 0}
+
+  - id: AT-002
+    title: "Whole test suite green"
+    requirement: [R-SC-006]
+    type: command
+    command: "npm test"
+    expect: {exit_code: 0}
+
+  - id: AT-003
+    title: "Regex router tables unchanged in this spec (frozen)"
+    requirement: [D1]
+    type: command
+    command: "node -e \"const r=require('./src/features/common/career/intentRouter');process.stdout.write(String(r.COMPANY_CUES.length+r.PERSONAL_CUES.length+r.AMBIGUOUS_CUES.length+r.FOLLOW_UP_MARKERS.length))\""
+    expect: {stdout_equals_baseline: true}
+    note: "Record the count at merge; any change to the tables needs a new research entry"
+
+  - id: AT-004
+    title: "No SDK or new dependency"
+    requirement: [C6]
+    type: grep
+    pattern: "typesafe"
+    path: "package.json"
+    expect: {matches: 0}
+
+  - id: AT-NEG-001
+    title: "No turn text or names in router log lines"
+    requirement: [C2]
+    type: covered-by
+    tests: ["jevRouter.test.js › logs and stats carry no text", "kbService.test.js › Jev decides the route"]
+
+  - id: AT-REL-001
+    title: "Release checks pass on the owner's eval set"
+    requirement: [R-SC-001, R-SC-002, R-SC-003, R-SC-004]
+    type: command
+    environment: jev
+    command: "node scripts/eval-career-kb.js --router jev"
+    expect: {stdout_contains: ["PASS  R-SC-003 Jev call p95", "PASS  R-SC-004 fallback rate", "PASS  SC-003 company leaks"], stdout_not_contains: ["FAIL  R-SC-001"]}
+
+  - id: AT-REL-002
+    title: "Regex baseline unchanged"
+    requirement: [R-SC-006]
+    type: command
+    environment: local-kb
+    command: "node scripts/eval-career-kb.js --router regex"
+    expect: {routing_equals_previous_release: true}
+
+  - id: AT-REL-004
+    title: "Session replay against the regex router"
+    requirement: [R-SC-007, FR-015]
+    type: command
+    environment: jev
+    command: "node scripts/replay-career-session.js --session glass-eval/sessions/<file>.jsonl --router jev; then --router regex"
+    expect: {jev_y_armed_gte_regex: true, jev_n_armed_lte_regex: true, jev_route_errors_lte_regex: true}
+    note: "Sessions whose STT ran in the wrong language are reported apart (R19 known limit)"
+
+  - id: AT-REL-003
+    title: "Live route wait"
+    requirement: [R-SC-005]
+    type: manual
+    environment: jev
+    steps: "node scripts/live-eval/run.js with PT and EN audio; aggregates.routeWaitMs.p95 ≤ 50 and no item above 250"
