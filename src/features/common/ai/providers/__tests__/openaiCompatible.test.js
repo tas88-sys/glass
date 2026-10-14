@@ -177,6 +177,7 @@ beforeEach(() => {
   modelsList = async () => ({ data: [] });
   health.resetHealth();
   catalog.resetCatalog();
+  compat.resetStatedCeilings();
 });
 
 // ---------------------------------------------------------------------------
@@ -334,6 +335,20 @@ describe('buildRequest', () => {
 // Errors
 // ---------------------------------------------------------------------------
 
+describe('statedTokenCeiling', () => {
+  const { statedTokenCeiling } = compat;
+  it('reads the ceiling from Cohere, Groq and OpenAI messages', () => {
+    assert.equal(statedTokenCeiling(httpError(400, 'too many tokens: max tokens must be less than or equal to 8192, the maximum output length for this model - received 9216.')), 8192);
+    assert.equal(statedTokenCeiling(httpError(400, '`max_tokens` must be less than or equal to `32768`, the maximum value for `max_tokens` is less than the `context_window` for this model')), 32768);
+    assert.equal(statedTokenCeiling(httpError(400, 'max_tokens is too large: 9216. This model supports at most 4096 completion tokens, whereas you provided 9216.')), 4096);
+  });
+  it('is null for another 400 or another status', () => {
+    assert.equal(statedTokenCeiling(httpError(400, 'unknown parameter: reasoning')), null);
+    assert.equal(statedTokenCeiling(httpError(422, 'max tokens must be less than or equal to 8192')), null);
+    assert.equal(statedTokenCeiling(new Error('max tokens must be less than or equal to 8192')), null);
+  });
+});
+
 describe('classify', () => {
   it('key errors end the request; refusals, missing models and limits fail over', () => {
     assert.equal(classify(httpError(401)), 'fatal-auth');
@@ -393,6 +408,31 @@ describe('createStreamingLLM', () => {
     assert.equal(error, null);
     assert.equal(text, 'fine');
     assert.equal(calls.length, 2);
+  });
+
+  it('a 400 that names the max_tokens ceiling retries the same model at it, and later requests start there', async (t) => {
+    const lines = quiet(t);
+    // OmniRoute says every model reasons, so an Ask asks 8,192 + 1,024; Cohere takes 8,192.
+    catalog.seed('openai-compatible', [{ id: 'cohere/command-a', reasoning: true }]);
+    const tooMany = httpError(400, 'too many tokens: max tokens must be less than or equal to 8192, the maximum output length for this model - received 9216.');
+    script = byModel({ 'cohere/command-a': [tooMany, answer('command-a', 'ok'), answer('command-a', 'again')], b: answer('b', 'never') });
+    const { events, text, error } = await readAll(await stream('cohere/command-a,b'));
+    assert.equal(error, null);
+    assert.equal(text, 'ok');
+    assert.deepEqual(calls.map(c => [c.params.model, c.params.max_tokens]), [['cohere/command-a', 9216], ['cohere/command-a', 8192]]);
+    assert.ok(!events.some(e => e._reset), 'no failover announced');
+    assert.ok(lines.some(l => /takes at most 8192 output tokens \(asked 9216\)/.test(l)));
+
+    assert.equal((await readAll(await stream('cohere/command-a,b'))).text, 'again');
+    assert.equal(calls[2].params.max_tokens, 8192);
+  });
+
+  it('a ceiling the request already met is a plain 400: the next model answers', async (t) => {
+    quiet(t);
+    script = byModel({ a: httpError(400, 'max_tokens must be less than or equal to `8192`'), b: answer('b', 'fine') });
+    const { text } = await readAll(await stream('a,b', { maxTokens: 900 }));
+    assert.equal(text, 'fine');
+    assert.deepEqual(calls.map(c => c.params.model), ['a', 'b']);
   });
 
   it('a refused key ends the request without trying the next model', async (t) => {

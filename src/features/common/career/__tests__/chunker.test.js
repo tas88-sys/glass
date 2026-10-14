@@ -233,6 +233,25 @@ describe('chunkMarkdown: unfinished markers (FR-004)', () => {
         assert.equal(chunks[0].body, 'First line stays.\nLast line stays.');
     });
 
+    it('drops a Q-block whose answer the notes flag with ⚠️, and keeps the correction', () => {
+        const md = [
+            '## Record',
+            '**Q9. What do you think of our stance on remote work?**',
+            '> Talked about tooling instead. ⚠️ (misheard, see below)',
+            '**Q10. Favorite tool?**',
+            '> The brass telescope.',
+            '## Correction',
+            'Remote work: say how the team keeps decisions written down.',
+        ].join('\n');
+        const chunks = chunkMarkdown('d.md', md, opts());
+        assert.deepEqual(chunks.map(c => c.title), ['d › Record › Favorite tool?', 'd › Correction']);
+    });
+
+    it('keeps a section whose body has a ⚠️ note', () => {
+        const md = '## Story\n\n⚠️ Careful: say the number once.\nThe pipeline cut the batch to 15 minutes.';
+        assert.equal(chunkMarkdown('s.md', md, opts()).length, 1);
+    });
+
     it('matches the marker with or without the emoji variation selector', () => {
         const md = '## S\n\nkeep\n⚠ CONFIRMAR this\nkeep too';
         assert.equal(chunkMarkdown('s.md', md, opts())[0].body, 'keep\nkeep too');

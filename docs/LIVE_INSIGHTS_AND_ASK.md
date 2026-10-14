@@ -234,7 +234,11 @@ then calls `parseAnswerOrPassive(prefix)`:
 
 The same instruction asks for the answer in the language of the question (Portuguese if it was
 asked in Portuguese), with technical terms as they are commonly said. Without it, the live eval
-got English answers to Portuguese questions.
+got English answers to Portuguese questions. When the turn's language is clear
+(`questionLanguage.js`, counting words found in only one of the two languages), the instruction
+names it: "The question was asked in Portuguese: write the whole answer in Portuguese, even when
+earlier turns or notes are in English". With English notes, the general rule alone still let a
+model answer a Portuguese question in English. A short or mixed turn keeps the general rule.
 
 ### 4.3 IPC channel: `live-answer-update`
 
@@ -367,7 +371,9 @@ is used from outside). Spec: `specs/2026-10-11-live-answer-career-context/`.
   folder's aliases (narrowed by file name) or the folder name. `skip` lists shared folders.
 
 Without a manifest, every `.md`/`.txt` is indexed. Lines with `[PREENCHER` or `⚠️ CONFIRMAR` are
-never injected.
+never injected. Nor is a Q-block whose answer carries a ⚠️: the notes flag that answer (a debrief's
+record of a misheard question, a script still to adjust). Since a file sends one section at most,
+the flagged record would otherwise take the slot of the file's correction.
 
 **Per question** (the debounce callback, after the `AbortController` exists):
 
@@ -659,9 +665,10 @@ TTS (Gemini, cached) → 100 ms PCM chunks → SttService (Deepgram/Gemini live)
 | A | Invented interview in pt-BR then en-US (`fixtures/interview.json`): direct questions, a request with no question mark, context then question, follow-ups, monologue, the candidate's own question | answer shown or not, as each turn expects; a key term; no error |
 | B | Questions sampled per route from `glass-eval/questions.jsonl` in the notes; a company question is preceded by "here at <company>…" | route; notes injected (personal/company) or not (general); company detected; answer shown. When the router gives the script text itself another route than its label, the route and notes checks only warn: that is a router gap, which `scripts/eval-career-kb.js` measures; the live eval fails only when audio and STT change a route the router gets right |
 | C | Ask, default mode, on an ops screen | order id, latency and error code read from the image; the screenshot was sent; a model that sees images answered |
-| D | Ask, code mode, on a hard grid problem; once in JavaScript and once in the saved language | five sections in order; a code block; **the JavaScript runs against 22 hidden tests**, one of them a 220×220 grid that a quadratic solution cannot finish |
+| D | Ask, code mode, on a hard grid problem; once in JavaScript and once in the saved language | five sections in order; a code block; **the JavaScript runs against 22 hidden tests**, one of them a 220×220 grid that a quadratic solution cannot finish (a function under another name than the screen's fails, and the detail says how it does under its own name); the Go answer compiles, when Go is installed |
 | E | Ask, system design mode, on a global rate limiter prompt | sections 0–11 in order; ≥ 8 numbers with units; ≥ 5 of 7 requirements from the image |
 | F | `--stress`: a burst of 5 questions 1 s apart; 32 filler turns then a question with both lanes on; Answer off | last question answered and no late update from a replaced answer; prompt holds the last 30 turns; Insights every 5 turns; no answer call with Answer off |
+| G | Each model of the list alone, plus `--endpoint-models`: one Live Answer turn, one Ask in text, the screenshot Ask when the catalog says the model sees images, and `--kb-per-model` career questions per route (default 1) with the notes, the router and the in-memory vectors, as in phase B. A tokens-per-minute limit makes it wait what the provider asks and try again, twice. The other phases only reach the first model that answers, so this is the only phase that tries the fallbacks | an answer with a key term and no error, per model; for a model that sees images, the facts from the screenshot. **A provider out of reach (rate limit, spent quota, 503, OmniRoute cooling down) only warns:** the model is out of reach, the app is not broken. `eachModel` in the aggregates has one line per model |
 
 - **Warnings** (they do not fail the run):
   - STT word error rate above 0.25;
@@ -703,8 +710,15 @@ and numbers only.
 - `--text`: no TTS or STT. `--fast` also skips the time each turn takes to say.
 - `--only A,C`: run only the listed phases.
 - `--kb-sample N`: questions per career route.
+- `--kb-per-model N`: career questions per route that each model answers in phase G (0 for none).
 - `--repeat N`: run phase A N times, for latency percentiles.
 - `--llm-models`, `--stt-provider`: use another list or STT provider than the app's.
+- `--endpoint-models <csv>` (or `LIVE_EVAL_ENDPOINT_MODELS`): more models for phase G, all on the
+  OpenAI-compatible endpoint. Use it to try each provider behind an OmniRoute combo, which the
+  list reaches only as one ID (`free-stack`); the IDs are in
+  [`runbook/OMNIROUTE_SETUP.md`](runbook/OMNIROUTE_SETUP.md). When that endpoint has a key, the
+  run first waits up to 150 s for it to answer its models list, since OmniRoute takes a minute or
+  two after it starts.
 - `--code-language`: the language of the second code run.
 - `--bm25-only`: career retrieval without vectors.
 - `--out`: the report folder.

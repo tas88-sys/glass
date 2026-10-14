@@ -165,6 +165,27 @@ const DEFAULT_MAX_TOKENS = 8_192;
 const DEFAULT_REASONING_TOKENS = 1024;
 const MAX_IMAGES = 3;
 
+// Output ceilings a server stated in a 400 ("max tokens must be less than or
+// equal to 8192"), per model, until the app restarts. The catalog may know no
+// limit, and a gateway's models list may say a model reasons when it does not
+// (OmniRoute says so of every model), which adds the reasoning allowance.
+const statedCeilings = new Map();
+
+/** The max_tokens ceiling a 400 names, or null. */
+function statedTokenCeiling(err) {
+  if (err?.status !== 400) return null;
+  const message = String(err.message || '');
+  const m = message.match(/max[_ ]?(?:completion[_ ])?tokens?\b[^.]*?(?:less than or equal to|at most|<=)\s*`?(\d{2,7})/i)
+    || message.match(/supports at most (\d{2,7}) completion tokens/i);
+  const n = m ? Number(m[1]) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** Forget the stated ceilings (tests). */
+function resetStatedCeilings() {
+  statedCeilings.clear();
+}
+
 /** A number from the environment, or null when unset, blank or not a number. */
 function envNumber(env, name) {
   const raw = env?.[name];
@@ -249,6 +270,12 @@ function orderForImages(models, messages) {
   return [...models.filter((m) => modelTraits(m).vision), ...models.filter((m) => !modelTraits(m).vision)];
 }
 
+/** The smaller of two caps, either of which may be null. */
+function lowest(a, b) {
+  if (a == null) return b ?? null;
+  return b == null ? a : Math.min(a, b);
+}
+
 /**
  * Build the chat-completions request for one attempt. Always streams, the
  * non-streaming lanes included (headers come once the request is accepted,
@@ -260,7 +287,8 @@ function orderForImages(models, messages) {
  * @param {object} input
  * @param {string} input.modelId
  * @param {Array} input.messages - Glass messages ({ role, content })
- * @param {number} [input.maxTokens] - caller cap; else OPENAI_COMPATIBLE_MAX_TOKENS; else 8,192
+ * @param {number} [input.maxTokens] - caller cap; else OPENAI_COMPATIBLE_MAX_TOKENS; else 8,192;
+ *   never over the model's catalog limit or a ceiling the server stated (statedCeilings)
  * @param {number} [input.temperature] - sent when within [0, 2]
  * @param {object} [input.env=process.env]
  * @returns {{ params: object, imagesSent: number, imagesDropped: number }}
@@ -272,7 +300,7 @@ function buildRequest({ modelId, messages, maxTokens, temperature, env = process
     model: modelId,
     messages: mapped.messages,
     stream: true,
-    max_tokens: completionBudget({ maxTokens, reasons: traits.reasoning, maxOutput: traits.maxOutput, env }),
+    max_tokens: completionBudget({ maxTokens, reasons: traits.reasoning, maxOutput: lowest(traits.maxOutput, statedCeilings.get(modelId)), env }),
   };
   if (typeof temperature === 'number' && Number.isFinite(temperature) && temperature >= 0 && temperature <= 2) {
     params.temperature = temperature;
@@ -701,6 +729,10 @@ async function runWithFailover({ client, host, model, mode, messages, maxTokens,
   let lastErr = null;
   let lastKind = null;
   let lastModel = null;
+  // A model whose 400 named its max_tokens ceiling is tried again at once, at
+  // that ceiling (once per request), before the list moves on.
+  let retryAtCeiling = null;
+  const triedAtCeiling = new Set();
   const startedAt = Date.now();
 
   const delayMs = timing.retryRoundDelayMs ?? RETRY_ROUND_DELAY_MS;
@@ -742,7 +774,8 @@ async function runWithFailover({ client, host, model, mode, messages, maxTokens,
 
     const left = timeLeft();
     if (left <= 0) { deadlineHit = true; break; }
-    const modelId = pickModel(remaining);
+    const modelId = retryAtCeiling || pickModel(remaining);
+    retryAtCeiling = null;
     // The attempt's own budget, shortened to what is left of the request deadline.
     const modelTimeoutMs = timing.firstTextTimeoutMs ?? firstTextTimeoutMs();
     const stats = {
@@ -765,6 +798,16 @@ async function runWithFailover({ client, host, model, mode, messages, maxTokens,
       lastKind = kind;
       if (stats.firstTextAt != null) answerStarted = true;
       logAttempt({ mode, attempt: attempts, of: plannedAttempts, modelId, outcome: isTimeout(err) ? 'timeout' : kind, stats, err });
+
+      const ceiling = statedTokenCeiling(err);
+      if (ceiling != null && ceiling < stats.maxTokens && stats.firstTextAt == null && !triedAtCeiling.has(modelId)) {
+        statedCeilings.set(modelId, ceiling);
+        triedAtCeiling.add(modelId);
+        retryAtCeiling = modelId;
+        plannedAttempts++;
+        console.warn(`[OpenAI-compatible Provider] ${modelId} takes at most ${ceiling} output tokens (asked ${stats.maxTokens}) — trying it again at ${ceiling}`);
+        continue;
+      }
 
       if (kind === 'fatal-auth') {
         logRequest({ mode, host, answeredBy: null, attempts, startedAt, reordered });
@@ -969,6 +1012,8 @@ module.exports = {
   normalizeModel,
   modelTraits,
   buildRequest,
+  statedTokenCeiling,
+  resetStatedCeilings,
   orderForImages,
   checkBaseURL,
   formatCredential,

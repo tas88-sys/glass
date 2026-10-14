@@ -15,12 +15,16 @@
 //   in each piece.
 // - A title or Q line carrying an unfinished marker drops the chunk; a marker
 //   line inside a body is removed.
+// - A Q-block whose answer carries a ⚠️ is dropped too: the notes flag that
+//   answer (a debrief's record of a misheard question, a script still to be
+//   adjusted), and it would win its file's one slot over the correction.
 
 const crypto = require('node:crypto');
 
 const MAX_CHARS = 1200;
 const MIN_CHARS = 300;
 const MARKER_RE = /\[PREENCHER|\u26A0\uFE0F?\s*CONFIRMAR/i;
+const FLAG_RE = /\u26A0/;
 const HEADING_RE = /^(#{1,6})\s+(.*?)\s*#*\s*$/;
 const Q_LINE_RE = /^\*\*Q(?:\d+[a-z]?)?(?:\s*\([^)]*\))?\s*[.:]\s*(?:\*\*\s*)?(.*?)\s*$/;
 const FENCE_RE = /^\s*(?:```|~~~)/;
@@ -224,6 +228,7 @@ function chunkMarkdown(path, markdown, opts = {}) {
     for (const b of blocks) {
         const title = [label, ...b.crumbs, ...(b.question ? [b.question] : [])].join(SEP);
         if (MARKER_RE.test(title)) continue;
+        if (b.question && b.lines.some(l => FLAG_RE.test(l))) continue;
         const body = cleanBody(b.lines);
         if (body) sections.push({ title, body, kind: b.question ? 'qa' : 'section' });
     }

@@ -69,14 +69,19 @@ const TODAY_USER =
     'When there are supporting points, format them as a markdown bullet list ' +
     '(each point on its own line beginning with "- "). ' +
     'Do not fabricate bullets for a trivial one-line answer. ' +
-    'Write the answer in the language of that question (Portuguese if it was asked in Portuguese), ' +
+    'Write the answer in the language that question was asked in (English for English, Portuguese for Portuguese), even when earlier turns or notes are in another language, ' +
     'keeping technical terms as they are commonly said. ' +
     'If there is no clear question or nothing useful to answer, reply EXACTLY: PASSIVE';
+// The same instruction for an English turn (the debounce path's): it names the language.
+const TODAY_USER_EN = TODAY_USER.replace(
+    'Write the answer in the language that question was asked in (English for English, Portuguese for Portuguese), even when earlier turns or notes are in another language, ',
+    'The question was asked in English: write the whole answer in English, even when earlier turns or notes are in Portuguese, ',
+);
 
 const HISTORY = ['me: hello there', 'them: Tell me about a time you disagreed with a teammate.'];
-const todaysMessages = history => [
+const todaysMessages = (history, user = TODAY_USER) => [
     { role: 'system', content: getSystemPrompt('pickle_glass_analysis', '', false).replace('{{CONVERSATION_HISTORY}}', history.slice(-30).join('\n')) },
-    { role: 'user', content: TODAY_USER },
+    { role: 'user', content: user },
 ];
 
 const PERSONAL = {
@@ -150,7 +155,7 @@ describe('SC-005: prompt is byte-identical when nothing is injected', () => {
         mock.timers.tick(800);
         for (let i = 0; i < 5; i++) await flush();
         assert.equal(llmCalls.length, 1);
-        assert.deepEqual(llmCalls[0], todaysMessages(HISTORY));
+        assert.deepEqual(llmCalls[0], todaysMessages(HISTORY, TODAY_USER_EN));
     });
 });
 
@@ -555,7 +560,7 @@ describe('triggerAnswerIfNeeded and the debounce callback', () => {
         pending[1].resolve(GENERAL);
         for (let i = 0; i < 10; i++) await flush();
         assert.equal(llmCalls.length, 1);
-        assert.deepEqual(llmCalls[0], todaysMessages(s.conversationHistory));
+        assert.deepEqual(llmCalls[0], todaysMessages(s.conversationHistory, TODAY_USER_EN));
         assert.equal(s.inFlight, false);
     });
 
@@ -568,7 +573,7 @@ describe('triggerAnswerIfNeeded and the debounce callback', () => {
         mock.timers.tick(800);
         for (let i = 0; i < 10; i++) await flush();
         assert.equal(llmCalls.length, 1);
-        assert.deepEqual(llmCalls[0], todaysMessages(HISTORY));
+        assert.deepEqual(llmCalls[0], todaysMessages(HISTORY, TODAY_USER_EN));
     });
 });
 

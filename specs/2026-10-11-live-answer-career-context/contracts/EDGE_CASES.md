@@ -10,6 +10,7 @@
 | E4 | A manifest path tries to escape the root (`../x`) | That entry is dropped | FR-002 |
 | E5 | A single file throws while reading or parsing | That file is skipped; the others are indexed | FR-017 |
 | E6 | Q-line carries `⚠️ CONFIRMAR` or `[PREENCHER` | Whole Q-block dropped | FR-004 |
+| E6b | A Q-block's answer carries a ⚠️ (the notes flag that answer) | Whole Q-block dropped; sections with a ⚠️ note are kept | FR-004 |
 | E7 | Marker inside a body paragraph | Only that line removed | FR-004 |
 | E8 | Heading-less file | One breadcrumb (`file`); split on paragraphs by size | FR-003 |
 | E9 | Section over 1,200 chars | Split on paragraph boundaries; title repeated | FR-003 |

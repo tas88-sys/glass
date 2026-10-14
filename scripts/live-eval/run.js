@@ -9,7 +9,7 @@
 // Run it through npm (launch.js starts it with the Node inside Electron, which
 // loads better-sqlite3 to read the app's settings read-only).
 //
-// Phases (--only A,B,...; default A,B,C,D,E; --stress adds F):
+// Phases (--only A,B,...; default A,B,C,D,E,G; --stress adds F):
 //   A  interview: invented questions in pt-BR and en-US, said by TTS into the
 //      STT sessions; the question gate, the speaker gate, answers, follow-ups
 //   B  career routes: questions sampled from CAREER_KB_PATH/glass-eval/questions.jsonl
@@ -20,6 +20,12 @@
 //   E  Ask system design mode with a hard prompt in the screenshot
 //   F  stress: a burst of questions (abort and replace), a long session (the
 //      30-turn prompt cap, the Insights lane), and Answer turned off
+//   G  each model: every model of the list alone (the other phases only reach
+//      the first one that answers), plus --endpoint-models: one Live Answer
+//      turn, one Ask in text, the screenshot Ask when the catalog says the
+//      model sees images, and --kb-per-model career questions per route with
+//      the notes (router, BM25 and the in-memory vectors), as in phase B. A provider out of reach (rate limit, quota, 503) is a
+//      warn, not a fail
 //
 // Options:
 //   --text               skip TTS and STT: the transcript goes in directly (faster, cheaper)
@@ -28,10 +34,15 @@
 //   --stress             add phase F
 //   --repeat N           run phase A N times and aggregate latency (default 1)
 //   --kb-sample N        questions per route in phase B (default 3)
+//   --kb-per-model N     career questions per route that each model answers in phase G,
+//                        with the notes and vectors (default 1; 0 for none)
 //   --seed N             sampling seed (default 7)
 //   --judge              score answers with an LLM judge (Gemini; --judge-model to pick)
 //   --rejudge <dir>      only score the answers of a finished run again (its report folder)
 //   --llm-models <csv>   model list instead of the app's (--llm-provider for its first provider)
+//   --endpoint-models <csv>  more models for phase G, all on the OpenAI-compatible
+//                        endpoint (also LIVE_EVAL_ENDPOINT_MODELS), e.g. each member
+//                        of an OmniRoute combo, to test the providers behind it one by one
 //   --stt-provider <p>   STT provider instead of the app's (deepgram or gemini)
 //   --code-language <l>  language of the second code run (default: the app's setting)
 //   --kb <dir>           career notes (default CAREER_KB_PATH)
@@ -68,6 +79,7 @@ const { runAsk } = require('./ask');
 const { createJudge } = require('./judge');
 const checks = require('./checks');
 const codeProblem = require('./fixtures/code-problem');
+const { buildGo } = require('./goBuild');
 const { consoleLine, writeReports, statusOf } = require('./report');
 const offline = require('./offline');
 
@@ -79,12 +91,13 @@ const PHASE_NAMES = {
     D: 'D · Ask code with a screenshot',
     E: 'E · Ask system design with a screenshot',
     F: 'F · Stress',
+    G: 'G · Each model alone',
 };
 const FIRST_TOKEN_BUDGET_MS = 6000;   // from the final transcript to the first token (warn)
 const WER_LIMIT = 0.25;               // warn
 
 function parseArgs(argv) {
-    const a = { text: false, only: null, stress: false, repeat: 1, kbSample: 3, seed: 7, judge: false, judgeModel: undefined, verbose: false };
+    const a = { text: false, only: null, stress: false, repeat: 1, kbSample: 3, kbPerModel: 1, seed: 7, judge: false, judgeModel: undefined, verbose: false };
     for (let i = 0; i < argv.length; i++) {
         const k = argv[i];
         const v = () => argv[++i];
@@ -94,12 +107,14 @@ function parseArgs(argv) {
         else if (k === '--stress') a.stress = true;
         else if (k === '--repeat') a.repeat = Math.max(1, Number(v()) || 1);
         else if (k === '--kb-sample') a.kbSample = Math.max(0, Number(v()) || 0);
+        else if (k === '--kb-per-model') a.kbPerModel = Math.max(0, Number(v()) || 0);
         else if (k === '--seed') a.seed = Number(v()) || 7;
         else if (k === '--judge') a.judge = true;
         else if (k === '--judge-model') a.judgeModel = v();
         else if (k === '--rejudge') a.rejudge = v();
         else if (k === '--llm-models') a.llmModels = v();
         else if (k === '--llm-provider') a.llmProvider = v();
+        else if (k === '--endpoint-models') a.endpointModels = v();
         else if (k === '--stt-provider') a.sttProvider = v();
         else if (k === '--code-language') a.codeLanguage = v();
         else if (k === '--kb') a.kb = v();
@@ -113,7 +128,9 @@ function parseArgs(argv) {
         else throw new Error(`unknown argument: ${k}`);
     }
     a.blocked = offline.parseBlocked(a.blockProviders != null ? a.blockProviders : process.env.LIVE_EVAL_BLOCK_PROVIDERS);
-    const phases = a.only || ['A', 'B', 'C', 'D', 'E'];
+    const endpointModels = a.endpointModels != null ? a.endpointModels : process.env.LIVE_EVAL_ENDPOINT_MODELS;
+    a.endpointModels = String(endpointModels || '').split(',').map(s => s.trim()).filter(Boolean);
+    const phases = a.only || ['A', 'B', 'C', 'D', 'E', 'G'];
     if (a.stress && !phases.includes('F')) phases.push('F');
     a.phases = phases;
     return a;
@@ -469,8 +486,24 @@ async function phaseD(ctx, history) {
             const res = checks.runJsSolution(block.code, codeProblem.FN_NAME, tests, { timeoutMs: 4000 });
             item.metrics.tests = `${res.passed}/${res.total}`;
             item.metrics.testsMs = res.ms;
-            item.checks.push(check('code passes the hidden tests', res.loaded && res.passed === res.total, 'fail', res.error || res.failures.slice(0, 3).map(f => `${f.name}: ${f.error || `want ${f.expected}, got ${JSON.stringify(f.got)}`}`).join('; ')));
+            // A function under another name (LeetCode's, say) still fails, but its tests tell a wrong
+            // name from a wrong algorithm.
+            let renamed = '';
+            const other = /no function named/.test(res.error || '') && (block.code.match(/\bfunction\s+([A-Za-z_$][\w$]*)\s*\(/) || [])[1];
+            if (other) {
+                const alt = checks.runJsSolution(block.code, other, tests, { timeoutMs: 4000 });
+                item.metrics.testsUnderOwnName = `${alt.passed}/${alt.total}`;
+                renamed = `named ${other}, not ${codeProblem.FN_NAME} as on the screen; under its own name it passes ${alt.passed}/${alt.total}`;
+            }
+            item.checks.push(check('code passes the hidden tests', res.loaded && res.passed === res.total, 'fail', renamed || res.error || res.failures.slice(0, 3).map(f => `${f.name}: ${f.error || `want ${f.expected}, got ${JSON.stringify(f.got)}`}`).join('; ')));
             item.testResult = res;
+        }
+        if (/^(?:go|golang)$/i.test(run.language) && block) {
+            const built = buildGo(block.code);
+            item.metrics.goBuild = built.available ? (built.ok ? 'ok' : 'failed') : 'no go';
+            item.checks.push(built.available
+                ? check('the Go code compiles', built.ok, 'fail', built.error)
+                : check('the Go code compiles', false, 'info', 'not built: Go is not installed'));
         }
         item.imageBase64 = image.base64;
         items.push(item);
@@ -608,6 +641,238 @@ async function phaseF(ctx, fixtures) {
 }
 
 // ---------------------------------------------------------------------------
+// Phase G (each model alone)
+// ---------------------------------------------------------------------------
+
+const MODEL_LIVE_TURN = { id: 'live', speaker: 'them', lang: 'en-US', text: 'How would you make a payment endpoint safe to retry?', mentionsAny: ['idempot', '/dedup/', 'key', 'token'] };
+const MODEL_ASK_PROMPT = { text: 'Explique em duas frases o que é backpressure em sistemas de streaming.', mentionsAny: ['backpressure', '/press[aã]o/', 'consumidor', 'produtor', 'buffer'] };
+// The provider said no for now (rate limit, quota, overload; OmniRoute's own cooldown after
+// them): the model is out of reach, the app is not broken.
+const OUT_OF_REACH = /\b(?:429|503)\b|rate.?limit|quota|too many requests|resource.?exhausted|per (?:minute|day)|high demand|overloaded|unavailable|cooling down/i;
+
+/** Each model of the list as its own one-model list, then the endpoint's extra models. */
+function modelTargets(ctx) {
+    const { provider, model } = ctx.cfg.llm;
+    const targets = ctx.models.factory.splitByProvider(model, provider).flatMap(seg => seg.models.map(m => ({ provider: seg.provider, model: m })));
+    for (const m of ctx.args.endpointModels) {
+        if (!targets.some(t => t.provider === 'openai-compatible' && t.model === m)) targets.push({ provider: 'openai-compatible', model: m, extra: true });
+    }
+    return targets;
+}
+
+/** How long a per-minute rate limit asks to wait ("try again in 7.5s", "1m2s"), capped at 65 s; null when it is not one. */
+function rateLimitWaitMs(error) {
+    if (!error || !/per minute|\bTPM\b|\bRPM\b|rate.?limit|\b429\b/i.test(error) || /per day|\bTPD\b|\bRPD\b/i.test(error)) return null;
+    const m = error.match(/try again in\s+(?:(\d+)m)?\s*([\d.]+)\s*s/i);
+    const ms = m ? (Number(m[1] || 0) * 60 + Number(m[2])) * 1000 + 500 : 20_000;
+    return Math.min(65_000, Math.max(1_000, Math.round(ms)));
+}
+
+/** An error check: a provider out of reach is a warn, anything else a fail. */
+function errorCheck(name, error) {
+    const away = !!error && OUT_OF_REACH.test(error);
+    return check(name, !error, away ? 'warn' : 'fail', error ? `${away ? 'out of reach: ' : ''}${error}` : '');
+}
+
+async function phaseG(ctx) {
+    const items = [];
+    const saved = ctx.cfg.llm;
+    const image = await renderScreenshot(path.join(FIX, 'ask-image.svg'), path.join(ctx.outDir, 'ask-image.jpg'));
+    // The same career questions for every model, so their answers compare.
+    const kbQuestions = ctx.career && ctx.cfg.kbPath && ctx.args.kbPerModel > 0 ? sampleKb(ctx.cfg.kbPath, ctx.args.kbPerModel, ctx.args.seed + 1) : [];
+    if (ctx.args.kbPerModel > 0 && !kbQuestions.length) ctx.out('G: no career questions (CAREER_KB_PATH not set or the module did not load)');
+    for (const target of modelTargets(ctx)) {
+        const key = ctx.cfg.keys[target.provider];
+        const label = `${target.provider}:${target.model}`;
+        if (!key) {
+            const item = { phase: 'G', id: label, kind: 'model', checks: [check('a key for the provider', false, 'fail', `no ${target.provider} key`)], metrics: { provider: target.provider } };
+            items.push(item);
+            ctx.emit(item);
+            continue;
+        }
+        // The app's own path with this model as the whole list: llmInfo reads cfg.llm on each call.
+        ctx.cfg.llm = { provider: target.provider, model: target.model };
+        const pinned = () => ({ provider: target.provider, model: target.model, apiKey: key, keys: { [target.provider]: key } });
+        try {
+            const s = harness.createSession({ cfg: ctx.cfg, career: null, tts: null, audio: false, log: ctx.out, liveFeatures: 'answer', textPace: false });
+            const ex = await s.exchange({ speaker: 'them', text: MODEL_LIVE_TURN.text, lang: MODEL_LIVE_TURN.lang });
+            await s.stop();
+            const shown = ex.answers.filter(a => a.text);
+            const a = shown[shown.length - 1] || ex.answers[ex.answers.length - 1] || null;
+            const error = ex.answers.filter(x => x.status === 'error').map(x => x.error).join('; ') || (a?.call?.error ?? '');
+            const live = {
+                phase: 'G',
+                id: `${label} · live`,
+                kind: 'live',
+                question: MODEL_LIVE_TURN.text,
+                answer: a?.text || '',
+                checks: [],
+                metrics: { ...liveMetrics(ex, a), provider: target.provider, listModel: target.model, extra: !!target.extra },
+            };
+            live.checks.push(errorCheck('no error', error));
+            if (!error) live.checks.push(check('answer shown', shown.length >= 1, 'fail', shown.length ? '' : `statuses: ${ex.answers.map(x => x.status).join(',') || 'gate did not fire'}`));
+            if (a?.text) {
+                const m = checks.mentions(a.text, MODEL_LIVE_TURN.mentionsAny);
+                live.checks.push(check('names a key term', m.found.length > 0, 'fail', m.found.length ? `found ${m.found.join(', ')}` : `none of ${MODEL_LIVE_TURN.mentionsAny.join(', ')}`));
+                const shape = checks.answerShape(a.text);
+                live.checks.push(check('short headline first (≤ 20 words)', shape.headlineWords <= 20, 'warn', `${shape.headlineWords} words`));
+                const got = checks.detectLang(a.text);
+                live.checks.push(check('answer in en', got === 'en' || got === 'unknown', 'warn', `detected ${got}`));
+            }
+            if (live.metrics.firstTokenMs != null) live.checks.push(check(`first token ≤ ${FIRST_TOKEN_BUDGET_MS / 1000}s after the turn`, live.metrics.firstTokenMs <= FIRST_TOKEN_BUDGET_MS, 'warn', `${live.metrics.firstTokenMs} ms`));
+            items.push(live);
+            ctx.emit(live);
+
+            const r = await runAsk({ tag: `G:${label}`, mode: 'default', userPrompt: MODEL_ASK_PROMPT.text, history: [], image: null, llmInfo: pinned });
+            const ask = askItem('G', `${label} · ask`, 'ask', r, MODEL_ASK_PROMPT.text);
+            Object.assign(ask.metrics, { provider: target.provider, listModel: target.model, extra: !!target.extra });
+            ask.checks.push(errorCheck('no error', r.error));
+            if (!r.error) ask.checks.push(check('answer not empty', r.text.trim().length > 0, 'fail'));
+            if (r.text) {
+                const m = checks.mentions(r.text, MODEL_ASK_PROMPT.mentionsAny);
+                ask.checks.push(check('names a key term', m.found.length > 0, 'fail', m.found.length ? `found ${m.found.join(', ')}` : `none of ${MODEL_ASK_PROMPT.mentionsAny.join(', ')}`));
+                const got = checks.detectLang(r.text);
+                ask.checks.push(check('answer in pt', got === 'pt' || got === 'unknown', 'warn', `detected ${got}`));
+            }
+            items.push(ask);
+            ctx.emit(ask);
+
+            for (const q of kbQuestions) {
+                const it = await modelCareerItem(ctx, q, label, target);
+                items.push(it);
+                ctx.emit(it);
+            }
+
+            if (ctx.models.catalog.seesImages(target.provider, target.model) === true) {
+                const prompt = 'Qual pedido falhou nessa tela, quanto tempo ele levou e qual foi o código de erro?';
+                const ri = await runAsk({ tag: `G:${label}:image`, mode: 'default', userPrompt: prompt, history: [], image, llmInfo: pinned });
+                const it = askItem('G', `${label} · image`, 'ask-image', ri, prompt);
+                Object.assign(it.metrics, { provider: target.provider, listModel: target.model, extra: !!target.extra });
+                it.checks.push(errorCheck('no error', ri.error));
+                if (!ri.error) {
+                    it.checks.push(check('screenshot sent with the request', it.metrics.imageSent && !ri.textOnlyRetry, 'fail', ri.textOnlyRetry ? `text-only retry after: ${ri.firstError}` : ''));
+                    for (const [name, term] of [['order id from the image', '58213'], ['latency from the image', '/4[.,\\s]?870/'], ['error code from the image', '/issuer[_ ]timeout/']]) {
+                        it.checks.push(check(name, checks.mentions(ri.text, [term]).found.length > 0, 'fail'));
+                    }
+                }
+                it.imageBase64 = image.base64;
+                items.push(it);
+                ctx.emit(it);
+            }
+        } finally {
+            ctx.cfg.llm = saved;
+        }
+    }
+    return items;
+}
+
+/**
+ * One career question to the model that cfg.llm pins, in a fresh session with
+ * the career module (Jev, BM25, vectors): the route, the notes injected and the
+ * answer, kept private as in phase B. A company question gets its company set
+ * directly, as the "here at <company>" turn of phase B would.
+ */
+async function modelCareerItem(ctx, q, label, target) {
+    const lang = langTag(q.lang || '') === 'pt' ? 'pt-BR' : 'en-US';
+    let ex;
+    let error = '';
+    let waitedMs = 0;
+    // A prompt with notes is ~5k tokens: a free key's tokens-per-minute limit
+    // stops the next question. Wait what the provider asks (up to a minute), twice.
+    for (let attempt = 0; attempt < 3; attempt++) {
+        const s = harness.createSession({ cfg: ctx.cfg, career: ctx.career, tts: null, audio: false, log: ctx.out, liveFeatures: 'answer', textPace: false });
+        if (q.route === 'company' && q.company) s.summary.activeCompany = q.company;
+        ex = await s.exchange({ speaker: 'them', text: q.text, lang });
+        await s.stop();
+        error = ex.answers.filter(x => x.status === 'error').map(x => x.error).join('; ');
+        const wait = rateLimitWaitMs(error);
+        if (wait == null || attempt === 2) break;
+        ctx.out(`  ${label} · kb:${q.id}: rate limited, waiting ${Math.round(wait / 1000)} s`);
+        waitedMs += wait;
+        await new Promise(r => setTimeout(r, wait));
+    }
+    const shown = ex.answers.filter(a => a.text);
+    const a = shown[shown.length - 1] || ex.answers[ex.answers.length - 1] || null;
+    const decision = a?.career || null;
+    const item = {
+        phase: 'G',
+        id: `${label} · kb:${q.id}`,
+        private: true,
+        kind: 'live-career',
+        lang,
+        question: q.text,
+        answer: a?.text || '',
+        checks: [],
+        metrics: liveMetrics(ex, a, {
+            provider: target.provider,
+            listModel: target.model,
+            extra: !!target.extra,
+            kbId: q.id,
+            expectedRoute: q.route,
+            route: decision?.route || null,
+            injected: decision ? decision.hasBlock : null,
+            chunks: decision?.chunks ?? null,
+            sources: a?.sources?.length || 0,
+            unverified: a?.unverified?.length || 0,
+            vectorUsed: decision?.vectorUsed ?? null,
+            routeSource: decision?.routeSource ?? null,
+            rateLimitWaitMs: waitedMs,
+        }),
+        notes: ex.career.find(d => d._block)?._block || '',
+    };
+    item.checks.push(errorCheck('no error', error));
+    if (!error) item.checks.push(check('answer shown', shown.length >= 1, 'fail', shown.length ? '' : `statuses: ${ex.answers.map(x => x.status).join(',') || 'gate did not fire'}`));
+    // The route is the router's (Jev), the same for every model: info here, phase B judges it.
+    item.checks.push(check(`routed ${q.route}`, decision?.route === q.route, 'info', `got ${decision?.route || 'none'}`));
+    if (decision?.hasBlock) item.checks.push(check('no unverified names or numbers', item.metrics.unverified === 0, 'warn', `${item.metrics.unverified} marked`));
+    if (a?.text) {
+        const got = checks.detectLang(a.text);
+        item.checks.push(check(`answer in ${langTag(lang)}`, got === langTag(lang) || got === 'unknown', 'warn', `detected ${got}`));
+    }
+    return item;
+}
+
+/** Per model of phase G: what each lane got (ok, warn, fail) and its first token. */
+function modelSummary(items) {
+    const rows = {};
+    for (const i of items.filter(x => x.phase === 'G' && x.metrics?.listModel)) {
+        const key = `${i.metrics.provider}:${i.metrics.listModel}`;
+        const lane = i.id.slice(i.id.lastIndexOf('·') + 2);
+        rows[key] = rows[key] || {};
+        rows[key][lane] = `${statusOf(i)}${i.metrics.firstTokenMs != null ? ` ${i.metrics.firstTokenMs}ms` : ''}`;
+    }
+    return rows;
+}
+
+/**
+ * The OpenAI-compatible endpoint answers its models list. A local OmniRoute
+ * takes a minute or two to answer after it starts; without this wait its models
+ * fail the run as if the provider were down.
+ */
+async function waitForEndpoint(credential, out, timeoutMs = 150_000) {
+    const [baseUrl, apiKey] = String(credential).split('\n');
+    const url = `${baseUrl.replace(/\/+$/, '')}/models`;
+    const started = Date.now();
+    let last = '';
+    while (Date.now() - started < timeoutMs) {
+        try {
+            const res = await fetch(url, { headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {}, signal: AbortSignal.timeout(10_000) });
+            if (res.ok) {
+                out(`[endpoint] OpenAI-compatible models list answered in ${Math.round((Date.now() - started) / 1000)} s`);
+                return true;
+            }
+            last = `HTTP ${res.status}`;
+            if (res.status === 401 || res.status === 403) break;
+        } catch (err) {
+            last = err.name === 'TimeoutError' ? 'timeout' : err.cause?.code || err.message;
+        }
+        await new Promise(r => setTimeout(r, 5000));
+    }
+    out(`[endpoint] OpenAI-compatible endpoint not answering (${last}); its models will fail`);
+    return false;
+}
+
+// ---------------------------------------------------------------------------
 // Judge and aggregates
 // ---------------------------------------------------------------------------
 
@@ -619,7 +884,7 @@ async function judgeItems(ctx, items) {
     }
     ctx.out(`[judge] scoring with ${judge.model}`);
     for (const it of items) {
-        if (!it.answer || !['live', 'live-career', 'ask-image', 'code', 'system-design'].includes(it.kind) || it.phase === 'F') continue;
+        if (!it.answer || !['live', 'live-career', 'ask', 'ask-image', 'code', 'system-design'].includes(it.kind) || it.phase === 'F') continue;
         it.judge = await judge.score({
             kind: it.kind,
             question: Array.isArray(it.question) ? it.question.join(' ') : it.question || it.extracted || '',
@@ -674,7 +939,9 @@ async function rejudge(args) {
     const cfg = loadConfig(args);
     const images = { C: 'ask-image.jpg', D: 'code-problem.jpg', E: 'system-design.jpg' };
     for (const it of run.items) {
-        const file = images[it.phase] && path.join(dir, images[it.phase]);
+        // Phase G sends the screenshot only on its image items.
+        const name = it.phase === 'G' ? (it.kind === 'ask-image' ? 'ask-image.jpg' : null) : images[it.phase];
+        const file = name && path.join(dir, name);
         if (file && fs.existsSync(file)) it.imageBase64 = fs.readFileSync(file).toString('base64');
         delete it.judge;
     }
@@ -737,10 +1004,10 @@ async function main() {
     }
     harness.useStubLlm(stubLlm);
     if (stubLlm) {
-        const skipped = args.phases.filter(p => ['C', 'D', 'E'].includes(p));
+        const skipped = args.phases.filter(p => ['C', 'D', 'E', 'G'].includes(p));
         if (skipped.length) {
             args.phases = args.phases.filter(p => !skipped.includes(p));
-            blockNotes.push(`phases ${skipped.join(',')} skipped: Ask needs a real model`);
+            blockNotes.push(`phases ${skipped.join(',')} skipped: they need a real model`);
         }
     }
     if (args.judge && blocked.includes('gemini')) {
@@ -752,13 +1019,17 @@ async function main() {
     const configLines = describe(cfg);
     if (blocked.length) configLines.push(`blocked: ${blocked.join(',')}${blockNotes.length ? ` (${blockNotes.join('; ')})` : ''}`);
     if (stubLlm) configLines[configLines.findIndex(l => l.startsWith('LLM:'))] = `LLM: ${offline.STUB_PROVIDER} (--block-providers)`;
+    if (args.phases.includes('G') && args.endpointModels.length) configLines.push(`phase G also: ${args.endpointModels.join(',')} (openai-compatible)`);
     configLines.forEach(l => out(`  ${l}`));
     out(`  report: ${outDir}`);
     if (!stubLlm && (!cfg.llm.provider || !cfg.llm.model)) throw new Error('no LLM list: configure one in the app or pass --llm-models');
     if (audio && (!cfg.stt.provider || !cfg.stt.apiKey)) throw new Error('no STT provider with a key: configure one in the app, or run with --text');
 
+    // An endpoint still warming up would fail its catalog refresh and its models.
+    const usesEndpoint = !stubLlm && !!cfg.keys['openai-compatible'];
+    if (usesEndpoint) await waitForEndpoint(cfg.keys['openai-compatible'], out);
     const models = await harness.setupModels(cfg, out);
-    const needCareer = args.phases.includes('A') || args.phases.includes('B') || args.phases.includes('F');
+    const needCareer = ['A', 'B', 'F', 'G'].some(p => args.phases.includes(p));
     let career = null;
     if (needCareer && cfg.kbPath) {
         try {
@@ -825,6 +1096,10 @@ async function main() {
         out('— Ask system design');
         items.push(...(await phaseE(ctx, history)));
     }
+    if (args.phases.includes('G')) {
+        out('— Each model alone');
+        items.push(...(await phaseG(ctx)));
+    }
     if (args.phases.includes('F')) {
         out('— Stress');
         items.push(...(await phaseF(ctx, fixtures)));
@@ -834,6 +1109,7 @@ async function main() {
     if (career?.embedder) career.embedder.close();
 
     const aggregates = aggregate(items);
+    if (args.phases.includes('G')) aggregates.eachModel = modelSummary(items);
     if (blocked.length) {
         // Requests the guard stopped: each one is a path that would have spent quota.
         aggregates.blockedRequests = { ...guard.attempts };

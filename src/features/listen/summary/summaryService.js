@@ -27,6 +27,8 @@ const {
     shouldTriggerAnswer,
     isBackchannel,
 } = require('./questionGate');
+// The question's language, named in the live answer prompt.
+const { answerLanguageRule } = require('./questionLanguage');
 
 // ---------------------------------------------------------------------------
 // Pure helper: extractQuestion (FR-006/FR-007/FR-009/FR-012)
@@ -302,7 +304,7 @@ class SummaryService {
                     'When there are supporting points, format them as a markdown bullet list ' +
                     '(each point on its own line beginning with "- "). ' +
                     'Do not fabricate bullets for a trivial one-line answer. ' +
-                    'Write the answer in the language of that question (Portuguese if it was asked in Portuguese), ' +
+                    answerLanguageRule((rec && rec.turn) || question) +
                     'keeping technical terms as they are commonly said. ' +
                     'If there is no clear question or nothing useful to answer, reply EXACTLY: PASSIVE' +
                     (career && career.addendum ? `\n\n${career.addendum}` : ''),
