@@ -56,8 +56,8 @@ const IMAGE = { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,AAA
 // ---------------------------------------------------------------------------
 
 describe('constants', () => {
-  it('chain providers are anthropic, gemini and groq', () => {
-    assert.deepEqual([...CHAIN_PROVIDERS].sort(), ['anthropic', 'gemini', 'groq']);
+  it('chain providers are anthropic, gemini, groq and openai-compatible', () => {
+    assert.deepEqual([...CHAIN_PROVIDERS].sort(), ['anthropic', 'gemini', 'groq', 'openai-compatible']);
   });
 
   it('keeps 15 s for the fallback', () => {
@@ -65,7 +65,7 @@ describe('constants', () => {
   });
 
   it('loading the chain loads no provider SDK', () => {
-    const loaded = Object.keys(require.cache).filter(p => /groq-sdk|@anthropic-ai|@google[\\/]/.test(p));
+    const loaded = Object.keys(require.cache).filter(p => /groq-sdk|@anthropic-ai|@google[\\/]|node_modules[\\/]openai[\\/]/.test(p));
     assert.deepEqual(loaded, []);
   });
 });
@@ -196,6 +196,18 @@ describe('skipReason (FR-007, D5, D6)', () => {
     assert.equal(at(1, [GROQ, GEMINI]), null);
   });
 
+  it('asks each segment\'s provider for its cooldowns: the same ID behind another provider is not cooling', () => {
+    // Groq spent gpt-oss; the OpenAI-compatible endpoint serves the same ID from another upstream.
+    const COMPAT = seg('openai-compatible', 'openai/gpt-oss-120b');
+    cool(...GROQ.models);
+    const isCoolingDown = (m, provider) => (provider === 'openai-compatible' ? health.isCoolingDown(`compat:${m}`) : health.isCoolingDown(m));
+    const keys = { groq: 'k', 'openai-compatible': 'c' };
+    assert.equal(skipReason({ index: 0, segments: [GROQ, COMPAT], keys, isCoolingDown }), 'cooling');
+    assert.equal(skipReason({ index: 1, segments: [GROQ, COMPAT], keys, isCoolingDown }), null);
+    // With a provider-blind check the compat segment would look spent too, and Groq would not be skipped.
+    assert.equal(at(0, [GROQ, COMPAT], keys), null);
+  });
+
   it('a cooldown that ended no longer counts', (t) => {
     t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
     for (const id of GROQ.models) health.markFailed(id, 5_000);
@@ -286,8 +298,8 @@ describe('failureMessage (FR-013, D11)', () => {
 });
 
 describe('DEFAULT_ADAPTERS', () => {
-  it('cover the three chain providers', () => {
-    assert.deepEqual(Object.keys(DEFAULT_ADAPTERS).sort(), ['anthropic', 'gemini', 'groq']);
+  it('cover the four chain providers', () => {
+    assert.deepEqual(Object.keys(DEFAULT_ADAPTERS).sort(), ['anthropic', 'gemini', 'groq', 'openai-compatible']);
     for (const [id, a] of Object.entries(DEFAULT_ADAPTERS)) {
       assert.equal(a.id, id);
       for (const fn of ['createStreamingLLM', 'createLLM', 'requestDeadlineMs', 'seesImages', 'firstModel']) assert.equal(typeof a[fn], 'function', `${id}.${fn}`);
@@ -298,6 +310,19 @@ describe('DEFAULT_ADAPTERS', () => {
     assert.equal(DEFAULT_ADAPTERS.groq.requestDeadlineMs(), require('../providers/groq').requestDeadlineMs());
     assert.equal(DEFAULT_ADAPTERS.gemini.requestDeadlineMs(), require('../providers/gemini').requestDeadlineMs());
     assert.equal(DEFAULT_ADAPTERS.anthropic.requestDeadlineMs(), require('../providers/anthropic').requestDeadlineMs());
+    assert.equal(DEFAULT_ADAPTERS['openai-compatible'].requestDeadlineMs(), require('../providers/openaiCompatible').requestDeadlineMs());
+  });
+
+  it('read the OpenAI-compatible cooldowns under that provider\'s own names', () => {
+    const health = require('../providers/modelHealth');
+    health.resetHealth();
+    health.markFailed('openai/gpt-oss-120b', 60_000); // Groq's model
+    assert.equal(DEFAULT_ADAPTERS['openai-compatible'].isCoolingDown('openai/gpt-oss-120b'), false);
+    assert.equal(DEFAULT_ADAPTERS.groq.isCoolingDown('openai/gpt-oss-120b'), true);
+    health.markFailed(require('../providers/openaiCompatible').healthKey('m-a'), 60_000);
+    assert.equal(DEFAULT_ADAPTERS['openai-compatible'].isCoolingDown('m-a'), true);
+    assert.equal(DEFAULT_ADAPTERS['openai-compatible'].firstModel(['m-a', 'm-b'], []), 'm-b');
+    health.resetHealth();
   });
 
   it('seesImages reads the catalog: Groq through a vision model; Gemini and Anthropic by default', () => {

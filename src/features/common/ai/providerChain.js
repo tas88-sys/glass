@@ -60,6 +60,7 @@ function chainDeadlineMs(env = process.env) {
 const groq = () => require('./providers/groq');
 const gemini = () => require('./providers/gemini');
 const anthropic = () => require('./providers/anthropic');
+const openaiCompatible = () => require('./providers/openaiCompatible');
 
 /**
  * The real providers. requestDeadlineMs is each provider's own exported
@@ -68,16 +69,21 @@ const anthropic = () => require('./providers/anthropic');
  * firstModel is the model the provider will try first, for the _reset that
  * announces the switch. ensureKnown lets the catalog learn the segment's
  * models before the plan reads it (bounded wait, modelCatalog.ensureKnown).
+ * isCoolingDown reads the provider's own cooldown names: the OpenAI-compatible
+ * provider keeps its models apart from Groq's, which can share an ID.
  */
-function adapterFor(id, load) {
+function adapterFor(id, load, { namespaced = false } = {}) {
+  const isCoolingDown = namespaced ? (m) => load().isCoolingDown(m) : (m) => health.isCoolingDown(m);
+  const pickModel = namespaced ? (models) => load().pickModel(models) : (models) => health.pickModel(models);
   return Object.freeze({
     id,
     createStreamingLLM: (opts) => load().createStreamingLLM(opts),
     createLLM: (opts) => load().createLLM(opts),
     requestDeadlineMs: () => load().requestDeadlineMs(),
     seesImages: (models) => models.some((m) => catalog.seesImages(id, m)),
-    firstModel: (models, input) => health.pickModel(catalog.orderForImages(id, models, hasImages(input))),
+    firstModel: (models, input) => pickModel(catalog.orderForImages(id, models, hasImages(input))),
     ensureKnown: (models, apiKey) => catalog.ensureKnown(id, apiKey, models),
+    isCoolingDown,
   });
 }
 
@@ -85,6 +91,7 @@ const DEFAULT_ADAPTERS = Object.freeze({
   groq: adapterFor('groq', groq),
   gemini: adapterFor('gemini', gemini),
   anthropic: adapterFor('anthropic', anthropic),
+  'openai-compatible': adapterFor('openai-compatible', openaiCompatible, { namespaced: true }),
 });
 
 // ---------------------------------------------------------------------------
@@ -125,15 +132,17 @@ function orderSegments(segments, withImages, adapters) {
  *  - 'no-key': its provider has no key;
  *  - 'cooling': every model cools down and a later segment with a key has a
  *    model that does not (if every one cools down, they run in order).
- * @param {{ index: number, segments: Array, keys: object, isCoolingDown: function(string): boolean }} input
+ * @param {{ index: number, segments: Array, keys: object, isCoolingDown: function(string, string): boolean }} input
+ *   isCoolingDown(modelId, provider)
  * @returns {'no-key'|'cooling'|null}
  */
 function skipReason({ index, segments, keys, isCoolingDown }) {
   const segment = segments[index];
   const hasKey = (s) => !!keys?.[s.provider];
+  const cooling = (s) => (m) => isCoolingDown(m, s.provider);
   if (!hasKey(segment)) return 'no-key';
-  if (segment.models.every(isCoolingDown)) {
-    const healthyLater = segments.slice(index + 1).some((s) => hasKey(s) && s.models.some((m) => !isCoolingDown(m)));
+  if (segment.models.every(cooling(segment))) {
+    const healthyLater = segments.slice(index + 1).some((s) => hasKey(s) && s.models.some((m) => !cooling(s)(m)));
     if (healthyLater) return 'cooling';
   }
   return null;
@@ -247,7 +256,8 @@ function firstModelOf(adapter, segment, input) {
  */
 function decideTurn({ i, withImages, ordered, segmentKeys, adapters, base, deadlineMs, startedAt, answerStarted, now }) {
   const segment = ordered[i];
-  const skip = skipReason({ index: i, segments: ordered, keys: segmentKeys, isCoolingDown: health.isCoolingDown });
+  const isCoolingDown = (m, provider) => (adapters[provider]?.isCoolingDown ? adapters[provider].isCoolingDown(m) : health.isCoolingDown(m));
+  const skip = skipReason({ index: i, segments: ordered, keys: segmentKeys, isCoolingDown });
   if (skip) return { skip };
   const leftMs = deadlineMs == null || answerStarted ? Infinity : startedAt + deadlineMs - now();
   if (leftMs <= 0) return { deadlineHit: true };

@@ -7,7 +7,8 @@
  *  1. the user's override, set in Settings;
  *  2. what the provider's models API reported (Groq input_modalities,
  *     max_completion_tokens, supported_features; Anthropic capabilities and
- *     max_tokens; Gemini outputTokenLimit and thinking);
+ *     max_tokens; Gemini outputTokenLimit and thinking; an OpenAI-compatible
+ *     endpoint's own fields, openaiCompatible.normalizeModel);
  *  3. the provider's default (PROVIDER_DEFAULTS), one rule per provider.
  *
  * Also kept per model, learned from the API's own refusals: whether the
@@ -27,7 +28,7 @@
 'use strict';
 
 /** Providers with a models API the catalog reads (the chain's providers). */
-const CATALOG_PROVIDERS = Object.freeze(['anthropic', 'gemini', 'groq']);
+const CATALOG_PROVIDERS = Object.freeze(['anthropic', 'gemini', 'groq', 'openai-compatible']);
 
 // One rule per provider, for a field neither the user nor the API set.
 const PROVIDER_DEFAULTS = Object.freeze({
@@ -36,6 +37,9 @@ const PROVIDER_DEFAULTS = Object.freeze({
   // models.list reports no input modalities; every Gemini chat model reads images.
   gemini: Object.freeze({ vision: true }),
   anthropic: Object.freeze({ vision: true }),
+  // Most OpenAI-compatible servers report no input modalities; an image sent
+  // to a model that reads only text is a 400.
+  'openai-compatible': Object.freeze({ vision: false }),
 });
 
 /** Fields the user can override in Settings. */
@@ -155,7 +159,7 @@ function defaultFetchers() {
     list: (apiKey) => require(`./providers/${name}`).listModels(apiKey),
     get: (apiKey, id) => require(`./providers/${name}`).getModel(apiKey, id),
   });
-  return { anthropic: of('anthropic'), gemini: of('gemini'), groq: of('groq') };
+  return { anthropic: of('anthropic'), gemini: of('gemini'), groq: of('groq'), 'openai-compatible': of('openaiCompatible') };
 }
 
 /**

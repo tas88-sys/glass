@@ -545,7 +545,7 @@ export class SettingsView extends LitElement {
         //////// after_modelStateService ////////
         this.shortcuts = {};
         this.firebaseUser = null;
-        this.apiKeys = { openai: '', gemini: '', anthropic: '', groq: '', whisper: '' };
+        this.apiKeys = { openai: '', gemini: '', anthropic: '', groq: '', 'openai-compatible': '', whisper: '' };
         this.providerConfig = {};
         this.isLoading = true;
         this.isContentProtectionOn = true;
@@ -774,8 +774,19 @@ export class SettingsView extends LitElement {
     async handleSaveKey(provider) {
         const input = this.shadowRoot.querySelector(`#key-input-${provider}`);
         if (!input) return;
-        const key = input.value;
-        
+        let key = input.value;
+
+        // Saved as one credential, "<base URL>\n<API key>" (openaiCompatible.formatCredential).
+        if (provider === 'openai-compatible') {
+            const urlInput = this.shadowRoot.querySelector('#openai-compatible-base-url-input');
+            const baseUrl = (urlInput ? urlInput.value : '').trim();
+            if (!baseUrl) {
+                alert('Enter the base URL of the OpenAI-compatible API (e.g. http://localhost:20128/v1).');
+                return;
+            }
+            key = `${baseUrl}\n${key.trim()}`;
+        }
+
         // For Ollama, we need to ensure it's ready first
         if (provider === 'ollama') {
         this.saving = true;
@@ -823,7 +834,7 @@ export class SettingsView extends LitElement {
             await this.refreshModelData();
         } else {
             alert(`Failed to save ${provider} key: ${result.error}`);
-            input.value = this.apiKeys[provider] || '';
+            input.value = provider === 'openai-compatible' ? this.openAICompatibleParts().apiKey : this.apiKeys[provider] || '';
         }
         this.saving = false;
     }
@@ -879,6 +890,60 @@ export class SettingsView extends LitElement {
 
     async handleSaveGroqModels() {
         await this.saveModelList('groq');
+    }
+
+    async handleSaveOpenAICompatibleModels() {
+        await this.saveModelList('openai-compatible');
+    }
+
+    /** The base URL and API key of the saved OpenAI-compatible credential ("<base URL>\n<API key>"). */
+    openAICompatibleParts() {
+        const saved = this.apiKeys['openai-compatible'] || '';
+        const cut = saved.indexOf('\n');
+        return cut === -1 ? { baseUrl: saved, apiKey: '' } : { baseUrl: saved.slice(0, cut), apiKey: saved.slice(cut + 1) };
+    }
+
+    /** Base URL, API key and model list of the OpenAI-compatible provider. */
+    renderOpenAICompatible(id, config) {
+        const { baseUrl, apiKey } = this.openAICompatibleParts();
+        const llmValue = this.getProviderForModel('llm', this.selectedLlm) === id ? this.selectedLlm : '';
+        return html`
+            <div class="provider-key-group">
+                <label for="openai-compatible-base-url-input">${config.name} Base URL</label>
+                <input type="text" id="openai-compatible-base-url-input"
+                    placeholder="e.g. http://localhost:20128/v1"
+                    .value=${baseUrl}
+                >
+                <label for="key-input-${id}" style="margin-top: 6px;">${config.name} API Key</label>
+                <input type="password" id="key-input-${id}"
+                    placeholder="Leave empty if the server needs none"
+                    .value=${apiKey}
+                >
+                <div class="key-buttons">
+                    <button class="settings-button" @click=${() => this.handleSaveKey(id)}>Save</button>
+                    <button class="settings-button danger" @click=${() => this.handleClearKey(id)}>Clear</button>
+                </div>
+                <p style="font-size: 11px; opacity: 0.6; margin: 4px 0 0 0; line-height: 1.4;">
+                    Any server that speaks the OpenAI chat API: OpenRouter (<code style="font-size: 10px;">https://openrouter.ai/api/v1</code>),
+                    SambaNova, Mistral, or a local gateway such as OmniRoute. https only, except localhost.
+                    Prompts go to that server and whatever it routes to.
+                </p>
+                <label for="openai-compatible-llm-model-input" style="margin-top: 8px;">${config.name} LLM Model ID</label>
+                <input type="text" id="openai-compatible-llm-model-input"
+                    placeholder="e.g. meta-llama/llama-3.3-70b-instruct:free"
+                    .value=${llmValue}
+                >
+                ${this.renderModelListNotes(id)}
+                <p style="font-size: 11px; opacity: 0.6; margin: 4px 0 8px 0; line-height: 1.4;">
+                    Comma-separated list for failover, with the IDs the server's models list uses.
+                    Rate limits, refusals and timeouts skip to the next; screenshots go first to models that see images.
+                    ${this.renderMixedListHelp('meta-llama/llama-3.3-70b-instruct:free,gemini-3.5-flash-lite')}
+                </p>
+                <div class="key-buttons">
+                    <button class="settings-button" @click=${() => this.handleSaveOpenAICompatibleModels()}>Save ${config.name} Models</button>
+                </div>
+            </div>
+        `;
     }
 
     /**
@@ -1703,6 +1768,8 @@ export class SettingsView extends LitElement {
                             `;
                         }
                         
+                        if (id === 'openai-compatible') return this.renderOpenAICompatible(id, config);
+
                         // Regular providers
                         const geminiLlmValue = (id === 'gemini' && this.getProviderForModel('llm', this.selectedLlm) === 'gemini')
                             ? this.selectedLlm

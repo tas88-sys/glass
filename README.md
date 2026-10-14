@@ -71,6 +71,7 @@ npm run setup
 - Gemini (LLM + STT): Get Gemini API Key [here](https://aistudio.google.com/apikey)
 - Anthropic Claude (LLM — Opus, Sonnet and Haiku 5.5, with failover across a model list like Gemini): Get Anthropic API Key [here](https://console.anthropic.com/settings/keys)
 - Groq (LLM — GPT-OSS 120B and 20B, and Qwen 3.8 27B for screenshots, with failover across a model list): Get Groq API Key [here](https://console.groq.com/keys)
+- OpenAI-compatible (LLM — any server that speaks the OpenAI chat API at a base URL: OpenRouter, SambaNova, Mistral, or a local [OmniRoute](https://github.com/diegosouzapw/OmniRoute) gateway): set the base URL, key and model list in Settings. Setting up OmniRoute as the last, free fallback: [`docs/runbook/OMNIROUTE_SETUP.md`](docs/runbook/OMNIROUTE_SETUP.md)
 - Deepgram (STT): Get Deepgram API Key [here](https://console.deepgram.com/)
 - Local: Ollama (LLM) & Whisper (STT)
 

@@ -12,6 +12,8 @@ const SAVE_CATALOG_TIMEOUT_MS = 5_000;
 // The career router's key (Jev, TypeSafe AI): a provider_settings row like the
 // others (encrypted, same Save/Clear flow), but no LLM or STT models.
 const ROUTER_KEY_PROVIDER = 'typesafe';
+// Catalog providers whose typed IDs are LLM models only (Gemini's may be STT too).
+const LLM_ONLY_CATALOG_PROVIDERS = ['anthropic', 'groq', 'openai-compatible'];
 const authService = require('./authService');
 const ollamaModelRepository = require('../repositories/ollamaModel');
 
@@ -249,6 +251,9 @@ class ModelStateService extends EventEmitter {
     async _autoSelectAvailableModels(forceReselectionForTypes = [], isInitialBoot = false) {
         console.log(`[ModelStateService] Running auto-selection. Force re-selection for: [${forceReselectionForTypes.join(', ')}]`);
         const { apiKeys, selectedModels } = await this.getLiveState();
+        // The row each selection is saved in decides an ID no catalog lists
+        // (an OpenAI-compatible endpoint's IDs have no prefix of their own).
+        const savedIn = await this.getSelectedModels();
         const types = ['llm', 'stt'];
 
         for (const type of types) {
@@ -257,7 +262,7 @@ class ModelStateService extends EventEmitter {
             const forceReselection = forceReselectionForTypes.includes(type);
 
             if (currentModelId && !forceReselection) {
-                const provider = this.getProviderForModel(currentModelId, type);
+                const provider = this.getProviderForModel(currentModelId, type, type === 'llm' ? savedIn.llmProvider : savedIn.sttProvider);
                 const apiKey = apiKeys[provider];
                 if (provider && apiKey) {
                     isCurrentModelValid = true;
@@ -424,10 +429,10 @@ class ModelStateService extends EventEmitter {
             if (installedModels.some(m => m.name === modelId)) return 'ollama';
         }
         // A typed ID or CSV list: the provider whose models list has it (the
-        // catalog), else its prefix. Gemini for LLM or STT; Anthropic and Groq
-        // for LLM only.
+        // catalog), else its prefix. Gemini for LLM or STT; Anthropic, Groq
+        // and OpenAI-compatible for LLM only.
         const inferred = inferProviderFromModelId(modelId, context);
-        if (inferred === 'gemini' || ((inferred === 'anthropic' || inferred === 'groq') && type === 'llm')) return inferred;
+        if (inferred === 'gemini' || (LLM_ONLY_CATALOG_PROVIDERS.includes(inferred) && type === 'llm')) return inferred;
         return null;
     }
 

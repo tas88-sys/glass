@@ -164,7 +164,7 @@ flowchart TB
     end
     subgraph cloud["CLOUD (only when signed in)"]
         firebase[("Firebase Auth + Firestore")]
-        providers["LLM/STT APIs: OpenAI · Gemini · Anthropic · Groq · Deepgram"]
+        providers["LLM/STT APIs: OpenAI · Gemini · Anthropic · Groq · OpenAI-compatible · Deepgram"]
     end
     user <--> header
     header <-->|preload IPC| main
@@ -606,6 +606,7 @@ flowchart TB
 | Gemini | ✅ `gemini-3-flash-preview` | ✅ `gemini-3.8-live` | LLM supports CSV failover, also across providers (§10.4); STT does not |
 | Anthropic | ✅ `claude-opus-5-5` · `claude-sonnet-5-5` · `claude-haiku-5-5` | ❌ | LLM only; supports CSV failover, also across providers (§10.4) |
 | Groq | ✅ `openai/gpt-oss-120b` · `openai/gpt-oss-20b` · `qwen/qwen3.8-27b` | ❌ | LLM only; supports CSV failover, also across providers (§10.4); of the presets, Groq's models API says only Qwen 3.8 sees images (§9.1) |
+| OpenAI-compatible | ✅ (the endpoint's own IDs) | ❌ | LLM only; any OpenAI chat-completions server at a base URL (OpenRouter, SambaNova, a local OmniRoute…); CSV failover, also across providers (§10.5); no preset, so onboarding does not offer it |
 | Deepgram | ❌ | ✅ `nova-3` | STT only (pinned to nova-3) |
 | Whisper (local) | ❌ | ✅ tiny/base/small/medium | Main process only |
 | Ollama (local) | ✅ (dynamic) | ❌ | LLM only |
@@ -639,6 +640,7 @@ flowchart LR
   | Groq | `input_modalities` has `image` | `max_completion_tokens` | `supported_features` has `reasoning` |
   | Anthropic | `capabilities.image_input` | `max_tokens` | `capabilities.thinking`; the effort levels marked supported in `capabilities.effort` |
   | Gemini | not reported (provider default) | `outputTokenLimit` | `thinking` |
+  | OpenAI-compatible | `input_modalities` or `architecture.input_modalities` has `image`, or `capabilities.vision`; default: text only | `max_completion_tokens`, `max_output_tokens` or `top_provider.max_completion_tokens` | `supported_parameters` has `reasoning`, `supported_features` has `reasoning`, or `capabilities.reasoning` |
 
   Anthropic leaves out retired models (`lifecycle`); Gemini keeps the models with
   `generateContent`, and its key goes in the `x-goog-api-key` header, not the URL.
@@ -1209,6 +1211,53 @@ flowchart TB
 - **Data.** On a fallback, the same request (prompt, transcript excerpt, career context,
   screenshot) goes to the next provider the user configured. Gemini's free tier is an unpaid
   service, which Google's terms allow to use content to improve its products.
+
+### 10.5 OpenAI-compatible endpoint
+
+Since 2026-10-14 (spec [`specs/2026-10-14-openai-compatible-provider/`](specs/2026-10-14-openai-compatible-provider/)),
+one more LLM provider, `openai-compatible` (`providers/openaiCompatible.js`), talks to any server
+that speaks the OpenAI chat-completions API at a base URL typed in Settings: a provider's own
+endpoint (SambaNova, Mistral), an aggregator (OpenRouter) or a local gateway (OmniRoute). One
+endpoint at a time.
+
+- **Credential.** Settings has Base URL, API Key (may be empty) and LLM Model ID fields. The base
+  URL and the key are saved as one string, `"<base URL>\n<key>"` (`formatCredential`), in the
+  provider's `api_key` column, encrypted like any key. The chain, the catalog and the key flow
+  need no second field. The base URL must be https, or http on localhost only. The SDK client
+  gets every setting it would otherwise read from the environment (`OPENAI_API_KEY`,
+  `OPENAI_ORG_ID`, `OPENAI_PROJECT_ID` never reach the endpoint).
+- **Failover** is Groq's (§10.3): an ordered list, cooldowns, a second round for fast transient
+  failures, first-text 20 s, idle 15 s, request deadline 45 s, cancel down to the HTTP request.
+  Two differences, because the models behind one endpoint may come from different upstreams:
+  - a model that refuses the request (400, 422) hands it to the next model; only a refused key
+    (401, 403) ends the request. 404 and 402 (credit) cool the model for 5 min; 413 goes to the
+    next model with no cooldown (`openaiCompatibleErrors.classify`);
+  - cooldowns are kept under the provider's own names (`healthKey`: `openai-compatible:<id>`), so
+    `openai/gpt-oss-120b` spent on Groq does not block the same ID on the endpoint. The chain
+    asks each adapter (`isCoolingDown`), not the registry directly.
+- **Requests** send only `model`, `messages`, `stream`, `max_tokens` (caller cap, else
+  `OPENAI_COMPATIBLE_MAX_TOKENS`, else 8,192, capped by the model's reported maximum; plus 1,024
+  on a model the catalog says reasons) and `temperature`. No reasoning field: each server names it
+  its own way. Images go only to models that see images (default: text only).
+- **Provider of an ID.** The endpoint's list (catalog) decides; an ID both Groq and the endpoint
+  list goes to the field or run it was typed in. An ID no catalog has stays in an
+  OpenAI-compatible field or run, unless it is a `claude-`/`gemini-` ID (`vendor/model` is as
+  much OpenRouter's shape as Groq's).
+- **Diagnostics:** grep `[OpenAI-compatible Provider]`. Each attempt line has `headers=`, `ttft=`,
+  `total=`, `served_by=` and, behind OmniRoute, `route=` (its `X-OmniRoute-Decision` header);
+  each request line has the endpoint's `host=`. Never the key, prompt or answer.
+- **Latency probe:** `node scripts/probe-openai-compatible-ttft.js` sends the same interview-sized
+  request to several endpoints, alternating the order, and prints headers/ttft/total p50 and p90
+  per target and the ttft difference against the first (e.g. Groq direct vs. via OmniRoute).
+- **Tuning (`.env`, optional):** `OPENAI_COMPATIBLE_FIRST_TEXT_TIMEOUT_MS` (20000),
+  `OPENAI_COMPATIBLE_REQUEST_DEADLINE_MS` (45000, `0` disables), `OPENAI_COMPATIBLE_IDLE_TIMEOUT_MS`
+  (15000, `0` disables), `OPENAI_COMPATIBLE_MAX_TOKENS` (8192), `OPENAI_COMPATIBLE_REASONING_TOKENS`
+  (1024). The live eval reads `OPENAI_COMPATIBLE_BASE_URL` and `OPENAI_COMPATIBLE_API_KEY`.
+- **OmniRoute as the endpoint** (install, local-only config, combo, Glass settings):
+  [`docs/runbook/OMNIROUTE_SETUP.md`](docs/runbook/OMNIROUTE_SETUP.md).
+- **Data.** Prompts, transcript excerpts, career context and screenshots go to the endpoint and to
+  whatever it routes to. A gateway's free tiers often come with training on prompts or unknown
+  data handling; research R1 in the spec reviews OmniRoute's.
 
 ---
 
