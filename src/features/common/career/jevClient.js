@@ -78,6 +78,15 @@ const ASKS_INSTRUCTIONS =
     'a fragment that asks nothing yet, or the interviewer telling or explaining something (about themselves, their company, the role or the process), ' +
     'even when it contains a rhetorical question. The turn may be in English or Brazilian Portuguese and may contain speech-to-text errors.';
 
+// Whether the interviewer is inviting the candidate's own questions (R21): the
+// company route then looks for the notes the candidate keeps for that moment,
+// whose words the invitation does not share ("tirar dúvidas" against "Suas perguntas").
+const INVITES_INSTRUCTIONS =
+    'Is the interviewer inviting the candidate to ask their own questions now (about the company, the team, the role or the process), ' +
+    'e.g. "do you have any questions for us?" / "agora fica à vontade pra tirar suas dúvidas"? ' +
+    'Answer no when the interviewer asks the candidate something, or only checks whether the candidate understood. ' +
+    'The turn may be in English or Brazilian Portuguese and may contain speech-to-text errors.';
+
 const FOLLOW_UP_INSTRUCTIONS =
     'Is `turn` a short follow-up asking for more about `previous_question` (the outcome, what happened next, what was learned), ' +
     'rather than a new question? The turn may be in English or Brazilian Portuguese.';
@@ -143,6 +152,7 @@ function buildRequest(text, ctx = {}, model = DEFAULT_MODEL) {
     const questions = {
         route: { type: 'choice', instructions: ROUTE_INSTRUCTIONS, criteria: { ...ROUTE_CRITERIA } },
         asks: { type: 'noul', instructions: ASKS_INSTRUCTIONS },
+        invites: { type: 'noul', instructions: INVITES_INSTRUCTIONS },
     };
     if (prevQ) questions.follow_up = { type: 'noul', instructions: FOLLOW_UP_INSTRUCTIONS };
     return { model, state, questions };
@@ -153,7 +163,7 @@ const unit = x => typeof x === 'number' && Number.isFinite(x) && x >= 0 && x <= 
 /**
  * The answers we use, or null when the body is not what the API documents.
  * @param {unknown} json
- * @returns {{ route: string, confidence: number, probabilities: Record<string, number>, asks: number|null, followUp: number|null, model: string|null }|null}
+ * @returns {{ route: string, confidence: number, probabilities: Record<string, number>, asks: number|null, invites: number|null, followUp: number|null, model: string|null }|null}
  */
 function parseResponse(json) {
     if (!json || typeof json !== 'object') return null;
@@ -171,6 +181,7 @@ function parseResponse(json) {
         confidence: r.confidence,
         probabilities,
         asks: noul(answers.asks),
+        invites: noul(answers.invites),
         followUp: noul(answers.follow_up),
         model: typeof json.model === 'string' ? json.model : null,
     };

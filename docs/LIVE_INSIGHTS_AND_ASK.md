@@ -374,8 +374,9 @@ never injected.
 1. **Route.** Jev (`jevRouter.js`), or the frozen regex router (`intentRouter.js`, English and
    Portuguese cue tables) when Jev is off or cannot answer in time, picks one of four routes:
    - `personal`: behavioral, background, experience, employer names;
-   - `company`: "why us", "what do you know about us"; with Jev, also "do you have any questions for us?"
-     (the company notes hold the candidate's questions for it);
+   - `company`: "why us", "what do you know about us"; with Jev, also "do you have any questions for us?":
+     Jev's `invites` then turns the query to the candidate's questions-to-ask notes and the answer
+     suggests questions to ask (spec R21);
    - `ambiguous`: "how would you…", "how do you usually…";
    - `general`: everything else.
 

@@ -109,6 +109,16 @@
       "completed_at": "2026-10-14T01:00:00Z"
     },
     {
+      "id": "T073",
+      "phase": "7-r19",
+      "description": "R21: jevClient invites question; jevRouter decisions carry invites; career module: company + invites ≥ 0.5 → the questions-to-ask query (both languages, plus the company) and the invitation addendum; cue +invite in the debug line.",
+      "status": "completed",
+      "target_file": "src/features/common/career/index.js",
+      "verify": "node --test src/features/common/career/__tests__/*.test.js; ask-career-kb.js on the session's invitation; eval-career-kb.js --router jev; replays",
+      "evidence": "Invitations invites 0.82–0.96, controls ≤ 0.14 but one below the floor; the session's invitation now draws the three questions-to-ask sections (none before); eval unchanged; npm test 1433/1433. research.md R21",
+      "completed_at": "2026-10-14T03:00:00Z"
+    },
+    {
       "id": "T-VERIFY-RELEASE",
       "phase": "verify",
       "description": "Owner: TYPESAFE_API_KEY in .env, about 40 fresh holdout questions (half PT, half EN) in the KB repo, then node scripts/eval-career-kb.js --router jev until R-SC-001..004 pass; live eval with PT and EN audio for R-SC-005.",

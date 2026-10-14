@@ -4,7 +4,7 @@ meta:
   spec_id: 2026-10-13-career-router-jev
   spec_name: career-router-jev
   status: in-progress    # draft | in-progress | approved | completed
-  phase: verify          # code and unit tests done; R19 (real-session gate) and R20 (candidate's questions) added 2026-10-13
+  phase: verify          # code and unit tests done; R19 (real-session gate), R20 and R21 (candidate's questions) added 2026-10-13
   created: 2026-10-13
   updated: 2026-10-13
 
@@ -63,6 +63,7 @@ the tables never saw.
     ≤ 60 chars each);
   - `questions.route`: `choice` over the four routes;
   - `questions.asks`: `noul`, always: does the turn ask the candidate for something to answer now (R19);
+  - `questions.invites`: `noul`, always: is the interviewer inviting the candidate's questions (R21);
   - `questions.follow_up`: `noul`, only when `previous_question` is sent.
 - **FR-003 Mapping.**
   - follow-up ≥ 0.5, a previous personal/company question in the window and a route other
@@ -153,8 +154,9 @@ the tables never saw.
 - **E10** STT in the wrong language (garbage text): Jev may read meaning into it and arm answers;
   the fix is the STT language (R19 known limit).
 - **E11** "Do you have any questions for us?" / "fica à vontade pra tirar suas dúvidas sobre a empresa":
-  company, so the company's notes, which hold the candidate's questions for it, go in (R20). The regex
-  router has no cue for it and stays frozen.
+  company (R20) with invites ≥ 0.5, so the query asks for the candidate's questions-to-ask notes
+  instead of the turn's words, and the answer suggests questions to ask (R21). The regex router has no
+  cue for it and stays frozen.
 
 ## Out of scope
 

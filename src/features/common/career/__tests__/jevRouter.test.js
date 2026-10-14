@@ -472,6 +472,24 @@ describe('asks and the segment before (R19)', () => {
         assert.equal(none.asks, null, 'an answer without asks');
     });
 
+    it('every decision Jev answered carries its invites (R21); a regex decision carries null', async () => {
+        const withInvites = (route, confidence, invites, followUp) => {
+            const b = body(route, confidence, followUp);
+            b.answers.invites = { type: 'noul', noul: invites };
+            return b;
+        };
+        const jev = await router(ok(withInvites('company', 0.9, 0.88))).r.decide('Do you have any questions for us?', ctx());
+        assert.equal(jev.invites, 0.88);
+        const follow = await router(ok(withInvites('general', 0.6, 0.05, 0.9))).r.decide('E como terminou?', ctx({ prev: prevPersonal() }));
+        assert.deepEqual([follow.cue, follow.invites], ['follow-up', 0.05]);
+        const low = await router(ok(withInvites('company', 0.3, 0.7))).r.decide('fica à vontade', ctx());
+        assert.deepEqual([low.fallback, low.invites], ['low', 0.7]);
+        const failed = await router(status(529)).r.decide('Any questions?', ctx());
+        assert.equal(failed.invites, null);
+        const none = await router(ok(body('company', 0.9))).r.decide('Why us?', ctx());
+        assert.equal(none.invites, null, 'an answer without invites');
+    });
+
     it('askPolicy: defaults, env, and out-of-range values fall back', () => {
         assert.deepEqual(router(ok(body('general'))).r.askPolicy(), { min: DEFAULTS.askMin, veto: DEFAULTS.askVeto });
         assert.deepEqual(router(ok(body('general')), { env: { ...KEY, CAREER_ROUTER_ASK_MIN: '0.6', CAREER_ROUTER_ASK_VETO: '0' } }).r.askPolicy(), { min: 0.6, veto: 0 });

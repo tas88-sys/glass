@@ -99,10 +99,16 @@ function buildContextBlock({ core, hits, maxChars = MAX_BLOCK_CHARS }) {
     return { block: sections.join(SECTION_SEP), sources, chunkIds, cardOverCap };
 }
 
+// R21 (spec 2026-10-13-career-router-jev): the interviewer opened the floor to the
+// candidate's questions, so the answer is questions to ask, not an answer.
+const INVITE_ADDENDUM =
+    ' Here the interviewer is inviting the candidate\'s questions: instead of answering, suggest two or three short questions ' +
+    'for the candidate to ask, taken from the notes when they have some for this company, in the language the interviewer used.';
+
 /** FR-014 addendum; names the interviewer's company when it is known. */
-function buildAddendum(activeCompany) {
+function buildAddendum(activeCompany, opts = {}) {
     const clause = activeCompany ? ` The interviewer's company is ${activeCompany}.` : '';
-    return ADDENDUM_TEMPLATE.replace('{COMPANY_CLAUSE}', clause);
+    return ADDENDUM_TEMPLATE.replace('{COMPANY_CLAUSE}', clause) + (opts.invite ? INVITE_ADDENDUM : '');
 }
 
-module.exports = { buildContextBlock, buildAddendum, ADDENDUM_TEMPLATE, BLOCK_CARD_LABEL, CARD_SOURCE, MAX_BLOCK_CHARS };
+module.exports = { buildContextBlock, buildAddendum, ADDENDUM_TEMPLATE, INVITE_ADDENDUM, BLOCK_CARD_LABEL, CARD_SOURCE, MAX_BLOCK_CHARS };

@@ -676,6 +676,35 @@ describe('career module: Jev router (spec 2026-10-13-career-router-jev)', () => 
         assert.match(ctx.addendum, /The interviewer's company is Lumen Works\./);
     });
 
+    it('company with Jev\'s invites: the query asks for the questions-to-ask notes and the addendum asks for questions (R21)', async () => {
+        const reply = invites => ({
+            ok: true,
+            status: 200,
+            json: async () => ({
+                model: 'jev-1.13.0',
+                answers: {
+                    route: { type: 'choice', choice: 'company', probabilities: { company: 0.95 }, confidence: 0.95 },
+                    invites: { type: 'noul', noul: invites },
+                },
+            }),
+        });
+        const turn = 'Agora fica à vontade pra tirar suas dúvidas sobre a empresa.';
+        const on = await jevCareer(reply(0.9));
+        const ctx = await on.mod.getCareerContext(turn, { prev: null, activeCompany: 'Bridge' });
+        assert.equal(ctx.route, 'company');
+        assert.equal(ctx.invite, true);
+        assert.ok(ctx.queryTerms.some(t => /^pergunt/.test(t)) && ctx.queryTerms.some(t => /^question/.test(t)), 'both languages');
+        assert.equal(ctx.anchorText, turn);
+        assert.match(ctx.addendum, /inviting the candidate's questions: instead of answering, suggest two or three short questions/);
+        assert.ok(on.lines.some(l => /cue=jev:company@0\.95\+invite/.test(l)));
+
+        const off = await jevCareer(reply(0.2));
+        const plain = await off.mod.getCareerContext('Por que você quer entrar aqui?', { prev: null, activeCompany: 'Bridge' });
+        assert.equal(plain.invite, false);
+        assert.ok(!plain.queryTerms.some(t => /^question/.test(t)));
+        assert.ok(!/inviting the candidate's questions/.test(plain.addendum));
+    });
+
     it('prefetch, classifyTurn and getCareerContext share one Jev call per turn', async () => {
         const { mod, fetchImpl } = await jevCareer(answer('personal', 0.9));
         const session = { prev: null, activeCompany: 'Bridge' };

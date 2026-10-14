@@ -50,6 +50,7 @@ A 71-minute Portuguese interview with Jev on armed 114 answers, 56 of them on ac
 - **`scripts/replay-career-session.js`** replays a labeled recorded session through the app's gate and router (Jev live, no LLM).
 - The question gate moved out of `summaryService.js` into `questionGate.js` (pure, no Electron) so scripts can run it.
 - **"Do you have any questions for us?" routes company** (spec R20): the same interview ended with the interviewer inviting the candidate's questions, and no answer came, with either router. With Jev, the company criterion now names that invitation, so the company's notes, where the candidate keeps their questions for it, go in. Invented invitations: 6/6 company (was 2/6); the eval is unchanged.
+- **…and the answer is questions to ask** (spec R21): Jev also says, in the same call, whether the interviewer is inviting the candidate's questions (`invites`). Then the notes search looks for the candidate's questions-to-ask sections, not the invitation's own words ("tirar dúvidas sobre o processo" matched other notes), and the answer suggests two or three questions. For the real invitation, the three questions-to-ask sections now go in (none before); the eval is unchanged.
 
 #### Fixed (found by the live eval with Jev)
 

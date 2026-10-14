@@ -55,7 +55,7 @@ describe('buildRequest (FR-002, FR-011)', () => {
         assert.equal(body.model, DEFAULT_MODEL);
         assert.match(body.model, /^jev-\d+\.\d+\.\d+$/, 'a version, never an alias');
         assert.deepEqual(body.state, { turn: 'Tell me about a time you led a migration.' });
-        assert.deepEqual(Object.keys(body.questions), ['route', 'asks']);
+        assert.deepEqual(Object.keys(body.questions), ['route', 'asks', 'invites']);
         const q = body.questions.route;
         assert.equal(q.type, 'choice');
         assert.equal(typeof q.instructions, 'string');
@@ -68,6 +68,14 @@ describe('buildRequest (FR-002, FR-011)', () => {
         assert.match(q.instructions, /English or Brazilian Portuguese/);
         assert.match(q.instructions, /speech-to-text errors/);
         for (const r of ROUTES) assert.match(q.criteria[r], /E\.g\. "[^"]+" \/ "[^"]+"/, r);
+    });
+
+    it('always asks whether the interviewer invites the candidate\'s questions, bilingual (R21)', () => {
+        const q = buildRequest('Do you have any questions for us?').questions.invites;
+        assert.equal(q.type, 'noul');
+        assert.match(q.instructions, /inviting the candidate to ask their own questions/);
+        assert.match(q.instructions, /"do you have any questions for us\?" \/ "[^"]+"/);
+        assert.match(q.instructions, /English or Brazilian Portuguese/);
     });
 
     it('routes the invitation to ask the interviewer questions as company (R20)', () => {
@@ -134,12 +142,13 @@ describe('buildRequest (FR-002, FR-011)', () => {
 
 describe('parseResponse (FR-003)', () => {
     it('reads the documented answer shape', () => {
-        const out = parseResponse(answer('company', 0.81, { asks: { type: 'noul', noul: 0.93 }, follow_up: { type: 'noul', noul: 0.12 } }));
-        assert.deepEqual(out, { route: 'company', confidence: 0.81, probabilities: { company: 0.81 }, asks: 0.93, followUp: 0.12, model: 'jev-1.13.0' });
+        const out = parseResponse(answer('company', 0.81, { asks: { type: 'noul', noul: 0.93 }, invites: { type: 'noul', noul: 0.77 }, follow_up: { type: 'noul', noul: 0.12 } }));
+        assert.deepEqual(out, { route: 'company', confidence: 0.81, probabilities: { company: 0.81 }, asks: 0.93, invites: 0.77, followUp: 0.12, model: 'jev-1.13.0' });
     });
 
     it('no asks or follow-up answer → null for each, the route still parses', () => {
         const out = parseResponse(answer());
+        assert.equal(out.invites, null);
         assert.equal(out.asks, null);
         assert.equal(out.followUp, null);
     });

@@ -198,7 +198,8 @@ The session ends with the interviewer inviting the candidate's questions about t
 router armed an answer: Jev read it as general with low confidence, so the regex decided, and the
 regex found no cue. The KB has sections written for this moment (the candidate's questions for each
 company), and on the company route the retrieval ranks them first (checked with `ask-career-kb.js`).
-Only the routing was missing.
+Only the routing was missing. (Correction, R21: that check used the clean English invitation. For the
+session's own Portuguese invitation the retrieval did not find those notes; R21 fixes it.)
 
 Offline, with `interviewer_company` set: 6 invented invitations (3 PT, 3 EN, short and long), the
 session's own invitation, and 8 controls (2 company questions; 6 others, among them "take your time,
@@ -240,3 +241,50 @@ names in the state, so the two causes are not separated. What follows from it:
 
 - Differences of one or two segments or items between single runs are noise.
 - A release check near its limit (R-SC-004) needs several runs; it fails in all of them today.
+
+## R21: what the answers were built on, and the invitation's notes
+
+**Decision**: Jev also answers, in the same call, whether the interviewer is inviting the candidate's
+questions (`invites`, noul). On the company route with invites ≥ 0.5 the query is the moment's
+("your questions to ask the interviewer", in both languages, plus the company), not the turn's
+words, and the addendum asks for two or three questions for the candidate to ask.
+
+### Why
+
+The owner asked how good the session's answers had been. The app kept none (now it does: spec
+`2026-10-13-live-answer-history`), so `replay-career-session.js --answers --no-llm` rebuilt, for
+each armed `y` segment, the notes block the prompt carried, over the KB as it stood at the
+interview (its commit before the session: 78 files and 2,512 sections against 79 and 2,539 in the
+log). The KB had since gained the session's own transcript and debrief, which the retrieval put in
+almost every answer; a rebuild over today's KB would have been contaminated.
+
+What the rebuild showed (the details stay in the KB repo, C5):
+
+- On the deep dive into one project, the specific fact a question asked for (a number, a component,
+  a design choice) was in the block for 5 of 21 checked questions. The KB holds most of those facts,
+  but spread over many interview-prep notes, with no single note on the project; the retrieval
+  brings a different fragment each time. Three facts the interviewer asked for are not in the KB.
+- A past interview's transcript filled a block slot in most answers.
+- The invitation to ask questions, routed company since R20, still drew no questions-to-ask note:
+  its words ("tirar dúvidas que você tiver sobre a empresa, sobre o processo") match other sections.
+
+### The change and its check
+
+- `jevClient`: `questions.invites` (always sent, about 80 tokens). `jevRouter`: decisions carry
+  `invites` (null on a regex decision). `index.js`: the invitation query and addendum; the debug
+  line shows `cue=…+invite`. The regex router stays frozen.
+- Jev live, on the R20 offline set: invites 0.82–0.96 on the 8 invitations, 0.02–0.14 on the
+  controls but one ("feel free to bring another project", 0.72), whose route is below the floor, so
+  nothing changes there.
+- Retrieval for the session's invitation, on the interview's KB and on today's: the candidate's
+  general questions-to-ask section, the Q&A bank's reverse questions and the company's own "your
+  questions" section are all sent (before: none of them).
+- Eval (133): unchanged (96.1%, holdout 100%, 11 below the floor, same misses). Synthetic: 40/40.
+  Replays: the session `y` 42/43, 20 wasted, 1 route error; the validation sessions `y` 43/44 and
+  18/18, 7 and 0 wasted (within the run-to-run variance of R20).
+
+### Not done
+
+The answers themselves were not rebuilt: the provider's daily token quota ran out after 7, and those
+7 used today's KB, so they were discarded. `--resume` with `--kb <the interview's commit>` rebuilds
+them when the quota is back.

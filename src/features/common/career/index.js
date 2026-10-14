@@ -59,6 +59,12 @@ const ms = x => Math.round(x * 10) / 10;
 // query carries the previous question's terms, and its vector query carries the
 // previous question's text (FR-006, E41). prev.anchorText is that question, kept
 // across a chain of follow-ups; its end is kept, where the question usually is.
+// R21: the invitation to ask questions shares no words with the notes kept for
+// it, so on the company route with Jev's invites ≥ INVITE_MIN the query asks
+// for those notes in both languages.
+const INVITE_MIN = 0.5;
+const INVITE_QUERY = 'Suas perguntas para fazer ao entrevistador sobre a empresa, o time e a vaga. Your questions to ask the interviewer about the company, the team and the role.';
+
 function vectorQueryText(turnText, decision, prev) {
     const anchor = decision.cue === 'follow-up' && prev && typeof prev.anchorText === 'string' ? prev.anchorText.trim() : '';
     return anchor ? `${anchor.slice(-MAX_ANCHOR_CHARS)}\n${turnText}` : turnText;
@@ -341,7 +347,7 @@ function createCareerModule(options = {}) {
         const top = hits[0];
         const parts = [
             `[career] route=${result.route}`,
-            `cue=${result.cue || '-'}`,
+            `cue=${result.cue || '-'}${result.invite ? '+invite' : ''}`,
             `chunks=${result.chunkIds.length ? result.chunkIds.join(',') : '-'}`,
             `scores=${hits.length ? hits.map(h => h.score.toFixed(4)).join(',') : '-'}`,
             `top=${top ? `cos:${top.cosine == null ? '-' : top.cosine.toFixed(3)}/cov:${top.coverage == null ? '-' : top.coverage.toFixed(2)}` : '-'}`,
@@ -368,6 +374,7 @@ function createCareerModule(options = {}) {
             routeFallback: decision.fallback,
             routeConfidence: decision.confidence,
             routeAsks: decision.asks == null ? null : decision.asks,
+            invite: false,
             jevMs: decision.jevMs,
             block: '',
             addendum: '',
@@ -395,10 +402,14 @@ function createCareerModule(options = {}) {
             ? prev.queryTerms.filter(x => typeof x === 'string')
             : [];
         const companyTerms = decision.route === 'company' && activeCompany ? tokenize(activeCompany) : [];
-        const terms = own.concat(boost, carried, companyTerms);
+        const invite = decision.route === 'company' && typeof decision.invites === 'number' && decision.invites >= INVITE_MIN;
+        result.invite = invite;
+        // On an invitation the turn's own words ("tirar dúvidas", "sobre o processo")
+        // pull other sections; the query is the moment's, plus the company.
+        const terms = invite ? tokenize(INVITE_QUERY).concat(companyTerms) : own.concat(boost, carried, companyTerms);
         result.queryTerms = [...new Set(terms)].slice(0, MAX_QUERY_TERMS);
-        const vectorText = vectorQueryText(turnText, decision, prev);
-        result.anchorText = vectorText === turnText ? turnText : prev.anchorText;
+        const vectorText = invite ? INVITE_QUERY : vectorQueryText(turnText, decision, prev);
+        result.anchorText = invite || vectorText === turnText ? turnText : prev.anchorText;
 
         const excluded = new Set(Array.isArray(opts.excludePaths) ? opts.excludePaths : []);
         const keep = h => excluded.size === 0 || !excluded.has(s.chunks[h.idx] && s.chunks[h.idx].path);
@@ -477,7 +488,7 @@ function createCareerModule(options = {}) {
         if (!built.block) return done(hits, vectorNote, 'inject=no(empty)');
 
         result.block = built.block;
-        result.addendum = buildAddendum(activeCompany);
+        result.addendum = buildAddendum(activeCompany, { invite: result.invite });
         result.sources = built.sources;
         result.chunkIds = built.chunkIds;
         return done(hits, vectorNote);

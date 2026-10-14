@@ -7,10 +7,12 @@
 // or an answer below the confidence floor.
 //
 // Every decision has the same shape:
-//   { route, cue, source: 'jev'|'regex', fallback: null|reason, confidence, asks, jevMs }
+//   { route, cue, source: 'jev'|'regex', fallback: null|reason, confidence, asks, invites, jevMs }
 // asks is Jev's "does the turn ask the candidate for something now" (0..1),
 // whenever Jev answered (also below the confidence floor), else null. The live
-// gate reads it against askPolicy() (R19).
+// gate reads it against askPolicy() (R19). invites is Jev's "is the interviewer
+// inviting the candidate's questions" (0..1, else null); the career module
+// reads it on the company route (R21).
 // A regex decision keeps the regex cue unchanged ('follow-up' still carries
 // the previous question's terms). A Jev decision's cue is 'jev:<route>@<conf>',
 // or 'follow-up'.
@@ -264,7 +266,7 @@ function createJevRouter(options = {}) {
     function regexDecision(text, ctx, fallback, extra = {}) {
         if (fallback) counts.fallbacks[fallback] = (counts.fallbacks[fallback] || 0) + 1;
         const d = classifyCareerIntent(text, ctx);
-        return { route: d.route, cue: d.cue, source: 'regex', fallback, confidence: null, asks: null, jevMs: null, ...extra };
+        return { route: d.route, cue: d.cue, source: 'regex', fallback, confidence: null, asks: null, invites: null, jevMs: null, ...extra };
     }
 
     /**
@@ -288,10 +290,10 @@ function createJevRouter(options = {}) {
             const a = settled.answer;
             const p = eligiblePrev(c);
             if (p && a.followUp !== null && a.followUp >= FOLLOW_UP_MIN && a.route !== 'company') {
-                return { route: p.route, cue: 'follow-up', source: 'jev', fallback: null, confidence: a.followUp, asks: a.asks, jevMs: entry.ms };
+                return { route: p.route, cue: 'follow-up', source: 'jev', fallback: null, confidence: a.followUp, asks: a.asks, invites: a.invites, jevMs: entry.ms };
             }
             if (a.confidence < cfg.minConfidence) {
-                return regexDecision(text, c, 'low', { confidence: a.confidence, asks: a.asks, jevMs: entry.ms });
+                return regexDecision(text, c, 'low', { confidence: a.confidence, asks: a.asks, invites: a.invites, jevMs: entry.ms });
             }
             return {
                 route: a.route,
@@ -300,6 +302,7 @@ function createJevRouter(options = {}) {
                 fallback: null,
                 confidence: a.confidence,
                 asks: a.asks,
+                invites: a.invites,
                 jevMs: entry.ms,
             };
         } catch {
