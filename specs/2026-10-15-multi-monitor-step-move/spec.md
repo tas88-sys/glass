@@ -16,7 +16,7 @@ summary:
     - {id: G4, description: "One monitor: behavior unchanged (the header stops at the work area's edges)", priority: HIGH}
   constraints:
     - {id: C1, description: "The header never straddles two monitors at rest. On Windows, a window across two monitors with different scale factors (here 125% and 100%) can be resized by Electron", type: TECHNICAL}
-    - {id: C2, description: "No new dependency. Changes stay in windowLayoutManager.js; windowManager.js and the shortcut registration are not edited", type: TECHNICAL}
+    - {id: C2, description: "No new dependency. Changes stay in src/window/; the shortcut registration is not edited. (First written as windowLayoutManager.js only; D7 needed smoothMovementManager.js and three call sites in windowManager.js)", type: TECHNICAL}
     - {id: C3, description: "Tests run under npm test with electron's screen mocked (the Module._load pattern of the provider tests)", type: TECHNICAL}
     - {id: C4, description: "macOS must not break: Cmd+arrow uses the same code", type: TECHNICAL}
   decisions:
@@ -25,6 +25,7 @@ summary:
     - {id: D3, decision: "When crossing, the coordinate across the movement is kept and clamped to the new work area (moving right keeps y), not scaled proportionally", rationale: "A step move should not make the header jump vertically. Ctrl+Shift+1/2 (move to display) keeps the proportional mapping it has today"}
     - {id: D4, decision: "Adjacency uses display bounds with a few px of tolerance; the neighbor must overlap the current display along the other axis; the nearest one wins", rationale: "Work areas leave gaps at the taskbar, and Electron's DIP layout on Windows with mixed scale factors may leave small gaps or overlaps between bounds"}
     - {id: D6, decision: "A step starts from the previous step's target while the header is still on its way to it (within 350 ms, and the header inside the box from that step's start to its target); otherwise from the header's real bounds. The state lives in WindowLayoutManager, so windowManager.js stays untouched", rationale: "Found by the owner on 2026-10-15: holding the keys never crossed. A held key repeats every ~30 ms while a step animates for 300 ms, so the header's bounds are always mid-flight, never flush with the edge, and every step restarted the animation from there. Near the edge each restart moved less than a pixel and the header stopped 1-2 px short; only the last animation, after the key was released, landed it on the edge"}
+    - {id: D7, decision: "SmoothMovementManager keeps each window's intended size (DIP). A size changes only through animateWindowBounds (header resize, panel height); a move (step, layout, drag via its setPosition) always sends that size, never the window's current bounds", rationale: "Found by the owner on 2026-10-15 once crossings worked: the header got smaller at every crossing until its buttons were gone. Measured in Electron on the owner's monitors: in the frame a window crosses between 125% and 100%, Windows rescales it for a moment (e.g. 493×48 then 394×35), and on the 125% monitor a 393×47 request comes back 394×48. Every move started from getBounds(), so a key repeat or a mouse move landing on that frame made the wrong size the new one: 47 px high became 35, 23, 11 after three round trips, by key or by drag. Upstream behavior; it showed only once crossings worked"}
     - {id: D5, decision: "Ctrl+Shift+Left/Right (snap to edge) is not changed", rationale: "Snapping inside the current monitor is what it promises; crossing is what Ctrl+arrow and Ctrl+Shift+N are for"}
 ---
 
@@ -93,6 +94,10 @@ The bounds touch (no DIP gap). The left monitor is bottom-aligned with the prima
   step starts from that target: ten repeats move ten steps, and a held key reaches the edge, crosses
   and keeps going. Moves made by other means (drag, snap, move to display) are not mixed in: the
   stored target is ignored once the header is outside its path or 350 ms passed.
+- **FR-005 Size kept across monitors.** After any number of crossings, by key or by drag, the
+  header and the panels have the size last asked for (header 393×47 in the main state; on the 125%
+  monitor Windows shows it as 394×48, which does not add up). A header resize or a panel height
+  change still applies (D7).
 - **FR-004 Child windows follow.** No code change expected: `window:moveStep` already lays out
   Ask/Listen from the future header bounds, and `calculateFeatureWindowLayout` picks the display by
   the header's center. Checked by hand (V4).
@@ -113,11 +118,8 @@ Estimated size: ~40 lines in `windowLayoutManager.js`, ~150 lines of tests.
 
 ## Risks
 
-- **Mixed scale factors (125% / 100%).** Moving a window between monitors with different DPI can
-  make Electron on Windows change its size or leave it blurry for a frame. C1 keeps the header
-  from resting across the border, but the animation (`smoothMovementManager`) passes through
-  intermediate positions. If V2 shows a resize, a follow-up sets the position without animation
-  when crossing; it is not in this plan's scope until seen.
+- **Mixed scale factors (125% / 100%).** It happened (D7): the header shrank at every crossing.
+  Fixed by keeping intended sizes; the rescale itself still shows for one frame mid-crossing.
 - **DIP gaps between displays.** If T1 shows the two displays' DIP bounds do not touch, D4's
   tolerance must cover the gap; T2 includes that case.
 
@@ -127,8 +129,11 @@ Estimated size: ~40 lines in `windowLayoutManager.js`, ~150 lines of tests.
 |---|---|
 | V1 `npm test` (new tests fail before T4–T5, pass after; nothing else changes) | Done 2026-10-15: 10 new tests, 5 failed before the fix (round trip on the owner's layout, the two single crossings, monitor on the right, drag); 1511 pass, 0 fail after |
 | V1b Held key (real animation, fake clock, repeat every 33 ms): 4 more tests, 3 fail without D6 | Done 2026-10-15: 1515 pass, 0 fail |
+| V1c Size across monitors (fake window with the measured rescale): 5 tests, all fail without D7 | Done 2026-10-15: 1520 pass, 0 fail |
 | V2 Owner's PC: Ctrl+Left to the left monitor, keep going to its far edge, then Ctrl+Right all the way back to the primary monitor's right edge; header size unchanged | |
 | V2b Same as V2, holding the keys down instead of tapping | |
+| V2c Hold the keys for three round trips: the header keeps its size | Measured 2026-10-15 in Electron on the owner's monitors (scratch harness, real modules, a window with the header's options): before D7 393×47 became 421×35, 449×23, 466×11; after, 393×47 on the primary monitor and 394×48 on the 125% one every trip. Owner check pending |
+| V3b Drag three round trips: same | Measured 2026-10-15 the same way: before D7 the height went 47 → 35 → 23 → 11; after, 393×47 / 394×48 every trip. Owner check pending |
 | V3 Drag the header across the border both ways: it follows the cursor | |
 | V4 With Listen and Ask open, cross both ways: the panels follow the header onto the same monitor | |
 | V5 One monitor (unplug or disable the second): arrows stop at the edges as before; Ctrl+Shift+1/2 still work with two | |

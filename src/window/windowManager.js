@@ -155,7 +155,7 @@ function setupWindowController(windowPool, layoutManager, movementManager) {
             const newHeaderPosition = layoutManager.calculateStepMovePosition(header, direction);
             if (!newHeaderPosition) return;
     
-            const futureHeaderBounds = { ...header.getBounds(), ...newHeaderPosition };
+            const futureHeaderBounds = { ...movementManager.intendedBounds(header), ...newHeaderPosition };
             const visibleWindows = {};
             const listenWin = windowPool.get('listen');
             const askWin = windowPool.get('ask');
@@ -211,14 +211,17 @@ function setupWindowController(windowPool, layoutManager, movementManager) {
         const header = windowPool.get('header');
         if (header) {
             const newPosition = layoutManager.calculateClampedPosition(header, { x: newX, y: newY });
-            header.setPosition(newPosition.x, newPosition.y);
+            movementManager.setPosition(header, newPosition);
         }
     });
     internalBridge.on('window:adjustWindowHeight', ({ winName, targetHeight }) => {
         layoutDebug(`[Layout Debug] adjustWindowHeight: targetHeight=${targetHeight}`);
         const senderWindow = windowPool.get(winName);
         if (senderWindow) {
-            const newBounds = layoutManager.calculateWindowHeightAdjustment(senderWindow, targetHeight);
+            const newBounds = {
+                ...layoutManager.calculateWindowHeightAdjustment(senderWindow, targetHeight),
+                width: movementManager.intendedSize(senderWindow).width,
+            };
             
             const wasResizable = senderWindow.isResizable();
             if (!wasResizable) senderWindow.setResizable(true);

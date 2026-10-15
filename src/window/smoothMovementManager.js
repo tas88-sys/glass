@@ -13,6 +13,42 @@ class SmoothMovementManager {
         this.animationFrameId = null;
 
         this.animationTimers = new Map();
+        this.intendedSizes = new WeakMap();
+    }
+
+    /**
+     * The size a window should have, in DIP. Its own bounds are not reliable
+     * while it moves between monitors with different scale factors (125% and
+     * 100%): Windows rescales it for a moment in the frame it crosses, and
+     * rounds sizes on the scaled monitor. A move that starts from those bounds
+     * keeps the wrong size, and the header shrank a little at every crossing.
+     * Sizes change only through animateWindowBounds; every move keeps this one.
+     * @param {BrowserWindow} win
+     * @returns {{width: number, height: number}}
+     */
+    intendedSize(win) {
+        let size = this.intendedSizes.get(win);
+        if (!size) {
+            const { width, height } = win.getBounds();
+            size = { width, height };
+            this.intendedSizes.set(win, size);
+        }
+        return { ...size };
+    }
+
+    /** The window's position with its intended size. */
+    intendedBounds(win) {
+        const { x, y } = win.getBounds();
+        return { x, y, ...this.intendedSize(win) };
+    }
+
+    /**
+     * Moves a window at once (mouse drag), keeping its intended size.
+     * BrowserWindow.setPosition would resend the current, possibly rescaled, size.
+     */
+    setPosition(win, { x, y }) {
+        if (!this._isWindowValid(win)) return;
+        win.setBounds({ x, y, ...this.intendedSize(win) });
     }
 
     /**
@@ -116,7 +152,13 @@ class SmoothMovementManager {
 
         this.isAnimating = true;
 
-        const startBounds = win.getBounds();
+        const startBounds = this.intendedBounds(win);
+        targetBounds = {
+            ...targetBounds,
+            width: targetBounds.width ?? startBounds.width,
+            height: targetBounds.height ?? startBounds.height,
+        };
+        this.intendedSizes.set(win, { width: targetBounds.width, height: targetBounds.height });
         const startTime = Date.now();
         const duration = options.duration || this.animationDuration;
     
@@ -132,8 +174,8 @@ class SmoothMovementManager {
             const newBounds = {
                 x: Math.round(startBounds.x + (targetBounds.x - startBounds.x) * eased),
                 y: Math.round(startBounds.y + (targetBounds.y - startBounds.y) * eased),
-                width: Math.round(startBounds.width + ((targetBounds.width ?? startBounds.width) - startBounds.width) * eased),
-                height: Math.round(startBounds.height + ((targetBounds.height ?? startBounds.height) - startBounds.height) * eased),
+                width: Math.round(startBounds.width + (targetBounds.width - startBounds.width) * eased),
+                height: Math.round(startBounds.height + (targetBounds.height - startBounds.height) * eased),
             };
             win.setBounds(newBounds);
     
@@ -159,8 +201,8 @@ class SmoothMovementManager {
             if (options.onComplete) options.onComplete();
             return;
         }
-        const currentBounds = win.getBounds();
-        const targetBounds = { ...currentBounds, ...targetPosition };
+        // Position only: a width or height in targetPosition is ignored.
+        const targetBounds = { x: targetPosition.x, y: targetPosition.y, ...this.intendedSize(win) };
         this.animateWindowBounds(win, targetBounds, options);
     }
     
@@ -170,10 +212,12 @@ class SmoothMovementManager {
             const win = this.windowPool.get(winName);
             const targetBounds = layout[winName];
             if (win && !win.isDestroyed() && targetBounds) {
+                // A layout places windows; their sizes come from their bounds,
+                // so the intended sizes are kept.
                 if (animated) {
-                    this.animateWindowBounds(win, targetBounds);
+                    this.animateWindowPosition(win, targetBounds);
                 } else {
-                    win.setBounds(targetBounds);
+                    this.setPosition(win, targetBounds);
                 }
             }
         }
