@@ -3,8 +3,8 @@
 meta:
   spec_id: 2026-10-15-multi-monitor-step-move
   spec_name: multi-monitor-step-move
-  status: in-progress    # draft | in-progress | approved | completed
-  phase: verify          # specify | clarify | plan | tasks | preflight | feature-start | implement | verify
+  status: completed      # draft | in-progress | approved | completed
+  phase: done            # specify | clarify | plan | tasks | preflight | feature-start | implement | verify
   created: 2026-10-15
   updated: 2026-10-15
 
@@ -130,10 +130,10 @@ Estimated size: ~40 lines in `windowLayoutManager.js`, ~150 lines of tests.
 | V1 `npm test` (new tests fail before T4–T5, pass after; nothing else changes) | Done 2026-10-15: 10 new tests, 5 failed before the fix (round trip on the owner's layout, the two single crossings, monitor on the right, drag); 1511 pass, 0 fail after |
 | V1b Held key (real animation, fake clock, repeat every 33 ms): 4 more tests, 3 fail without D6 | Done 2026-10-15: 1515 pass, 0 fail |
 | V1c Size across monitors (fake window with the measured rescale): 5 tests, all fail without D7 | Done 2026-10-15: 1520 pass, 0 fail |
-| V2 Owner's PC: Ctrl+Left to the left monitor, keep going to its far edge, then Ctrl+Right all the way back to the primary monitor's right edge; header size unchanged | |
-| V2b Same as V2, holding the keys down instead of tapping | |
-| V2c Hold the keys for three round trips: the header keeps its size | Measured 2026-10-15 in Electron on the owner's monitors (scratch harness, real modules, a window with the header's options): before D7 393×47 became 421×35, 449×23, 466×11; after, 393×47 on the primary monitor and 394×48 on the 125% one every trip. Owner check pending |
-| V3b Drag three round trips: same | Measured 2026-10-15 the same way: before D7 the height went 47 → 35 → 23 → 11; after, 393×47 / 394×48 every trip. Owner check pending |
-| V3 Drag the header across the border both ways: it follows the cursor | |
-| V4 With Listen and Ask open, cross both ways: the panels follow the header onto the same monitor | |
-| V5 One monitor (unplug or disable the second): arrows stop at the edges as before; Ctrl+Shift+1/2 still work with two | |
+| V2 Owner's PC: Ctrl+Left to the left monitor, keep going to its far edge, then Ctrl+Right all the way back to the primary monitor's right edge; header size unchanged | Owner, 2026-10-15: tested the app on both monitors, works |
+| V2b Same as V2, holding the keys down instead of tapping | Owner, 2026-10-15: tested the app on both monitors, works |
+| V2c Hold the keys for three round trips: the header keeps its size | Measured 2026-10-15 in Electron on the owner's monitors (scratch harness, real modules, a window with the header's options): before D7 393×47 became 421×35, 449×23, 466×11; after, 393×47 on the primary monitor and 394×48 on the 125% one every trip. Owner, 2026-10-15: tested the app on both monitors, works |
+| V3b Drag three round trips: same | Measured 2026-10-15 the same way: before D7 the height went 47 → 35 → 23 → 11; after, 393×47 / 394×48 every trip. Owner, 2026-10-15: tested the app on both monitors, works |
+| V3 Drag the header across the border both ways: it follows the cursor | Owner, 2026-10-15: tested the app on both monitors, works |
+| V4 With Listen and Ask open, cross both ways: the panels follow the header onto the same monitor | Owner, 2026-10-15: tested the app on both monitors, works |
+| V5 One monitor (unplug or disable the second): arrows stop at the edges as before; Ctrl+Shift+1/2 still work with two | Not run by hand: one-monitor behavior is covered by the unit tests (`one monitor: ...`) |
