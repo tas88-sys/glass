@@ -23,6 +23,42 @@ function getCurrentDisplay(window) {
     return screen.getDisplayNearestPoint(windowCenter);
 }
 
+// Electron's DIP layout on Windows with mixed scale factors can leave small
+// gaps or overlaps between display bounds.
+const ADJACENT_TOLERANCE = 8;
+
+/**
+ * The nearest display touching `display`'s edge in `direction` and sharing
+ * part of that edge, or null.
+ * @param {Display} display
+ * @param {'left'|'right'|'up'|'down'} direction
+ * @returns {Display|null}
+ */
+function adjacentDisplay(display, direction) {
+    const a = display.bounds;
+    let best = null;
+    let bestGap = Infinity;
+    for (const d of screen.getAllDisplays()) {
+        if (d.id === display.id) continue;
+        const b = d.bounds;
+        const sharesRows = b.y < a.y + a.height && b.y + b.height > a.y;
+        const sharesColumns = b.x < a.x + a.width && b.x + b.width > a.x;
+        let gap;
+        switch (direction) {
+            case 'left': gap = sharesRows ? a.x - (b.x + b.width) : Infinity; break;
+            case 'right': gap = sharesRows ? b.x - (a.x + a.width) : Infinity; break;
+            case 'up': gap = sharesColumns ? a.y - (b.y + b.height) : Infinity; break;
+            case 'down': gap = sharesColumns ? b.y - (a.y + a.height) : Infinity; break;
+            default: gap = Infinity;
+        }
+        if (Math.abs(gap) <= ADJACENT_TOLERANCE && Math.abs(gap) < bestGap) {
+            best = d;
+            bestGap = Math.abs(gap);
+        }
+    }
+    return best;
+}
+
 class WindowLayoutManager {
     /**
      * @param {Map<string, BrowserWindow>} windowPool - 관리할 창들의 맵
@@ -150,9 +186,14 @@ class WindowLayoutManager {
     
     calculateClampedPosition(header, { x: newX, y: newY }) {
         if (!header) return null;
-        const targetDisplay = screen.getDisplayNearestPoint({ x: newX, y: newY });
-        const { x: workAreaX, y: workAreaY, width, height } = targetDisplay.workArea;
         const headerBounds = header.getBounds();
+        // The display under the header's center, not its top-left corner: the
+        // corner reaches a monitor on the left at once but never one on the right.
+        const targetDisplay = screen.getDisplayNearestPoint({
+            x: newX + headerBounds.width / 2,
+            y: newY + headerBounds.height / 2,
+        });
+        const { x: workAreaX, y: workAreaY, width, height } = targetDisplay.workArea;
         const clampedX = Math.max(workAreaX, Math.min(newX, workAreaX + width - headerBounds.width));
         const clampedY = Math.max(workAreaY, Math.min(newY, workAreaY + height - headerBounds.height));
         return { x: clampedX, y: clampedY };
@@ -293,8 +334,25 @@ class WindowLayoutManager {
             case 'up': targetY -= stepSize; break;
             case 'down': targetY += stepSize; break;
         }
-    
-        return this.calculateClampedPosition(header, { x: targetX, y: targetY });
+
+        const clamped = this.calculateClampedPosition(header, { x: targetX, y: targetY });
+        const horizontal = direction === 'left' || direction === 'right';
+        const blocked = horizontal ? clamped.x === currentBounds.x : clamped.y === currentBounds.y;
+        if (!blocked) return clamped;
+
+        // Flush with the edge: cross to the next display, flush with its near edge.
+        const neighbor = adjacentDisplay(getCurrentDisplay(header), direction);
+        if (!neighbor) return clamped;
+        const { x: wx, y: wy, width: ww, height: wh } = neighbor.workArea;
+        const clampX = (x) => Math.max(wx, Math.min(x, wx + ww - currentBounds.width));
+        const clampY = (y) => Math.max(wy, Math.min(y, wy + wh - currentBounds.height));
+        switch (direction) {
+            case 'left': return { x: wx + ww - currentBounds.width, y: clampY(currentBounds.y) };
+            case 'right': return { x: wx, y: clampY(currentBounds.y) };
+            case 'up': return { x: clampX(currentBounds.x), y: wy + wh - currentBounds.height };
+            case 'down': return { x: clampX(currentBounds.x), y: wy };
+        }
+        return clamped;
     }
     
     calculateEdgePosition(header, direction) {
