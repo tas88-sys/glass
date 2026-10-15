@@ -6,6 +6,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 
 ## [Unreleased]
 
+### Multi-monitor step move (spec `2026-10-15-multi-monitor-step-move`)
+
+#### Fixed
+
+- **Ctrl+arrow brings the header back from another monitor.** It used to cross to a monitor on the left but stop at that monitor's right edge, and it never reached a monitor on the right. Upstream bug.
+  - The display is now picked by the header's center, not its top-left corner.
+  - A step from the edge of a monitor crosses to the adjacent one and lands flush with its near edge.
+- **Holding Ctrl+arrow crosses too.** A held key repeats while the previous step is still animating, so the header was never exactly on the edge and stopped 1-2 px short of it. Each step now starts from the previous step's destination while the header is on its way there.
+- **The header no longer shrinks when it moves between monitors with different scaling** (125% and 100%). Windows rescales a window for a moment in the frame it crosses, and every move started from that size, so the header lost about 12 px of height per crossing, by key or by mouse. Moves now keep the size last asked for; only a resize or a panel height change sets it. Upstream behavior, visible once crossings worked.
+- **Dragging the header across monitors** no longer leaves it behind the cursor for a whole header width at the border (half at most).
+
 ### OpenAI-compatible provider (spec `2026-10-14-openai-compatible-provider`)
 
 #### Added
