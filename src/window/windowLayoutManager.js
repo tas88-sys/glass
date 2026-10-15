@@ -27,6 +27,9 @@ function getCurrentDisplay(window) {
 // gaps or overlaps between display bounds.
 const ADJACENT_TOLERANCE = 8;
 
+// A step animates for 300 ms (SmoothMovementManager); a little more is kept.
+const STEP_ANIMATION_MS = 350;
+
 /**
  * The nearest display touching `display`'s edge in `direction` and sharing
  * part of that edge, or null.
@@ -321,9 +324,36 @@ class WindowLayoutManager {
         return { x: newX, y: newY, width: shortcutBounds.width, height: shortcutBounds.height };
     }
 
+    /**
+     * Where the next step starts from. A held key repeats every ~30 ms while
+     * the previous step still animates (300 ms), so the header's own bounds
+     * are mid-flight: never flush with an edge, and each step would restart
+     * from there. While the header is on its way to the last step's target,
+     * that target is the starting point.
+     */
+    _stepStart(header) {
+        const current = header.getBounds();
+        const p = this._pendingStep;
+        if (!p || Date.now() > p.until) return current;
+        const within = (v, a, b) => v >= Math.min(a, b) - 1 && v <= Math.max(a, b) + 1;
+        if (!within(current.x, p.from.x, p.to.x) || !within(current.y, p.from.y, p.to.y)) return current;
+        return { ...current, x: p.to.x, y: p.to.y };
+    }
+
     calculateStepMovePosition(header, direction) {
         if (!header) return null;
-        const currentBounds = header.getBounds();
+        const currentBounds = this._stepStart(header);
+        const from = header.getBounds();
+        const target = this._calculateStepTarget(header, currentBounds, direction);
+        this._pendingStep = {
+            from: { x: from.x, y: from.y },
+            to: target,
+            until: Date.now() + STEP_ANIMATION_MS,
+        };
+        return target;
+    }
+
+    _calculateStepTarget(header, currentBounds, direction) {
         const stepSize = 80; // 이동 간격
         let targetX = currentBounds.x;
         let targetY = currentBounds.y;
@@ -341,7 +371,13 @@ class WindowLayoutManager {
         if (!blocked) return clamped;
 
         // Flush with the edge: cross to the next display, flush with its near edge.
-        const neighbor = adjacentDisplay(getCurrentDisplay(header), direction);
+        const neighbor = adjacentDisplay(
+            screen.getDisplayNearestPoint({
+                x: currentBounds.x + currentBounds.width / 2,
+                y: currentBounds.y + currentBounds.height / 2,
+            }),
+            direction,
+        );
         if (!neighbor) return clamped;
         const { x: wx, y: wy, width: ww, height: wh } = neighbor.workArea;
         const clampX = (x) => Math.max(wx, Math.min(x, wx + ww - currentBounds.width));

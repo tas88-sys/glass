@@ -13,6 +13,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 - **Ctrl+arrow brings the header back from another monitor.** It used to cross to a monitor on the left but stop at that monitor's right edge, and it never reached a monitor on the right. Upstream bug.
   - The display is now picked by the header's center, not its top-left corner.
   - A step from the edge of a monitor crosses to the adjacent one and lands flush with its near edge.
+- **Holding Ctrl+arrow crosses too.** A held key repeats while the previous step is still animating, so the header was never exactly on the edge and stopped 1-2 px short of it. Each step now starts from the previous step's destination while the header is on its way there.
 - **Dragging the header across monitors** no longer leaves it behind the cursor for a whole header width at the border (half at most).
 
 ### OpenAI-compatible provider (spec `2026-10-14-openai-compatible-provider`)

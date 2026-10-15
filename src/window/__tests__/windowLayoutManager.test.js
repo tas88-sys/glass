@@ -11,7 +11,7 @@
 
 'use strict';
 
-const { describe, it, beforeEach } = require('node:test');
+const { describe, it, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const Module = require('module');
 
@@ -231,5 +231,63 @@ describe('calculateClampedPosition (mouse drag) across monitors', () => {
         assertInsideWorkArea(bounds);
       }
     }
+  });
+});
+
+describe('holding Ctrl+arrow (key repeat while the previous step still animates)', () => {
+  const { mock } = require('node:test');
+  const SmoothMovementManager = require('../smoothMovementManager');
+  const REPEAT_MS = 33;
+
+  // The real animation over a fake window, on a fake clock.
+  function hold(direction, ms) {
+    const win = {
+      getBounds: () => ({ ...bounds }),
+      setBounds: (b) => { bounds = { ...bounds, ...b }; },
+      isDestroyed: () => false,
+    };
+    const movement = new SmoothMovementManager(new Map([['header', win]]));
+    for (let t = 0; t < ms; t += REPEAT_MS) {
+      const next = layout.calculateStepMovePosition(win, direction);
+      movement.animateWindowPosition(win, next);
+      mock.timers.tick(REPEAT_MS);
+    }
+    mock.timers.tick(400); // let the last animation finish
+  }
+
+  beforeEach(() => mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 }));
+  afterEach(() => mock.timers.reset());
+
+  it("owner's layout: holding left crosses to the left monitor", () => {
+    displays = OWNER();
+    place(700, 400);
+    hold('left', 4000);
+    assert.equal(displayOf(bounds), 2, `stopped at x=${bounds.x}`);
+    assert.equal(bounds.x, -1536);
+  });
+
+  it("owner's layout: holding right brings it back to the primary monitor", () => {
+    displays = OWNER();
+    place(-1536, 400);
+    hold('right', 4000);
+    assert.equal(displayOf(bounds), 1, `stopped at x=${bounds.x}`);
+    assert.equal(bounds.x, 1920 - W);
+  });
+
+  it('ten key repeats move exactly ten steps, not fewer', () => {
+    displays = OWNER();
+    place(1200, 400);
+    hold('left', 10 * REPEAT_MS);
+    assert.equal(bounds.x, 1200 - 10 * 80);
+  });
+
+  it('a drag right after a step does not leave the old target behind', () => {
+    displays = OWNER();
+    place(1200, 400);
+    const win = { getBounds: () => ({ ...bounds }) };
+    bounds = { ...bounds, ...layout.calculateStepMovePosition(win, 'left') }; // target 1120
+    mock.timers.tick(100);
+    place(300, 700); // the user drags the header somewhere else
+    assert.deepEqual(layout.calculateStepMovePosition(win, 'left'), { x: 220, y: 700 });
   });
 });
