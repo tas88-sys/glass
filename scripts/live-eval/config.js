@@ -3,7 +3,8 @@
 // Where the live eval gets keys, model lists and settings, in this order:
 //   1. command-line flags (--llm-models, --llm-provider, --stt-provider, ...);
 //   2. .env (GROQ_API_KEY, GEMINI_API_KEY, ANTHROPIC_API_KEY, DEEPGRAM_API_KEY,
-//      CAREER_KB_PATH, CAREER_KB_COMPANY);
+//      OPENAI_COMPATIBLE_BASE_URL + OPENAI_COMPATIBLE_API_KEY, CAREER_KB_PATH,
+//      CAREER_KB_COMPANY);
 //   3. the app's own data, opened read-only: %APPDATA%\Glass\pickleglass.db
 //      (provider_settings, model_catalog) and pickle-glass-settings.json.
 // The app's files are never written. Keys never reach the console or a report:
@@ -14,7 +15,15 @@ const os = require('node:os');
 const path = require('node:path');
 
 // typesafe: the career router's key (Jev), saved in Settings like the others.
-const KEY_ENV = { groq: 'GROQ_API_KEY', gemini: 'GEMINI_API_KEY', anthropic: 'ANTHROPIC_API_KEY', deepgram: 'DEEPGRAM_API_KEY', typesafe: 'TYPESAFE_API_KEY' };
+// openai-compatible: the base URL; its key, if any, is OPENAI_COMPATIBLE_API_KEY.
+const KEY_ENV = { groq: 'GROQ_API_KEY', gemini: 'GEMINI_API_KEY', anthropic: 'ANTHROPIC_API_KEY', deepgram: 'DEEPGRAM_API_KEY', typesafe: 'TYPESAFE_API_KEY', 'openai-compatible': 'OPENAI_COMPATIBLE_BASE_URL' };
+
+/** The value the app saves for a provider from .env: the key, or for the OpenAI-compatible provider "<base URL>\n<key>". */
+function envCredential(provider, env) {
+    const value = env[KEY_ENV[provider]];
+    if (!value) return null;
+    return provider === 'openai-compatible' ? `${value.trim()}\n${(env.OPENAI_COMPATIBLE_API_KEY || '').trim()}` : value;
+}
 
 function appDataDir() {
     const home = os.homedir();
@@ -76,9 +85,10 @@ function loadConfig(args, env = process.env) {
     const source = {};
 
     const keys = {};
-    for (const [provider, name] of Object.entries(KEY_ENV)) {
-        if (env[name]) {
-            keys[provider] = env[name];
+    for (const provider of Object.keys(KEY_ENV)) {
+        const fromEnv = envCredential(provider, env);
+        if (fromEnv) {
+            keys[provider] = fromEnv;
             source[`${provider} key`] = '.env';
         } else if (rows[provider]?.api_key) {
             keys[provider] = rows[provider].api_key;

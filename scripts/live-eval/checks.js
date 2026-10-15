@@ -190,7 +190,30 @@ function quantile(xs, p) {
     return s[Math.min(s.length - 1, Math.max(0, Math.ceil(p * s.length) - 1))];
 }
 
+const FALLBACK_REPLY = {
+    pt: 'Boa pergunta. Eu começaria pelo contexto e pelo resultado que a gente quer.',
+    en: "Good question. I'd start from the context and the outcome we want.",
+};
+
+/**
+ * What the candidate says back in phase B before the next question: the
+ * answer's headline, as read off the panel, without markdown or a
+ * "Headline:" label, at most maxWords words; a short line when nothing showed.
+ */
+function candidateReply(answer, lang, maxWords = 25) {
+    const first = String(answer || '').split('\n').map(l => l.trim()).find(Boolean) || '';
+    const plain = first
+        .replace(/^[-*•]\s+/, '')
+        .replace(/[*_#`]/g, '')
+        .replace(/^(?:short\s+)?headline(?:\s+answer)?\s*:\s*/i, '')
+        .trim();
+    if (!plain || /^passive$/i.test(plain)) return FALLBACK_REPLY[/^pt/i.test(lang || '') ? 'pt' : 'en'];
+    const ws = plain.split(/\s+/);
+    return ws.length > maxWords ? `${ws.slice(0, maxWords).join(' ')}.` : plain;
+}
+
 module.exports = {
+    candidateReply,
     words,
     wer,
     detectLang,

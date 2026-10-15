@@ -29,7 +29,7 @@ Help me decide if this is the best approach or if I am missing something and thi
 ## SPEED (ORAL TECH INTERVIEWS): gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-3-flash-preview
 
 ### TLDR
-## openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b,gemini-3.5-flash-lite,gemini-3.1-flash-lite 
+## openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b,gemini-3.5-flash-lite,gemini-3.1-flash-lite,free-stack
 
 
 Why:

@@ -13,6 +13,23 @@ const c = require('../checks');
 const { parseWav, toMono24k, decodeGeminiAudio } = require('../tts');
 const codeProblem = require('../fixtures/code-problem');
 
+describe('candidateReply (phase B, what the candidate says back)', () => {
+    it('is the headline without markdown or a "Headline:" label', () => {
+        assert.equal(c.candidateReply('**Headline:** I build a one-pager first.\n\n- point', 'en-US'), 'I build a one-pager first.');
+        assert.equal(c.candidateReply('- **Faço um PRD antes dos tickets.**\n- ponto', 'pt-BR'), 'Faço um PRD antes dos tickets.');
+    });
+
+    it('cuts a long headline to maxWords', () => {
+        assert.equal(c.candidateReply('one two three four five six', 'en-US', 3), 'one two three.');
+    });
+
+    it('falls back to a short line in the turn language when nothing was shown', () => {
+        assert.match(c.candidateReply('', 'pt-BR'), /^Boa pergunta/);
+        assert.match(c.candidateReply('PASSIVE', 'en-US'), /^Good question/);
+        assert.match(c.candidateReply(undefined, 'en-US'), /^Good question/);
+    });
+});
+
 describe('wer', () => {
     it('is 0 for the same words, ignoring case, accents, punctuation and number words', () => {
         assert.equal(c.wer('Como você garantiria que um pagamento não seja cobrado duas vezes?', 'como voce garantiria que 1 pagamento nao seja cobrado 2 vezes'), 0);

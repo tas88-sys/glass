@@ -6,6 +6,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 
 ## [Unreleased]
 
+### OpenAI-compatible provider (spec `2026-10-14-openai-compatible-provider`)
+
+#### Added
+
+- **New `openai-compatible` LLM provider** (`providers/openaiCompatible.js`). It talks to any server that speaks the OpenAI chat API at a base URL: OpenRouter, SambaNova, Mistral, or a local gateway such as OmniRoute. It works in Ask, Live Answer and Live Insights.
+  - **Settings:** Base URL, API Key (may be empty) and LLM Model ID list. The URL must be https, or http on localhost only.
+  - **Storage:** the URL and the key are saved together, encrypted, in the provider's key row. No migration.
+- **Failover**, as Groq's, with two differences:
+  - a model that refuses the request (400/422) hands it to the next model; only a refused key ends the request;
+  - cooldowns are kept per provider, so a Groq model ID spent on Groq still runs on the endpoint.
+- **Mixed lists:** the endpoint's models can come before or after Groq, Gemini and Anthropic models.
+- **Logs:** each attempt line has `ttft=`, `served_by=` and, behind OmniRoute, `route=` (its `X-OmniRoute-Decision` header).
+- **`scripts/probe-openai-compatible-ttft.js`** measures the time to first token of the same request on several endpoints (e.g. Groq direct vs. via OmniRoute), alternating their order.
+- **Live eval:** reads `OPENAI_COMPATIBLE_BASE_URL` and `OPENAI_COMPATIBLE_API_KEY` from `.env`.
+- **Not done:** OmniRoute itself is not bundled or required. The review of it (free tiers, terms, privacy) is research R1 of the spec.
+- **`docs/runbook/OMNIROUTE_SETUP.md`:** how to set up OmniRoute on a new machine as the last, free fallback:
+  - the versions it needs and the install;
+  - the local-only `.env`;
+  - how to start it, outside the repo;
+  - the dashboard steps (providers, `free-stack` combo, client key);
+  - the Glass settings, the latency check and the pitfalls seen on 2026-10-14.
+
 ### Live answers are kept for review (spec `2026-10-13-live-answer-history`)
 
 After a real interview the owner asked how good its 101 answers had been, and they were gone: the panel was their only copy.

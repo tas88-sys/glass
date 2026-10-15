@@ -72,6 +72,15 @@ const PROVIDERS = {
       ],
       sttModels: [], // Groq's Whisper is batch-only; Glass needs real-time STT
   },
+  'openai-compatible': {
+      // Any OpenAI chat-completions server at a base URL (OpenRouter, SambaNova,
+      // a local OmniRoute…). Its models are the endpoint's own, typed in
+      // Settings; none is preset, so onboarding does not offer it.
+      name: 'OpenAI-compatible',
+      handler: () => require("./providers/openaiCompatible"),
+      llmModels: [],
+      sttModels: [],
+  },
   'deepgram': {
     name: 'Deepgram',
     handler: () => require("./providers/deepgram"),
@@ -130,11 +139,14 @@ function providerFromPrefix(id) {
  * them (the first entry decides): the provider whose models API lists it
  * (modelCatalog); when several do, `context` (the field the list was typed
  * in, or the run it continues) if it is one of them. An ID no catalog has
- * falls back to its prefix (providerFromPrefix), logged once. Installed
+ * falls back to its prefix (providerFromPrefix), logged once. An
+ * OpenAI-compatible endpoint's IDs have no prefix of their own: in its field
+ * or run, an unlisted ID stays there unless its prefix names Anthropic or
+ * Gemini ('vendor/model' is as much OpenRouter's shape as Groq's). Installed
  * Ollama models are matched before this by the callers.
  * @param {string|null|undefined} modelId
  * @param {string} [context]
- * @returns {'anthropic'|'gemini'|'groq'|null}
+ * @returns {'anthropic'|'gemini'|'groq'|'openai-compatible'|null}
  */
 function inferProviderFromModelId(modelId, context) {
   if (typeof modelId !== 'string') return null;
@@ -143,15 +155,16 @@ function inferProviderFromModelId(modelId, context) {
   const listed = catalog.providerOf(first, context);
   if (listed) return listed;
   const byPrefix = providerFromPrefix(first);
-  catalog.notePrefixProvider(first, byPrefix);
-  return byPrefix;
+  const inferred = context === 'openai-compatible' && (byPrefix === null || byPrefix === 'groq') ? context : byPrefix;
+  catalog.notePrefixProvider(first, inferred);
+  return inferred;
 }
 
 /**
  * Segments of a model list that may name several providers: runs of
  * consecutive IDs of one provider (inferProviderFromModelId, with the current
  * run as context). An ID with no inferable provider joins the current run;
- * the first run's provider is `firstProvider`. Only Anthropic, Gemini and Groq lists are cut; any other
+ * the first run's provider is `firstProvider`. Only Anthropic, Gemini, Groq and OpenAI-compatible lists are cut; any other
  * provider's list is one segment. Trimmed, empties dropped; an empty list → [].
  * @param {string|null|undefined} modelCsv
  * @param {string} firstProvider - the active provider
@@ -254,6 +267,7 @@ function getProviderClass(providerId) {
         'anthropic': 'AnthropicProvider',
         'gemini': 'GeminiProvider',
         'groq': 'GroqProvider',
+        'openai-compatible': 'OpenAICompatibleProvider',
         'deepgram': 'DeepgramProvider',
         'ollama': 'OllamaProvider',
         'whisper': 'WhisperProvider'

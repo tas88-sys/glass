@@ -21,6 +21,7 @@ const Module = require('module');
 
 const realGroq = require('groq-sdk');
 const realAnthropic = require('@anthropic-ai/sdk');
+const realOpenAI = require('openai');
 
 // ---------------------------------------------------------------------------
 // Fake SDKs
@@ -63,6 +64,7 @@ const sdk = {
   groq: { script: null, calls: [] },
   gemini: { script: null, calls: [] },
   anthropic: { script: null, calls: [] },
+  compat: { script: null, calls: [] },
 };
 
 /** groq-sdk / @anthropic-ai/sdk create(): a promise of the stream, with withResponse(). */
@@ -93,6 +95,15 @@ class FakeAnthropic {
     this.beta = { messages: { create: (params, options) => fakeCreate('anthropic', params, { ...options, apiKey: this.apiKey }) } };
   }
 }
+
+class FakeOpenAI {
+  constructor(opts) {
+    this.apiKey = opts.apiKey;
+    this.baseURL = opts.baseURL;
+    this.chat = { completions: { create: (params, options) => fakeCreate('compat', params, { ...options, apiKey: `${this.baseURL} ${this.apiKey}` }) } };
+  }
+}
+Object.assign(FakeOpenAI, realOpenAI, { default: FakeOpenAI });
 
 class FakeGemini {
   constructor(apiKey) { this.apiKey = apiKey; }
@@ -135,10 +146,11 @@ Module._load = function (request, parent, isMain) {
   if (request === '@anthropic-ai/sdk') return { ...realAnthropic, Anthropic: FakeAnthropic, default: FakeAnthropic };
   if (request === '@google/generative-ai') return { GoogleGenerativeAI: FakeGemini };
   if (request === '@google/genai') return { GoogleGenAI: class {} };
+  if (request === 'openai') return FakeOpenAI;
   return originalLoad.apply(this, arguments);
 };
 for (const k of Object.keys(require.cache)) {
-  if (/[\\/](groq|gemini|anthropic|geminiModelRotator|providerChain|factory)\.js$/.test(k)) delete require.cache[k];
+  if (/[\\/](groq|gemini|anthropic|geminiModelRotator|openaiCompatible|providerChain|factory)\.js$/.test(k)) delete require.cache[k];
 }
 
 const health = require('../providers/modelHealth');
@@ -417,5 +429,68 @@ describe('chain over the real providers (SC-003)', () => {
     const chainLogs = logs.filter(l => l.startsWith('[LLM Chain]'));
     assert.equal(chainLogs.length, 3);
     for (const line of chainLogs) assert.doesNotMatch(line, /SECRET/);
+  });
+});
+
+describe('chain into an OpenAI-compatible endpoint (spec 2026-10-14-openai-compatible-provider)', () => {
+  const { formatCredential } = require('../providers/openaiCompatible');
+  const COMPAT_KEY = formatCredential('http://localhost:20128/v1', 'sk-omni');
+  // A gateway that serves Groq's gpt-oss ID from another upstream, then a free model.
+  const LIST = 'openai/gpt-oss-120b,openai/gpt-oss-20b,openai/gpt-oss-120b,meta-llama/llama-3.3-70b-instruct:free';
+  const keys = { ...KEYS, 'openai-compatible': COMPAT_KEY };
+
+  beforeEach(() => {
+    catalog.seed('openai-compatible', [{ id: 'openai/gpt-oss-120b' }, { id: 'meta-llama/llama-3.3-70b-instruct:free' }]);
+  });
+
+  it("a Groq-field list runs Groq first, and the endpoint's own IDs go to the endpoint", () => {
+    assert.deepEqual(splitByProvider(LIST, 'groq'), [
+      { provider: 'groq', models: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'openai/gpt-oss-120b'] },
+      { provider: 'openai-compatible', models: ['meta-llama/llama-3.3-70b-instruct:free'] },
+    ]);
+  });
+
+  it("Groq spent → the endpoint answers with the same model ID, which Groq's cooldown does not block", async () => {
+    const list = 'openai/gpt-oss-120b,openai/gpt-oss-20b,openai/gpt-oss-120b';
+    // In the endpoint's field, an ID both list stays the endpoint's; one only Groq lists starts a Groq run.
+    assert.deepEqual(splitByProvider(`meta-llama/llama-3.3-70b-instruct:free,${list}`, 'openai-compatible'), [
+      { provider: 'openai-compatible', models: ['meta-llama/llama-3.3-70b-instruct:free', 'openai/gpt-oss-120b'] },
+      { provider: 'groq', models: ['openai/gpt-oss-20b', 'openai/gpt-oss-120b'] },
+    ]);
+    sdk.groq.script = byModel(Object.fromEntries(GROQ_MODELS.map(m => [m, dailyLimit(m)])));
+    sdk.compat.script = byModel({ 'meta-llama/llama-3.3-70b-instruct:free': groqAnswer('meta-llama/llama-3.3-70b-instruct', 'Via the gateway.') });
+
+    const { text, error, events } = await readAll(await createStreamingLLM('groq', laneOpts(LIST, keys)).streamChat(MSGS));
+    assert.equal(error, null);
+    assert.equal(text, 'Via the gateway.');
+    assert.deepEqual(resets(events).at(-1), { _reset: true, next_model: 'meta-llama/llama-3.3-70b-instruct:free', reason: 'provider' });
+    assert.equal(sdk.compat.calls.length, 1);
+    assert.equal(sdk.compat.calls[0].apiKey, 'http://localhost:20128/v1 sk-omni', 'the endpoint gets its own URL and key');
+    assert.equal(sdk.compat.calls[0].params.max_tokens, 900);
+    assert.ok(sdk.groq.calls.every(c => c.apiKey === 'gsk_test'), 'Groq never sees the endpoint credential');
+    assert.match(chainLine('request stream'), /provider=openai-compatible segments_run=2 /);
+    assert.equal(health.isCoolingDown('openai/gpt-oss-120b'), true, "Groq's model cools down");
+  });
+
+  it("the endpoint's copy of a spent Groq ID still runs: cooldowns are per provider", async () => {
+    sdk.groq.script = byModel(Object.fromEntries(GROQ_MODELS.map(m => [m, dailyLimit(m)])));
+    sdk.compat.script = byModel({ 'openai/gpt-oss-120b': groqAnswer('openai/gpt-oss-120b', 'Same ID, other upstream.') });
+    const list = 'openai/gpt-oss-120b,openai/gpt-oss-20b';
+    // Groq is spent: its models cool down in the registry.
+    await readAll(await createStreamingLLM('groq', laneOpts(list, keys)).streamChat(MSGS)).catch(() => {});
+    assert.equal(health.isCoolingDown('openai/gpt-oss-120b'), true);
+
+    const { text, error } = await readAll(await createStreamingLLM('openai-compatible', { ...laneOpts('openai/gpt-oss-120b', keys), apiKey: COMPAT_KEY }).streamChat(MSGS));
+    assert.equal(error, null);
+    assert.equal(text, 'Same ID, other upstream.');
+  });
+
+  it('logs carry no prompt, answer or credential', async () => {
+    sdk.groq.script = byModel(Object.fromEntries(GROQ_MODELS.map(m => [m, dailyLimit(m)])));
+    sdk.compat.script = byModel({ 'meta-llama/llama-3.3-70b-instruct:free': groqAnswer('m', 'SECRET ANSWER') });
+    const secretKeys = { groq: 'gsk_SECRET', 'openai-compatible': formatCredential('http://localhost:20128/v1', 'sk-SECRET') };
+    await readAll(await createStreamingLLM('groq', laneOpts(LIST, secretKeys)).streamChat([{ role: 'user', content: 'SECRET PROMPT' }]));
+    assert.ok(logs.some(l => l.startsWith('[OpenAI-compatible Provider] request stream host=localhost:20128 answered_by=m')));
+    for (const line of logs) assert.doesNotMatch(line, /SECRET/);
   });
 });

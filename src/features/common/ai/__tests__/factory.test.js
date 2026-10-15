@@ -121,6 +121,49 @@ describe('inferProviderFromModelId: Groq (spec 2026-10-12-groq-provider FR-002)'
   }
 });
 
+describe('OpenAI-compatible provider (spec 2026-10-14-openai-compatible-provider)', () => {
+  const catalog = require('../modelCatalog');
+  const { splitByProvider, getProviderClass } = require('../factory');
+  beforeEach(() => catalog.resetCatalog());
+
+  it('is registered with no preset model, so onboarding does not offer it', () => {
+    assert.deepEqual(PROVIDERS['openai-compatible'].llmModels, []);
+    assert.deepEqual(PROVIDERS['openai-compatible'].sttModels, []);
+    assert.equal(typeof getProviderClass('openai-compatible').validateApiKey, 'function');
+  });
+
+  it('an ID its list has belongs to it, in any field', () => {
+    catalog.seed('openai-compatible', [{ id: 'meta-llama/llama-3.3-70b-instruct:free' }, { id: 'mistral-small-latest' }]);
+    assert.equal(inferProviderFromModelId('meta-llama/llama-3.3-70b-instruct:free'), 'openai-compatible');
+    assert.equal(inferProviderFromModelId('mistral-small-latest', 'groq'), 'openai-compatible');
+    assert.deepEqual(splitByProvider('openai/gpt-oss-120b,meta-llama/llama-3.3-70b-instruct:free', 'groq'), [
+      { provider: 'groq', models: ['openai/gpt-oss-120b'] },
+      { provider: 'openai-compatible', models: ['meta-llama/llama-3.3-70b-instruct:free'] },
+    ]);
+  });
+
+  it('an ID Groq and the endpoint both list: the field or run it was typed in', () => {
+    catalog.seed('groq', [{ id: 'openai/gpt-oss-120b' }]);
+    catalog.seed('openai-compatible', [{ id: 'openai/gpt-oss-120b' }]);
+    assert.equal(inferProviderFromModelId('openai/gpt-oss-120b', 'groq'), 'groq');
+    assert.equal(inferProviderFromModelId('openai/gpt-oss-120b', 'openai-compatible'), 'openai-compatible');
+  });
+
+  it('in its field or run, an unlisted ID stays there unless it is a Claude or Gemini ID', (t) => {
+    t.mock.method(console, 'warn', () => {});
+    assert.equal(inferProviderFromModelId('some/new-model:free', 'openai-compatible'), 'openai-compatible', 'not taken as Groq');
+    assert.equal(inferProviderFromModelId('plain-model', 'openai-compatible'), 'openai-compatible');
+    assert.equal(inferProviderFromModelId('gemini-3.5-flash-lite', 'openai-compatible'), 'gemini');
+    assert.equal(inferProviderFromModelId('some/new-model:free', 'groq'), 'groq', 'the Groq rule is unchanged');
+    assert.equal(inferProviderFromModelId('plain-model'), null, 'no context: no provider');
+    assert.deepEqual(splitByProvider('a/x,plain,gemini-3.5-flash-lite,b/y', 'openai-compatible'), [
+      { provider: 'openai-compatible', models: ['a/x', 'plain'] },
+      { provider: 'gemini', models: ['gemini-3.5-flash-lite'] },
+      { provider: 'groq', models: ['b/y'] },
+    ]);
+  });
+});
+
 describe('splitByProvider (spec 2026-10-12-cross-provider-failover FR-001)', () => {
   const { splitByProvider } = require('../factory');
   const cases = [
