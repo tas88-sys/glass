@@ -341,8 +341,42 @@ these two.
 - **Start or restart by hand:** `Start-ScheduledTask -TaskName "OmniRoute (Glass local gateway)"`,
   or step 3's command from `%USERPROFILE%\.omniroute`.
 - **Stop:** `omniroute stop`, or end the `node`/`omniroute` process listening on 20128.
-- **Remove:** undo step 3b, run `npm uninstall -g omniroute`, then delete `%USERPROFILE%\.omniroute`
-  (database, provider keys, encryption key).
+- **Remove:** undo step 3b and step 8, run `npm uninstall -g omniroute`, then delete
+  `%USERPROFILE%\.omniroute` (database, provider keys, encryption key).
+
+## 8. Back it up (encrypted, to a synced folder)
+
+Everything OmniRoute knows lives in `%USERPROFILE%\.omniroute`: the database (providers, combo, client
+key, settings) and `.env`. The provider credentials in the database are encrypted with
+`STORAGE_ENCRYPTION_KEY` from `.env`, so **a backup of the database without `.env` is useless**.
+
+OmniRoute's own `omniroute backup` does not cover this: it leaves `.env` out, its `restore` only copies
+files (it cannot open an `--encrypt` backup), and `backup auto enable` only writes a JSON file.
+[`omniroute-backup-to-drive.mjs`](omniroute-backup-to-drive.mjs) fills the gap. It takes the database
+snapshot with `omniroute backup create` (safe while the server runs), encrypts the snapshot and `.env`
+with AES-256-GCM, and writes them to a folder under `G:\My Drive\Software\glass\omniroute-backups` (set
+`OMNIROUTE_BACKUP_DIR` for another one), keeping the last 14.
+
+1. Copy the script to `%USERPROFILE%\.omniroute\backup-to-drive.mjs` and run it once from there:
+   `node backup-to-drive.mjs`. It creates `%USERPROFILE%\.omniroute\backup.key` (the passphrase).
+   **Copy that file's content to a password manager now.** It is not in the backup folder, and
+   without it the backups cannot be opened.
+2. Schedule it (daily, plus 5 minutes after logon for a PC that was off at the time):
+   ```powershell
+   $node = (Get-Command node).Source
+   $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -Command `"& '$node' '$env:USERPROFILE\.omniroute\backup-to-drive.mjs' *>> '$env:USERPROFILE\.omniroute\logs\backup.log'`""
+   $logon = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME; $logon.Delay = "PT5M"
+   $set = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
+   Register-ScheduledTask -TaskName "OmniRoute backup to Drive" -Action $action -Trigger @((New-ScheduledTaskTrigger -Daily -At 12:30), $logon) -Settings $set
+   ```
+   The result of each run is in `%USERPROFILE%\.omniroute\logs\backup.log`.
+3. **Restore on a new machine:** install OmniRoute (step 1) and let it run once, stop it, put the
+   passphrase in `%USERPROFILE%\.omniroute\backup.key`, then
+   `node backup-to-drive.mjs decrypt "<backup folder>" "<empty temp folder>"`. Copy `storage.sqlite` and
+   `.env` from the temp folder into `%USERPROFILE%\.omniroute`, delete `storage.sqlite-wal` and
+   `-shm` there, delete the temp folder (it holds `.env` in plain text), and start it (step 3b).
+   Tested on 2026-10-15 up to the decrypted copy (database opens, 3 provider connections, the combo and
+   the client key present, `.env` byte-identical); the copy into a fresh install was not tried.
 
 ## Pitfalls (seen on 2026-10-14)
 
