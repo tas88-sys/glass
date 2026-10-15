@@ -47,14 +47,30 @@ const { answerLanguageRule } = require('./questionLanguage');
 // Total / pure: never throws, never returns null/undefined. Non-empty input
 // always yields non-empty output (falls back to the full trimmed turn).
 // ---------------------------------------------------------------------------
+/**
+ * A sentence from its last comma part that leads a question to its end, peeled:
+ * commas drop the framing ("Como arquiteta, ou mesmo antes disso, como que você
+ * faz…") and keep a list inside the question ("retries, timeouts, and idempotency").
+ */
+function askingSpan(sentence) {
+    const parts = sentence.split(',');
+    for (let i = parts.length - 1; i > 0; i--) {
+        const rest = peelLead(parts.slice(i).join(','));
+        if (rest && leadsQuestion(rest)) return rest;
+    }
+    return peelLead(sentence);
+}
+
 function extractQuestion(text) {
     if (typeof text !== 'string') return '';
     const trimmed = text.trim();
     if (trimmed.length === 0) return '';
 
     // Split on sentence-boundary punctuation AND em-dash (—) to isolate
-    // interrogative spans from filler prefixes like "the thing I wanted to ask is —"
-    const clauses = trimmed.split(/[.!?;,\n—]+/);
+    // interrogative spans from filler prefixes like "the thing I wanted to ask is —".
+    // Not on commas: "with Go concurrency (goroutines, channels, context) in
+    // production?" would surface as "context) in production?" (live eval q084).
+    const clauses = trimmed.split(/[.!?;\n—]+/);
     let lastClause = null;      // peeled interrogative span (discourse markers stripped)
     let lastHasQ = false;       // did the original segment end with '?'
     let hasStrongSignal = false; // true when signal is '?' or CLAUSE_LEAD_RE (not cue-only)
@@ -69,8 +85,8 @@ function extractQuestion(text) {
         const nextChar = trimmed[segEnd] || '';
         const hasQuestionMark = nextChar === '?';
 
-        // Peel leading discourse markers
-        const c = peelLead(rawClause);
+        // Peel leading discourse markers and comma framing
+        const c = askingSpan(rawClause);
 
         if (c.length === 0) continue;
 
@@ -294,17 +310,22 @@ class SummaryService {
         const basePrompt = getSystemPrompt('pickle_glass_analysis', career?.block || '', false);
         const systemPrompt = basePrompt.replace('{{CONVERSATION_HISTORY}}', recent);
 
+        // The turn that asked, quoted: with several unanswered questions in the
+        // transcript and more in the notes' titles, models sometimes answered an
+        // earlier one (live eval q038, q084).
+        const asked = String((rec && rec.turn) || question || '').trim();
         const messages = [
             { role: 'system', content: systemPrompt },
             {
                 role: 'user',
                 content:
+                    (asked ? `The interviewer's most recent question, their last turn in the transcript: "${asked}"` + '\n\n' : '') +
                     'Answer the interviewer\'s most recent question directly and concisely. ' +
                     'Start with a short headline answer (one sentence). ' +
                     'When there are supporting points, format them as a markdown bullet list ' +
                     '(each point on its own line beginning with "- "). ' +
                     'Do not fabricate bullets for a trivial one-line answer. ' +
-                    answerLanguageRule((rec && rec.turn) || question) +
+                    answerLanguageRule(asked) +
                     'keeping technical terms as they are commonly said. ' +
                     'If there is no clear question or nothing useful to answer, reply EXACTLY: PASSIVE' +
                     (career && career.addendum ? `\n\n${career.addendum}` : ''),

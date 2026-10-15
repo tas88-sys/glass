@@ -240,6 +240,13 @@ names it: "The question was asked in Portuguese: write the whole answer in Portu
 earlier turns or notes are in English". With English notes, the general rule alone still let a
 model answer a Portuguese question in English. A short or mixed turn keeps the general rule.
 
+The instruction opens by quoting the turn that asked ("The interviewer's most recent question, their
+last turn in the transcript: …"). With several unanswered questions in the transcript and more in the
+notes' section titles, models sometimes answered an earlier one; replaying those calls, quoting the
+turn removed the misses. The panel's question label comes from `extractQuestion`, which splits on
+sentence ends and drops comma framing ("Como arquiteta, …, como que você faz…") but keeps a list
+inside the question ("retries, timeouts, and idempotency").
+
 ### 4.3 IPC channel: `live-answer-update`
 
 `summaryService.sendToRenderer('live-answer-update', { id, question, answer, ts })` is emitted on
@@ -663,7 +670,7 @@ TTS (Gemini, cached) → 100 ms PCM chunks → SttService (Deepgram/Gemini live)
 | | What | Checks that fail the run |
 |---|---|---|
 | A | Invented interview in pt-BR then en-US (`fixtures/interview.json`): direct questions, a request with no question mark, context then question, follow-ups, monologue, the candidate's own question | answer shown or not, as each turn expects; a key term; no error |
-| B | Questions sampled per route from `glass-eval/questions.jsonl` in the notes; a company question is preceded by "here at <company>…" | route; notes injected (personal/company) or not (general); company detected; answer shown. When the router gives the script text itself another route than its label, the route and notes checks only warn: that is a router gap, which `scripts/eval-career-kb.js` measures; the live eval fails only when audio and STT change a route the router gets right |
+| B | Questions sampled per route from `glass-eval/questions.jsonl` in the notes; a company question is preceded by "here at <company>…"; after each answer the candidate says its headline back, so the transcript alternates as in an interview | route; notes injected (personal/company) or not (general); company detected; answer shown. When the router gives the script text itself another route than its label, the route and notes checks only warn: that is a router gap, which `scripts/eval-career-kb.js` measures; the live eval fails only when audio and STT change a route the router gets right |
 | C | Ask, default mode, on an ops screen | order id, latency and error code read from the image; the screenshot was sent; a model that sees images answered |
 | D | Ask, code mode, on a hard grid problem; once in JavaScript and once in the saved language | five sections in order; a code block; **the JavaScript runs against 22 hidden tests**, one of them a 220×220 grid that a quadratic solution cannot finish (a function under another name than the screen's fails, and the detail says how it does under its own name); the Go answer compiles, when Go is installed |
 | E | Ask, system design mode, on a global rate limiter prompt | sections 0–11 in order; ≥ 8 numbers with units; ≥ 5 of 7 requirements from the image |

@@ -402,6 +402,9 @@ async function phaseB(ctx, session, questions, lang) {
         item.history = session.history().slice(-8).join('\n');
         items.push(item);
         ctx.emit(item);
+        // The candidate answers before the next question, as in an interview, so the
+        // transcript is not a stack of unanswered questions (live eval q038, q084).
+        await session.say({ speaker: 'me', text: checks.candidateReply(a?.text, lang), lang });
     }
     return items;
 }

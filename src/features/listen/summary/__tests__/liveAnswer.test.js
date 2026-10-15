@@ -1051,6 +1051,19 @@ describe('extractQuestion', () => {
     assert.equal(extractQuestion(input), 'como que você faz para revisar um design grande');
   });
 
+  // A list inside the question keeps the question whole (live eval q084).
+  it('keeps a comma list inside the question', () => {
+    assert.equal(
+      extractQuestion('Do you have hands-on experience with Go concurrency (goroutines, channels, context) in production?'),
+      'Do you have hands-on experience with Go concurrency (goroutines, channels, context) in production?',
+    );
+    assert.equal(
+      extractQuestion('How do you handle retries, timeouts, and idempotency in payments?'),
+      'How do you handle retries, timeouts, and idempotency in payments?',
+    );
+    assert.equal(extractQuestion('So, what is your experience with Kafka, RabbitMQ or NATS?'), 'what is your experience with Kafka, RabbitMQ or NATS?');
+  });
+
   // T4: cue with no '?' → cue-bearing clause or full text, never empty
   it('T4: returns non-empty string for cue with no question mark', () => {
     const input = 'compare a process and a thread';

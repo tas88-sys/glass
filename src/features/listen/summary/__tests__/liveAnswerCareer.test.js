@@ -79,9 +79,11 @@ const TODAY_USER_EN = TODAY_USER.replace(
 );
 
 const HISTORY = ['me: hello there', 'them: Tell me about a time you disagreed with a teammate.'];
-const todaysMessages = (history, user = TODAY_USER) => [
+// The asking turn, quoted ahead of the instruction ('q' in the direct calls below).
+const askedLine = turn => `The interviewer's most recent question, their last turn in the transcript: "${turn}"\n\n`;
+const todaysMessages = (history, user = TODAY_USER, turn = 'q') => [
     { role: 'system', content: getSystemPrompt('pickle_glass_analysis', '', false).replace('{{CONVERSATION_HISTORY}}', history.slice(-30).join('\n')) },
-    { role: 'user', content: user },
+    { role: 'user', content: askedLine(turn) + user },
 ];
 
 const PERSONAL = {
@@ -155,7 +157,7 @@ describe('SC-005: prompt is byte-identical when nothing is injected', () => {
         mock.timers.tick(800);
         for (let i = 0; i < 5; i++) await flush();
         assert.equal(llmCalls.length, 1);
-        assert.deepEqual(llmCalls[0], todaysMessages(HISTORY, TODAY_USER_EN));
+        assert.deepEqual(llmCalls[0], todaysMessages(HISTORY, TODAY_USER_EN, q));
     });
 });
 
@@ -168,7 +170,7 @@ describe('FR-014: personal context goes into customPrompt plus the addendum', ()
             .replace('{{CONVERSATION_HISTORY}}', HISTORY.join('\n'));
         assert.equal(system.content, expectedSystem);
         assert.ok(system.content.includes(`User-provided context\n-----\n${PERSONAL.block}\n-----`));
-        assert.equal(user.content, `${TODAY_USER}\n\n${PERSONAL.addendum}`);
+        assert.equal(user.content, `${askedLine('q')}${TODAY_USER}\n\n${PERSONAL.addendum}`);
     });
 });
 
@@ -560,7 +562,7 @@ describe('triggerAnswerIfNeeded and the debounce callback', () => {
         pending[1].resolve(GENERAL);
         for (let i = 0; i < 10; i++) await flush();
         assert.equal(llmCalls.length, 1);
-        assert.deepEqual(llmCalls[0], todaysMessages(s.conversationHistory, TODAY_USER_EN));
+        assert.deepEqual(llmCalls[0], todaysMessages(s.conversationHistory, TODAY_USER_EN, 'second question about the lighthouse?'));
         assert.equal(s.inFlight, false);
     });
 
@@ -573,7 +575,7 @@ describe('triggerAnswerIfNeeded and the debounce callback', () => {
         mock.timers.tick(800);
         for (let i = 0; i < 10; i++) await flush();
         assert.equal(llmCalls.length, 1);
-        assert.deepEqual(llmCalls[0], todaysMessages(HISTORY, TODAY_USER_EN));
+        assert.deepEqual(llmCalls[0], todaysMessages(HISTORY, TODAY_USER_EN, 'Tell me about a time you disagreed with a teammate?'));
     });
 });
 
