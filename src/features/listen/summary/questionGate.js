@@ -163,6 +163,32 @@ function isBackchannel(text) {
 }
 
 // ---------------------------------------------------------------------------
+// Pure helper: endsWithConfirmationCheck (spec 2026-10-16-confirmation-check-answer)
+// True when the turn ends by only checking that the candidate is following:
+// "…as próximas etapas são essas, está bem?", "…next week, okay?". The tag
+// stands after a comma or period, or alone ("Tá?"); a name after it is kept
+// out ("…está, Ana?"). A real session got a recap and an answer in the
+// interviewer's voice for these; makeLiveAnswer then asks for one line.
+// Says nothing about the rest of the turn: the model still sees a real question.
+// ---------------------------------------------------------------------------
+const CHECK_TAIL_RE = new RegExp(
+    '(?:^|[,.;:!]\\s*)(?:(?:esta|ta)(?:\\s+(?:bem|bom|certo|ok|okay|claro))?|ok|okay|certo|beleza|combinado|' +
+    'pode ser|tudo (?:bem|certo)|entendeu|entendido|ficou claro|faz sentido|ne|nao e|correto|' +
+    'right|all right|alright|sounds? good|makes sense|got it|yeah)$'
+);
+
+function endsWithConfirmationCheck(text) {
+    if (typeof text !== 'string') return false;
+    const trimmed = text.trim();
+    if (!trimmed.endsWith('?')) return false;
+    const t = trimmed.slice(0, -1).trimEnd();
+    if (CHECK_TAIL_RE.test(foldPt(t))) return true;
+    // The STT capitalizes names: "…está, Ana?" / "…está Ana?".
+    const unnamed = t.replace(/,?\s+\p{Lu}\p{Ll}+$/u, '');
+    return unnamed !== t && CHECK_TAIL_RE.test(foldPt(unnamed));
+}
+
+// ---------------------------------------------------------------------------
 // Pure helper: shouldTriggerAnswer (FR-001 + FR-004)
 // Decision-only: does not manage debounce or abort — orchestrator does that.
 // Returns false when:
@@ -215,4 +241,5 @@ module.exports = {
     shouldTriggerAnswer,
     isBackchannel,
     BACKCHANNEL_MAX_WORDS,
+    endsWithConfirmationCheck,
 };

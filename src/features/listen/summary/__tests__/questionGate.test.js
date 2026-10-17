@@ -1,5 +1,6 @@
 /**
  * questionGate.test.js — the live answer's backchannel gate (spec 2026-10-13-career-router-jev, R19)
+ * and its confirmation-check tail (spec 2026-10-16-confirmation-check-answer)
  *
  * Run: node --test src/features/listen/summary/__tests__/questionGate.test.js
  *
@@ -12,7 +13,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { isBackchannel, shouldTriggerAnswer, BACKCHANNEL_MAX_WORDS } = require('../questionGate');
+const { isBackchannel, shouldTriggerAnswer, BACKCHANNEL_MAX_WORDS, endsWithConfirmationCheck } = require('../questionGate');
 const SummaryService = require('../summaryService');
 
 describe('isBackchannel (R19)', () => {
@@ -50,5 +51,45 @@ describe('isBackchannel (R19)', () => {
 
     it('summaryService re-exports the same gate', () => {
         assert.equal(SummaryService.shouldTriggerAnswer, shouldTriggerAnswer);
+    });
+});
+
+// Spec 2026-10-16-confirmation-check-answer: invented turns of the shape a real
+// session answered with a recap, or in the interviewer's voice.
+describe('endsWithConfirmationCheck', () => {
+    it('a turn that ends only checking the candidate is following', () => {
+        for (const t of [
+            'Depois vem a etapa técnica e a conversa com o gestor, está bem?',
+            'Se precisar falar comigo é só mandar mensagem, está bem?',
+            'A gente usa Go e Kafka no time, tá?',
+            'Eu te mando o convite amanhã, tá bom?',
+            'O processo tem três etapas. Certo?',
+            'Vou verificar a agenda do time, combinado?',
+            'A vaga é remota, ok?',
+            'Fica para terça às dez, pode ser?',
+            'E o gestor aprofunda os desafios, está, Ana?',
+            'E o gestor aprofunda os desafios, está Ana?',
+            'Esse é o pacote, né?',
+            'We will send the take-home next week, okay?',
+            'The team is mostly backend, right?',
+            'Tá?',
+        ]) {
+            assert.equal(endsWithConfirmationCheck(t), true, t);
+        }
+    });
+
+    it('a real question, or a tag word that is not a check, is not one', () => {
+        for (const t of [
+            'Alguma dúvida sobre os benefícios?',
+            'Qual é o caminho certo?',
+            'Você trabalhou com Kafka?',
+            'Qual linguagem você usa, Java?',
+            'Você está pronto?',
+            'Depois vem a etapa técnica, está bem.',
+            'What is the right way to shard this?',
+            '', null, undefined, 42,
+        ]) {
+            assert.equal(endsWithConfirmationCheck(t), false, String(t));
+        }
     });
 });

@@ -6,6 +6,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 
 ## [Unreleased]
 
+### Confirmation check answer (spec `2026-10-16-confirmation-check-answer`)
+
+#### Fixed
+
+- **A turn that ends with "…, está bem?" gets one line, not a recap.** When the interviewer explains something (the role, the process, the next steps) and only checks that the candidate is following, the live answer is now one short sentence the candidate would say back ("Perfeito, ficou claro."). In a real session these turns got three bullets restating what the interviewer had just said, and once the interviewer's own offer ("pode me contatar a qualquer momento") in the candidate's mouth.
+  - The rule is added only when the turn ends with such a check, and not on the personal or ambiguous routes ("então você liderou a migração, certo?" still gets a full answer). Every other turn's prompt is unchanged.
+
 ### Multi-monitor step move (spec `2026-10-15-multi-monitor-step-move`)
 
 #### Fixed

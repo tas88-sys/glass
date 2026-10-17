@@ -247,6 +247,18 @@ turn removed the misses. The panel's question label comes from `extractQuestion`
 sentence ends and drops comma framing ("Como arquiteta, …, como que você faz…") but keeps a list
 inside the question ("retries, timeouts, and idempotency").
 
+When the turn ends only checking that the candidate is following ("…as próximas etapas são essas,
+está bem?", "…, ok?", "…, certo?"), the instruction gets one more rule (spec
+`2026-10-16-confirmation-check-answer`). If the turn tells something (the company, the role, the
+process, the next steps) rather than asking about the candidate's experience, the model replies with
+one short sentence the candidate would say back ("Perfeito, ficou claro."), with no bullets, no recap,
+and never in the interviewer's voice. In a real session these turns got a three-bullet recap of what
+the interviewer had just said, and "pode me contatar a qualquer momento" offered back to the
+interviewer. `endsWithConfirmationCheck` (`questionGate.js`) reads the tag after a comma or period,
+or alone, and ignores a name after it ("…está, Ana?"). The rule is left out on the personal and
+ambiguous routes ("então você liderou a migração, certo?" asks), and every other turn's messages are
+unchanged.
+
 ### 4.3 IPC channel: `live-answer-update`
 
 `summaryService.sendToRenderer('live-answer-update', { id, question, answer, ts })` is emitted on
