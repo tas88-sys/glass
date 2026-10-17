@@ -716,3 +716,49 @@ describe('R19: backchannels, Jev\'s asks and the interviewer segment before', ()
         assert.equal(s.lastThemTurn, null);
     });
 });
+
+// Spec 2026-10-16-confirmation-check-answer: a turn that ends only checking the
+// candidate is following adds one rule to the instruction; every other turn's
+// messages stay byte for byte.
+describe('confirmation check rule', () => {
+    const { CONFIRMATION_CHECK_RULE } = SummaryService;
+    const CHECK_TURN = 'Depois vem a etapa técnica e a conversa com o gestor, está bem?';
+    const userOf = calls => calls.at(-1)[1].content;
+
+    afterEach(() => { llmCalls.length = 0; });
+
+    it('general route, or career off: the rule follows the PASSIVE line', async () => {
+        for (const career of [GENERAL, null]) {
+            const { s } = service();
+            await s.makeLiveAnswer(HISTORY, undefined, { id: 1, question: CHECK_TURN, career });
+            const user = userOf(llmCalls);
+            assert.ok(user.endsWith(`reply EXACTLY: PASSIVE\n\n${CONFIRMATION_CHECK_RULE}`), String(career && career.route));
+        }
+    });
+
+    it('the record\'s whole turn decides, as in the app', async () => {
+        const { s } = service();
+        const record = { turn: CHECK_TURN, status: null };
+        await s.makeLiveAnswer(HISTORY, undefined, { id: 1, question: 'Depois vem a etapa técnica?', career: null, record });
+        assert.ok(userOf(llmCalls).includes(CONFIRMATION_CHECK_RULE));
+    });
+
+    it('personal or ambiguous route: no rule ("então você liderou a migração, certo?" asks)', async () => {
+        for (const route of ['personal', 'ambiguous']) {
+            const { s } = service();
+            await s.makeLiveAnswer(HISTORY, undefined, { id: 1, question: 'Então você liderou a migração, certo?', career: { ...PERSONAL, route } });
+            assert.ok(!userOf(llmCalls).includes(CONFIRMATION_CHECK_RULE), route);
+        }
+    });
+
+    it('a turn without the check: today\'s messages, byte for byte', async () => {
+        const { s } = service();
+        await s.makeLiveAnswer(HISTORY, undefined, { id: 1, question: 'q', career: null });
+        assert.deepEqual(llmCalls.at(-1), todaysMessages(HISTORY));
+    });
+
+    it('the rule asks for one sentence in the candidate\'s voice', () => {
+        assert.match(CONFIRMATION_CHECK_RULE, /ONE short sentence the candidate would say back/);
+        assert.match(CONFIRMATION_CHECK_RULE, /never offer back what the interviewer offered/);
+    });
+});

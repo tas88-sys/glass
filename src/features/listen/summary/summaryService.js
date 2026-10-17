@@ -26,9 +26,21 @@ const {
     normalizeTail,
     shouldTriggerAnswer,
     isBackchannel,
+    endsWithConfirmationCheck,
 } = require('./questionGate');
 // The question's language, named in the live answer prompt.
 const { answerLanguageRule } = require('./questionLanguage');
+
+// Added to the live answer instruction when the turn ends only checking that the
+// candidate is following (spec 2026-10-16-confirmation-check-answer). A real
+// session got a three-bullet recap for "…, está bem?", and "you can reach me any
+// time" offered back in the interviewer's voice.
+const CONFIRMATION_CHECK_RULE =
+    'That turn ends by only checking that the candidate is following ("está bem?", "ok?", "certo?"). ' +
+    'If the rest of it tells the candidate something (about the interviewer, the company, the role, the process or the next steps) ' +
+    'rather than asking about their experience or knowledge, reply with ONE short sentence the candidate would say back, ' +
+    'such as "Perfeito, ficou claro." or "Combinado, obrigado.": no bullets, no summary of what was said. ' +
+    'Speak as the candidate: never offer back what the interviewer offered. Otherwise answer as above.';
 
 // ---------------------------------------------------------------------------
 // Pure helper: extractQuestion (FR-006/FR-007/FR-009/FR-012)
@@ -314,6 +326,10 @@ class SummaryService {
         // transcript and more in the notes' titles, models sometimes answered an
         // earlier one (live eval q038, q084).
         const asked = String((rec && rec.turn) || question || '').trim();
+        // Not on the candidate's own work: "então você liderou a migração, certo?" asks.
+        const route = meta.career && meta.career.route;
+        const check = endsWithConfirmationCheck(asked) && route !== 'personal' && route !== 'ambiguous';
+        if (check) laDebug('[live-answer] turn ends with a confirmation check — one-line rule added');
         const messages = [
             { role: 'system', content: systemPrompt },
             {
@@ -328,6 +344,7 @@ class SummaryService {
                     answerLanguageRule(asked) +
                     'keeping technical terms as they are commonly said. ' +
                     'If there is no clear question or nothing useful to answer, reply EXACTLY: PASSIVE' +
+                    (check ? `\n\n${CONFIRMATION_CHECK_RULE}` : '') +
                     (career && career.addendum ? `\n\n${career.addendum}` : ''),
             },
         ];
@@ -1165,3 +1182,4 @@ module.exports.shouldTriggerAnswer = shouldTriggerAnswer;
 module.exports.normalizeTail = normalizeTail;
 module.exports.parseLiveAnswerSseLine = parseLiveAnswerSseLine;
 module.exports.extractQuestion = extractQuestion;
+module.exports.CONFIRMATION_CHECK_RULE = CONFIRMATION_CHECK_RULE;
