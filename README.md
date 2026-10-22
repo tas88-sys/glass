@@ -178,6 +178,7 @@ On **Linux**, system-audio loopback is disabled (`getDisplayMedia({audio:false})
 **Career context for Live Answer (optional)** (`src/features/common/career/`):
 
 - When the interviewer asks about your own background, Live Answer can answer in first person from a local folder of your career notes (markdown or text).
+- How it works: this app has a retrieval-augmented generation (RAG) assistant that answers interview questions live. Retrieval is hybrid: local Snowflake Arctic embeddings (vectors for each section's text and title) and an in-process BM25F keyword index run together, and their rankings are merged with Reciprocal Rank Fusion. If the embeddings aren't ready in time, it uses BM25 alone. A routing layer powered by Jev, with a regex router as backup, labels each question as personal, company, ambiguous or general. That label decides whether the personal knowledge base is used, filtered by company, gated by a similarity threshold, or skipped.
 - Set `CAREER_KB_PATH` in `.env` to that folder. **Glass does not need it:** without it, or with a missing folder, the feature is off and Live Answer works exactly as before.
 - Your notes stay on your machine, except the excerpt (up to 9,000 characters) sent with each personal question to your LLM provider. An embedding model (~310 MB) is downloaded once.
 - Numbers and known names in an answer that your notes don't contain are marked "⚠ not in your notes" under it.
