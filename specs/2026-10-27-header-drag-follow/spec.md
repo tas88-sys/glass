@@ -3,8 +3,8 @@
 meta:
   spec_id: 2026-10-27-header-drag-follow
   spec_name: header-drag-follow
-  status: in-progress    # draft | in-progress | approved | completed
-  phase: verify          # specify | clarify | plan | tasks | preflight | feature-start | implement | verify
+  status: completed      # draft | in-progress | approved | completed
+  phase: done            # specify | clarify | plan | tasks | preflight | feature-start | implement | verify
   created: 2026-10-27
   updated: 2026-10-27
 
@@ -68,6 +68,6 @@ The bug is in upstream Glass code (pickle-com/glass).
 |---|---|
 | V1 `npm test`: 5 new tests in `src/window/__tests__/smoothMovementManager.test.js` fail before the fix, pass after | Done 2026-10-27: 5 failed before; 1532 pass, 0 fail after (one earlier run had 1 unrelated failure that did not come back in 4 reruns) |
 | V2 Real app (run-glass driver), drag through the page's `moveHeaderTo` path, 30 steps per drag, primary monitor | Done 2026-10-27: before the fix Ask stayed at 661,393 while the header went to 300,150 and 1300,250; after, Ask moved by the header's delta on each of three drags |
-| V3 Owner's PC: drag by the Ask pill and by the bar's background, on both monitors, with an answer open; Ask stays under the header the whole time, no jump on release | Pending (owner) |
-| V4 Same while an answer streams in, and with the mode picker open | Pending (owner) |
-| V5 Ctrl+arrow, Ctrl+Shift+Left/Right and Ctrl+Shift+1/2 still animate header and panels | Pending (owner) |
+| V3 Owner's PC: drag by the Ask pill and by the bar's background, on both monitors, with an answer open; Ask stays under the header the whole time, no jump on release | Owner, 2026-10-27: tested the app, works |
+| V4 Same while an answer streams in, and with the mode picker open | Owner, 2026-10-27: tested the app, works |
+| V5 Ctrl+arrow, Ctrl+Shift+Left/Right and Ctrl+Shift+1/2 still animate header and panels | Owner, 2026-10-27: tested the app, works |
