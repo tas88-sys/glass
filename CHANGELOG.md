@@ -6,6 +6,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 
 ## [Unreleased]
 
+### Header drag follow (spec `2026-10-27-header-drag-follow`)
+
+#### Fixed
+
+- **Ask and Listen follow the header while it is dragged.** On Windows the panels often stayed put. Dragging by the Ask pill or a button left them behind for good, and dragging by the bar's background made them jump into place only when the mouse was released. Electron on Windows emits `moved` only when a native drag ends, never after the `setBounds` of the header's own drag handler, and the panels listened only to `moved`. On the 125% monitor they followed some of the time, by accident: rounding changed the header's size and fired `resize`. Upstream bug.
+  - The panels now follow on `move`, by either kind of drag, on both monitors.
+  - An open mode picker or settings popup follows too.
+  - A drag no longer loses to a panel's height animation, for example while an answer streams in. The animation ends at its target height under the header.
+  - The movement manager's "something is animating" flag could stay on after a window was closed mid-animation. It is now recomputed whenever an animation ends.
+
 ### Confirmation check answer (spec `2026-10-16-confirmation-check-answer`)
 
 #### Fixed

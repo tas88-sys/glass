@@ -788,11 +788,14 @@ function createWindows() {
     movementManager = new SmoothMovementManager(windowPool);
 
 
-    header.on('moved', () => {
-        if (movementManager.isAnimating) {
+    // On Windows 'moved' fires only when a native drag ends, never after
+    // setBounds (the header's own drag handler), so the windows hanging from
+    // the header follow it on 'move'. The header's animations place them.
+    header.on('move', () => {
+        if (movementManager.isAnimatingWindow(header)) {
             return;
         }
-        updateChildWindowLayouts(false);
+        movementManager.animateLayout(layoutManager.calculateHeaderFollowLayout(), false);
     });
 
     header.webContents.once('dom-ready', () => {
