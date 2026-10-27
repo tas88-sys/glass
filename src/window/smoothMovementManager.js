@@ -13,6 +13,7 @@ class SmoothMovementManager {
         this.animationFrameId = null;
 
         this.animationTimers = new Map();
+        this.animationCompletions = new Map();
         this.intendedSizes = new WeakMap();
     }
 
@@ -45,10 +46,38 @@ class SmoothMovementManager {
     /**
      * Moves a window at once (mouse drag), keeping its intended size.
      * BrowserWindow.setPosition would resend the current, possibly rescaled, size.
+     * A running animation of the window ends here, at the size it was headed to
+     * (Ask grows while an answer streams in): left running, it would put the
+     * window back where it started on its next frame.
      */
     setPosition(win, { x, y }) {
         if (!this._isWindowValid(win)) return;
+        const onComplete = this._stopAnimation(win);
         win.setBounds({ x, y, ...this.intendedSize(win) });
+        if (onComplete) onComplete();
+    }
+
+    /** True while `win` itself is animating, whatever other windows do. */
+    isAnimatingWindow(win) {
+        return this.animationTimers.has(win);
+    }
+
+    /**
+     * Cancels the window's animation, if any.
+     * @returns {function|undefined} its onComplete, for the caller to run once the window is placed
+     */
+    _stopAnimation(win) {
+        if (!this.animationTimers.has(win)) return undefined;
+        clearTimeout(this.animationTimers.get(win));
+        const onComplete = this.animationCompletions.get(win);
+        this._finishTimer(win);
+        return onComplete;
+    }
+
+    _finishTimer(win) {
+        this.animationTimers.delete(win);
+        this.animationCompletions.delete(win);
+        this.isAnimating = this.animationTimers.size > 0;
     }
 
     /**
@@ -60,7 +89,7 @@ class SmoothMovementManager {
             // 해당 창의 타이머가 있으면 정리
             if (this.animationTimers.has(win)) {
                 clearTimeout(this.animationTimers.get(win));
-                this.animationTimers.delete(win);
+                this._finishTimer(win);
             }
             return false;
         }
@@ -159,6 +188,7 @@ class SmoothMovementManager {
             height: targetBounds.height ?? startBounds.height,
         };
         this.intendedSizes.set(win, { width: targetBounds.width, height: targetBounds.height });
+        this.animationCompletions.set(win, options.onComplete);
         const startTime = Date.now();
         const duration = options.duration || this.animationDuration;
     
@@ -184,12 +214,7 @@ class SmoothMovementManager {
                 this.animationTimers.set(win, timerId);
             } else {
                 win.setBounds(targetBounds);
-                this.animationTimers.delete(win);
-                
-                if (this.animationTimers.size === 0) {
-                    this.isAnimating = false;
-                }
-                
+                this._finishTimer(win);
                 if (options.onComplete) options.onComplete();
             }
         };

@@ -306,6 +306,28 @@ class WindowLayoutManager {
         return layout;
     }
     
+    /**
+     * Where the open windows that hang from the header go when it is dragged:
+     * the panels (Ask, Listen) and the popups (settings, mode picker).
+     * @returns {Object<string, {x: number, y: number}>}
+     */
+    calculateHeaderFollowLayout() {
+        const isOpen = (name) => {
+            const win = this.windowPool.get(name);
+            return !!win && !win.isDestroyed() && win.isVisible();
+        };
+        const layout = this.calculateFeatureWindowLayout({ ask: isOpen('ask'), listen: isOpen('listen') });
+        if (isOpen('settings')) {
+            const position = this.calculateSettingsWindowPosition();
+            if (position) layout.settings = position;
+        }
+        if (isOpen('mode-picker')) {
+            const position = this.calculateModePickerWindowPosition();
+            if (position) layout['mode-picker'] = position;
+        }
+        return layout;
+    }
+
     calculateShortcutSettingsWindowPosition() {
         const header = this.windowPool.get('header');
         const shortcutSettings = this.windowPool.get('shortcut-settings');
