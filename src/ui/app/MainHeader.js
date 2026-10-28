@@ -10,6 +10,8 @@ export class MainHeader extends LitElement {
 
     static styles = css`
         :host {
+            /* Saturated ring so the header can be found with peripheral vision */
+            --header-accent: #FFB020;
             display: flex;
             transition: transform 0.2s cubic-bezier(0.23, 1, 0.32, 1), opacity 0.2s ease-out;
         }
@@ -62,6 +64,8 @@ export class MainHeader extends LitElement {
             width: 100%;
             height: 100%;
             background: rgba(0, 0, 0, 0.6);
+            /* Inset: the header window is exactly the pill's size, an outer glow would be clipped */
+            box-shadow: inset 0 0 10px rgba(255, 176, 32, 0.35);
             border-radius: 9000px;
             z-index: -1;
         }
@@ -71,8 +75,8 @@ export class MainHeader extends LitElement {
             position: absolute;
             top: 0; left: 0; right: 0; bottom: 0;
             border-radius: 9000px;
-            padding: 1px;
-            background: linear-gradient(169deg, rgba(255, 255, 255, 0.17) 0%, rgba(255, 255, 255, 0.08) 50%, rgba(255, 255, 255, 0.17) 100%); 
+            padding: 2px;
+            background: var(--header-accent);
             -webkit-mask:
                 linear-gradient(#fff 0 0) content-box,
                 linear-gradient(#fff 0 0);
