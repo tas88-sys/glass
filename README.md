@@ -51,6 +51,17 @@ node --version
 npm run setup
 ```
 
+### Desktop shortcut (Windows)
+
+```bash
+npm run shortcut:win
+```
+
+Creates a "Glass" shortcut on the desktop that runs `npm start` in a hidden window, detached from
+any terminal. The output goes to `%LOCALAPPDATA%\glass-logs\glass.log` (the previous run is kept as
+`glass.prev.log`). The shortcut points at this checkout, so run the command again after cloning on
+another machine or moving the repo.
+
 ## Highlights
 
 
