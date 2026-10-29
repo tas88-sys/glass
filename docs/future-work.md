@@ -334,3 +334,213 @@ Found while sweeping for model-name rules, not related to the catalog:
 - [ ] The Groq log shows `limit`, `used` and `requested` for every OTPM refusal, passing or not.
 - [ ] With an Anthropic key saved, Settings shows the capabilities of a Claude model from the Models API, and a model the beta refuses is learned (one resend, then no beta for it).
 - [ ] An Ask with a screenshot after a `Request too large` refusal logs `skip … reason=key-output-limit` and goes straight to the next provider.
+
+---
+
+## 9. Live Answer — the extracted question picks the wrong span
+
+**Status:** Pending. Found on 2026-10-28 reviewing a real Portuguese session (34 answers in `live_answers`); seen again on 2026-10-29 in an English session (18 answers, 3 of them to reported questions); not started. Suggested order: first of items 9 to 11, since it also fixes a wrong route.
+**Severity:** MEDIUM
+**Code:** `extractQuestion` (`src/features/listen/summary/summaryService.js:76`), the gate helpers in `src/features/listen/summary/questionGate.js`
+
+### Summary
+
+The answer prompt quotes the whole interviewer turn (`makeLiveAnswer`, `asked = rec.turn`), so the model usually answers the right topic. But the extracted `question` also goes to `resolveCareerContext` → `getCareerContext(text, { question })`, so a wrong span **picks the route and the notes**, and it is the `Q:` label the panel and the history show.
+
+`extractQuestion` keeps the **last clause with any signal**, strong or weak. A trailing fragment therefore beats a real question earlier in the turn, and a confirmation check or a hand-over phrase counts as a question.
+
+### Cases from the session (paraphrased)
+
+| Turn (shape) | Extracted | Effect |
+|--------------|-----------|--------|
+| "E quando você diz escalável, você diz escalada pelo quê? … [an argument that layering does not change the bytecode] … você tem menos garbage collector atuando," | "você tem menos de colector atuando," | Routed **personal** (`jev:personal@0.60`); the answer told an autoscaling war story (queue-based pod scaling) instead of answering "scalable in what sense" (maintainability, isolating change). The candidate's own answer was closer. |
+| "Tudo bem? Perfeito. Passando para outro assunto, eu queria colocar um cenário … vamos imaginar que a gente tem um endpoint que recebe um CSV …" | "Tudo bem?" | Fired on a scenario still being set up; the answer invented a whole design (and "max 3 goroutines, as mentioned") before the interviewer asked anything. The real question came two turns later. |
+| "Você saberia me dizer o que é uma arquitetura MVC? … Por que a gente quebra em 3 níveis? … pode falar." | "pode falar" | "pode" read as an auxiliary leading a question. The answer was right only because the prompt quotes the full turn. |
+| "… você pode perguntar absolutamente qualquer coisa e na pior das hipóteses eu só vou dizer, não posso te dizer … Beleza?" | "você pode perguntar absolutamente qualquer coisa …" | Label only; the one-line reply was fine. |
+| (2026-10-29) "… they probably are going to ask additional questions, like maybe they will say: I saw you created a class for this, could you explain why? How would you change this, what would you do? So you can show that you can navigate the code …" | "what would you do?" | The interviewer was **describing** the next round. The answer, routed personal (`jev:personal@0.71`), told a 190-word story about a past project, with a technology the notes say was never used (item 10). |
+| (2026-10-29) "… questions like: I see you are using an HTTP client with this config, why? … or architecture questions, like how will you approach this, or things like that." | "how will you approach this or things like that" | Same shape, next turn: a monologue of architecture choices nobody asked for. |
+| (2026-10-29) "… you can arrive with your AI setup, your CLAUDE.md, your skills … they want to see how you take benefit of AI to build things." | "how you take benefit of a yard to build the things" | Informative turn, no question; also see item 13 (wrong route) and item 15 ("a yard" for "AI"). |
+
+### Proposed
+
+1. **Rank the candidates instead of keeping the last signal.** Tier 1: a clause that ends in `?`. Tier 2: a clause led by a question word or auxiliary (`leadsQuestion`, `EMBEDDED_Q_RE`). Tier 3: a content cue only. Take the highest tier present, and the last clause within it. "você diz escalada pelo quê?" then beats the trailing fragment.
+2. **Drop check and hand-over phrases as candidates when another candidate exists:** "tudo bem?", "beleza?", "certo?", "ok?", "pode falar", "fique à vontade", "isso". Reuse `isBackchannel` and `endsWithConfirmationCheck` from `questionGate.js`; peel them like discourse markers.
+3. **Hold a setup-only turn.** When the only question is a check and the rest announces a scenario ("vamos imaginar", "eu queria colocar um cenário", "imagina que", "let's say", "imagine that"), do not fire; carry the turn into the next one (same mechanism as the continuation grace in item 1). Fire when a real question arrives or the silence settles.
+4. **Do not answer a reported question.** A question inside reported or future speech is an example, not a question to the candidate: "they will ask", "they might say", "maybe they will do, like …", "questions like …", "eles vão perguntar", "podem te perguntar", "tipo: …". When the only questions of a turn sit inside such a frame, return PASSIVE (the PASSIVE path already works: the next turn of the same explanation was correctly held). Candidate places: a gate rule in `questionGate.js`, plus a line in the live answer user message ("if the interviewer is describing what someone else will ask, reply PASSIVE").
+5. **Tests.** Add the shapes above, anonymized, as `extractQuestion` and gate unit cases and as live-eval items; keep company names and interview details out of this repo.
+
+### Acceptance (when implemented)
+
+- [ ] The four shapes extract "você diz escalada pelo quê?", nothing (held), "o que é uma arquitetura MVC? / por que a gente quebra em 3 níveis?", and "Beleza?" or a one-line reply.
+- [ ] The scalability shape routes general, not personal.
+- [ ] A scenario set up over two or three turns produces one answer, after the question.
+- [ ] The three 2026-10-29 shapes (an explanation of the next round quoting the questions someone else will ask) produce no answer, in English and in Portuguese.
+- [ ] Existing `extractQuestion` and gate tests still pass; the live eval loses no question it answers today.
+
+---
+
+## 10. Live Answer career context — a real number attached to the wrong claim
+
+**Status:** Pending. Found on 2026-10-28 in the same session as item 9; not started. Do it in two steps: prompt and temperature first, then the check.
+**Severity:** HIGH (the candidate may say a wrong number about their own work)
+**Code:** `findUnsupported` (`src/features/common/career/answerCheck.js`), `checkAnswer` (`src/features/common/career/index.js:584`), `makeLiveAnswer` (`src/features/listen/summary/summaryService.js`, `temperature: 0.7`)
+
+### Summary
+
+Asked "have you done concurrent programming?" (route personal, `jev:personal@1.00`), the answer listed three past employers with results. Two did not match the notes:
+
+- A percentage the notes give as a **cost** reduction at one employer came out as an **ingestion-time** reduction at the same employer.
+- A "cut in half" result at another employer, which the notes tie to a message broker and event sourcing, came out as done "with goroutines and channels".
+
+Neither was marked: the live check (FR-021) passes a number when it appears **anywhere** in what the model was given, and the percentage was in the notes. It checks presence, not attribution. The temperature (0.7) also invites embellishment on the personal route.
+
+**Seen again on 2026-10-29 (English session), worse:**
+
+- "Real example from a project of yours?" → a buffered channel in a backup service, "backup ~30% faster". Neither the backup channel nor the 30% is in the notes; only the buffer size ("100") was marked.
+- "Have you implemented rate limiting?" → the first employer matches the notes; a "leaky bucket + circuit breaker" at a second employer is not in them.
+- An answer (to a reported question, item 9) said the candidate **chose a message broker that the notes list explicitly under "not used"**, with a "50% lower latency". Only "50" was marked; the technology was not, since the check knows employer and company names only.
+
+### Proposed
+
+1. **Prompt rule on the personal and ambiguous routes** (in the career addendum): state a metric only with the result and the employer the notes give it; never attach a technology to an employer unless the notes link them; when no metric fits the question, give none.
+2. **Lower temperature on the personal and ambiguous routes**, about 0.2 to 0.3; general keeps 0.7.
+3. **Neighborhood check in `findUnsupported` (second step).** A number counts as supported only when one note chunk holds the number, the employer named in the same answer bullet, **and** at least one content word near the number in the answer (±5 words, stopwords dropped). In the case above, the answer's "tempo"/"ingestão" next to the number vs the note's "custo" would mark it.
+   - Cost: the notes mix English and Portuguese ("reduction" vs "redução", "cost" vs "custo"), so it needs a small bilingual stem list or accent-folded prefixes, and it will raise false alarms. Measure on the eval (item 4's set) before turning it on.
+   - Technology-to-employer claims need an entity → technology map from the manifest; leave out of the first version.
+4. **A "not used" list (cheaper than the map above, do it with step 1).** The notes already list technologies the candidate has not used (a "Não usei:" line). Read them into the snapshot (better: a `notUsed` field in the KB manifest than parsing prose), and on the personal and ambiguous routes:
+   - add them to the career addendum ("never claim experience with: …");
+   - in `checkAnswer`, mark any of them the answer names in the first person or next to an employer, like an unsupported number.
+
+### Acceptance (when implemented)
+
+- [ ] A replay of the concurrency turn with the same notes states no metric the notes tie to a different result.
+- [ ] Unit cases for `findUnsupported`: same number, same employer, different result → flagged; same number and result → not flagged; Portuguese answer with an English note → not flagged.
+- [ ] False-alarm rate of the neighborhood check measured on the eval set and recorded here before it ships.
+- [ ] A personal answer naming a technology from the "not used" list is marked in the panel; with the addendum line, a replay of the 2026-10-29 turn names none.
+
+---
+
+## 11. Live Answer — answers too long to read while speaking
+
+**Status:** Pending. Found on 2026-10-28 in the same session as item 9; not started.
+**Severity:** MEDIUM
+**Code:** the user message in `makeLiveAnswer` (`src/features/listen/summary/summaryService.js`, "Answer … directly and concisely", `maxTokens: 900`). Related: `specs/2026-06-01-interview-live-answer-readability/`.
+
+### Summary
+
+Of the 34 answers in the session: median about 100 words, 17 over 100, 7 over 150, longest 292. The long ones add a closing paragraph ("Em resumo …", "Resultado: …") and extra sections ("Como calculo a proporção:", "Governança:"). The prompt asks for concision but sets no budget. The transcript shows the candidate stuttering while reading the long ones.
+
+### Proposed
+
+1. **A budget in the prompt:** one headline sentence, at most 3 bullets of about 15 words each, about 60 words in all. No closing paragraph, no extra headed sections, no restating the question.
+2. **Leave `maxTokens` at 900 for now.** The gpt-oss models reason before answering; if the provider counts reasoning tokens against the cap (to confirm for Groq), a low cap gives empty or cut answers. Change the prompt first, measure, then decide.
+3. **Optional, in the panel:** show the headline and the first 3 bullets, and fold the rest behind a "more" line, so what is worth reading stays in view when the model runs over.
+4. **Measure:** compare word counts per answer before and after from `live_answers` (`scripts/export-live-answers.js` exports a session), and add a "≤ N words" check to the live eval.
+
+### Acceptance (when implemented)
+
+- [ ] On the live eval and the next real session, median ≤ 60 words and no answer over 120, with no rise in empty or cut answers.
+- [ ] No answer ends with a summary paragraph.
+- [ ] If the panel fold ships: an answer over 3 bullets shows the headline and 3 bullets, and the rest opens on click.
+
+---
+
+## 12. Live Answer — the one-line reply to a confirmation check comes out in Portuguese
+
+**Status:** Pending. Found on 2026-10-29 in an English session; not started. Small and isolated: a good first task.
+**Severity:** LOW (visible, easy to fix)
+**Code:** `CONFIRMATION_CHECK_RULE` and its use in `makeLiveAnswer` (`src/features/listen/summary/summaryService.js`); `answerLanguageRule` (`src/features/listen/summary/questionLanguage.js`). Spec: `specs/2026-10-16-confirmation-check-answer/`.
+
+### Summary
+
+Two English turns ending in "Okay?" ("… in case we decide to advance with you to the interview with the client … Okay?", "So we will be in touch … Okay?") got "Perfeito, está claro." and "Combinado, obrigado.". The rule's examples are in Portuguese only, and the model copies them word for word, overriding the language rule in the same message.
+
+### Proposed
+
+1. Give the examples in both languages ("Perfect, that's clear." / "Sounds good, thanks."), or pick the example by `questionLanguage(asked)`.
+2. Say in the rule itself that the reply follows the turn's language.
+
+### Acceptance (when implemented)
+
+- [ ] A unit case: an English turn ending in "Okay?" builds a rule whose example is in English; a Portuguese one keeps the Portuguese example.
+- [ ] Live eval: an English confirmation check gets an English one-liner.
+
+---
+
+## 13. Live Answer career context — a question about the candidate's own setup routes general
+
+**Status:** Pending. Found on 2026-10-29; not started. Related: item 5 ("English questions about the candidate that still route general").
+**Severity:** MEDIUM (the answer invented a setup)
+**Code:** `classifyCareerIntent` (`src/features/common/career/intentRouter.js:268`), the Jev router (`jevRouter.js`), the regex fallback (`routeFallback`, `src/features/common/career/index.js:374`)
+
+### Summary
+
+A turn about the candidate's AI setup ("you can arrive with your AI setup, your CLAUDE.md, the skills you usually use … being able to explain your setup") routed **general** (`regex(low)`: Jev gave no route and no regex cue matched), so no notes were sent. The model then described a setup of its own: a Python LLM framework, a different vendor's model and a test runner, none of which the candidate uses; the notes describe the real one (an agentic coding CLI with specs, skills, hooks and MCP).
+
+### Proposed
+
+1. Regex cues for the candidate's tools and way of working: "your setup", "your (AI) setup", "your skills", "the tools you use", "your workflow", "how you use AI", "seu setup", "suas skills", "como você usa IA".
+2. Add the shape to Jev's labeled set if it keeps routing general.
+3. Measure as in item 5: a small held-out set written before the change; count questions about the candidate routed general before and after.
+
+### Acceptance (when implemented)
+
+- [ ] The 2026-10-29 turn, anonymized, routes personal and gets the setup note.
+- [ ] On item 5's held-out sets, no question about the code on screen moves to personal (the live-coding guard there still holds).
+
+---
+
+## 14. Live Answer career context — the live check marks technical constants as claims
+
+**Status:** Pending. Found on 2026-10-29; not started.
+**Severity:** LOW (noise that hides the real marks)
+**Code:** `findUnsupported` (`src/features/common/career/answerCheck.js`)
+
+### Summary
+
+In the 2026-10-29 session the check marked "429" (an HTTP status in "avoids 429 errors") and "300" (an illustrative threshold, "e.g., > 300 lines") as unverified, while the invented "30%" and the unused technology passed (item 10). Marks on constants teach the reader to ignore marks.
+
+### Proposed
+
+1. Skip HTTP status codes next to HTTP words ("429 errors", "a 503", "status 404", "HTTP 500"): 3-digit numbers from 100 to 599 within a few words of "error", "status", "HTTP", "response", "code".
+2. Skip numbers inside an example frame: "e.g.", "for example", "por exemplo", "like > N", "such as".
+3. Keep marking percentages, money and durations everywhere: those are the claims that matter.
+
+### Acceptance (when implemented)
+
+- [ ] Unit cases: "avoids 429 errors" and "(e.g., > 300 lines)" → not marked; "cut latency by 30%" with no 30 in the notes → marked.
+- [ ] On the 2026-10-28 and 2026-10-29 sessions' answers (replayed against their notes), the marks left are only real claims.
+
+---
+
+## 15. STT — interview terms heard as other words
+
+**Status:** Pending. Found on 2026-10-29 in an English session; not started.
+**Severity:** LOW to MEDIUM (wrong words reach the extracted question and the note search)
+**Code:** `TECH_KEYTERMS` (`src/features/listen/sttKeyterms.js`); Deepgram only.
+
+### Summary
+
+What the transcript had, and what was said:
+
+| Heard | Said |
+|-------|------|
+| "IP token" | API token |
+| "railing meets", "reclimiter", "rig limit" | rate limits, rate limiter |
+| "AR", "a yard", "the air" | AI |
+| "Club MD" | CLAUDE.md |
+| "coordination" (as in "the coordination produced a change") | probably the coding agent's name |
+| "non warfare channels" | unbuffered channels |
+
+The extracted question for one turn was "how you take benefit of **a yard** to build the things".
+
+### Proposed
+
+1. Add to `TECH_KEYTERMS`: "API token", "rate limit", "rate limiter", "AI", "CLAUDE.md", "Claude Code", "unbuffered", "buffered channel". Watch the size cap (`MAX_KEYTERMS`, about 500 tokens at Deepgram).
+2. Check whether "AI" as a two-letter keyterm biases ordinary words; drop it if the live eval gets worse.
+3. Re-run the live eval's audio items (`scripts/live-eval/audioFeeder.js`) before and after.
+
+### Acceptance (when implemented)
+
+- [ ] The live eval's word error on the added terms goes down, and no other item gets worse.
+- [ ] The keyterm list stays under Deepgram's cap (`sttKeyterms` unit tests).
