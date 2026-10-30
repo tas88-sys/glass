@@ -64,6 +64,22 @@ function answerShape(text) {
     return { headline, headlineWords: headline.split(/\s+/).filter(Boolean).length, bullets, lines: lines.length, chars: String(text || '').length };
 }
 
+/** Words a candidate would read aloud: markdown marks and code blocks left out (future-work item 11). */
+function answerWords(text) {
+    const prose = String(text || '')
+        .replace(/```[\s\S]*?(```|$)/g, ' ')
+        .replace(/^\s*(?:[-*•]|\d+\.)\s+/gm, '')
+        .replace(/[*_#`>|]/g, ' ');
+    return prose.split(/\s+/).filter(w => /[\p{L}\p{N}]/u.test(w)).length;
+}
+
+/** An answer with bullets whose last line is not one: a closing summary paragraph (item 11). */
+function endsWithClosingParagraph(text) {
+    const lines = String(text || '').replace(/```[\s\S]*?(```|$)/g, '').split('\n').map(l => l.trim()).filter(Boolean);
+    const isBullet = l => /^(?:[-*•]|\d+\.)\s+/.test(l);
+    return lines.some(isBullet) && !isBullet(lines[lines.length - 1]);
+}
+
 /**
  * Terms found in text, accent- and case-insensitive. A term is a plain
  * substring or, when it starts with '/', a regex ("/4[.,]?870/").
@@ -218,6 +234,8 @@ module.exports = {
     wer,
     detectLang,
     answerShape,
+    answerWords,
+    endsWithClosingParagraph,
     mentions,
     plainMath,
     sectionsInOrder,

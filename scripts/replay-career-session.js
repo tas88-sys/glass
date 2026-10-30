@@ -75,6 +75,8 @@ const {
     isReportedOnly,
     extractQuestion,
 } = require('../src/features/listen/summary/questionGate');
+// Answer length, counted as the live eval counts it (future-work item 11).
+const { answerWords } = require('./live-eval/checks');
 
 const ROUTES = ['personal', 'company', 'ambiguous', 'general'];
 const ROUTE_WAIT_MS = 800 + 250;
@@ -430,7 +432,10 @@ async function main() {
         lines.push(line);
     }
     r.jevMs = { p50: pct(jevMs, 0.5), p95: pct(jevMs, 0.95) };
-    if (gen) r.answers = { file: args.answers, written: answerLines.size, ...gen.stats() };
+    if (gen) {
+        const words = [...answerLines.values()].map(l => JSON.parse(l)).filter(a => a.status === 'answer').map(a => answerWords(a.answer));
+        r.answers = { file: args.answers, written: answerLines.size, ...gen.stats(), words: { p50: pct(words, 0.5), max: words.length ? Math.max(...words) : null, over120: words.filter(w => w > 120).length } };
+    }
     r.router = mod.routerStats ? { asked: args.router, ...mod.routerStats() } : args.router;
 
     if (args.json) {
@@ -451,7 +456,7 @@ async function main() {
     out.push(`sources: ${JSON.stringify(r.sources)}  follow-ups: ${r.followUps}`);
     out.push(`fallbacks (answer): ${JSON.stringify(r.fallbacks)}  (gate): ${JSON.stringify(r.gateFallbacks)}`);
     out.push(`jev call p50 ${r.jevMs.p50 ?? '-'} ms, p95 ${r.jevMs.p95 ?? '-'} ms`);
-    if (r.answers) out.push(`answers: ${r.answers.written} written to ${r.answers.file}; ${JSON.stringify(r.answers.status)}; models ${JSON.stringify(r.answers.models)}`);
+    if (r.answers) out.push(`answers: ${r.answers.written} written to ${r.answers.file}; ${JSON.stringify(r.answers.status)}; models ${JSON.stringify(r.answers.models)}; words p50 ${r.answers.words.p50 ?? '-'}, max ${r.answers.words.max ?? '-'}, >120 ${r.answers.words.over120}`);
     if (args.list) out.push('', ...lines);
     process.stdout.write(`${out.join('\n')}\n`);
 }

@@ -20,6 +20,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { answerWords } = require('./live-eval/checks');
 
 function appDb() {
     const base = process.platform === 'win32' ? process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming')
@@ -106,7 +107,10 @@ function main() {
     }
     fs.writeFileSync(args.out, `${lines.join('\n')}\n`);
     const byStatus = rows.reduce((o, r) => ({ ...o, [r.status]: (o[r.status] || 0) + 1 }), {});
-    process.stdout.write(`session ${id}: ${rows.length} answers ${JSON.stringify(byStatus)} → ${args.out}\n`);
+    // Words per shown answer, as the live eval counts them (future-work item 11).
+    const words = rows.filter(r => r.status === 'answer').map(r => answerWords(r.answer)).sort((a, b) => a - b);
+    const length = words.length ? `; words p50 ${words[Math.ceil(words.length / 2) - 1]}, max ${words[words.length - 1]}, >120 ${words.filter(w => w > 120).length}` : '';
+    process.stdout.write(`session ${id}: ${rows.length} answers ${JSON.stringify(byStatus)}${length} → ${args.out}\n`);
 }
 
 try {
