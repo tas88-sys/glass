@@ -1100,4 +1100,30 @@ describe('extractQuestion', () => {
     assert.ok(result.length > 0, 'result must be non-empty for non-empty input');
     assert.equal(result, input.trim());
   });
+
+  // Future-work item 9: shapes from real sessions, invented text.
+  it('a real question beats a trailing fragment', () => {
+    const input = 'E quando você diz escalável, você diz escalada pelo quê? Porque se a gente pensar, ' +
+      'separar em camadas não muda o bytecode, parece que ainda é o mesmo bytecode não é? ' +
+      'Você tem menos dependência, você tem menos garbage collector atuando,';
+    assert.equal(extractQuestion(input), 'quando você diz escalável, você diz escalada pelo quê?');
+  });
+
+  it('a hand-over at the end ("pode falar") is not the question', () => {
+    const input = 'Última pergunta. Você saberia me dizer o que é uma arquitetura MVC? Isso. ' +
+      'E por que a gente quebra ela em três níveis? Por que alguém um dia fez isso, pode falar.';
+    assert.equal(extractQuestion(input), 'por que a gente quebra ela em três níveis?');
+    assert.equal(extractQuestion('Você já usou Kafka em produção, pode falar.'), 'Você já usou Kafka em produção');
+  });
+
+  it('a check loses to a real question, and is its own label when alone', () => {
+    assert.equal(extractQuestion('Tudo bem? E qual banco de dados vocês usavam lá?'), 'qual banco de dados vocês usavam lá?');
+    assert.equal(extractQuestion('A vaga é remota. Okay?'), 'Okay?');
+    assert.equal(extractQuestion('Oi, tudo bem?'), 'Oi, tudo bem?');
+    assert.equal(extractQuestion('Você consumia esse contrato, não é?'), 'Você consumia esse contrato, não é?');
+  });
+
+  it('a question with "?" beats a later clause led only by a question word', () => {
+    assert.equal(extractQuestion('How do you size the pool? Then, what you measure afterwards'), 'How do you size the pool?');
+  });
 });

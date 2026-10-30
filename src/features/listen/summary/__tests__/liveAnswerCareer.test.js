@@ -794,3 +794,73 @@ describe('confirmation check rule', () => {
         assert.match(rule, /in the language the interviewer is speaking/);
     });
 });
+
+// Future-work item 9: a scenario set up over turns gets one answer, after its
+// question, and that answer quotes the scenario; a turn quoting questions
+// someone else will ask gets a rule. Invented text (spec C5).
+describe('item 9: a scenario held for its question, and reported questions', () => {
+    const SETUP_1 = 'Tudo bem? Perfeito. Eu queria colocar um cenário, vamos imaginar que a gente tem um endpoint que recebe um CSV grande.';
+    const SETUP_2 = 'Imagina que o pod tem pouca memória e o arquivo é maior que ela.';
+    const QUESTION = 'Como você processaria esse arquivo sem derrubar o pod?';
+
+    it('set-up turns arm nothing and cost no career call; the question is answered once, quoting them', async () => {
+        mock.timers.enable({ apis: ['setTimeout'] });
+        const { s } = service();
+        const stub = stubCareer();
+        s.career = stub;
+        const metas = [];
+        s.makeLiveAnswer = async (texts, signal, m) => { metas.push(m); return null; };
+        s.conversationHistory = [`them: ${SETUP_1}`];
+        s.triggerAnswerIfNeeded('Them', SETUP_1);
+        s.conversationHistory.push(`them: ${SETUP_2}`);
+        s.triggerAnswerIfNeeded('Them', SETUP_2);
+        mock.timers.tick(800);
+        for (let i = 0; i < 5; i++) await flush();
+        assert.equal(metas.length, 0, 'no answer while the scenario is set up');
+        assert.deepEqual(stub.calls.prefetch, []);
+        assert.equal(s.heldSetup.length, 2);
+
+        s.conversationHistory.push(`them: ${QUESTION}`);
+        s.triggerAnswerIfNeeded('Them', QUESTION);
+        mock.timers.tick(800);
+        for (let i = 0; i < 5; i++) await flush();
+        assert.equal(metas.length, 1);
+        assert.equal(metas[0].record.turn, `${SETUP_1} ${SETUP_2} ${QUESTION}`);
+        assert.equal(metas[0].question, extractQuestion(QUESTION));
+        assert.deepEqual(s.heldSetup, []);
+    });
+
+    it('a set-up held too long ago is not quoted; resetLiveAnswer drops the hold', async () => {
+        mock.timers.enable({ apis: ['setTimeout'] });
+        const { s } = service();
+        s.career = stubCareer();
+        let meta = null;
+        s.makeLiveAnswer = async (texts, signal, m) => { meta = m; return null; };
+        s.heldSetup = [{ text: SETUP_1, ts: Date.now() - 10 * 60_000 }];
+        s.conversationHistory = [`them: ${QUESTION}`];
+        s.triggerAnswerIfNeeded('Them', QUESTION);
+        mock.timers.tick(800);
+        for (let i = 0; i < 5; i++) await flush();
+        assert.equal(meta.record.turn, QUESTION);
+
+        s.triggerAnswerIfNeeded('Them', SETUP_1);
+        assert.equal(s.heldSetup.length, 1);
+        s.resetLiveAnswer();
+        assert.deepEqual(s.heldSetup, []);
+    });
+
+    it('a turn quoting someone else\'s questions next to one for the candidate gets the reported rule', async () => {
+        const { s } = service();
+        const turn = 'They will ask about your Kafka work later. But first, how do you handle retries?';
+        await s.makeLiveAnswer(HISTORY, undefined, { id: 1, question: extractQuestion(turn), career: GENERAL, record: { turn } });
+        const user = llmCalls.at(-1)[1].content;
+        assert.ok(user.endsWith('reply EXACTLY: PASSIVE\n\nPart of that turn quotes questions someone else will ask later, as examples. ' +
+            'Answer only what the interviewer asks the candidate now; if that is nothing, reply EXACTLY: PASSIVE'), user);
+    });
+
+    it('a turn with no reported speech: no rule (SC-005 keeps the rest byte-identical)', async () => {
+        const { s } = service();
+        await s.makeLiveAnswer(HISTORY, undefined, { id: 1, question: 'q', career: GENERAL, record: { turn: 'How do you handle retries?' } });
+        assert.doesNotMatch(llmCalls.at(-1)[1].content, /someone else will ask/);
+    });
+});

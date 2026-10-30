@@ -1,7 +1,7 @@
 'use strict';
 
-// The live answer's question gate, pure (no Electron): summaryService uses it,
-// and scripts/replay-career-session.js replays real sessions through it.
+// The live answer's question gate and extractQuestion, pure (no Electron): summaryService uses them,
+// and scripts/replay-career-session.js replays real sessions through them.
 
 // ---------------------------------------------------------------------------
 // Pure helper: isLikelyQuestion (FR-002)
@@ -189,11 +189,235 @@ function endsWithConfirmationCheck(text) {
 }
 
 // ---------------------------------------------------------------------------
+// Question candidates (future-work item 9)
+// The clauses of a turn that carry a question signal, ranked: tier 1 ends in
+// '?', tier 2 is led by a question word or auxiliary (or an embedded one),
+// tier 3 has only a content cue. A check ("tudo bem?", "beleza?"), a statement
+// ending in a tag ("…o mesmo bytecode, não é?") or a hand-over ("pode falar",
+// "go ahead") is flagged: it loses to any real candidate. extractQuestion picks from these, and the setup and reported
+// rules below read them.
+// ---------------------------------------------------------------------------
+// The turn passing the floor back: a request to answer, not a question.
+const HANDOVER_RE = /^(?:pode (?:falar|seguir|continuar|comecar|mandar)|(?:fique|fica) a vontade|manda ver|isso|go ahead|feel free|over to you|your turn|the floor is yours)$/;
+// A tag that turns a statement into a check: "…o mesmo bytecode, não é?".
+const TAG_TAIL_RE = /(?:^|[\s,.;:!])(?:nao e|ne|sabe|entendeu|certo|correto|right|okay|ok|isn'?t it|don'?t you think|you know)$/;
+
+function foldedClause(clause) {
+    return foldPt(String(clause || '')).replace(/[?.!,;:\s]+$/, '').trim();
+}
+
+function isHandover(clause) {
+    return HANDOVER_RE.test(foldedClause(clause));
+}
+
+/** A clause that only checks the candidate is following, ends in a tag, or hands over the floor. */
+function isCheckOrHandover(clause) {
+    const t = foldedClause(clause);
+    if (!t) return false;
+    return HANDOVER_RE.test(t) || CHECK_TAIL_RE.test(t) || TAG_TAIL_RE.test(t);
+}
+
+/**
+ * A sentence from its last comma part that leads a question to its end, peeled:
+ * commas drop the framing ("Como arquiteta, ou mesmo antes disso, como que você
+ * faz…") and keep a list inside the question ("retries, timeouts, and idempotency").
+ * A hand-over at the end ("…Kafka, pode falar") is dropped first.
+ */
+function askingSpan(sentence) {
+    const parts = sentence.split(',');
+    while (parts.length > 1 && isHandover(peelLead(parts[parts.length - 1]))) parts.pop();
+    for (let i = parts.length - 1; i > 0; i--) {
+        const rest = peelLead(parts.slice(i).join(','));
+        if (rest && leadsQuestion(rest)) return rest;
+    }
+    return peelLead(parts.join(','));
+}
+
+/**
+ * The turn's question candidates, in order: { span, tier, check }, span the
+ * peeled asking span (no '?').
+ * Split on sentence ends and em-dashes, not commas: "with Go concurrency
+ * (goroutines, channels, context) in production?" stays whole (live eval q084).
+ */
+function questionCandidates(text) {
+    if (typeof text !== 'string') return [];
+    const trimmed = text.trim();
+    const out = [];
+    const re = /[^.!?;\n—]+/g;
+    let m;
+    while ((m = re.exec(trimmed)) !== null) {
+        const raw = m[0].trim();
+        if (!raw) continue;
+        const hasQuestionMark = trimmed[m.index + m[0].length] === '?';
+        const check = isCheckOrHandover(raw);
+        let span = askingSpan(raw);
+        // A check peels to nothing ("Beleza", "Ok"): keep it as said.
+        if (!span && check) span = raw;
+        if (!span) continue;
+        let tier = 0;
+        if (hasQuestionMark) tier = 1;
+        else if (leadsQuestion(span) || EMBEDDED_Q_RE.test(span)) tier = 2;
+        else if (hasContentCue(span)) tier = 3;
+        if (tier === 0) continue;
+        out.push({ span, tier, check });
+    }
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// Pure helper: extractQuestion (FR-006/FR-007/FR-009/FR-012)
+// Given a raw transcription turn, extract the most-specific interrogative
+// span: the Q: label, and the words the career search boosts.
+//
+// Algorithm (future-work item 9):
+//   guard: non-string → ''; trim; empty → ''
+//   rank the turn's question candidates (questionCandidates): tier 1 ends in
+//   '?', tier 2 is led by a wh-word / auxiliary (or embedded), tier 3 has a
+//   content cue only. Checks and hand-overs ("tudo bem?", "pode falar") lose
+//   to any real tier 1 or 2 candidate.
+//   take the highest tier present and the LAST clause within it, peeled;
+//   a check alone is its own label ("Beleza?")
+//   cue-only or no candidate → full trimmed text
+// So "…você diz escalada pelo quê? … menos garbage collector atuando," gives
+// the question, not the trailing fragment.
+//
+// Total / pure: never throws, never returns null/undefined. Non-empty input
+// always yields non-empty output (falls back to the full trimmed turn).
+// ---------------------------------------------------------------------------
+function extractQuestion(text) {
+    if (typeof text !== 'string') return '';
+    const trimmed = text.trim();
+    if (trimmed.length === 0) return '';
+
+    const candidates = questionCandidates(trimmed);
+    const pick = list => {
+        const top = Math.min(...list.map(c => c.tier));
+        return list.filter(c => c.tier === top).pop();
+    };
+    const real = candidates.filter(c => !c.check && c.tier <= 2);
+    const checks = candidates.filter(c => c.check && c.tier <= 2);
+    const best = real.length ? pick(real) : checks.length ? pick(checks) : null;
+    // Leading discourse markers stay peeled ("And where are you based" →
+    // "where are you based", G2); the '?' comes back when the turn had one.
+    if (best) return best.tier === 1 ? best.span + '?' : best.span;
+
+    // Fallback: full trimmed text (T3 cue-only, T4, T8 declarative, no strong signal)
+    return trimmed;
+}
+
+// ---------------------------------------------------------------------------
+// Pure helper: isSetupOnly (future-work item 9)
+// True when the turn announces a scenario and asks nothing yet: "Tudo bem?
+// Perfeito. Eu queria colocar um cenário, vamos imaginar que a gente tem um
+// endpoint que recebe um CSV…". A real session answered that with a whole
+// design two turns before the question. The caller holds the turn and quotes it
+// with the question that follows. A scenario with its question ("Imagine X.
+// How would you design it?") or with a task left after the setup words
+// ("imagine you are designing…") is not one.
+// ---------------------------------------------------------------------------
+const SETUP_RE = new RegExp(
+    '\\b(?:vamos imaginar|imagina que|imagine que|vamos supor que|suponha que|digamos que|' +
+    '(?:eu )?(?:queria|quero|vou) (?:te )?(?:colocar|dar|passar|propor|trazer) (?:um|1) cenario|' +
+    // "So let's say one specific member, but maybe you have an example…" asks.
+    'let\'?s say,? (?:for (?:example|instance),? )?(?:that )?(?:you|we|there)|' +
+    'imagine that|suppose that|picture this|here\'?s (?:the|a) scenario|' +
+    'let me (?:set up|give you|describe) (?:a|the) scenario)\\b',
+    'g'
+);
+
+// A task in the scenario itself: "imagine that you are designing…", "…precisa projetar".
+const SETUP_TASK_RE = /\b(?:design|build|implement|architect|scal|optimi[sz]|refactor|debug)(?:e|es|ed|ing)?\b|\b(?:projetar|desenhar|implementar|construir|otimizar|escalar|modelar)\b/;
+
+function isSetupOnly(text) {
+    if (typeof text !== 'string') return false;
+    const folded = foldPt(text);
+    if (!new RegExp(SETUP_RE.source).test(folded)) return false;
+    if (questionCandidates(text).some(c => !c.check && c.tier <= 2)) return false;
+    const rest = folded.replace(SETUP_RE, ' ');
+    return !hasContentCue(rest) && !SETUP_TASK_RE.test(rest);
+}
+
+// ---------------------------------------------------------------------------
+// Pure helper: isReportedOnly (future-work item 9)
+// True when every question of the turn sits inside reported or future speech:
+// "…they probably are going to ask, like, could you explain why this? How
+// would you change this?" A real session answered such a description of the
+// next round with a war story. A question that asks the candidate directly
+// ("tell me", "now", "me conta") or follows a pivot back to them ("but first",
+// "mas antes") is not reported.
+// ---------------------------------------------------------------------------
+const REPORTED_FRAME_RE = new RegExp(
+    // English: "they will ask", "they probably are going to ask", "maybe they will do, like"
+    '\\b(?:they|he|she|someone|somebody|the (?:interviewers?|team|client|panel|hiring manager))' +
+    '(?:\'ll)?(?:\\s+(?:will|might|may|could|would|can|are going to|is going to|are gonna|is gonna|gonna|probably|also|then|maybe|usually|often))+' +
+    '\\s+(?:ask|say|do|check|require|expect|want)\\b|' +
+    '\\b(?:they|he|she) (?:want|wants|would like|like) to (?:see|know|understand|hear)\\b|' +
+    '\\b(?:things|stuff) (?:that )?they (?:\\w+ ){0,2}(?:check|ask|look for|look at|want)\\b|' +
+    // Portuguese: "eles vão perguntar", "podem te perguntar", "eles querem ver"
+    '\\b(?:eles|elas|ele|ela|o pessoal|o time|a equipe|o gestor|o entrevistador|alguem)' +
+    '(?:\\s+(?:vao|vai|podem|pode|devem|deve|provavelmente|talvez|tambem|costumam|costuma))+' +
+    '\\s+(?:te |lhe )?(?:perguntar|pedir|questionar|dizer|falar|olhar|checar|avaliar|querer saber)\\b|' +
+    '\\b(?:vao|podem) te perguntar\\b|' +
+    '\\b(?:eles|elas|ele|ela) (?:querem|quer|gostam de|gosta de) (?:ver|saber|entender|ouvir)\\b|' +
+    '\\bcoisas que (?:eles|elas) (?:\\w+ ){0,2}(?:olham|checam|perguntam|avaliam)\\b',
+    'g'
+);
+// Back to the candidate after a reported frame.
+const PIVOT_RE = /\b(?:but first|before that|anyway|mas antes|antes disso|enfim|voltando)\b/g;
+// A question put to the candidate now, even after a frame.
+const DIRECT_RE = /\b(?:(?:tell|walk|give|show) (?:me|us)|me (?:conta|conte|fala|fale|explica|explique|diz|diga|mostra|mostre)|(?:right )?now|agora|today|hoje)\b/;
+
+function matchStarts(re, folded) {
+    const out = [];
+    const g = new RegExp(re.source, 'g');
+    let m;
+    while ((m = g.exec(folded)) !== null) {
+        out.push({ start: m.index, end: m.index + m[0].length });
+        if (m[0].length === 0) g.lastIndex++;
+    }
+    return out;
+}
+
+/** The turn has reported or future speech in it ("they will ask", "eles vão perguntar"). */
+function hasReportedFrame(text) {
+    return typeof text === 'string' && matchStarts(REPORTED_FRAME_RE, foldPt(text.trim())).length > 0;
+}
+
+function isReportedOnly(text) {
+    if (typeof text !== 'string') return false;
+    const trimmed = text.trim();
+    // Frames, pivots and candidates are all placed in the folded turn.
+    const folded = foldPt(trimmed);
+    const frames = matchStarts(REPORTED_FRAME_RE, folded);
+    if (frames.length === 0) return false;
+    const pivots = matchStarts(PIVOT_RE, folded);
+    // The questions proper; a bare cue ("explain your reasoning", advice) only when there are none.
+    const all = questionCandidates(trimmed).filter(c => !c.check);
+    const asked = all.filter(c => c.tier <= 2);
+    const real = asked.length ? asked : all;
+    if (real.length === 0) return false;
+    let from = 0;
+    return real.every(c => {
+        const span = foldPt(c.span);
+        const at = folded.indexOf(span, from);
+        const start = at < 0 ? folded.indexOf(span) : at;
+        if (start >= 0) from = start + span.length;
+        if (start < 0 || DIRECT_RE.test(span)) return false;
+        // The frame may open the clause itself: "eles vão perguntar coisas como: por que…?"
+        const frame = frames.filter(f => f.start < start + span.length).pop();
+        if (!frame) return false;
+        return !pivots.some(p => p.start >= frame.end && p.start < start);
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Pure helper: shouldTriggerAnswer (FR-001 + FR-004)
 // Decision-only: does not manage debounce or abort — orchestrator does that.
 // Returns false when:
 //   - speaker is not 'them' (case-insensitive mic gate)
 //   - text is only an acknowledgment or filler (isBackchannel)
+//   - text only sets up a scenario, or only quotes questions someone else
+//     will ask (isSetupOnly, isReportedOnly; future-work item 9)
 //   - text is not a likely question, and carries no career cue
 //   - normalized tail equals lastAnsweredTail (de-dup same question)
 // Returns true otherwise (including when inFlight with new tail — the caller
@@ -222,6 +446,8 @@ function shouldTriggerAnswer(speaker, text, lastAnsweredTail, inFlight, hasCaree
     if (typeof speaker !== 'string' || speaker.toLowerCase() !== 'them') return false;
     // Acknowledgments and fillers want no answer (R19)
     if (isBackchannel(text)) return false;
+    // A scenario still being set up, or the questions of someone else (item 9)
+    if (isSetupOnly(text) || isReportedOnly(text)) return false;
     // Question heuristic, widened by career cues (career FR-007)
     if (!isLikelyQuestion(text) && !hasCue(hasCareerCue, text)) return false;
     // De-dup: same normalized tail as last answered
@@ -242,4 +468,11 @@ module.exports = {
     isBackchannel,
     BACKCHANNEL_MAX_WORDS,
     endsWithConfirmationCheck,
+    isCheckOrHandover,
+    askingSpan,
+    questionCandidates,
+    extractQuestion,
+    isSetupOnly,
+    hasReportedFrame,
+    isReportedOnly,
 };

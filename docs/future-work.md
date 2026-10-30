@@ -11,7 +11,7 @@ One step at a time, each with its own plan, a fresh session per step. When a ste
 | Step | Item | Why here |
 |------|------|----------|
 | [x] 1 | 12. Confirmation one-liner in the wrong language | Small and isolated. It touches the same prompt as 10 and 11, so it goes first and sets up the prompt test and eval loop. |
-| [ ] 2 | 9. The extracted question picks the wrong span | First stage of the flow: it decides whether a turn is answered and which span goes to routing and the note search, so the evals of 10 and 11 run on the right questions. It also stops the answers to reported questions that produced the "not used" technology claim. |
+| [x] 2 | 9. The extracted question picks the wrong span | First stage of the flow: it decides whether a turn is answered and which span goes to routing and the note search, so the evals of 10 and 11 run on the right questions. It also stops the answers to reported questions that produced the "not used" technology claim. |
 | [ ] 3 | 10a. Prompt rule, temperature 0.2–0.3 on personal/ambiguous, "not used" list in the addendum (item 10, steps 1 and 4 first half) | The only HIGH item, and its cheap half. The "not used" list needs a `notUsed` field in the career KB manifest, which lives in the separate, private KB repo. |
 | [ ] 4 | 11. Answers too long | Same prompt. After 10a because the lower temperature already changes answer length; measured before 10a, the numbers would be stale. |
 | [ ] 5 | 14. The live check marks technical constants | `findUnsupported`. Before 10b: 10b needs its false-alarm rate measured, and that is not readable with this noise in. |
@@ -361,13 +361,13 @@ Found while sweeping for model-name rules, not related to the catalog:
 
 ## 9. Live Answer — the extracted question picks the wrong span
 
-**Status:** Pending. Found on 2026-10-28 reviewing a real Portuguese session (34 answers in `live_answers`); seen again on 2026-10-29 in an English session (18 answers, 3 of them to reported questions); not started. Step 2 of the work order at the top of this file.
+**Status:** Done — 2026-10-30, branch `2026-10-30-extracted-question-span` (step 2 of the work order at the top of this file). Found on 2026-10-28 reviewing a real Portuguese session (34 answers in `live_answers`); seen again on 2026-10-29 in an English session (18 answers, 3 of them to reported questions). See **Outcome** below.
 **Severity:** MEDIUM
-**Code:** `extractQuestion` (`src/features/listen/summary/summaryService.js:76`), the gate helpers in `src/features/listen/summary/questionGate.js`
+**Code:** `extractQuestion`, `questionCandidates`, `isSetupOnly` and `isReportedOnly` (`src/features/listen/summary/questionGate.js`); the held set-up and the reported rule in `summaryService.js`
 
 ### Summary
 
-The answer prompt quotes the whole interviewer turn (`makeLiveAnswer`, `asked = rec.turn`), so the model usually answers the right topic. But the extracted `question` also goes to `resolveCareerContext` → `getCareerContext(text, { question })`, so a wrong span **picks the route and the notes**, and it is the `Q:` label the panel and the history show.
+The answer prompt quotes the whole interviewer turn (`makeLiveAnswer`, `asked = rec.turn`), so the model usually answers the right topic. The extracted `question` is the `Q:` label the panel and the history show, and `getCareerContext(text, { question })` boosts its words in the note search. It does **not** pick the route: the router reads the whole turn (`router.decide(turnText)`, `src/features/common/career/index.js:368`). (This entry first said the span picked the route; checked on 2026-10-30.)
 
 `extractQuestion` keeps the **last clause with any signal**, strong or weak. A trailing fragment therefore beats a real question earlier in the turn, and a confirmation check or a hand-over phrase counts as a question.
 
@@ -393,11 +393,24 @@ The answer prompt quotes the whole interviewer turn (`makeLiveAnswer`, `asked = 
 
 ### Acceptance (when implemented)
 
-- [ ] The four shapes extract "você diz escalada pelo quê?", nothing (held), "o que é uma arquitetura MVC? / por que a gente quebra em 3 níveis?", and "Beleza?" or a one-line reply.
-- [ ] The scalability shape routes general, not personal.
-- [ ] A scenario set up over two or three turns produces one answer, after the question.
-- [ ] The three 2026-10-29 shapes (an explanation of the next round quoting the questions someone else will ask) produce no answer, in English and in Portuguese.
-- [ ] Existing `extractQuestion` and gate tests still pass; the live eval loses no question it answers today.
+- [x] The four shapes extract "você diz escalada pelo quê?", nothing (held), "o que é uma arquitetura MVC? / por que a gente quebra em 3 níveis?", and "Beleza?" or a one-line reply. (The fourth: a real question in the same turn now wins over "Beleza?"; the reply stays one line, item 12.)
+- [ ] The scalability shape routes general, not personal. **Not this item's to fix:** the route comes from the whole turn, so the span cannot change it. Measured, see **Outcome**; moved to item 13.
+- [x] A scenario set up over two or three turns produces one answer, after the question.
+- [x] The three 2026-10-29 shapes (an explanation of the next round quoting the questions someone else will ask) produce no answer, in English and in Portuguese.
+- [x] Existing `extractQuestion` and gate tests still pass; the live eval loses no question it answers today.
+
+### Outcome (2026-10-30)
+
+- **Ranking.** `questionCandidates` ranks the clauses: tier 1 ends in `?`, tier 2 is led by a question word or auxiliary, tier 3 is a cue only. `extractQuestion` takes the highest tier and, within it, the last clause. Checks ("tudo bem?"), statements ending in a tag ("…, não é?") and hand-overs ("pode falar") lose to any real tier 1 or 2 candidate, and are their own label when alone. A trailing hand-over is cut from its sentence. `extractQuestion` moved to `questionGate.js` (pure, so the replay uses it without Electron). `summaryService` re-exports it.
+- **Held set-up.** `isSetupOnly`: a scenario announced ("vamos imaginar que", "eu queria colocar um cenário", "let's say, for example, that you…", "imagine that") with no tier 1 or 2 question and no task left ("designing", "projetar"). Such a turn arms nothing and costs no Jev call. The next armed answer quotes it before its question (`record.turn`; up to 3 turns, from the last 120 s). Not done: firing on silence after a set-up. A scenario never followed by a question gets no answer.
+- **Reported questions.** `isReportedOnly`: every question of the turn sits after a frame of reported or future speech ("they will ask", "they probably are going to ask", "the things they check", "they want to see how", "eles vão perguntar", "podem te perguntar"). `shouldTriggerAnswer` returns false for these turns and for held set-ups, so the router gate follows. A question that addresses the candidate directly ("tell me", "now", "me conta") or comes after a pivot ("but first", "mas antes") is still answered. When a turn mixes both, the prompt gets one more line ("answer only what the interviewer asks the candidate now"). Otherwise the prompt is byte for byte unchanged.
+- **Replay** (both sessions, `--router jev`; the replay now passes `question` to `getCareerContext` as the app does, and mirrors the hold):
+  - 2026-10-28: armed 34 → 32, wasted `n` 1 → 0.
+  - 2026-10-29: armed 18 → 16, wasted `n` 3 → 0.
+  - No `y` newly missed in either.
+  - Over every them turn of the seven recorded sessions plus the live eval and KB question sets (746 texts), only five turns changed trigger: the four target shapes and one explanatory Portuguese turn (a "vamos imaginar" with rhetorical tags), now held.
+  - The live eval offline (`--only A`, stub LLM) is identical before and after: 17 pass.
+- **Scalability route.** The same turn routed `general` (Jev gave no route, regex fallback) in one replay run and `jev:personal@0.60` in the next. That is the value seen live. Jev reads the whole turn, so it is a routing case: see the note in item 13.
 
 ---
 
@@ -504,6 +517,11 @@ A turn about the candidate's AI setup ("you can arrive with your AI setup, your 
 1. Regex cues for the candidate's tools and way of working: "your setup", "your (AI) setup", "your skills", "the tools you use", "your workflow", "how you use AI", "seu setup", "suas skills", "como você usa IA".
 2. Add the shape to Jev's labeled set if it keeps routing general.
 3. Measure as in item 5: a small held-out set written before the change; count questions about the candidate routed general before and after.
+4. **The opposite error, from item 9 (2026-10-30).** Item 9 fixed the extracted span, but the route is still decided on the whole turn. Two technical questions in the 2026-10-28 replay route personal:
+   - the scalability turn ("escalável pelo quê?"): `jev:personal@0.60` in one run, regex fallback to `general` in another;
+   - a scenario question led by "você conhece algum recurso…" (regex `experience:pt-voce-habito`).
+
+   Add both shapes, anonymized, to item 5's held-out sets as general. Measure whether passing the extracted question to the router helps (`router.decide(turnText)`, `src/features/common/career/index.js:368`).
 
 ### Acceptance (when implemented)
 
