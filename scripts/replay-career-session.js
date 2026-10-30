@@ -18,8 +18,9 @@
 // Relative paths resolve against the KB. The files live with the KB, never in
 // this public repo (spec C5).
 //
-// For each them segment, in order, the app's own decisions: the backchannel and
-// question gates (questionGate.js), classifyTurn and Jev's asks for a
+// For each them segment, in order, the app's own decisions: the backchannel,
+// set-up and reported-question rules and the question gate (questionGate.js;
+// a held set-up is quoted with the next armed segment's answer), classifyTurn and Jev's asks for a
 // statement-form segment while Jev is on (hasCareerCue otherwise), the de-dup
 // tail, the debounce's drop on a low asks (wantsAnswer), and for an armed
 // segment getCareerContext with the follow-up state (prev) the live service keeps.
@@ -59,7 +60,15 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true
 
 const { createCareerModule } = require('../src/features/common/career');
 const { readConfig } = require('../src/features/common/career/jevRouter');
-const { isLikelyQuestion, isBackchannel, normalizeTail, shouldTriggerAnswer } = require('../src/features/listen/summary/questionGate');
+const {
+    isLikelyQuestion,
+    isBackchannel,
+    normalizeTail,
+    shouldTriggerAnswer,
+    isSetupOnly,
+    isReportedOnly,
+    extractQuestion,
+} = require('../src/features/listen/summary/questionGate');
 
 const ROUTES = ['personal', 'company', 'ambiguous', 'general'];
 const ROUTE_WAIT_MS = 800 + 250;
@@ -201,9 +210,9 @@ async function answerGenerator(args, kb, env) {
             status.kept = (status.kept || 0) + 1;
             return pick(a);
         },
-        async answer(said, seg, ctx) {
+        async answer(said, seg, ctx, turn = seg.text) {
             for (let attempt = 1; ; attempt++) {
-                const a = await this.once(said, seg, ctx);
+                const a = await this.once(said, seg, ctx, turn);
                 // A daily quota does not come back in seconds: stop asking, and --resume later.
                 if (a.status === 'error' && /per day|\((?:TPD|RPD)\)/i.test(a.error || '')) {
                     this.exhausted = true;
@@ -216,10 +225,10 @@ async function answerGenerator(args, kb, env) {
                 await sleep(20_000);
             }
         },
-        async once(said, seg, ctx) {
+        async once(said, seg, ctx, turn = seg.text) {
             payloads = [];
             const callsBefore = harness.calls.length;
-            const question = SummaryService.extractQuestion(seg.text);
+            const question = extractQuestion(seg.text);
             const context = { sources: ctx && Array.isArray(ctx.sources) ? ctx.sources : [], block: ctx && ctx.block ? ctx.block : '' };
             if (args.noLlm) {
                 status.context = (status.context || 0) + 1;
@@ -229,9 +238,9 @@ async function answerGenerator(args, kb, env) {
             let result = null;
             let error = null;
             try {
-                // The segment as the record's turn, as the app passes it: the prompt
-                // quotes it and the confirmation check reads it, not the extracted question.
-                const record = { turn: seg.text, question, status: null };
+                // The turn as the app passes it (the segment, after any held scenario):
+                // the prompt quotes it and the confirmation check reads it, not the extracted question.
+                const record = { turn, question, status: null };
                 result = await svc.makeLiveAnswer(said, null, { id: ++seq, question, career: ctx, record });
             } catch (err) {
                 error = err.userMessage || err.message;
@@ -275,6 +284,7 @@ async function main() {
     let lastTail = null;
     let activeCompany = null;
     let lastThem = null;        // { text, t }: the live service's lastThemTurn
+    let held = [];              // [{ text, t }]: the live service's heldSetup (item 9)
     let before = null;          // the segment before the current one
     const session = t => {
         const ss = {
@@ -325,6 +335,13 @@ async function main() {
         if (isBackchannel(s.text)) {
             gate = 'backchannel';
             r.backchannel++;
+        } else if (isSetupOnly(s.text)) {
+            // Held for the question that follows, which quotes it (item 9).
+            gate = 'setup';
+            held.push({ text: s.text, t: s.t });
+            if (held.length > 3) held.shift();
+        } else if (isReportedOnly(s.text)) {
+            gate = 'reported';
         } else if (!isLikelyQuestion(s.text) && mod.gateUsesJev()) {
             gate = 'router';
             const d = await mod.classifyTurn(s.text, session(s.t));
@@ -359,7 +376,11 @@ async function main() {
             r.armed[gate === 'router' ? 'byRouterGate' : 'byQuestionGate']++;
             if (label === 'n') r.wasted.push(s.i);
             lastTail = normalizeTail(s.text);
-            const ctx = await mod.getCareerContext(s.text, session(s.t), { routeBudgetMs: ROUTE_WAIT_MS });
+            // The turn the answer quotes: the scenario held in the last 120 s, then this segment.
+            const quoted = held.filter(h => s.t - h.t <= 120).map(h => h.text);
+            held = [];
+            const turn = quoted.length ? `${quoted.join(' ')} ${s.text}` : s.text;
+            const ctx = await mod.getCareerContext(s.text, { ...session(s.t), question: extractQuestion(s.text) }, { routeBudgetMs: ROUTE_WAIT_MS });
             const route = ctx ? ctx.route : 'general';
             const src = ctx ? (ctx.routeFallback ? `regex(${ctx.routeFallback})` : ctx.routeSource) : '-';
             inc(r.sources, src);
@@ -376,7 +397,7 @@ async function main() {
             line += ` route=${route} cue=${ctx && ctx.cue ? ctx.cue : '-'} src=${src}`;
             if (gen && (args.answersFor === 'armed' || label === 'y') && (!gen.exhausted || gen.has(s.i))) {
                 const kept = gen.kept(s.i);
-                const a = kept || await gen.answer(said.slice(), s, ctx);
+                const a = kept || await gen.answer(said.slice(), s, ctx, turn);
                 answerLines.set(s.i, JSON.stringify({ i: s.i, t: s.t, label, route, src, cue: ctx ? ctx.cue || null : null, ...a }));
                 // Every line so far plus the kept answers not reached yet, so a stopped run loses nothing.
                 const all = [...answerLines.entries()].sort((x, y) => x[0] - y[0]).map(e => e[1]);

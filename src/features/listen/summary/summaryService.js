@@ -16,17 +16,17 @@ function laDebug(...args) {
     if (LIVE_ANSWER_DEBUG) console.log(...args);
 }
 
-// The question gate (isLikelyQuestion, FR-002; shouldTriggerAnswer, FR-001/FR-004) lives in questionGate.js.
+// The question gate (isLikelyQuestion, FR-002; shouldTriggerAnswer, FR-001/FR-004) and
+// extractQuestion (FR-006) live in questionGate.js.
 const {
     isLikelyQuestion,
-    peelLead,
-    leadsQuestion,
-    hasContentCue,
-    EMBEDDED_Q_RE,
     normalizeTail,
     shouldTriggerAnswer,
     isBackchannel,
     endsWithConfirmationCheck,
+    isSetupOnly,
+    hasReportedFrame,
+    extractQuestion,
 } = require('./questionGate');
 // The question's language, named in the live answer prompt.
 const { answerLanguageRule, questionLanguage } = require('./questionLanguage');
@@ -48,6 +48,19 @@ const CHECK_RULE_WORDS = {
     },
 };
 
+// Added when the turn quotes questions someone else will ask, next to one put
+// to the candidate (future-work item 9): a real session answered "they will ask,
+// like, why this class? how would you change it?" with a war story. A turn with
+// only such questions never gets here (isReportedOnly).
+const REPORTED_RULE =
+    'Part of that turn quotes questions someone else will ask later, as examples. ' +
+    'Answer only what the interviewer asks the candidate now; if that is nothing, reply EXACTLY: PASSIVE';
+
+// Scenario set-up turns held for their question (item 9): at most this many,
+// quoted when the question comes within this window.
+const HELD_SETUP_MAX = 3;
+const HELD_SETUP_MS = 120_000;
+
 function confirmationCheckRule(turn) {
     const w = CHECK_RULE_WORDS[questionLanguage(turn)] || CHECK_RULE_WORDS.any;
     return (
@@ -57,97 +70,6 @@ function confirmationCheckRule(turn) {
         `such as ${w.examples}: no bullets, no summary of what was said. ` +
         'Speak as the candidate: never offer back what the interviewer offered. Otherwise answer as above.'
     );
-}
-
-// ---------------------------------------------------------------------------
-// Pure helper: extractQuestion (FR-006/FR-007/FR-009/FR-012)
-// Given a raw transcription turn, extract the most-specific interrogative
-// span. Reuses the four module-scope signal regexes and the clause-split /
-// discourse-marker-peel shape from isLikelyQuestion.
-//
-// Algorithm:
-//   guard: non-string → ''; trim; empty → ''
-//   split into clauses on sentence-boundary punctuation
-//   for each clause: peel discourse markers (LEAD_STRIP_RE), then test signals
-//   track the LAST signal-bearing clause (prefer '?'-ending, else CLAUSE_LEAD_RE/
-//   CONTENT_CUE_RE/EMBEDDED_Q_RE)
-//   return that peeled clause (discourse markers stripped), else full trimmed text
-//
-// Total / pure: never throws, never returns null/undefined. Non-empty input
-// always yields non-empty output (falls back to the full trimmed turn).
-// ---------------------------------------------------------------------------
-/**
- * A sentence from its last comma part that leads a question to its end, peeled:
- * commas drop the framing ("Como arquiteta, ou mesmo antes disso, como que você
- * faz…") and keep a list inside the question ("retries, timeouts, and idempotency").
- */
-function askingSpan(sentence) {
-    const parts = sentence.split(',');
-    for (let i = parts.length - 1; i > 0; i--) {
-        const rest = peelLead(parts.slice(i).join(','));
-        if (rest && leadsQuestion(rest)) return rest;
-    }
-    return peelLead(sentence);
-}
-
-function extractQuestion(text) {
-    if (typeof text !== 'string') return '';
-    const trimmed = text.trim();
-    if (trimmed.length === 0) return '';
-
-    // Split on sentence-boundary punctuation AND em-dash (—) to isolate
-    // interrogative spans from filler prefixes like "the thing I wanted to ask is —".
-    // Not on commas: "with Go concurrency (goroutines, channels, context) in
-    // production?" would surface as "context) in production?" (live eval q084).
-    const clauses = trimmed.split(/[.!?;\n—]+/);
-    let lastClause = null;      // peeled interrogative span (discourse markers stripped)
-    let lastHasQ = false;       // did the original segment end with '?'
-    let hasStrongSignal = false; // true when signal is '?' or CLAUSE_LEAD_RE (not cue-only)
-
-    for (let i = 0; i < clauses.length; i++) {
-        const rawClause = clauses[i].trim();
-        if (rawClause.length === 0) continue;
-
-        // Determine if the '?' follows this clause in the original text.
-        // We check if the character immediately after this clause segment is '?'.
-        const segEnd = trimmed.indexOf(rawClause) + rawClause.length;
-        const nextChar = trimmed[segEnd] || '';
-        const hasQuestionMark = nextChar === '?';
-
-        // Peel leading discourse markers and comma framing
-        const c = askingSpan(rawClause);
-
-        if (c.length === 0) continue;
-
-        const hasClauseLead = leadsQuestion(c);
-        const hasCue = hasContentCue(c);
-        const hasEmbedded = EMBEDDED_Q_RE.test(c);
-
-        // Strong signal: explicit '?' or CLAUSE_LEAD_RE (wh-word / auxiliary leading
-        // an interrogative clause). These reliably identify extractable spans.
-        // Weak signal: CONTENT_CUE_RE / EMBEDDED_Q_RE — still a question signal but
-        // insufficient to extract a sub-span; the full turn is the best label.
-        const isStrong = hasQuestionMark || hasClauseLead || hasEmbedded;
-        const isWeak = hasCue;
-        const isSignal = isStrong || isWeak;
-
-        if (isSignal) {
-            lastClause = c;
-            lastHasQ = hasQuestionMark;
-            if (isStrong) hasStrongSignal = true;
-        }
-    }
-
-    if (lastClause !== null && hasStrongSignal) {
-        // Strong signal: return the narrowest interrogative span with leading
-        // discourse markers peeled (LEAD_STRIP_RE) — so "And where are you based"
-        // surfaces as "where are you based", dropping filler from the Q: label (G2).
-        // Append '?' if the original turn had one after this clause.
-        return lastHasQ ? lastClause + '?' : lastClause;
-    }
-
-    // Fallback: full trimmed text (T3 cue-only, T4, T8 declarative, no strong signal)
-    return trimmed;
 }
 
 // ---------------------------------------------------------------------------
@@ -264,6 +186,9 @@ class SummaryService {
         // The interviewer's last segment ({ text, ts }): the router reads it as
         // the start of a question the STT split (R19).
         this.lastThemTurn = null;
+        // Turns that only set up a scenario ([{ text, ts }], future-work item 9):
+        // the answer to the question that follows quotes them.
+        this.heldSetup = [];
 
         // Which live lanes run (spec 2026-10-12-live-features-toggle): 'both',
         // 'answer' or 'insights'. Set by listenService at session start and
@@ -347,6 +272,8 @@ class SummaryService {
         const route = meta.career && meta.career.route;
         const check = endsWithConfirmationCheck(asked) && route !== 'personal' && route !== 'ambiguous';
         if (check) laDebug('[live-answer] turn ends with a confirmation check — one-line rule added');
+        const reported = hasReportedFrame(asked);
+        if (reported) laDebug('[live-answer] turn quotes questions someone else will ask — reported rule added');
         const messages = [
             { role: 'system', content: systemPrompt },
             {
@@ -362,6 +289,7 @@ class SummaryService {
                     'keeping technical terms as they are commonly said. ' +
                     'If there is no clear question or nothing useful to answer, reply EXACTLY: PASSIVE' +
                     (check ? `\n\n${confirmationCheckRule(asked)}` : '') +
+                    (reported ? `\n\n${REPORTED_RULE}` : '') +
                     (career && career.addendum ? `\n\n${career.addendum}` : ''),
             },
         ];
@@ -599,6 +527,14 @@ class SummaryService {
             return;
         }
 
+        // Item 9: a turn that only sets up a scenario waits for its question,
+        // costs no Jev call, and is quoted with that question when it comes.
+        if (fromThem && isSetupOnly(text)) {
+            this.heldSetup = this.heldSetup.concat({ text, ts: Date.now() }).slice(-HELD_SETUP_MAX);
+            laDebug('[live-answer] trigger gate: scenario set-up only → held for the next question');
+            return;
+        }
+
         // Career FR-007 with Jev (spec 2026-10-13): a them turn with no question
         // form ("your biggest weakness") waits for the Jev route instead of the
         // regex cue. Questions keep the synchronous path below.
@@ -761,7 +697,7 @@ class SummaryService {
             const answerId = ++this.answerSeq;
             const question = extractQuestion(text);
             // What the history keeps of this answer (spec 2026-10-13-live-answer-history).
-            const record = { sessionId: this.currentSessionId, askedAt: Date.now(), turn: text, question, status: null };
+            const record = { sessionId: this.currentSessionId, askedAt: Date.now(), turn: this.takeHeldSetup(text), question, status: null };
 
             try {
                 // Career context is resolved after the controller exists, so a newer
@@ -810,6 +746,17 @@ class SummaryService {
                 this.saveLiveAnswer(record);
             }
         }, 800);
+    }
+
+    /**
+     * The turn the answer quotes: the scenario set up in the held turns of the
+     * last HELD_SETUP_MS, then the question (item 9). Empties the hold.
+     */
+    takeHeldSetup(text) {
+        const now = Date.now();
+        const held = this.heldSetup.filter(h => now - h.ts <= HELD_SETUP_MS).map(h => h.text);
+        this.heldSetup = [];
+        return held.length ? `${held.join(' ')} ${text}` : text;
     }
 
     /**
@@ -899,6 +846,7 @@ class SummaryService {
         this.careerPrev = null;
         this.activeCompany = null;
         this.lastThemTurn = null;
+        this.heldSetup = [];
         this.answerEpoch++;
         console.log('[live-answer] resetLiveAnswer — debounce cleared, in-flight aborted');
     }
