@@ -12,8 +12,8 @@ One step at a time, each with its own plan, a fresh session per step. When a ste
 |------|------|----------|
 | [x] 1 | 12. Confirmation one-liner in the wrong language | Small and isolated. It touches the same prompt as 10 and 11, so it goes first and sets up the prompt test and eval loop. |
 | [x] 2 | 9. The extracted question picks the wrong span | First stage of the flow: it decides whether a turn is answered and which span goes to routing and the note search, so the evals of 10 and 11 run on the right questions. It also stops the answers to reported questions that produced the "not used" technology claim. |
-| [x] 3 | 10a. Prompt rule, temperature 0.2–0.3 on personal/ambiguous, "not used" list in the addendum (item 10, steps 1 and 4 first half) | The only HIGH item, and its cheap half. The "not used" list needs a `notUsed` field in the career KB manifest, which lives in the separate, private KB repo. **Merged with two measurements pending** (item 10, "Pending from 10a"): step 4 starts by running them. |
-| [ ] 4 | 11. Answers too long | Same prompt. After 10a because the lower temperature already changes answer length; measured before 10a, the numbers would be stale. |
+| [x] 3 | 10a. Prompt rule, temperature 0.2–0.3 on personal/ambiguous, "not used" list in the addendum (item 10, steps 1 and 4 first half) | The only HIGH item, and its cheap half. The "not used" list needs a `notUsed` field in the career KB manifest, which lives in the separate, private KB repo. **Merged with two measurements pending** (item 10, "Pending from 10a"): moved to the start of step 5, with item 11's. |
+| [x] 4 | 11. Answers too long | Same prompt. After 10a because the lower temperature already changes answer length; measured before 10a, the numbers would be stale. **Merged with its measurements pending** (item 11, "Pending from 11"), together with 10a's: step 5 starts by running both. |
 | [ ] 5 | 14. The live check marks technical constants | `findUnsupported`. Before 10b: 10b needs its false-alarm rate measured, and that is not readable with this noise in. |
 | [ ] 6 | 10b. Neighborhood check and marking "not used" technologies (item 10, steps 2–3 and 4 second half) | Same file as 14, now without the noise. |
 | [ ] 7 | 13. A question about the candidate's own setup routes general | After 9, since the 2026-10-29 turn had no question and should then get no answer; what is left are real questions about the setup. Uses item 5's held-out sets, so it can share a plan with item 5. |
@@ -477,14 +477,15 @@ No answer came back empty or PASSIVE, and no new kind of error appeared. Median 
 
 The prompt cuts the "not used" claims but does not stop a real number from moving to another result. That needs the check (10b).
 
-### Pending from 10a (run at the start of step 4)
+### Pending from 10a (run at the start of step 5, with item 11's)
 
-The Groq daily token limit ran out mid-measurement. When it is back:
+The Groq daily token limit ran out mid-measurement, and again at the start of step 4. When it is back:
 
 1. **Finish the replay of the shipped wording.** Six turns are missing:
    - command: `--resume` on the same `--arm` lists, with `--answers-for arm`;
    - record the three columns above for all ten turns.
 2. **Run the live eval with the judge**, `npm run eval:live -- --text --only A,B --judge`, and compare with the run before 10a (23 pass, 9 warn, judge mean 4.87, routes 10/12).
+   - Run it on commit `77ee925` (a worktree): 10a's code and the word counts, without item 11's prompt. Leave out the two length checks when counting pass and warn.
    - Accept: judge mean not lower, same route accuracy.
    - If the mean drops (answers drier under the stricter rule), revisit the wording before item 11 builds on it.
    - The same run gives item 11 its "before" lengths.
@@ -493,7 +494,7 @@ The Groq daily token limit ran out mid-measurement. When it is back:
 
 ## 11. Live Answer — answers too long to read while speaking
 
-**Status:** Pending. Found on 2026-10-28 in the same session as item 9; not started.
+**Status:** Done, measurements pending — 2026-10-30, branch `2026-10-30-live-answer-length` (step 4 of the work order). The prompt budget shipped before any real-LLM run, because the Groq daily limit was used up; see "Pending from 11". Found on 2026-10-28 in the same session as item 9.
 **Severity:** MEDIUM
 **Code:** the user message in `makeLiveAnswer` (`src/features/listen/summary/summaryService.js`, "Answer … directly and concisely", `maxTokens: 900`). Related: `specs/2026-06-01-interview-live-answer-readability/`.
 
@@ -513,6 +514,40 @@ Of the 34 answers in the session: median about 100 words, 17 over 100, 7 over 15
 - [ ] On the live eval and the next real session, median ≤ 60 words and no answer over 120, with no rise in empty or cut answers.
 - [ ] No answer ends with a summary paragraph.
 - [ ] If the panel fold ships: an answer over 3 bullets shows the headline and 3 bullets, and the rest opens on click.
+
+### What shipped (2026-10-30)
+
+- **The budget, in the live answer instruction** (`LENGTH_RULE`, `summaryService.js`): a one-sentence headline, at most 3 bullets of about 15 words, about 60 words in all, no closing summary, no extra headed sections, no restating the question. Every route gets it.
+  - `pickle_glass_analysis` is unchanged: it is closed, and Ask shares it.
+- **`maxTokens` stays 900.** Proposed step 2 is answered by the code: `groq.js` adds 1024 tokens for gpt-oss's reasoning, and Anthropic raises the cap to 4096 on models that think, so the cap does not end an answer inside the reasoning.
+- **Word counts:**
+  - the live eval warns on an answer over 120 words, and on bullets followed by a closing paragraph;
+  - its aggregates give the words' median and maximum;
+  - the session replay and `export-live-answers.js` print the same.
+- **The panel fold (step 3) did not ship.** It comes back only if the "after" measurement still shows answers over 120 words.
+
+**Before, the real sessions** (`export-live-answers.js`):
+
+| Session | Answers | Median words | Longest | Over 120 |
+|---|---|---|---|---|
+| 2026-10-28, Portuguese | 34 | 95 | 275 | 10 |
+| 2026-10-29, English | 17 | 72 | 182 | 3 |
+
+**Unchanged, without an LLM:**
+- `npm test`;
+- the live eval offline: no check, label or route differences beyond the two new checks.
+
+### Pending from 11 (run at the start of step 5)
+
+1. **Replay before and after, gpt-oss-120b, one answer per turn.**
+   - Turns: the ten career turns of 10a's replay, plus the seven Portuguese turns whose real answers ran over 120 words.
+   - Before: commit `77ee925`, in a worktree. After: `main`.
+   - Record the median and longest answer, the count over 120, the answers that end in a paragraph, and any empty, cut or PASSIVE answer.
+   - This replay also gives 10a's "after" table.
+2. **The live eval with the judge**, `--text --only A,B --judge`, after (on `main`), against 10a's run before (on `77ee925`, "Pending from 10a").
+3. **Accept** with: median ≤ 60, nothing over 120, no closing paragraph, no rise in empty, cut or PASSIVE answers, and a judge mean not lower.
+   - If the judge mean drops, or the median lands over 70, revise the wording once and measure again, before step 5's own change. Answers too thin to carry a career result are the risk to look for.
+   - If it still misses, record the result here and propose the fold.
 
 ---
 

@@ -58,6 +58,21 @@ describe('answerShape', () => {
     });
 });
 
+describe('answerWords and endsWithClosingParagraph (item 11)', () => {
+    it('counts the words read aloud, without markdown marks or code', () => {
+        assert.equal(c.answerWords('**Use an idempotency key.**\n\n- store it — once\n1. return the saved result'), 11);
+        assert.equal(c.answerWords('Like this:\n```js\nconst a = 1;\n```\n- done'), 3);
+        assert.equal(c.answerWords('Sim.'), 1);
+        assert.equal(c.answerWords(''), 0);
+    });
+    it('marks bullets followed by a paragraph, not bullets alone or prose alone', () => {
+        assert.equal(c.endsWithClosingParagraph('Yes.\n\n- one\n- two\n\nIn short, it depends.'), true);
+        assert.equal(c.endsWithClosingParagraph('Yes.\n\n- one\n- two\n'), false);
+        assert.equal(c.endsWithClosingParagraph('Yes, a single line.'), false);
+        assert.equal(c.endsWithClosingParagraph('Yes.\n- one\n```\nx\n```'), false);
+    });
+});
+
 describe('mentions', () => {
     it('matches substrings and /regex/ terms without accents or case', () => {
         const m = c.mentions('A réplica atrasada (LAG) é lida do primário; 4,870 ms', ['replica', 'lag', '/4[.,\\s]?870/', 'sharding']);

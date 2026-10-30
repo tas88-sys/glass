@@ -94,6 +94,7 @@ const PHASE_NAMES = {
     G: 'G · Each model alone',
 };
 const FIRST_TOKEN_BUDGET_MS = 6000;   // from the final transcript to the first token (warn)
+const MAX_ANSWER_WORDS = 120;        // a Live Answer the candidate can still read while speaking (warn, item 11)
 const WER_LIMIT = 0.25;               // warn
 
 function parseArgs(argv) {
@@ -234,6 +235,14 @@ function liveMetrics(ex, a, extra = {}) {
     };
 }
 
+/** Words read aloud and a closing paragraph (future-work item 11); add(name, ok, level, detail). */
+function lengthChecks(item, text, add) {
+    const words = checks.answerWords(text);
+    item.metrics.words = words;
+    add(`at most ${MAX_ANSWER_WORDS} words`, words <= MAX_ANSWER_WORDS, 'warn', `${words} words`);
+    add('no closing paragraph', !checks.endsWithClosingParagraph(text), 'warn', 'bullets, then a paragraph');
+}
+
 function sttChecks(item, ex, said, audio) {
     if (!audio) return;
     const ref = Array.isArray(said) ? said.join(' ') : said;
@@ -280,6 +289,7 @@ function evalLiveTurn(t, ex, { phase, audio, privateItem = false, ctx = {} }) {
             item.metrics.headlineWords = shape.headlineWords;
             item.metrics.bullets = shape.bullets;
             item.checks.push(answerCheck(ctx, 'short headline first (≤ 20 words)', shape.headlineWords <= 20, 'warn', `${shape.headlineWords} words`));
+            lengthChecks(item, a.text, (...r) => item.checks.push(answerCheck(ctx, ...r)));
             if (expect.lang) {
                 const got = checks.detectLang(a.text);
                 item.checks.push(answerCheck(ctx, `answer in ${expect.lang}`, got === expect.lang || got === 'unknown', 'warn', `detected ${got}`));
@@ -395,6 +405,7 @@ async function phaseB(ctx, session, questions, lang) {
         if (a?.text) {
             const got = checks.detectLang(a.text);
             item.checks.push(answerCheck(ctx, `answer in ${langTag(lang)}`, got === langTag(lang) || got === 'unknown', 'warn', `detected ${got}`));
+            lengthChecks(item, a.text, (...r) => item.checks.push(answerCheck(ctx, ...r)));
         }
         if (item.metrics.firstTokenMs != null) item.checks.push(check(`first token ≤ ${FIRST_TOKEN_BUDGET_MS / 1000}s after the turn`, item.metrics.firstTokenMs <= FIRST_TOKEN_BUDGET_MS, 'warn', `${item.metrics.firstTokenMs} ms`));
         item.checks.push(check('no error', !ex.answers.some(x => x.status === 'error'), 'fail', ex.answers.filter(x => x.status === 'error').map(x => x.error).join('; ')));
@@ -719,6 +730,7 @@ async function phaseG(ctx) {
                 live.checks.push(check('names a key term', m.found.length > 0, 'fail', m.found.length ? `found ${m.found.join(', ')}` : `none of ${MODEL_LIVE_TURN.mentionsAny.join(', ')}`));
                 const shape = checks.answerShape(a.text);
                 live.checks.push(check('short headline first (≤ 20 words)', shape.headlineWords <= 20, 'warn', `${shape.headlineWords} words`));
+                lengthChecks(live, a.text, (...r) => live.checks.push(check(...r)));
                 const got = checks.detectLang(a.text);
                 live.checks.push(check('answer in en', got === 'en' || got === 'unknown', 'warn', `detected ${got}`));
             }
@@ -922,6 +934,7 @@ function aggregate(items) {
         totalMs: { p50: q(pick('totalMs'), 0.5), p95: q(pick('totalMs'), 0.95) },
         audioToFinalMs: { p50: q(pick('audioToFinalMs'), 0.5), p95: q(pick('audioToFinalMs'), 0.95) },
         werMean: wers.length ? Math.round((wers.reduce((s, x) => s + x, 0) / wers.length) * 1000) / 1000 : null,
+        words: { p50: q(pick('words'), 0.5), max: q(pick('words'), 1), over: pick('words').filter(w => w > MAX_ANSWER_WORDS).length },
         fallbacks: items.reduce((s, i) => s + (i.metrics?.resets || 0), 0),
         answeredBy: models,
         careerRoutes: b.length ? `${routeOk}/${b.length}` : null,

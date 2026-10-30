@@ -61,6 +61,17 @@ const REPORTED_RULE =
 const HELD_SETUP_MAX = 3;
 const HELD_SETUP_MS = 120_000;
 
+// How a live answer is shaped. A budget, because the candidate reads it aloud
+// while speaking (future-work item 11): with "concisely" alone a real session
+// had a median of ~100 words, up to 275, and long answers ended in a summary.
+const LENGTH_RULE =
+    'Answer the interviewer\'s most recent question directly and briefly: the candidate reads it aloud while speaking. ' +
+    'Start with a short headline answer (one sentence). ' +
+    'When there are supporting points, add at most 3 as a markdown bullet list ' +
+    '(each point on its own line beginning with "- "), each about 15 words: about 60 words in all. ' +
+    'No closing summary, no extra headed sections, no restating the question. ' +
+    'Do not fabricate bullets for a trivial one-line answer. ';
+
 // With notes injected (future-work item 10): at 0.7 answers moved a real
 // metric onto another result or employer. Other answers keep 0.7.
 const CAREER_TEMPERATURE = 0.3;
@@ -284,11 +295,7 @@ class SummaryService {
                 role: 'user',
                 content:
                     (asked ? `The interviewer's most recent question, their last turn in the transcript: "${asked}"` + '\n\n' : '') +
-                    'Answer the interviewer\'s most recent question directly and concisely. ' +
-                    'Start with a short headline answer (one sentence). ' +
-                    'When there are supporting points, format them as a markdown bullet list ' +
-                    '(each point on its own line beginning with "- "). ' +
-                    'Do not fabricate bullets for a trivial one-line answer. ' +
+                    LENGTH_RULE +
                     answerLanguageRule(asked) +
                     'keeping technical terms as they are commonly said. ' +
                     'If there is no clear question or nothing useful to answer, reply EXACTLY: PASSIVE' +
