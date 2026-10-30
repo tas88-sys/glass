@@ -12,7 +12,7 @@ One step at a time, each with its own plan, a fresh session per step. When a ste
 |------|------|----------|
 | [x] 1 | 12. Confirmation one-liner in the wrong language | Small and isolated. It touches the same prompt as 10 and 11, so it goes first and sets up the prompt test and eval loop. |
 | [x] 2 | 9. The extracted question picks the wrong span | First stage of the flow: it decides whether a turn is answered and which span goes to routing and the note search, so the evals of 10 and 11 run on the right questions. It also stops the answers to reported questions that produced the "not used" technology claim. |
-| [ ] 3 | 10a. Prompt rule, temperature 0.2–0.3 on personal/ambiguous, "not used" list in the addendum (item 10, steps 1 and 4 first half) | The only HIGH item, and its cheap half. The "not used" list needs a `notUsed` field in the career KB manifest, which lives in the separate, private KB repo. |
+| [x] 3 | 10a. Prompt rule, temperature 0.2–0.3 on personal/ambiguous, "not used" list in the addendum (item 10, steps 1 and 4 first half) | The only HIGH item, and its cheap half. The "not used" list needs a `notUsed` field in the career KB manifest, which lives in the separate, private KB repo. **Merged with two measurements pending** (item 10, "Pending from 10a"): step 4 starts by running them. |
 | [ ] 4 | 11. Answers too long | Same prompt. After 10a because the lower temperature already changes answer length; measured before 10a, the numbers would be stale. |
 | [ ] 5 | 14. The live check marks technical constants | `findUnsupported`. Before 10b: 10b needs its false-alarm rate measured, and that is not readable with this noise in. |
 | [ ] 6 | 10b. Neighborhood check and marking "not used" technologies (item 10, steps 2–3 and 4 second half) | Same file as 14, now without the noise. |
@@ -416,7 +416,7 @@ The answer prompt quotes the whole interviewer turn (`makeLiveAnswer`, `asked = 
 
 ## 10. Live Answer career context — a real number attached to the wrong claim
 
-**Status:** Pending. Found on 2026-10-28 in the same session as item 9; not started. Do it in two steps: prompt and temperature first, then the check (steps 3 and 6 of the work order at the top of this file).
+**Status:** 10a done — 2026-10-30, branch `2026-10-30-career-answer-grounding` (step 3 of the work order), with two measurements pending (below). 10b (the check) pending, step 6. Found on 2026-10-28 in the same session as item 9.
 **Severity:** HIGH (the candidate may say a wrong number about their own work)
 **Code:** `findUnsupported` (`src/features/common/career/answerCheck.js`), `checkAnswer` (`src/features/common/career/index.js:584`), `makeLiveAnswer` (`src/features/listen/summary/summaryService.js`, `temperature: 0.7`)
 
@@ -448,10 +448,46 @@ Neither was marked: the live check (FR-021) passes a number when it appears **an
 
 ### Acceptance (when implemented)
 
-- [ ] A replay of the concurrency turn with the same notes states no metric the notes tie to a different result.
+- [ ] A replay of the concurrency turn with the same notes states no metric the notes tie to a different result. **Not met by 10a:** with the rule, the turn still moved a cost reduction onto response time (see Outcome). Left to 10b.
 - [ ] Unit cases for `findUnsupported`: same number, same employer, different result → flagged; same number and result → not flagged; Portuguese answer with an English note → not flagged.
 - [ ] False-alarm rate of the neighborhood check measured on the eval set and recorded here before it ships.
-- [ ] A personal answer naming a technology from the "not used" list is marked in the panel; with the addendum line, a replay of the 2026-10-29 turn names none.
+- [ ] A personal answer naming a technology from the "not used" list is marked in the panel (10b). The other half is met: with the addendum line, the 2026-10-29 turn (forced with `--arm`, since item 9's gate now skips it) names none.
+
+### Outcome of 10a (2026-10-30)
+
+What shipped:
+- The career addendum keeps each number with the result, project and employer the notes give it, forbids estimates, and places a technology at an employer only when the notes say it was used there.
+- The manifest takes `notUsed`. The addendum names those technologies as never used: at most 30, not on an invitation.
+- Answers with notes injected run at temperature 0.3; the others keep 0.7. The prompt for answers without notes is byte-identical.
+
+**Unchanged:**
+- `npm test`;
+- the live eval offline, regex and Jev: zero check, label, route or notes differences;
+- the KB eval: identical apart from timings.
+
+**Replay with real LLM.** Ten career turns of the two sessions, one answer each, `openai/gpt-oss-120b`, counted by hand against the notes block:
+
+| Run | Answers | Metric invented or moved to another result | Technique placed at an employer from a hypothetical note | "Not used" technology claimed |
+|---|---|---|---|---|
+| Before (main, 0.7) | 10 | 4 | 1 | 1 |
+| First rule wording, 0.3, list | 10 | 3 | 1 | 0 |
+| Shipped wording, partial | 4 (3 career) | 1 | 0 | 0 |
+
+No answer came back empty or PASSIVE, and no new kind of error appeared. Median length: 94 words before, 95 with the first wording.
+
+The prompt cuts the "not used" claims but does not stop a real number from moving to another result. That needs the check (10b).
+
+### Pending from 10a (run at the start of step 4)
+
+The Groq daily token limit ran out mid-measurement. When it is back:
+
+1. **Finish the replay of the shipped wording.** Six turns are missing:
+   - command: `--resume` on the same `--arm` lists, with `--answers-for arm`;
+   - record the three columns above for all ten turns.
+2. **Run the live eval with the judge**, `npm run eval:live -- --text --only A,B --judge`, and compare with the run before 10a (23 pass, 9 warn, judge mean 4.87, routes 10/12).
+   - Accept: judge mean not lower, same route accuracy.
+   - If the mean drops (answers drier under the stricter rule), revisit the wording before item 11 builds on it.
+   - The same run gives item 11 its "before" lengths.
 
 ---
 
