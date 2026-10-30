@@ -653,7 +653,10 @@ What shipped, in `findUnsupported`:
 
 **Unchanged:**
 - `npm test`;
-- the live eval offline (regex): no check, label or route differences.
+- the live eval offline (regex), 137 items: same score (130 pass, 6 warn, and the 1 fail already on `main`, a stress turn the gate misses), no label or route differences.
+  - Two answers swapped the first-token timing check.
+  - Two answers got one note chunk fewer.
+  - The check runs after the answer, so it cannot change either, and the notes did not change between the runs.
 
 ---
 
