@@ -10,7 +10,7 @@ One step at a time, each with its own plan, a fresh session per step. When a ste
 
 | Step | Item | Why here |
 |------|------|----------|
-| [ ] 1 | 12. Confirmation one-liner in the wrong language | Small and isolated. It touches the same prompt as 10 and 11, so it goes first and sets up the prompt test and eval loop. |
+| [x] 1 | 12. Confirmation one-liner in the wrong language | Small and isolated. It touches the same prompt as 10 and 11, so it goes first and sets up the prompt test and eval loop. |
 | [ ] 2 | 9. The extracted question picks the wrong span | First stage of the flow: it decides whether a turn is answered and which span goes to routing and the note search, so the evals of 10 and 11 run on the right questions. It also stops the answers to reported questions that produced the "not used" technology claim. |
 | [ ] 3 | 10a. Prompt rule, temperature 0.2–0.3 on personal/ambiguous, "not used" list in the addendum (item 10, steps 1 and 4 first half) | The only HIGH item, and its cheap half. The "not used" list needs a `notUsed` field in the career KB manifest, which lives in the separate, private KB repo. |
 | [ ] 4 | 11. Answers too long | Same prompt. After 10a because the lower temperature already changes answer length; measured before 10a, the numbers would be stale. |
@@ -469,9 +469,9 @@ Of the 34 answers in the session: median about 100 words, 17 over 100, 7 over 15
 
 ## 12. Live Answer — the one-line reply to a confirmation check comes out in Portuguese
 
-**Status:** Pending. Found on 2026-10-29 in an English session; not started. Small and isolated: step 1 of the work order at the top of this file.
+**Status:** Done on 2026-10-30, branch `2026-10-30-confirmation-check-language` (step 1 of the work order at the top of this file). The rule picks its tags and examples by the turn's language: spec FR-004 and D5.
 **Severity:** LOW (visible, easy to fix)
-**Code:** `CONFIRMATION_CHECK_RULE` and its use in `makeLiveAnswer` (`src/features/listen/summary/summaryService.js`); `answerLanguageRule` (`src/features/listen/summary/questionLanguage.js`). Spec: `specs/2026-10-16-confirmation-check-answer/`.
+**Code:** `confirmationCheckRule` (was `CONFIRMATION_CHECK_RULE`) and its use in `makeLiveAnswer` (`src/features/listen/summary/summaryService.js`); `answerLanguageRule` (`src/features/listen/summary/questionLanguage.js`). Spec: `specs/2026-10-16-confirmation-check-answer/`.
 
 ### Summary
 
@@ -484,8 +484,8 @@ Two English turns ending in "Okay?" ("… in case we decide to advance with you 
 
 ### Acceptance (when implemented)
 
-- [ ] A unit case: an English turn ending in "Okay?" builds a rule whose example is in English; a Portuguese one keeps the Portuguese example.
-- [ ] Live eval: an English confirmation check gets an English one-liner.
+- [x] A unit case: an English turn ending in "Okay?" builds a rule whose example is in English; a Portuguese one keeps the Portuguese example.
+- [x] Live eval: an English confirmation check gets an English one-liner (`en-next-steps`: "Sounds good, thanks."; the 2026-10-29 session replayed: "Sounds good, thank you." for both turns).
 
 ---
 

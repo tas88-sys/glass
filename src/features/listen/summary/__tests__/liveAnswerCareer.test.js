@@ -721,8 +721,10 @@ describe('R19: backchannels, Jev\'s asks and the interviewer segment before', ()
 // candidate is following adds one rule to the instruction; every other turn's
 // messages stay byte for byte.
 describe('confirmation check rule', () => {
-    const { CONFIRMATION_CHECK_RULE } = SummaryService;
+    const { confirmationCheckRule } = SummaryService;
     const CHECK_TURN = 'Depois vem a etapa técnica e a conversa com o gestor, está bem?';
+    const CHECK_TURN_EN = 'Next week you talk with the hiring manager, and then we send you the feedback, okay?';
+    const CONFIRMATION_CHECK_RULE = confirmationCheckRule(CHECK_TURN);
     const userOf = calls => calls.at(-1)[1].content;
 
     afterEach(() => { llmCalls.length = 0; });
@@ -758,7 +760,37 @@ describe('confirmation check rule', () => {
     });
 
     it('the rule asks for one sentence in the candidate\'s voice', () => {
-        assert.match(CONFIRMATION_CHECK_RULE, /ONE short sentence the candidate would say back/);
-        assert.match(CONFIRMATION_CHECK_RULE, /never offer back what the interviewer offered/);
+        for (const turn of [CHECK_TURN, CHECK_TURN_EN, 'Okay?']) {
+            assert.match(confirmationCheckRule(turn), /ONE short sentence the candidate would say back/);
+            assert.match(confirmationCheckRule(turn), /never offer back what the interviewer offered/);
+        }
+    });
+
+    // FR-004: the tags and examples follow the turn's language.
+    it('a Portuguese turn: the 2026-10-16 text, byte for byte', () => {
+        assert.equal(
+            CONFIRMATION_CHECK_RULE,
+            'That turn ends by only checking that the candidate is following ("está bem?", "ok?", "certo?"). ' +
+            'If the rest of it tells the candidate something (about the interviewer, the company, the role, the process or the next steps) ' +
+            'rather than asking about their experience or knowledge, reply with ONE short sentence the candidate would say back, ' +
+            'such as "Perfeito, ficou claro." or "Combinado, obrigado.": no bullets, no summary of what was said. ' +
+            'Speak as the candidate: never offer back what the interviewer offered. Otherwise answer as above.'
+        );
+    });
+
+    it('an English turn: English tags and examples, no Portuguese one to copy', async () => {
+        const { s } = service();
+        await s.makeLiveAnswer(HISTORY, undefined, { id: 1, question: CHECK_TURN_EN, career: GENERAL });
+        const user = userOf(llmCalls);
+        assert.ok(user.endsWith(`reply EXACTLY: PASSIVE\n\n${confirmationCheckRule(CHECK_TURN_EN)}`));
+        assert.match(user, /"Perfect, that's clear\."/);
+        assert.match(user, /would say back in English,/);
+        assert.doesNotMatch(user, /Perfeito|Combinado|está bem/);
+    });
+
+    it('a turn of unknown language: one example of each, in the interviewer\'s language', () => {
+        const rule = confirmationCheckRule('Okay?');
+        assert.match(rule, /"Perfect, that's clear\." or "Perfeito, ficou claro\."/);
+        assert.match(rule, /in the language the interviewer is speaking/);
     });
 });

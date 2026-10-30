@@ -29,18 +29,35 @@ const {
     endsWithConfirmationCheck,
 } = require('./questionGate');
 // The question's language, named in the live answer prompt.
-const { answerLanguageRule } = require('./questionLanguage');
+const { answerLanguageRule, questionLanguage } = require('./questionLanguage');
 
 // Added to the live answer instruction when the turn ends only checking that the
 // candidate is following (spec 2026-10-16-confirmation-check-answer). A real
 // session got a three-bullet recap for "…, está bem?", and "you can reach me any
 // time" offered back in the interviewer's voice.
-const CONFIRMATION_CHECK_RULE =
-    'That turn ends by only checking that the candidate is following ("está bem?", "ok?", "certo?"). ' +
-    'If the rest of it tells the candidate something (about the interviewer, the company, the role, the process or the next steps) ' +
-    'rather than asking about their experience or knowledge, reply with ONE short sentence the candidate would say back, ' +
-    'such as "Perfeito, ficou claro." or "Combinado, obrigado.": no bullets, no summary of what was said. ' +
-    'Speak as the candidate: never offer back what the interviewer offered. Otherwise answer as above.';
+// The tags and examples follow the turn's language (FR-004): an English session
+// copied the Portuguese example word for word. The Portuguese text is the one
+// the 2026-10-16 replay verified, byte for byte.
+const CHECK_RULE_WORDS = {
+    pt: { tags: '("está bem?", "ok?", "certo?")', lang: '', examples: '"Perfeito, ficou claro." or "Combinado, obrigado."' },
+    en: { tags: '("okay?", "right?", "all right?")', lang: ' in English', examples: '"Perfect, that\'s clear." or "Sounds good, thanks."' },
+    any: {
+        tags: '("okay?", "right?", "está bem?", "certo?")',
+        lang: ' in the language the interviewer is speaking',
+        examples: '"Perfect, that\'s clear." or "Perfeito, ficou claro."',
+    },
+};
+
+function confirmationCheckRule(turn) {
+    const w = CHECK_RULE_WORDS[questionLanguage(turn)] || CHECK_RULE_WORDS.any;
+    return (
+        `That turn ends by only checking that the candidate is following ${w.tags}. ` +
+        'If the rest of it tells the candidate something (about the interviewer, the company, the role, the process or the next steps) ' +
+        `rather than asking about their experience or knowledge, reply with ONE short sentence the candidate would say back${w.lang}, ` +
+        `such as ${w.examples}: no bullets, no summary of what was said. ` +
+        'Speak as the candidate: never offer back what the interviewer offered. Otherwise answer as above.'
+    );
+}
 
 // ---------------------------------------------------------------------------
 // Pure helper: extractQuestion (FR-006/FR-007/FR-009/FR-012)
@@ -344,7 +361,7 @@ class SummaryService {
                     answerLanguageRule(asked) +
                     'keeping technical terms as they are commonly said. ' +
                     'If there is no clear question or nothing useful to answer, reply EXACTLY: PASSIVE' +
-                    (check ? `\n\n${CONFIRMATION_CHECK_RULE}` : '') +
+                    (check ? `\n\n${confirmationCheckRule(asked)}` : '') +
                     (career && career.addendum ? `\n\n${career.addendum}` : ''),
             },
         ];
@@ -1182,4 +1199,4 @@ module.exports.shouldTriggerAnswer = shouldTriggerAnswer;
 module.exports.normalizeTail = normalizeTail;
 module.exports.parseLiveAnswerSseLine = parseLiveAnswerSseLine;
 module.exports.extractQuestion = extractQuestion;
-module.exports.CONFIRMATION_CHECK_RULE = CONFIRMATION_CHECK_RULE;
+module.exports.confirmationCheckRule = confirmationCheckRule;

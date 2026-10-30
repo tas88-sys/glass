@@ -12,7 +12,8 @@
         { "id": "pt-imperative", "speaker": "them", "text": "Me explica a diferença entre consistência forte e consistência eventual.", "expect": { "answer": "yes", "mentionsAny": ["eventual", "forte", "consisten"], "lang": "pt" }, "note": "a request with no question mark: the gate's cues are English, so this checks the Portuguese path" },
         { "id": "pt-split", "speaker": "them", "text": ["Pensando nessa plataforma de pagamentos com picos enormes na Black Friday.", "Como você escalaria o banco de dados?"], "pauseMs": 2600, "expect": { "answer": "yes", "mentionsAny": ["shard", "partic", "replica", "réplica", "cache", "leitura"], "lang": "pt" }, "note": "context first, the question after a pause longer than the STT turn debounce: two them turns, one answer" },
         { "id": "pt-followup", "speaker": "them", "text": "E se uma das réplicas ficar atrasada?", "expect": { "answer": "yes", "mentionsAny": ["replica", "réplica", "lag", "atras", "leitura", "consisten", "primar"], "lang": "pt" } },
-        { "id": "pt-behavioral", "speaker": "them", "text": "Me fala sobre uma vez em que você discordou de uma decisão técnica do seu time.", "expect": { "answer": "yes", "lang": "pt" }, "note": "statement-form behavioral prompt: needs the career cue (or STT punctuation) to pass the gate" }
+        { "id": "pt-behavioral", "speaker": "them", "text": "Me fala sobre uma vez em que você discordou de uma decisão técnica do seu time.", "expect": { "answer": "yes", "lang": "pt" }, "note": "statement-form behavioral prompt: needs the career cue (or STT punctuation) to pass the gate" },
+        { "id": "pt-next-steps", "speaker": "them", "text": "Depois desta conversa vem a etapa técnica e a gente te manda o retorno até sexta, está bem?", "expect": { "answer": "yes", "lang": "pt" }, "note": "tells and ends only checking: one short sentence back, not a recap (spec 2026-10-16-confirmation-check-answer)" }
       ]
     },
     {
@@ -25,7 +26,8 @@
         { "id": "en-monologue", "speaker": "them", "text": "We have about forty engineers split across four product teams in two time zones.", "expect": { "answer": "no" } },
         { "id": "en-me-question", "speaker": "me", "text": "Can I ask how on-call works on your team?", "expect": { "answer": "no" } },
         { "id": "en-design", "speaker": "them", "text": "How would you design a rate limiter for a public API?", "expect": { "answer": "yes", "mentionsAny": ["token bucket", "sliding window", "leaky bucket", "fixed window", "redis"], "lang": "en" } },
-        { "id": "en-followup", "speaker": "them", "text": "And how would that work across several regions?", "expect": { "answer": "yes", "mentionsAny": ["region", "global", "sync", "replicat", "eventual", "consisten"], "lang": "en" } }
+        { "id": "en-followup", "speaker": "them", "text": "And how would that work across several regions?", "expect": { "answer": "yes", "mentionsAny": ["region", "global", "sync", "replicat", "eventual", "consisten"], "lang": "en" } },
+        { "id": "en-next-steps", "speaker": "them", "text": "After this call you'll meet the hiring manager, and we'll send you feedback by Friday, okay?", "expect": { "answer": "yes", "lang": "en" }, "note": "the same check in English: the one sentence back must be in English, not the rule's Portuguese example (FR-004)" }
       ]
     }
   ],
