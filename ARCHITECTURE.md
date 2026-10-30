@@ -858,8 +858,8 @@ flowchart TB
   wait.
 - **Requests** (`buildRequest`, `anthropic.js:186`, pure). What the model takes comes from the
   model catalog (§9.1), that is the Models API or an override in Settings:
-  - It never sends `temperature`, `top_p`, `top_k` or `thinking`. Every lane passes
-    `temperature: 0.7`, and Opus, Sonnet and Haiku 5.5 reject a non-default value with a 400.
+  - It never sends `temperature`, `top_p`, `top_k` or `thinking`. The lanes pass
+    `temperature: 0.7` (Live Answer 0.3 when notes are injected), and Opus, Sonnet and Haiku 5.5 reject a non-default value with a 400.
   - `output_config.effort` is sent only to a model whose `capabilities.effort` lists levels
     (`effortLevels`, `:32`; Haiku 4.5 and Sonnet 4.5 reject effort with a 400). The level is the
     caller's, else `ANTHROPIC_EFFORT`, else `low`, among the model's levels. A model the catalog

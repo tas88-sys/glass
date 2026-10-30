@@ -20,6 +20,7 @@ export interface Manifest {
     exclude: string[];            // exclude wins; .git/** and node_modules/** always excluded
     core: string[];               // canonical card file(s), never chunked
     entities?: string[];          // employer/project names from the CV: personal cues for the router (FR-006)
+    notUsed?: string[];           // technologies the candidate has never used: the addendum says so (FR-014, future-work item 10)
     companies?: {
         root: string;
         skip?: string[];
@@ -203,7 +204,7 @@ export declare function buildContextBlock(input: {
     maxChars?: number;            // default 6000; the core card is never cut (FR-013)
 }): { block: string; sources: string[]; chunkIds: string[]; cardOverCap: boolean };   // cardOverCap → caller logs E33
 
-export declare function buildAddendum(activeCompany: string | null): string;
+export declare function buildAddendum(activeCompany: string | null, opts?: { invite?: boolean; notUsed?: string[] }): string;
 
 /**
  * Block format (FR-013). The card is labeled so the addendum can refer to it:
@@ -224,8 +225,12 @@ export declare function globToRegExp(glob: string): RegExp;
 // Prompt addendum (FR-014) — exact text appended to the user message when
 // context is injected. {COMPANY_CLAUSE} is '' or
 // " The interviewer's company is <name>." when an active company is known.
+// {NOT_USED_CLAUSE} is '' or, when the manifest lists notUsed names and the
+// turn is not an invitation (R21), " The candidate has never used: <names>.
+// Never claim experience with them; if asked, say so and name the closest one
+// the notes give." (names trimmed, once each case-insensitively, at most 30).
 // ---------------------------------------------------------------------------
-export declare const ADDENDUM_TEMPLATE: `The interviewer is asking about the candidate's own background. Answer in first person as the candidate, using only facts from the User-provided context; the canonical facts override the other notes when they disagree. Do not invent employers, dates, metrics or projects. For "tell me about a time" questions, pick one story and give situation, action and result in a few bullets. The notes were prepared for different companies: never present a company named in them as the interviewer's company.{COMPANY_CLAUSE} Answer in the language the interviewer used.`;
+export declare const ADDENDUM_TEMPLATE: `The interviewer is asking about the candidate's own background. Answer in first person as the candidate, using only facts from the User-provided context; the canonical facts override the other notes when they disagree. Do not invent employers, dates, metrics, technologies or projects. Every number must come from the notes with the same result, project and employer it has there; never move a number to another result, project or employer, and never estimate one: when the notes give no number for that result, state the result without a number. Say a technology or technique was used at an employer only when the notes say it was used there, not when they mention it as an idea or a general answer. For "tell me about a time" questions, pick one story and give situation, action and result in a few bullets. The notes were prepared for different companies: never present a company named in them as the interviewer's company.{COMPANY_CLAUSE}{NOT_USED_CLAUSE} Answer in the language the interviewer used.`;
 
 // ---------------------------------------------------------------------------
 // IPC payload extension (FR-015, FR-021)

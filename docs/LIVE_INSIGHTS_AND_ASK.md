@@ -374,6 +374,7 @@ is used from outside). Spec: `specs/2026-10-11-live-answer-career-context/`.
   "version": 1,
   "core": ["about-me/canonical-facts.md"],
   "entities": ["Example Corp", "Example Project"],
+  "notUsed": ["Example Broker", "Example Framework"],
   "include": ["**/*.md", "**/*.txt"],
   "exclude": ["chats/**", "drafts/**"],
   "companies": { "root": "interviews", "skip": ["shared"], "aliases": { "acme": ["Acme", "Acme Labs"] } }
@@ -384,6 +385,9 @@ is used from outside). Spec: `specs/2026-10-11-live-answer-career-context/`.
   other notes, and is never chunked.
 - `entities`: employer and project names. Jev gets them as `candidate_names`; the regex
   fallback treats them as personal cues.
+- `notUsed`: technologies you have never used. Whenever notes are injected, the addendum lists
+  them (at most 30) and tells the model never to claim them, and, if asked, to say so and name the
+  closest one the notes give.
 - `include`/`exclude`: globs (`*`, `**`, `?`). Exclude wins; `.git` and `node_modules` are always
   excluded.
 - `companies`: each folder under `root` is one company's prep. Its chunks are tagged with the
@@ -417,8 +421,11 @@ the flagged record would otherwise take the slot of the file's correction.
    - The ambiguous route injects only above a threshold.
 3. **Inject.** The card plus up to six chunks, capped at 9,000 characters, go into the prompt's
    existing *User-provided context* slot (`getSystemPrompt`'s `customPrompt`). A first-person
-   addendum is appended to the user message. On the `general` route, or when nothing is found,
-   the prompt is byte-identical to the pre-feature one.
+   addendum is appended to the user message: it keeps each number with the result, project and
+   employer the notes give it, and places a technology at an employer only when the notes say it was
+   used there. With notes, the
+   answer is asked at temperature 0.3 (0.7 otherwise), since at 0.7 it embellished their facts. On
+   the `general` route, or when nothing is found, the prompt is byte-identical to the pre-feature one.
 4. **Show.** The note titles ride on that answer's `live-answer-update` payloads as `sources`.
    `LiveAnswerView` shows them as a muted "from: …" line under the question.
 5. **Check.** When the answer finishes, every number in it (compared by value, so `1,000`, `1.000`

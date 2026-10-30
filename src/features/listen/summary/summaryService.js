@@ -61,6 +61,10 @@ const REPORTED_RULE =
 const HELD_SETUP_MAX = 3;
 const HELD_SETUP_MS = 120_000;
 
+// With notes injected (future-work item 10): at 0.7 answers moved a real
+// metric onto another result or employer. Other answers keep 0.7.
+const CAREER_TEMPERATURE = 0.3;
+
 function confirmationCheckRule(turn) {
     const w = CHECK_RULE_WORDS[questionLanguage(turn)] || CHECK_RULE_WORDS.any;
     return (
@@ -308,7 +312,7 @@ class SummaryService {
             apiKey: modelInfo.apiKey,
             model: modelInfo.model,
             keys: modelInfo.keys,
-            temperature: 0.7,
+            temperature: career ? CAREER_TEMPERATURE : 0.7,
             maxTokens: 900,
             usePortkey: modelInfo.provider === 'openai-glass',
             portkeyVirtualKey: modelInfo.provider === 'openai-glass' ? modelInfo.apiKey : undefined,

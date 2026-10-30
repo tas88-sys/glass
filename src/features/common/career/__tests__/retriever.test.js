@@ -14,7 +14,7 @@ const assert = require('node:assert/strict');
 const { fuseAndFilter, passesAmbiguousThreshold, RRF_K, LIST_DEPTH, MAX_PER_FILE } = require('../retriever');
 const { buildVectorIndex } = require('../vectorIndex');
 const {
-    buildContextBlock, buildAddendum, BLOCK_CARD_LABEL, ADDENDUM_TEMPLATE, CARD_SOURCE, MAX_BLOCK_CHARS,
+    buildContextBlock, buildAddendum, BLOCK_CARD_LABEL, ADDENDUM_TEMPLATE, INVITE_ADDENDUM, CARD_SOURCE, MAX_BLOCK_CHARS,
 } = require('../contextBuilder');
 
 const mk = (i, extra = {}) => ({
@@ -325,18 +325,43 @@ describe('buildContextBlock (FR-013)', () => {
 });
 
 describe('buildAddendum (FR-014)', () => {
-    it('without a company: the template with an empty clause', () => {
-        assert.equal(buildAddendum(null), ADDENDUM_TEMPLATE.replace('{COMPANY_CLAUSE}', ''));
+    const fill = (company, notUsed) => ADDENDUM_TEMPLATE.replace('{COMPANY_CLAUSE}', company).replace('{NOT_USED_CLAUSE}', notUsed);
+
+    it('without a company: the template with empty clauses', () => {
+        assert.equal(buildAddendum(null), fill('', ''));
         assert.match(buildAddendum(null), /interviewer's company\. Answer in the language/);
     });
 
     it('with a company: names it once', () => {
         const a = buildAddendum('Bridge');
-        assert.equal(a, ADDENDUM_TEMPLATE.replace('{COMPANY_CLAUSE}', " The interviewer's company is Bridge."));
+        assert.equal(a, fill(" The interviewer's company is Bridge.", ''));
     });
 
     it('matches the contract text', () => {
         assert.equal(ADDENDUM_TEMPLATE,
-            "The interviewer is asking about the candidate's own background. Answer in first person as the candidate, using only facts from the User-provided context; the canonical facts override the other notes when they disagree. Do not invent employers, dates, metrics or projects. For \"tell me about a time\" questions, pick one story and give situation, action and result in a few bullets. The notes were prepared for different companies: never present a company named in them as the interviewer's company.{COMPANY_CLAUSE} Answer in the language the interviewer used.");
+            "The interviewer is asking about the candidate's own background. Answer in first person as the candidate, using only facts from the User-provided context; the canonical facts override the other notes when they disagree. Do not invent employers, dates, metrics, technologies or projects. Every number must come from the notes with the same result, project and employer it has there; never move a number to another result, project or employer, and never estimate one: when the notes give no number for that result, state the result without a number. Say a technology or technique was used at an employer only when the notes say it was used there, not when they mention it as an idea or a general answer. For \"tell me about a time\" questions, pick one story and give situation, action and result in a few bullets. The notes were prepared for different companies: never present a company named in them as the interviewer's company.{COMPANY_CLAUSE}{NOT_USED_CLAUSE} Answer in the language the interviewer used.");
+    });
+
+    it('lists the technologies the candidate never used, once each, after the company (item 10)', () => {
+        const a = buildAddendum('Bridge', { notUsed: ['Tidewire', 'Ferrous', 'tidewire', ' Ferrous '] });
+        assert.equal(a, fill(
+            " The interviewer's company is Bridge.",
+            ' The candidate has never used: Tidewire, Ferrous. Never claim experience with them; if asked, say so and name the closest one the notes give.',
+        ));
+    });
+
+    it('caps the never-used list at 30 names', () => {
+        const names = Array.from({ length: 40 }, (_, i) => `Tool${i}`);
+        const a = buildAddendum(null, { notUsed: names });
+        assert.match(a, /Tool29\. Never claim/);
+        assert.ok(!/Tool30/.test(a));
+    });
+
+    it('an empty or missing list, or an invitation, adds no never-used line', () => {
+        assert.equal(buildAddendum(null, { notUsed: [] }), fill('', ''));
+        assert.equal(buildAddendum(null, { notUsed: [' ', 3, null] }), fill('', ''));
+        const invite = buildAddendum('Bridge', { invite: true, notUsed: ['Tidewire'] });
+        assert.ok(!/never used/.test(invite));
+        assert.equal(invite, fill(" The interviewer's company is Bridge.", '') + INVITE_ADDENDUM);
     });
 });
