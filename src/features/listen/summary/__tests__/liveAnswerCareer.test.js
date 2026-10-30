@@ -68,10 +68,11 @@ const realCareer = require('../../../common/career');
 // Today's user instruction, copied verbatim from makeLiveAnswer (with the
 // language line the live eval asked for). SC-005 compares against it byte for byte.
 const TODAY_USER =
-    'Answer the interviewer\'s most recent question directly and concisely. ' +
+    'Answer the interviewer\'s most recent question directly and briefly: the candidate reads it aloud while speaking. ' +
     'Start with a short headline answer (one sentence). ' +
-    'When there are supporting points, format them as a markdown bullet list ' +
-    '(each point on its own line beginning with "- "). ' +
+    'When there are supporting points, add at most 3 as a markdown bullet list ' +
+    '(each point on its own line beginning with "- "), each about 15 words: about 60 words in all. ' +
+    'No closing summary, no extra headed sections, no restating the question. ' +
     'Do not fabricate bullets for a trivial one-line answer. ' +
     'Write the answer in the language that question was asked in (English for English, Portuguese for Portuguese), even when earlier turns or notes are in another language, ' +
     'keeping technical terms as they are commonly said. ' +
@@ -194,6 +195,21 @@ describe('item 10: a lower temperature when notes are injected', () => {
         await s.makeLiveAnswer(HISTORY, undefined, { id: 2, question: 'q', career: { ...PERSONAL, block: '' } });
         await s.makeLiveAnswer(HISTORY, undefined, { id: 3, question: 'q', career: null });
         assert.deepEqual(llmOpts.map(o => o.temperature), [0.7, 0.7, 0.7]);
+    });
+});
+
+describe('item 11: a length budget on every route', () => {
+    it('general and personal both ask for at most 3 bullets, about 60 words, no closing summary; the cap stays 900', async () => {
+        const { s } = service();
+        await s.makeLiveAnswer(HISTORY, undefined, { id: 1, question: 'q', career: GENERAL });
+        await s.makeLiveAnswer(HISTORY, undefined, { id: 2, question: 'q', career: PERSONAL });
+        for (const call of llmCalls) {
+            const user = call.find(m => m.role === 'user').content;
+            assert.match(user, /at most 3 as a markdown bullet list/);
+            assert.match(user, /about 60 words in all/);
+            assert.match(user, /No closing summary/);
+        }
+        assert.deepEqual(llmOpts.map(o => o.maxTokens), [900, 900]);
     });
 });
 

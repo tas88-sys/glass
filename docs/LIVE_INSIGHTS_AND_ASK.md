@@ -247,6 +247,13 @@ turn removed the misses. The panel's question label comes from `extractQuestion`
 sentence ends and drops comma framing ("Como arquiteta, …, como que você faz…") but keeps a list
 inside the question ("retries, timeouts, and idempotency").
 
+The instruction also sets a length budget, since the candidate reads the answer aloud while speaking:
+a one-sentence headline, at most 3 bullets of about 15 words, about 60 words in all, with no closing
+summary, no extra headed sections and no restating of the question (future-work item 11). With only
+"concisely", a real session's answers had a median of about 100 words and ended in a summary
+paragraph. `maxTokens` stays at 900: Groq adds 1024 tokens for gpt-oss's reasoning, so the cap does
+not cut an answer.
+
 When the turn ends only checking that the candidate is following ("…as próximas etapas são essas,
 está bem?", "…, ok?", "…, certo?"), the instruction gets one more rule (spec
 `2026-10-16-confirmation-check-answer`). If the turn tells something (the company, the role, the
@@ -702,6 +709,8 @@ TTS (Gemini, cached) → 100 ms PCM chunks → SttService (Deepgram/Gemini live)
   - the answer in a different language from the question;
   - a fallback to another model;
   - a long headline;
+  - an answer over 120 words, or bullets followed by a closing paragraph (the report's aggregates
+    give the words' median and maximum);
   - `unverified` marks.
 - **`--judge`** has a Gemini model score each answer from 1 to 5, with a rubric for each kind. For
   career answers it also checks that the answer agrees with the notes it was given. The score is
