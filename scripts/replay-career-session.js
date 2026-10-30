@@ -229,7 +229,10 @@ async function answerGenerator(args, kb, env) {
             let result = null;
             let error = null;
             try {
-                result = await svc.makeLiveAnswer(said, null, { id: ++seq, question, career: ctx });
+                // The segment as the record's turn, as the app passes it: the prompt
+                // quotes it and the confirmation check reads it, not the extracted question.
+                const record = { turn: seg.text, question, status: null };
+                result = await svc.makeLiveAnswer(said, null, { id: ++seq, question, career: ctx, record });
             } catch (err) {
                 error = err.userMessage || err.message;
             }

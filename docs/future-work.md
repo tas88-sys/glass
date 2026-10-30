@@ -4,6 +4,28 @@ Deferred enhancements that are intentionally **out of scope for their current ve
 
 ---
 
+## Work order for items 9 to 15 (agreed on 2026-10-30)
+
+One step at a time, each with its own plan, a fresh session per step. When a step is done, tick it here, set the item's **Status** to Done with the date and branch, and start the next session from this list.
+
+| Step | Item | Why here |
+|------|------|----------|
+| [x] 1 | 12. Confirmation one-liner in the wrong language | Small and isolated. It touches the same prompt as 10 and 11, so it goes first and sets up the prompt test and eval loop. |
+| [ ] 2 | 9. The extracted question picks the wrong span | First stage of the flow: it decides whether a turn is answered and which span goes to routing and the note search, so the evals of 10 and 11 run on the right questions. It also stops the answers to reported questions that produced the "not used" technology claim. |
+| [ ] 3 | 10a. Prompt rule, temperature 0.2–0.3 on personal/ambiguous, "not used" list in the addendum (item 10, steps 1 and 4 first half) | The only HIGH item, and its cheap half. The "not used" list needs a `notUsed` field in the career KB manifest, which lives in the separate, private KB repo. |
+| [ ] 4 | 11. Answers too long | Same prompt. After 10a because the lower temperature already changes answer length; measured before 10a, the numbers would be stale. |
+| [ ] 5 | 14. The live check marks technical constants | `findUnsupported`. Before 10b: 10b needs its false-alarm rate measured, and that is not readable with this noise in. |
+| [ ] 6 | 10b. Neighborhood check and marking "not used" technologies (item 10, steps 2–3 and 4 second half) | Same file as 14, now without the noise. |
+| [ ] 7 | 13. A question about the candidate's own setup routes general | After 9, since the 2026-10-29 turn had no question and should then get no answer; what is left are real questions about the setup. Uses item 5's held-out sets, so it can share a plan with item 5. |
+| [ ] 8 | 15. STT terms heard as other words | Independent, lowest severity, costliest to measure (audio eval before and after). Can move into any gap. |
+
+Notes for the plans:
+
+- **Replay of the 2026-10-28 and 2026-10-29 sessions.** Items 9, 10, 11 and 14 accept against a replay of those sessions with their notes. Build it in step 2 and reuse it after. It runs locally only, outside this repo: the turns and the notes are private and this repo is public. Only anonymized cases go into the repo's tests.
+- **Item 13's acceptance changes with item 9.** Item 9 says the 2026-10-29 setup turn gets no answer (no question in it); item 13 used that same turn as its personal-route case. In step 7, replace it with a direct question about the setup.
+
+---
+
 ## 1. Live Answer lane — auto-answer can fire before the interviewer finishes
 
 **Tracking issue:** [tas88-sys/glass#3](https://github.com/tas88-sys/glass/issues/3)
@@ -339,7 +361,7 @@ Found while sweeping for model-name rules, not related to the catalog:
 
 ## 9. Live Answer — the extracted question picks the wrong span
 
-**Status:** Pending. Found on 2026-10-28 reviewing a real Portuguese session (34 answers in `live_answers`); seen again on 2026-10-29 in an English session (18 answers, 3 of them to reported questions); not started. Suggested order: first of items 9 to 11, since it also fixes a wrong route.
+**Status:** Pending. Found on 2026-10-28 reviewing a real Portuguese session (34 answers in `live_answers`); seen again on 2026-10-29 in an English session (18 answers, 3 of them to reported questions); not started. Step 2 of the work order at the top of this file.
 **Severity:** MEDIUM
 **Code:** `extractQuestion` (`src/features/listen/summary/summaryService.js:76`), the gate helpers in `src/features/listen/summary/questionGate.js`
 
@@ -381,7 +403,7 @@ The answer prompt quotes the whole interviewer turn (`makeLiveAnswer`, `asked = 
 
 ## 10. Live Answer career context — a real number attached to the wrong claim
 
-**Status:** Pending. Found on 2026-10-28 in the same session as item 9; not started. Do it in two steps: prompt and temperature first, then the check.
+**Status:** Pending. Found on 2026-10-28 in the same session as item 9; not started. Do it in two steps: prompt and temperature first, then the check (steps 3 and 6 of the work order at the top of this file).
 **Severity:** HIGH (the candidate may say a wrong number about their own work)
 **Code:** `findUnsupported` (`src/features/common/career/answerCheck.js`), `checkAnswer` (`src/features/common/career/index.js:584`), `makeLiveAnswer` (`src/features/listen/summary/summaryService.js`, `temperature: 0.7`)
 
@@ -447,9 +469,9 @@ Of the 34 answers in the session: median about 100 words, 17 over 100, 7 over 15
 
 ## 12. Live Answer — the one-line reply to a confirmation check comes out in Portuguese
 
-**Status:** Pending. Found on 2026-10-29 in an English session; not started. Small and isolated: a good first task.
+**Status:** Done on 2026-10-30, branch `2026-10-30-confirmation-check-language` (step 1 of the work order at the top of this file). The rule picks its tags and examples by the turn's language: spec FR-004 and D5.
 **Severity:** LOW (visible, easy to fix)
-**Code:** `CONFIRMATION_CHECK_RULE` and its use in `makeLiveAnswer` (`src/features/listen/summary/summaryService.js`); `answerLanguageRule` (`src/features/listen/summary/questionLanguage.js`). Spec: `specs/2026-10-16-confirmation-check-answer/`.
+**Code:** `confirmationCheckRule` (was `CONFIRMATION_CHECK_RULE`) and its use in `makeLiveAnswer` (`src/features/listen/summary/summaryService.js`); `answerLanguageRule` (`src/features/listen/summary/questionLanguage.js`). Spec: `specs/2026-10-16-confirmation-check-answer/`.
 
 ### Summary
 
@@ -462,8 +484,8 @@ Two English turns ending in "Okay?" ("… in case we decide to advance with you 
 
 ### Acceptance (when implemented)
 
-- [ ] A unit case: an English turn ending in "Okay?" builds a rule whose example is in English; a Portuguese one keeps the Portuguese example.
-- [ ] Live eval: an English confirmation check gets an English one-liner.
+- [x] A unit case: an English turn ending in "Okay?" builds a rule whose example is in English; a Portuguese one keeps the Portuguese example.
+- [x] Live eval: an English confirmation check gets an English one-liner (`en-next-steps`: "Sounds good, thanks."; the 2026-10-29 session replayed: "Sounds good, thank you." for both turns).
 
 ---
 
@@ -485,7 +507,7 @@ A turn about the candidate's AI setup ("you can arrive with your AI setup, your 
 
 ### Acceptance (when implemented)
 
-- [ ] The 2026-10-29 turn, anonymized, routes personal and gets the setup note.
+- [ ] A direct question about the candidate's setup, anonymized, routes personal and gets the setup note. (Not the 2026-10-29 turn itself: it has no question, and after item 9 it gets no answer.)
 - [ ] On item 5's held-out sets, no question about the code on screen moves to personal (the live-coding guard there still holds).
 
 ---
