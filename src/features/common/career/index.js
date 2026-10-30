@@ -488,7 +488,7 @@ function createCareerModule(options = {}) {
         if (!built.block) return done(hits, vectorNote, 'inject=no(empty)');
 
         result.block = built.block;
-        result.addendum = buildAddendum(activeCompany, { invite: result.invite });
+        result.addendum = buildAddendum(activeCompany, { invite: result.invite, notUsed: s.notUsed });
         result.sources = built.sources;
         result.chunkIds = built.chunkIds;
         return done(hits, vectorNote);

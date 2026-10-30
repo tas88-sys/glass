@@ -18,6 +18,7 @@ delete process.env.CAREER_KB_PATH;   // the real singleton must stay disabled he
 
 // --- Mocked LLM stream -------------------------------------------------------
 const llmCalls = [];
+const llmOpts = [];         // createStreamingLLM's options, one per answer
 let streamScript = () => ['Headline answer here.\n', '- point one\n'];
 
 function sseResponse(lines) {
@@ -43,14 +44,17 @@ require.cache[factoryPath] = {
     loaded: true,
     exports: {
         createLLM: () => { throw new Error('createLLM is not used by the answer lane'); },
-        createStreamingLLM: () => ({
-            streamChat: async messages => {
-                llmCalls.push(messages);
-                const script = streamScript();
-                const lines = script.map(x => (x.startsWith('data: ') ? x : delta(x)));
-                return sseResponse([...lines, 'data: [DONE]']);
-            },
-        }),
+        createStreamingLLM: (provider, opts) => {
+            llmOpts.push(opts);
+            return {
+                streamChat: async messages => {
+                    llmCalls.push(messages);
+                    const script = streamScript();
+                    const lines = script.map(x => (x.startsWith('data: ') ? x : delta(x)));
+                    return sseResponse([...lines, 'data: [DONE]']);
+                },
+            };
+        },
     },
 };
 const modelStateService = require('../../../common/services/modelStateService');
@@ -123,6 +127,7 @@ const flush = () => new Promise(r => setImmediate(r));
 
 afterEach(() => {
     llmCalls.length = 0;
+    llmOpts.length = 0;
     streamScript = () => ['Headline answer here.\n', '- point one\n'];
     mock.timers.reset();
 });
@@ -171,6 +176,24 @@ describe('FR-014: personal context goes into customPrompt plus the addendum', ()
         assert.equal(system.content, expectedSystem);
         assert.ok(system.content.includes(`User-provided context\n-----\n${PERSONAL.block}\n-----`));
         assert.equal(user.content, `${askedLine('q')}${TODAY_USER}\n\n${PERSONAL.addendum}`);
+    });
+});
+
+describe('item 10: a lower temperature when notes are injected', () => {
+    it('personal, ambiguous or company with a block → 0.3', async () => {
+        const { s } = service();
+        for (const route of ['personal', 'ambiguous', 'company']) {
+            await s.makeLiveAnswer(HISTORY, undefined, { id: 1, question: 'q', career: { ...PERSONAL, route } });
+        }
+        assert.deepEqual(llmOpts.map(o => o.temperature), [0.3, 0.3, 0.3]);
+    });
+
+    it('general, a career route with no block, or no career → 0.7, as today', async () => {
+        const { s } = service();
+        await s.makeLiveAnswer(HISTORY, undefined, { id: 1, question: 'q', career: GENERAL });
+        await s.makeLiveAnswer(HISTORY, undefined, { id: 2, question: 'q', career: { ...PERSONAL, block: '' } });
+        await s.makeLiveAnswer(HISTORY, undefined, { id: 3, question: 'q', career: null });
+        assert.deepEqual(llmOpts.map(o => o.temperature), [0.7, 0.7, 0.7]);
     });
 });
 

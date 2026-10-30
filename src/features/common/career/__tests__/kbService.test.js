@@ -105,6 +105,13 @@ describe('parseManifest (FR-002; E3, E4)', () => {
         assert.deepEqual(m.include, ['**/*.md', '**/*.txt']);
         assert.deepEqual(m.exclude, []);
         assert.deepEqual(m.core, []);
+        assert.deepEqual(m.notUsed, []);
+    });
+
+    it('notUsed: trimmed names, non-strings dropped; [] when absent (item 10)', () => {
+        assert.deepEqual(parseManifest(JSON.stringify({ ...MANIFEST, notUsed: [' Tidewire ', 3, '', null, 'Ferrous'] })).notUsed, ['Tidewire', 'Ferrous']);
+        assert.deepEqual(parseManifest(JSON.stringify({ ...MANIFEST, notUsed: 'Tidewire' })).notUsed, []);
+        assert.deepEqual(parseManifest(JSON.stringify(MANIFEST)).notUsed, []);
     });
 
     it('unknown version → defaults', () => {
@@ -124,6 +131,19 @@ describe('parseManifest (FR-002; E3, E4)', () => {
         const m = parseManifest(null);
         assert.equal(m.valid, false);
         assert.deepEqual(m.include, ['**/*.md', '**/*.txt']);
+    });
+});
+
+describe('career module: the manifest\'s notUsed list in the addendum (item 10)', () => {
+    it('a personal answer gets the never-used line; a general one gets no addendum', async () => {
+        const dir = await kb(FILES, { ...MANIFEST, notUsed: ['Tidewire', 'Ferrous'] });
+        const { mod } = career({ CAREER_KB_PATH: dir });
+        await mod.warm();
+        const ctx = await mod.getCareerContext('Tell me about a time you disagreed with a teammate.', { prev: null, activeCompany: null });
+        assert.equal(ctx.route, 'personal');
+        assert.match(ctx.addendum, / The candidate has never used: Tidewire, Ferrous\. Never claim experience with them;/);
+        const general = await mod.getCareerContext("What's the difference between a mutex and a channel?", { prev: null, activeCompany: null });
+        assert.equal(general.addendum, '');
     });
 });
 
@@ -282,6 +302,7 @@ describe('career module: ready (FR-008, FR-011, FR-012, FR-013, FR-014, FR-017)'
         assert.ok(ctx.chunkIds.length >= 1);
         assert.match(ctx.addendum, /^The interviewer is asking about the candidate's own background\./);
         assert.ok(!/interviewer's company is/.test(ctx.addendum));
+        assert.ok(!/never used/.test(ctx.addendum), 'no notUsed in the manifest → no line');
         assert.ok(ctx.queryTerms.includes('teammat'));
         assert.equal(ctx.timings.vectorUsed, false, 'no embedder → BM25 only');
         for (const k of ['routeMs', 'bm25Ms', 'vectorMs', 'totalMs']) assert.equal(typeof ctx.timings[k], 'number');

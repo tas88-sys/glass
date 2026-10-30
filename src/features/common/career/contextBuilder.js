@@ -21,9 +21,13 @@ const SECTION_SEP = '\n\n';
 const ADDENDUM_TEMPLATE =
     "The interviewer is asking about the candidate's own background. Answer in first person as the candidate, " +
     'using only facts from the User-provided context; the canonical facts override the other notes when they disagree. ' +
-    'Do not invent employers, dates, metrics or projects. For "tell me about a time" questions, pick one story and give ' +
+    'Do not invent employers, dates, metrics, technologies or projects. Every number must come from the notes with the same ' +
+    'result, project and employer it has there; never move a number to another result, project or employer, and never ' +
+    'estimate one: when the notes give no number for that result, state the result without a number. Say a technology or ' +
+    'technique was used at an employer only when the notes say it was used there, not when they mention it as an idea or a ' +
+    'general answer. For "tell me about a time" questions, pick one story and give ' +
     'situation, action and result in a few bullets. The notes were prepared for different companies: never present a ' +
-    "company named in them as the interviewer's company.{COMPANY_CLAUSE} Answer in the language the interviewer used.";
+    "company named in them as the interviewer's company.{COMPANY_CLAUSE}{NOT_USED_CLAUSE} Answer in the language the interviewer used.";
 
 // The system prompt later substitutes this placeholder once; a note must not
 // carry it (promptTemplates' outputInstructions comes after customPrompt).
@@ -105,10 +109,29 @@ const INVITE_ADDENDUM =
     ' Here the interviewer is inviting the candidate\'s questions: instead of answering, suggest two or three short questions ' +
     'for the candidate to ask, taken from the notes when they have some for this company, in the language the interviewer used.';
 
-/** FR-014 addendum; names the interviewer's company when it is known. */
+// Future-work item 10: answers claimed technologies the notes list as never used.
+const MAX_NOT_USED = 30;
+
+function notUsedClause(names) {
+    const seen = new Set();
+    const list = [];
+    for (const n of Array.isArray(names) ? names : []) {
+        const name = typeof n === 'string' ? n.trim() : '';
+        if (!name || seen.has(name.toLowerCase())) continue;
+        seen.add(name.toLowerCase());
+        list.push(name);
+        if (list.length === MAX_NOT_USED) break;
+    }
+    if (!list.length) return '';
+    return ` The candidate has never used: ${list.join(', ')}. Never claim experience with them; if asked, say so and name the closest one the notes give.`;
+}
+
+/** FR-014 addendum; names the interviewer's company when it is known, and the manifest's notUsed (not on an invitation). */
 function buildAddendum(activeCompany, opts = {}) {
     const clause = activeCompany ? ` The interviewer's company is ${activeCompany}.` : '';
-    return ADDENDUM_TEMPLATE.replace('{COMPANY_CLAUSE}', clause) + (opts.invite ? INVITE_ADDENDUM : '');
+    return ADDENDUM_TEMPLATE
+        .replace('{COMPANY_CLAUSE}', clause)
+        .replace('{NOT_USED_CLAUSE}', opts.invite ? '' : notUsedClause(opts.notUsed)) + (opts.invite ? INVITE_ADDENDUM : '');
 }
 
 module.exports = { buildContextBlock, buildAddendum, ADDENDUM_TEMPLATE, INVITE_ADDENDUM, BLOCK_CARD_LABEL, CARD_SOURCE, MAX_BLOCK_CHARS };

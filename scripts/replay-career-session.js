@@ -5,8 +5,9 @@
 // router, as the app runs them (spec 2026-10-13-career-router-jev, R19).
 //
 //   node scripts/replay-career-session.js --session <file> [--kb <dir>] [--router regex|jev] [--list] [--json]
-//                                         [--answers <out.jsonl> [--answers-for y|armed] [--llm-provider <p>]
+//                                         [--answers <out.jsonl> [--answers-for y|armed|arm] [--llm-provider <p>]
 //                                          [--llm-models <list>] [--block-providers <p,...>] [--resume] [--no-llm]]
+//                                         [--arm <i,...>]
 //
 // --session: a JSONL file, one segment per line, in the order heard:
 //   { i, speaker: 'them'|'me', t, text, ask?, route? }
@@ -35,8 +36,9 @@
 // its id and decisions, never its text.
 //
 // --answers <out.jsonl> also generates the live answer for each armed segment
-// labeled 'y' (--answers-for armed: every armed segment) with the app's own
-// SummaryService.makeLiveAnswer: the same prompt, the session's transcript up
+// labeled 'y' (--answers-for armed: every armed segment; arm: only the --arm
+// ones) with the app's own SummaryService.makeLiveAnswer: the same prompt, the
+// session's transcript up
 // to that segment, the career context with vectors, and the LLM chain the app
 // uses (provider and list from the app's settings, or --llm-provider and
 // --llm-models; keys from .env or the app's settings, as the live eval reads
@@ -52,6 +54,10 @@
 // quota (TPD) stops the asking; --resume picks up later. --no-llm writes the
 // same lines with the route, sources and block but calls no LLM (status
 // 'context'): what each answer would have been built on.
+//
+// --arm <i,...> arms those segments whatever the gate decides (gate=forced),
+// and --answers answers them whatever their label: a turn the gate now skips
+// can still be replayed for its answer (item 10's reported turn).
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -87,6 +93,7 @@ function parseArgs(argv) {
         blocked: [],
         resume: false,
         noLlm: false,
+        arm: new Set(),
     };
     for (let i = 0; i < argv.length; i++) {
         const k = argv[i];
@@ -101,6 +108,7 @@ function parseArgs(argv) {
         else if (k === '--llm-models') a.llmModels = argv[++i];
         else if (k === '--resume') a.resume = true;
         else if (k === '--no-llm') a.noLlm = true;
+        else if (k === '--arm') a.arm = new Set(String(argv[++i] || '').split(',').map(x => Number(x.trim())).filter(Number.isInteger));
         else if (k === '--block-providers') a.blocked = String(argv[++i] || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
         else throw new Error(`unknown argument: ${k}`);
     }
@@ -108,7 +116,7 @@ function parseArgs(argv) {
     if (!a.session) throw new Error('pass --session <file>');
     if (a.router !== 'regex' && a.router !== 'jev') throw new Error('--router takes regex or jev');
     if (a.router === 'jev' && !cfg.apiKey) throw new Error('--router jev needs TYPESAFE_API_KEY (in .env)');
-    if (a.answersFor !== 'y' && a.answersFor !== 'armed') throw new Error('--answers-for takes y or armed');
+    if (!['y', 'armed', 'arm'].includes(a.answersFor)) throw new Error('--answers-for takes y, armed or arm');
     if ((a.resume || a.noLlm || a.llmModels || a.llmProvider || a.blocked.length) && !a.answers) throw new Error('--resume, --no-llm and the LLM flags go with --answers <file>');
     if (a.answers) {
         const out = path.resolve(a.answers);
@@ -302,6 +310,7 @@ async function main() {
         labels: { y: 0, e: 0, n: 0, none: 0 },
         armed: { total: 0, y: 0, e: 0, n: 0, none: 0, byQuestionGate: 0, byRouterGate: 0 },
         backchannel: 0,
+        forced: 0,
         dropped: { total: 0, y: 0, e: 0, n: 0, none: 0, ids: [] },
         missed: [],
         wasted: [],
@@ -364,6 +373,14 @@ async function main() {
             r.dropped.ids.push(s.i);
         }
 
+        const forced = !armed && args.arm.has(s.i);
+        if (forced) {
+            if (gate === 'setup') held.pop();
+            armed = true;
+            gate = 'forced';
+            r.forced++;
+        }
+
         let line = `${s.i ?? '-'} ask=${label} gate=${gate} armed=${armed ? 'yes' : 'no'}`;
         if (args.list && gate !== 'backchannel' && mod.gateUsesJev()) {
             const d = await mod.classifyTurn(s.text, session(s.t));       // the call the gate made, from the cache
@@ -371,10 +388,12 @@ async function main() {
             if (d) line += ` jev=${d.cue}`;
         }
         if (armed) {
-            r.armed.total++;
-            inc(r.armed, label);
-            r.armed[gate === 'router' ? 'byRouterGate' : 'byQuestionGate']++;
-            if (label === 'n') r.wasted.push(s.i);
+            if (!forced) {
+                r.armed.total++;
+                inc(r.armed, label);
+                r.armed[gate === 'router' ? 'byRouterGate' : 'byQuestionGate']++;
+                if (label === 'n') r.wasted.push(s.i);
+            }
             lastTail = normalizeTail(s.text);
             // The turn the answer quotes: the scenario held in the last 120 s, then this segment.
             const quoted = held.filter(h => s.t - h.t <= 120).map(h => h.text);
@@ -395,7 +414,7 @@ async function main() {
                 ? { route, queryTerms: ctx.queryTerms || [], anchorText: ctx.anchorText || '', t: s.t }
                 : null;
             line += ` route=${route} cue=${ctx && ctx.cue ? ctx.cue : '-'} src=${src}`;
-            if (gen && (args.answersFor === 'armed' || label === 'y') && (!gen.exhausted || gen.has(s.i))) {
+            if (gen && (args.answersFor === 'armed' || (args.answersFor === 'y' && label === 'y') || args.arm.has(s.i)) && (!gen.exhausted || gen.has(s.i))) {
                 const kept = gen.kept(s.i);
                 const a = kept || await gen.answer(said.slice(), s, ctx, turn);
                 answerLines.set(s.i, JSON.stringify({ i: s.i, t: s.t, label, route, src, cue: ctx ? ctx.cue || null : null, ...a }));
@@ -422,6 +441,7 @@ async function main() {
     out.push(`replay: ${r.segments} segments, ${r.them} them; labels y=${r.labels.y} e=${r.labels.e} n=${r.labels.n} unlabeled=${r.labels.none}; router ${args.router}`);
     out.push(`armed ${r.armed.total} (question gate ${r.armed.byQuestionGate}, router gate ${r.armed.byRouterGate}): y=${r.armed.y}/${r.labels.y} e=${r.armed.e}/${r.labels.e} n=${r.armed.n}/${r.labels.n}`);
     out.push(`backchannel (no Jev call): ${r.backchannel}; dropped by asks ${r.dropped.total} (y=${r.dropped.y} e=${r.dropped.e} n=${r.dropped.n}): ${r.dropped.ids.join(',') || '-'}`);
+    if (args.arm.size) out.push(`forced by --arm (not counted as armed): ${r.forced}`);
     out.push(`missed y (${r.missed.length}): ${r.missed.join(',') || '-'}`);
     out.push(`wasted n (${r.wasted.length}): ${r.wasted.join(',') || '-'}`);
     out.push('routes on armed y/e (rows expected, cols got):');

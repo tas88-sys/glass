@@ -27,7 +27,7 @@ const strings = list => (Array.isArray(list) ? list.filter(x => typeof x === 'st
  * @param {string|null} raw
  */
 function parseManifest(raw) {
-    const defaults = { valid: false, include: DEFAULT_INCLUDE.slice(), exclude: [], core: [], entities: [], companies: null };
+    const defaults = { valid: false, include: DEFAULT_INCLUDE.slice(), exclude: [], core: [], entities: [], notUsed: [], companies: null };
     if (typeof raw !== 'string') return defaults;
     let m;
     try {
@@ -56,6 +56,7 @@ function parseManifest(raw) {
         exclude: sanitizePatterns(m.exclude),
         core: sanitizePatterns(m.core),
         entities: strings(m.entities),
+        notUsed: strings(m.notUsed),
         companies,
     };
 }
@@ -214,9 +215,10 @@ function createKbService({ root, fs = fsp, log = () => {} }) {
         const core = coreParts.filter(Boolean).join('\n\n');
 
         const entities = manifest.entities;
+        const notUsed = manifest.notUsed;
         const companyNames = companyNamesFor(companyFolders.sort(), manifest.companies);
         if (!changed && snap && snap.core === core) {
-            snap = { ...snap, entities, companyNames, refreshedAt: Date.now() };
+            snap = { ...snap, entities, notUsed, companyNames, refreshedAt: Date.now() };
             return snap;
         }
 
@@ -232,6 +234,7 @@ function createKbService({ root, fs = fsp, log = () => {} }) {
             bm25: changed || !snap ? buildBm25(chunks) : snap.bm25,
             core,
             entities,
+            notUsed,
             companyNames,
             refreshedAt: Date.now(),
         };
