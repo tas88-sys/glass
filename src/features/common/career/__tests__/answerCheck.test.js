@@ -46,6 +46,53 @@ describe('findUnsupported: numbers (FR-021)', () => {
     });
 });
 
+describe('findUnsupported: technical constants (future-work item 14)', () => {
+    it('skips an HTTP status next to an HTTP word', () => {
+        assert.deepEqual(findUnsupported('The retry queue avoids 429 errors.', ''), []);
+        assert.deepEqual(findUnsupported('It answered status 404, then HTTP 500.', ''), []);
+        assert.deepEqual(findUnsupported('It returns a 503 response while draining.', ''), []);
+        assert.deepEqual(findUnsupported('A falha vira erro 502 no gateway.', ''), []);
+    });
+
+    it('still marks a 3-digit number with no HTTP word near it', () => {
+        assert.deepEqual(findUnsupported('The query returned 200 rows.', ''), ['200']);
+    });
+
+    it('skips a bare number inside an example', () => {
+        assert.deepEqual(findUnsupported('Block large reviews (e.g., > 300 lines) without tests.', ''), []);
+        assert.deepEqual(findUnsupported('Guarde em micros, por exemplo, 1/1.000 de centavo.', ''), []);
+        assert.deepEqual(findUnsupported('Pick a small batch, for example 64 rows.', ''), []);
+    });
+
+    it('a constant repeated later in the answer stays a constant, but not as a percentage', () => {
+        assert.deepEqual(findUnsupported('Store micros, e.g., 1/1.000 of a cent. Read it back dividing by 1.000.', ''), []);
+        assert.deepEqual(findUnsupported('A cap, e.g. 40 rows. Coverage rose 40%.', ''), ['40%']);
+    });
+
+    it('an example ends at the sentence end', () => {
+        assert.deepEqual(findUnsupported('Use a cap, e.g. a queue. We ran 40 lanterns.', ''), ['40']);
+        assert.deepEqual(findUnsupported('Use a cap (e.g. a queue) with 40 lanterns.', ''), ['40']);
+    });
+
+    it('marks percentages, money and durations, inside an example too', () => {
+        assert.deepEqual(findUnsupported('We cut latency by 30%.', 'Latency fell.'), ['30%']);
+        assert.deepEqual(findUnsupported('A goal, e.g., 30% fewer pages.', ''), ['30%']);
+        assert.deepEqual(findUnsupported('A budget, e.g., R$ 2 mil a month.', ''), ['2 mil']);
+        assert.deepEqual(findUnsupported('A target, e.g., 200 ms at p99.', ''), ['200']);
+        assert.deepEqual(findUnsupported('Coverage, por exemplo 15‑20 % of cases.', ''), ['15', '20 %']);
+    });
+
+    it('reads a percentage written with a space', () => {
+        assert.deepEqual(findUnsupported('It gave 50 % lower latency.', ''), ['50 %']);
+        assert.deepEqual(findUnsupported('It gave 50 % lower latency.', ''), ['50 %']);
+        assert.deepEqual(findUnsupported('It gave 50 % lower latency.', 'latency down 50%'), []);
+    });
+
+    it('the accepted cost: a count of errors next to "errors" is not checked', () => {
+        assert.deepEqual(findUnsupported('We cut 500 errors a day.', ''), []);
+    });
+});
+
 describe('findUnsupported: known names (FR-021)', () => {
     const names = ['Bridge', 'Harbor Co'];
 

@@ -29,6 +29,9 @@
 | E46 | A technical prompt that ends in "Give an example." or speaks of "your team" | Ambiguous: notes only when one is close enough (R16) | FR-006, FR-012 |
 | E47 | A request about something that happened ("Tell me about a launch that went well", "Fale sobre uma entrega que atrasou") | Personal (R17) | FR-006 |
 | E48 | "Tell me about a …" or "Fale sobre um …" with no past event ("Tell me about a binary search tree") | Ambiguous: notes only when one is close (R17); "Tell me about the CAP theorem" stays general | FR-006, FR-012 |
+| E49 | An answer names an HTTP status ("avoids 429 errors", "status 404") | Not flagged; "returned 200 rows", with no HTTP word near, is. Accepted cost: "cut 500 errors a day" is not flagged either | FR-021 |
+| E50 | An answer gives a number as an example ("e.g., > 300 lines", "por exemplo, 1/1.000"), then repeats it | Not flagged, the repeat included; a percentage, money or a duration in the example ("e.g., 30%") is | FR-021 |
+| E51 | An answer writes a percentage with a space ("50 % lower latency") | Checked as a percentage and listed as "50 %" | FR-021 |
 | E11 | Turn in Portuguese, best note in English | Retrieved through the vector side; answer in Portuguese | FR-009, FR-014 |
 | E12 | Turn names a tool or vendor exactly | BM25 rank carries it into the fused top k | FR-008, FR-010 |
 | E13 | "why us" with active company A; notes of B rank higher | B's chunks dropped; A's and untagged chunks kept | FR-011 |

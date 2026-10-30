@@ -440,6 +440,10 @@ the flagged record would otherwise take the slot of the file's correction.
    nowhere in what the model was given (the notes, the question, the transcript) is listed under
    the answer: "⚠ not in your notes: …". It asks you to check before saying it; it is not proof of
    an error, since a number worked out from the notes (years since a start date) is flagged too.
+   Technical constants are left out: an HTTP status next to an HTTP word ("avoids 429 errors"),
+   a number given as an example ("e.g., > 300 lines"), and that number repeated later in the
+   answer. Percentages ("50 %" too), money and durations are always checked. The cost: "cut
+   500 errors a day" is not.
    Numbers written as words and names outside the manifest are not checked.
 
 **How Jev picks a route** (spec `specs/2026-10-13-career-router-jev/`). With `TYPESAFE_API_KEY`
