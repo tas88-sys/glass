@@ -453,7 +453,7 @@ export class LiveAnswerView extends LitElement {
                                 : ''}
                             <div class="answer-body" data-answer-id="${a.id}"></div>
                             ${a.unverified && a.unverified.length
-                                ? html`<div class="answer-unverified" title="Not in the notes or the conversation sent with this question. Check before saying it.">⚠ not in your notes: ${a.unverified.join(' · ')}</div>`
+                                ? html`<div class="answer-unverified" title="Not in the notes or the conversation sent with this question. &quot;other result&quot;: the notes give this number to another result or employer. &quot;never used&quot;: the notes list this technology as never used. Check before saying it.">⚠ not in your notes: ${a.unverified.join(' · ')}</div>`
                                 : ''}
                         </div>
                     `

@@ -15,7 +15,7 @@ One step at a time, each with its own plan, a fresh session per step. When a ste
 | [x] 3 | 10a. Prompt rule, temperature 0.2–0.3 on personal/ambiguous, "not used" list in the addendum (item 10, steps 1 and 4 first half) | The only HIGH item, and its cheap half. The "not used" list needs a `notUsed` field in the career KB manifest, which lives in the separate, private KB repo. **Merged with two measurements pending** (item 10, "Pending from 10a"): moved to the start of step 6, with item 11's. |
 | [x] 4 | 11. Answers too long | Same prompt. After 10a because the lower temperature already changes answer length; measured before 10a, the numbers would be stale. **Merged with its measurements pending** (item 11, "Pending from 11"), together with 10a's: step 5 started them, step 6 finishes them. |
 | [x] 5 | 14. The live check marks technical constants | `findUnsupported`. Before 10b: 10b needs its false-alarm rate measured, and that is not readable with this noise in. The Groq daily limit ran out again after 3 of the pending answers, so 10a's and 11's measurements move to the start of step 6. |
-| [ ] 6 | 10b. Neighborhood check and marking "not used" technologies (item 10, steps 2–3 and 4 second half) | Same file as 14, now without the noise. |
+| [x] 6 | 10b. Neighborhood check and marking "not used" technologies (item 10, steps 2–3 and 4 second half) | Same file as 14, now without the noise. Measured offline on the replay answers that kept their notes. 10a's and 11's real-LLM measurements still wait for the Groq daily limit (the "Pending from" sections). |
 | [ ] 7 | 13. A question about the candidate's own setup routes general | After 9, since the 2026-10-29 turn had no question and should then get no answer; what is left are real questions about the setup. Uses item 5's held-out sets, so it can share a plan with item 5. |
 | [ ] 8 | 15. STT terms heard as other words | Independent, lowest severity, costliest to measure (audio eval before and after). Can move into any gap. |
 
@@ -416,7 +416,7 @@ The answer prompt quotes the whole interviewer turn (`makeLiveAnswer`, `asked = 
 
 ## 10. Live Answer career context — a real number attached to the wrong claim
 
-**Status:** 10a done — 2026-10-30, branch `2026-10-30-career-answer-grounding` (step 3 of the work order), with two measurements pending (below). 10b (the check) pending, step 6. Found on 2026-10-28 in the same session as item 9.
+**Status:** 10a done — 2026-10-30, branch `2026-10-30-career-answer-grounding` (step 3 of the work order), with two measurements pending (below). 10b done — 2026-10-30, branch `2026-10-30-career-check-neighborhood` (step 6). Found on 2026-10-28 in the same session as item 9.
 **Severity:** HIGH (the candidate may say a wrong number about their own work)
 **Code:** `findUnsupported` (`src/features/common/career/answerCheck.js`), `checkAnswer` (`src/features/common/career/index.js:584`), `makeLiveAnswer` (`src/features/listen/summary/summaryService.js`, `temperature: 0.7`)
 
@@ -448,10 +448,12 @@ Neither was marked: the live check (FR-021) passes a number when it appears **an
 
 ### Acceptance (when implemented)
 
-- [ ] A replay of the concurrency turn with the same notes states no metric the notes tie to a different result. **Not met by 10a:** with the rule, the turn still moved a cost reduction onto response time (see Outcome). Left to 10b.
-- [ ] Unit cases for `findUnsupported`: same number, same employer, different result → flagged; same number and result → not flagged; Portuguese answer with an English note → not flagged.
-- [ ] False-alarm rate of the neighborhood check measured on the eval set and recorded here before it ships.
-- [ ] A personal answer naming a technology from the "not used" list is marked in the panel (10b). The other half is met: with the addendum line, the 2026-10-29 turn (forced with `--arm`, since item 9's gate now skips it) names none.
+- [ ] A replay of the concurrency turn with the same notes states no metric the notes tie to a different result.
+  - **Not met by 10a:** with the rule, the turn still moved a cost reduction onto response time (see Outcome).
+  - **10b marks it instead of preventing it:** on the replay answers of that turn, the moved multipliers are listed as "(other result)" (Outcome of 10b). The answer still states them, so the box stays open.
+- [x] Unit cases for `findUnsupported`: same number, same employer, different result → flagged; same number and result → not flagged; Portuguese answer with an English note → not flagged.
+- [x] False-alarm rate of the neighborhood check measured and recorded here before it ships. It was measured on the replay answers, not on the eval set (see Outcome of 10b).
+- [x] A personal answer naming a technology from the "not used" list is marked in the panel (10b). The other half is met: with the addendum line, the 2026-10-29 turn (forced with `--arm`, since item 9's gate now skips it) names none.
 
 ### Outcome of 10a (2026-10-30)
 
@@ -476,6 +478,46 @@ What shipped:
 No answer came back empty or PASSIVE, and no new kind of error appeared. Median length: 94 words before, 95 with the first wording.
 
 The prompt cuts the "not used" claims but does not stop a real number from moving to another result. That needs the check (10b).
+
+### Outcome of 10b (2026-10-30)
+
+What shipped, in `findUnsupported` (spec FR-021, E52–E56):
+
+- **Neighborhood check.** A result number is a percentage, money, a duration or a multiplier ("3x", "3‑5×"). When only the notes block holds it, it passes only if a note line holds it together with two things:
+  - a content word within five words of it in the answer, with direction words ("redução", "cut", "faster") left out and a short English–Portuguese list of measures ("custo"/"cost", "tempo"/"time");
+  - the known name the answer's line gives it, found in the note line, its section title or the heading above it.
+  - Otherwise it is listed as "40% (other result)".
+  - A number the question or the transcript holds passes on presence. A bare number ("5 workers") is checked on presence only: it is a parameter more often than a result.
+- **Never-used technologies.** A `notUsed` name is listed as "Tidewire (never used)" when it meets three conditions:
+  - its sentence is in the first person or names a known employer;
+  - its clause has no negation or "instead of";
+  - the answer is not an invitation.
+  - The addendum's own list does not count as support.
+- **The panel's tooltip** explains both labels.
+
+**False alarms, on the replay answers.** The eval set does not work for this: the live eval report keeps a count of marks per item but not the notes block, so a mark there cannot be labeled. Instead, the measurement used the replay answers that kept the block the model saw: the career turns of the 2026-10-28 and 2026-10-29 sessions, from 10a's and 11's runs. Old check against new, each new mark labeled by hand against the block:
+
+| Answers | New marks | Real errors | False alarms | Marks removed |
+|---|---|---|---|---|
+| 24 | 7 | 7 | 0 | 0 |
+
+The real errors:
+- one "never used" technology claimed (the case in 10a's "before" table);
+- a "3‑5x" from another result, in two answers (both ends of the range listed, so four marks);
+- an error rate the notes do not give;
+- one end of an invented response-time change whose other end the presence check already marked.
+
+The two candidates a first, cruder rule raised as false alarms passed:
+- "erros" against "errors";
+- a percentage the notes write as a word ("half"). The words near it matched.
+
+The sample is small. 11's replay adds answers when the Groq limit allows, and the measurement can be redone on them (the script is local, outside this repo).
+
+**Unchanged:**
+- `npm test`.
+- The live eval offline (137 items), with the same score: 130 pass, 6 warn and 1 fail, the fail already on `main`. The "no unverified names or numbers" check is the same on every item, since the stub answers hold no number from the notes. The rest of the run differed in two places, neither of which the check can cause, since it runs after the answer:
+  - two first-token timing checks swapped;
+  - two items took one note chunk more or less.
 
 ### Pending from 10a (run at the start of step 6, with item 11's)
 
