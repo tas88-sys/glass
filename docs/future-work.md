@@ -12,9 +12,9 @@ One step at a time, each with its own plan, a fresh session per step. When a ste
 |------|------|----------|
 | [x] 1 | 12. Confirmation one-liner in the wrong language | Small and isolated. It touches the same prompt as 10 and 11, so it goes first and sets up the prompt test and eval loop. |
 | [x] 2 | 9. The extracted question picks the wrong span | First stage of the flow: it decides whether a turn is answered and which span goes to routing and the note search, so the evals of 10 and 11 run on the right questions. It also stops the answers to reported questions that produced the "not used" technology claim. |
-| [x] 3 | 10a. Prompt rule, temperature 0.2–0.3 on personal/ambiguous, "not used" list in the addendum (item 10, steps 1 and 4 first half) | The only HIGH item, and its cheap half. The "not used" list needs a `notUsed` field in the career KB manifest, which lives in the separate, private KB repo. **Merged with two measurements pending** (item 10, "Pending from 10a"): moved to the start of step 5, with item 11's. |
-| [x] 4 | 11. Answers too long | Same prompt. After 10a because the lower temperature already changes answer length; measured before 10a, the numbers would be stale. **Merged with its measurements pending** (item 11, "Pending from 11"), together with 10a's: step 5 starts by running both. |
-| [ ] 5 | 14. The live check marks technical constants | `findUnsupported`. Before 10b: 10b needs its false-alarm rate measured, and that is not readable with this noise in. |
+| [x] 3 | 10a. Prompt rule, temperature 0.2–0.3 on personal/ambiguous, "not used" list in the addendum (item 10, steps 1 and 4 first half) | The only HIGH item, and its cheap half. The "not used" list needs a `notUsed` field in the career KB manifest, which lives in the separate, private KB repo. **Merged with two measurements pending** (item 10, "Pending from 10a"): moved to the start of step 6, with item 11's. |
+| [x] 4 | 11. Answers too long | Same prompt. After 10a because the lower temperature already changes answer length; measured before 10a, the numbers would be stale. **Merged with its measurements pending** (item 11, "Pending from 11"), together with 10a's: step 5 started them, step 6 finishes them. |
+| [x] 5 | 14. The live check marks technical constants | `findUnsupported`. Before 10b: 10b needs its false-alarm rate measured, and that is not readable with this noise in. The Groq daily limit ran out again after 3 of the pending answers, so 10a's and 11's measurements move to the start of step 6. |
 | [ ] 6 | 10b. Neighborhood check and marking "not used" technologies (item 10, steps 2–3 and 4 second half) | Same file as 14, now without the noise. |
 | [ ] 7 | 13. A question about the candidate's own setup routes general | After 9, since the 2026-10-29 turn had no question and should then get no answer; what is left are real questions about the setup. Uses item 5's held-out sets, so it can share a plan with item 5. |
 | [ ] 8 | 15. STT terms heard as other words | Independent, lowest severity, costliest to measure (audio eval before and after). Can move into any gap. |
@@ -477,7 +477,7 @@ No answer came back empty or PASSIVE, and no new kind of error appeared. Median 
 
 The prompt cuts the "not used" claims but does not stop a real number from moving to another result. That needs the check (10b).
 
-### Pending from 10a (run at the start of step 5, with item 11's)
+### Pending from 10a (run at the start of step 6, with item 11's)
 
 The Groq daily token limit ran out mid-measurement, and again at the start of step 4. When it is back:
 
@@ -537,16 +537,20 @@ Of the 34 answers in the session: median about 100 words, 17 over 100, 7 over 15
 - `npm test`;
 - the live eval offline: no check, label or route differences beyond the two new checks.
 
-### Pending from 11 (run at the start of step 5)
+### Pending from 11 (run at the start of step 6)
 
 1. **Replay before and after, gpt-oss-120b, one answer per turn.**
    - Turns: the ten career turns of 10a's replay, plus the seven Portuguese turns whose real answers ran over 120 words.
    - Before: commit `77ee925`, in a worktree. After: `main`.
    - Record the median and longest answer, the count over 120, the answers that end in a paragraph, and any empty, cut or PASSIVE answer.
    - This replay also gives 10a's "after" table.
+   - **Done so far (2026-10-30):** 3 of the 17 "after" answers and 2 "before", then the daily limit ran out again (each answer takes about 6,500 tokens, so the two replays alone need more than a day's 200,000).
+     - After: 46, 55 and 72 words. None ends in a paragraph, and none is empty or PASSIVE.
+     - The two turns run on both sides went from 100 to 72 words and from 70 to 55.
+     - The answers stayed in that session's scratchpad, so step 6 reruns all 17 on each side. Plan two days: "after" first, then "before", then the judge.
 2. **The live eval with the judge**, `--text --only A,B --judge`, after (on `main`), against 10a's run before (on `77ee925`, "Pending from 10a").
 3. **Accept** with: median ≤ 60, nothing over 120, no closing paragraph, no rise in empty, cut or PASSIVE answers, and a judge mean not lower.
-   - If the judge mean drops, or the median lands over 70, revise the wording once and measure again, before step 5's own change. Answers too thin to carry a career result are the risk to look for.
+   - If the judge mean drops, or the median lands over 70, revise the wording once and measure again. Answers too thin to carry a career result are the risk to look for.
    - If it still misses, record the result here and propose the fold.
 
 ---
@@ -603,7 +607,7 @@ A turn about the candidate's AI setup ("you can arrive with your AI setup, your 
 
 ## 14. Live Answer career context — the live check marks technical constants as claims
 
-**Status:** Pending. Found on 2026-10-29; not started.
+**Status:** Done — 2026-10-30, branch `2026-10-30-live-check-constants` (step 5 of the work order). Found on 2026-10-29.
 **Severity:** LOW (noise that hides the real marks)
 **Code:** `findUnsupported` (`src/features/common/career/answerCheck.js`)
 
@@ -619,8 +623,37 @@ In the 2026-10-29 session the check marked "429" (an HTTP status in "avoids 429 
 
 ### Acceptance (when implemented)
 
-- [ ] Unit cases: "avoids 429 errors" and "(e.g., > 300 lines)" → not marked; "cut latency by 30%" with no 30 in the notes → marked.
-- [ ] On the 2026-10-28 and 2026-10-29 sessions' answers (replayed against their notes), the marks left are only real claims.
+- [x] Unit cases: "avoids 429 errors" and "(e.g., > 300 lines)" → not marked; "cut latency by 30%" with no 30 in the notes → marked.
+- [x] On the 2026-10-28 and 2026-10-29 sessions' answers (replayed against their notes), the marks left are only real claims. The Portuguese ones are test-coverage percentages the answer gives as the candidate's practice; rule 3 keeps them on purpose.
+
+### Outcome (2026-10-30)
+
+What shipped, in `findUnsupported`:
+
+- Each number gets a kind: percentage, money, duration or bare.
+  - A percentage written with a space ("50 %", also a no-break space) is now read as one, and listed as "50 %". Before, it was listed as a plain "50".
+  - The first number of a range ("15–20 %") counts as a percentage too.
+- A bare number is skipped as a constant in three cases:
+  - an HTTP status (100–599) within two words of error, status, HTTP, response or code, in English or Portuguese;
+  - a number after an example marker ("e.g.", "for example", "such as", "por exemplo", "ex.:") in the same sentence, at most 6 words on;
+  - the same value repeated later in the answer.
+- Percentages, money and durations are never skipped, inside an example too.
+- The accepted cost: "cut 500 errors a day" is not checked. A list of real status codes would not help, since 500 is one.
+
+**The real sessions' marks, old code against new** (a stored mark counts as kept when the new code still lists its number):
+
+| Session | Marks before | After | Dropped |
+|---|---|---|---|
+| 2026-10-28, Portuguese | 6 | 5 | an example value, repeated later in the same answer |
+| 2026-10-29, English | 4 | 2 | the HTTP status and the example threshold |
+
+- English keeps the invented buffer size and the invented latency percentage, now listed as a percentage.
+- Over every number in the 52 real answers, with nothing given, the new code drops nine. All are constants: decimal scales, example values, the HTTP status and the threshold. No percentage was dropped.
+- On the replayed answers, the only difference is a label: "50" became "50 %".
+
+**Unchanged:**
+- `npm test`;
+- the live eval offline (regex): no check, label or route differences.
 
 ---
 
