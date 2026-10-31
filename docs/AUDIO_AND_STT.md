@@ -117,17 +117,20 @@ by `toProviderLanguage` (`sttLanguage.js`): Deepgram and Gemini get the full tag
 `pt` / `en`. Nova-3 supports `pt-BR`. `language=multi` (code-switching) and `detect_language`
 are not used. Per-side (Me / Them) language is not implemented.
 
-**Keyterms.** Each session also sends up to 90 `keyterm=` parameters, words nova-3 should favor
+**Keyterms.** Each session also sends `keyterm=` parameters, words nova-3 should favor
 (`sttKeyterms.js`, built by `sttService._keyterms` at every session start and renewal). It works
 in `pt-BR` as well as `en-US`: in the live eval, "O que é LINQ?" was heard as "O que é link?"
 without them and right with them. The list has two parts:
 - the career notes' company names and manifest entities, first (at most 50; the interviewer's
   company is the name the STT most often misspells). There are none until the notes have loaded;
 - a fixed list of technical names an STT hears as plain words (`LINQ`, `gRPC`, `Kafka`,
-  `goroutine`, …).
+  `goroutine`, `API token`, `rate limiter`, `CLAUDE.md`, …). "AI" is in it only inside phrases
+  (`AI agent`, `AI tools`, `AI setup`): alone, two letters could pull "I" or "a" into it.
 
-The log line shows only how many terms were sent, since some come from the notes. Other STT
-providers ignore the list.
+The cap is the 50 names plus the whole fixed list, so the fixed list always fits. Deepgram refuses
+a request whose keyterms pass 500 tokens in all; `sttKeyterms.test.js` keeps the fixed list and 50
+names of 20 characters under it by a conservative estimate. The log line shows only how many terms
+were sent, since some come from the notes. Other STT providers ignore the list.
 
 **Caveats:**
 - **STT-only.** `createLLM`/`createStreamingLLM` are stubs that throw (`deepgram.js:104-111`).
