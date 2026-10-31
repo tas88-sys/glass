@@ -16,17 +16,21 @@
  */
 
 // Names that sound like ordinary words or get split ("LINQ" → "link",
-// "gRPC" → "G RPC", "Kubernetes" → "cooper netties"). Kept short: Deepgram
-// caps the keyterms of a request (about 500 tokens).
+// "gRPC" → "G RPC", "Kubernetes" → "cooper netties", "API token" → "IP token",
+// "rate limiter" → "reclimiter", "CLAUDE.md" → "Club MD"). Kept short: Deepgram
+// caps the keyterms of a request at 500 tokens. "AI" goes only inside phrases:
+// alone, two letters could pull "I" or "a" into it (future-work item 15).
 const TECH_KEYTERMS = Object.freeze([
     'LINQ', 'gRPC', 'GraphQL', 'Kafka', 'RabbitMQ', 'Kubernetes', 'kubectl', 'Redis', 'PostgreSQL',
     'MongoDB', 'DynamoDB', 'Cassandra', 'Elasticsearch', 'goroutine', 'mutex', 'Terraform', 'nginx',
     'OAuth', 'JWT', 'idempotency', 'sharding', 'CQRS', 'Golang', 'TypeScript', 'Django', 'FastAPI',
     'Spring Boot', 'Entity Framework', 'BigQuery', 'Snowflake', 'Kinesis', 'SQS', 'on-call',
+    'API token', 'rate limit', 'rate limiter', 'unbuffered channel', 'buffered channel',
+    'Claude Code', 'CLAUDE.md', 'AI agent', 'AI tools', 'AI setup',
 ]);
 
-const MAX_EXTRA_KEYTERMS = 50;  // names from the notes, so the fixed list always fits
-const MAX_KEYTERMS = 90;        // under Deepgram's cap
+const MAX_EXTRA_KEYTERMS = 50;  // names from the notes
+const MAX_KEYTERMS = MAX_EXTRA_KEYTERMS + TECH_KEYTERMS.length;   // the fixed list always fits
 const MAX_TERM_CHARS = 40;
 
 /**
