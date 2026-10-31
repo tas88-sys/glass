@@ -20,7 +20,8 @@ const { buildVectorIndex } = require('./vectorIndex');
 
 // Per-model settings. Titles are embedded like queries: they are questions
 // or topics, and the match is question to question. minCosine is the FR-012
-// ambiguous-route gate on that model's cosine scale (research R5).
+// ambiguous-route gate on that model's cosine scale (research R5; Arctic's
+// checked against labeled turns in R26).
 const MODEL_PROFILES = {
     'Snowflake/snowflake-arctic-embed-m-v2.0': {
         dtype: 'q8', pooling: 'sentence_embedding', queryPrefix: 'query: ', passagePrefix: '', minCosine: 0.35,

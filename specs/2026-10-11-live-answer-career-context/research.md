@@ -504,6 +504,65 @@ are local.
 
 ---
 
+## R26: The ambiguous gate against labeled turns (T027, future-work item 5)
+
+**Question.** The ambiguous route sends notes only when one of the sections it would send has a
+cosine of at least `minCosine` (FR-012, R14). R5 set 0.35 from the gold notes' cosines, with no
+turn labeled "should inject" or "should not". Is 0.35 right?
+
+**The check.**
+- **The turns:** 67 that land on the ambiguous route:
+  - 31 eval and check-set items labeled ambiguous;
+  - 7 labeled otherwise that a router already sent to ambiguous in the saved runs of items 5 and 13;
+  - 28 interviewer turns labeled ambiguous in the recorded behavioral session (C5);
+  - the hypothetical turn the regex has routed ambiguous since item 5's first gap.
+- **The run:** a scratchpad script sent each turn through `getCareerContext` with the route fixed
+  to ambiguous and the gate open, with the eval's leave-source-out.
+- **The labels:** each turn was labeled by reading the sections it would send, with no cosine or
+  score shown.
+  - `y`: one of them helps the candidate answer.
+  - `n`: none helps, or they pull the answer to another subject.
+  - The candidate reviewed the 67 labels before the cosines were opened.
+  - The labels are kept in the KB repo.
+- **The rule, written before the cosines were opened:** take the highest threshold that still
+  lets every `y` through. If no threshold separates the two classes, keep 0.35.
+- **Quota:** none was used. The vectors are local, and no router or LLM ran.
+
+**Finding.** 57 turns are `y` and 10 are `n`, and the cosine does not separate them.
+- The highest cosine among the sections sent ranges from 0.392 to 0.772 for `y` turns and from 0.293
+  to 0.545 for `n` turns. Seven of the ten `n` score above the lowest `y`.
+- **Why the `n` score high:** the KB holds study notes on the topic of a question the notes do not
+  answer. Examples are a live-coding question about the algorithm on screen, the role of a tech
+  lead, and a setup script failing in CI.
+- **What 0.35 blocks:** two of the ten `n`, both pieces of a turn cut short by the transcription.
+
+| Threshold | `y` passing (57) | `n` blocked (10) | Without the recorded session: `y` (33) | `n` (6) |
+|---|---|---|---|---|
+| 0.30 | 57 | 1 | 33 | 0 |
+| **0.35** | **57** | **2** | **33** | **0** |
+| 0.39 | 57 | 3 | 33 | 1 |
+| 0.40 | 55 | 4 | 31 | 2 |
+| 0.45 | 48 | 6 | 27 | 3 |
+| 0.50 | 39 | 9 | 23 | 5 |
+| 0.55 | 27 | 10 | 17 | 6 |
+
+- **Bias:** the leadership bank in the KB was written from the recorded session, so its turns find
+  their own question. The columns without it show the same thing.
+- **How much the cosine moves:** the same question cut at different points of the transcription
+  scores far apart. One eval item scores 0.689 as asked, and 0.639 and 0.493 as two cuts of the
+  recorded session.
+- **Keyword-only path** (no vectors): it would send notes for 39 of the 57 `y` and 7 of the 10 `n`.
+  This is reported only; the path is used only when the embeddings are unavailable.
+
+**Decision.** Keep 0.35. The rule's first branch gives 0.39, which blocks one more `n` (7 of 10
+would still pass). The lowest `y` would then clear it by 0.002, less than the transcription moves
+the cosine. With the classes overlapping, the rule keeps 0.35. At 0.35 the gate works as a floor
+against noise. To tell a note that answers the question from a note on the same topic would need
+something other than the cosine, for example matching the question to a prepared question's
+title. That is not worked here.
+
+---
+
 ## Summary of Decisions
 
 | ID | Decision | Confidence |
@@ -526,3 +585,4 @@ are local.
 | R16 | English twins of the Portuguese present-tense and job cues; three that open technical prompts route ambiguous | High (held-out checks) |
 | R17 | More experience verbs; past-event requests personal; other "tell me about a …" ambiguous | Medium (held-out checks of 10 and 10) |
 | R25 | English questions reach Portuguese notes as often as Portuguese ones (40 vs 37 of 51); no change, two sections per file nets zero | Medium (53 hand translations, route fixed) |
+| R26 | The ambiguous gate stays at 0.35: every turn labeled "should inject" passes, and no threshold separates the two labels | Medium (67 labeled turns, route fixed) |

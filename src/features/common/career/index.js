@@ -28,7 +28,8 @@ const CANDIDATES = 60;             // per ranking, before company scope and leav
 const PREFETCH_TIMEOUT_MS = 150;   // C3
 // FR-012 ambiguous gate with vectors: each model profile carries its own
 // (embedder.js, research R5); this is the fallback for an embedder without one.
-// Provisional until the eval set labels which ambiguous questions should inject.
+// Checked against 67 labeled ambiguous turns (research R26): every "should inject"
+// turn passes, and no threshold separates the two labels.
 const DEFAULT_MIN_COSINE = 0.35;
 const MAX_QUERY_TERMS = 40;
 const MAX_ANCHOR_CHARS = 600;      // the end of the previous question, joined to a follow-up's vector query

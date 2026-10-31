@@ -190,7 +190,8 @@ export declare function fuseAndFilter(input: {
  * FR-012 gate for the ambiguous route, applied to each fused hit that would be
  * sent; context is injected when any one passes (E43).
  * Vectors used → hit.cosine >= minCosine. BM25-only → hit.coverage >= 0.5 and
- * hit.matchedTerms >= 2. minCosine is calibrated by the eval (T027).
+ * hit.matchedTerms >= 2. minCosine was set in R5 and checked against
+ * labeled ambiguous turns in R26 (T027).
  */
 export declare function passesAmbiguousThreshold(
     hit: ScoredChunk | undefined,
