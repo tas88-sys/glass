@@ -288,3 +288,63 @@ What the rebuild showed (the details stay in the KB repo, C5):
 The answers themselves were not rebuilt: the provider's daily token quota ran out after 7, and those
 7 used today's KB, so they were discarded. `--resume` with `--kb <the interview's commit>` rebuilds
 them when the quota is back.
+
+## R22: questions about the candidate's own setup, and technical turns routed personal
+
+**Decision**: Jev's `personal` criterion adds how the candidate works (the tools, setup and workflow
+they use, including how they use AI), with one more example pair. The `general` criterion adds a
+question about the code or the solution being worked on in the interview, even when it says "you"
+or "your". The frozen regex router gets two cues, `background:your-setup` and its Portuguese twin
+`background:pt-seu-setup`, because the live case was decided by the regex: Jev answered below its
+confidence floor. Routing on the extracted question instead of the whole turn was measured and not
+adopted. Future-work item 13.
+
+### Why
+
+In the 2026-10-29 session a turn about the candidate's AI setup ("your AI setup, your CLAUDE.md,
+the skills you usually use") routed general (`regex(low)`: Jev below the floor, no regex cue). No
+notes were sent, and the answer described a setup the candidate does not use. Since item 9 that turn
+gets no answer (it asks nothing), so the check uses direct questions about the setup. Item 9 also
+left the opposite error: two technical turns of the 2026-10-28 session routed personal (a scenario
+led by "você conhece algum recurso…", by the regex cue `experience:pt-voce-habito`; and "escalável
+pelo quê?", `jev:personal@0.60` in one run).
+
+### The check
+
+A new set of 36 turns, written before any router ran on them and kept in the KB repo (C5):
+16 questions about the candidate's setup, tools and AI workflow (personal), and 20 technical or
+live-coding turns with the same words ("your setUp method", "o setup do Jest", "what's a CLAUDE.md
+for?"), including the two 2026-10-28 shapes (general or ambiguous). The regex cues were written
+after reading the 16, so for the regex those count as tuning; the 20, and every Jev figure, are a
+test. Jev ran twice before and twice after (its routes vary between runs, R20).
+
+| Check | Before: regex / Jev | After: regex / Jev |
+|---|---|---|
+| 16 setup questions routed general | 9 / 2, 2 | 4 / 0, 0 |
+| 16 setup questions routed personal | 5 / 13, 13 | 11 / 16, 16 |
+| Setup note sent (11 questions with one) | 1 / 5, 5 | 3 / 6, 6 |
+| 20 technical turns routed personal | 2 / 4, 4 | 2 / 1, 2 |
+| Eval (133): confusion matrix | unchanged | unchanged |
+| Eval: Jev below the floor | 12, 12 | 14, 14 |
+| Synthetic (40): confusion matrix | unchanged | unchanged |
+
+- The two technical turns the regex still routes personal come from older cues
+  (`experience:pt-voce-habito`, and "your workflow file" through `background:your-career`): item 5's
+  live-coding guard, not this change. Across the 698 recorded interviewer turns and eval questions
+  the new cues change one route: the 2026-10-29 setup turn, now personal.
+- Replays (`--router jev`, no LLM): on 2026-10-28 the scenario turn routes general (route errors on
+  labeled turns 1 → 0); "escalável pelo quê?" stays general. Unlabeled armed turns that moved:
+  technical questions to general, two scenario questions about the solution being built from
+  ambiguous to general, and two questions on how the candidate steers and reviews an agent's work
+  to personal. One hypothetical about an API's rate limits went from `ambiguous@0.59–0.60` (two
+  runs) to below the floor in both runs after, where the older regex cue
+  `behavioral:example-when-you` routes it personal. A sentence in the criterion saying a scenario
+  stays ambiguous did not change it, and was dropped.
+
+### Routing on the extracted question
+
+The router reads the whole turn (`router.decide(turnText)`). Over the 185 interviewer turns of the
+recorded sessions whose extracted question differs from the turn, routing on the question alone
+fixes the 2026-10-28 scenario turn but takes the labeled route away from 22 turns with the regex
+and 14 with Jev (mostly questions about the candidate whose subject is earlier in the turn), and
+Jev then routes another labeled general turn personal. Not adopted.

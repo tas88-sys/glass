@@ -16,7 +16,7 @@ One step at a time, each with its own plan, a fresh session per step. When a ste
 | [x] 4 | 11. Answers too long | Same prompt. After 10a because the lower temperature already changes answer length; measured before 10a, the numbers would be stale. **Merged with its measurements pending** (item 11, "Pending from 11"), together with 10a's: step 5 started them, step 6 finishes them. |
 | [x] 5 | 14. The live check marks technical constants | `findUnsupported`. Before 10b: 10b needs its false-alarm rate measured, and that is not readable with this noise in. The Groq daily limit ran out again after 3 of the pending answers, so 10a's and 11's measurements move to the start of step 6. |
 | [x] 6 | 10b. Neighborhood check and marking "not used" technologies (item 10, steps 2–3 and 4 second half) | Same file as 14, now without the noise. Measured offline on the replay answers that kept their notes. 10a's and 11's real-LLM measurements still wait for the Groq daily limit (the "Pending from" sections). |
-| [ ] 7 | 13. A question about the candidate's own setup routes general | After 9, since the 2026-10-29 turn had no question and should then get no answer; what is left are real questions about the setup. Uses item 5's held-out sets, so it can share a plan with item 5. |
+| [x] 7 | 13. A question about the candidate's own setup routes general | After 9, since the 2026-10-29 turn had no question and should then get no answer; what is left are real questions about the setup. Uses item 5's held-out sets, so it can share a plan with item 5. |
 | [ ] 8 | 15. STT terms heard as other words | Independent, lowest severity, costliest to measure (audio eval before and after). Can move into any gap. |
 
 Notes for the plans:
@@ -261,7 +261,7 @@ Four gaps are still open after T038 to T040. Each was measured with the eval, `s
 ### Acceptance
 
 - [ ] A live-coding turn set exists, and its turns routed personal are counted before and after any guard.
-- [ ] On a new English held-out set, questions about the candidate routed general are counted before and after.
+- [ ] On a new English held-out set, questions about the candidate routed general are counted before and after. (Item 13 did this for one topic only, questions about the candidate's setup and AI workflow: see its **Outcome**. A general held-out set is still to write.)
 - [ ] The eval's Portuguese questions asked in English send the right note as often as in Portuguese, or the gap is explained.
 - [ ] The ambiguous threshold is set from labeled turns (T027).
 
@@ -621,7 +621,7 @@ Two English turns ending in "Okay?" ("… in case we decide to advance with you 
 
 ## 13. Live Answer career context — a question about the candidate's own setup routes general
 
-**Status:** Pending. Found on 2026-10-29; not started. Related: item 5 ("English questions about the candidate that still route general").
+**Status:** Done — 2026-10-31, branch `2026-10-31-career-route-setup` (step 7 of the work order). Found on 2026-10-29. Related: item 5 ("English questions about the candidate that still route general"). See **Outcome** below and research R22 (`specs/2026-10-13-career-router-jev/research.md`).
 **Severity:** MEDIUM (the answer invented a setup)
 **Code:** `classifyCareerIntent` (`src/features/common/career/intentRouter.js:268`), the Jev router (`jevRouter.js`), the regex fallback (`routeFallback`, `src/features/common/career/index.js:374`)
 
@@ -642,8 +642,25 @@ A turn about the candidate's AI setup ("you can arrive with your AI setup, your 
 
 ### Acceptance (when implemented)
 
-- [ ] A direct question about the candidate's setup, anonymized, routes personal and gets the setup note. (Not the 2026-10-29 turn itself: it has no question, and after item 9 it gets no answer.)
-- [ ] On item 5's held-out sets, no question about the code on screen moves to personal (the live-coding guard there still holds).
+- [x] A direct question about the candidate's setup, anonymized, routes personal and gets the setup note. (Not the 2026-10-29 turn itself: it has no question, and after item 9 it gets no answer.)
+- [x] On item 5's held-out sets, no question about the code on screen moves to personal (the live-coding guard there still holds). R16's and R17's sets were never saved to a file, so a new set of 20 technical and live-coding turns with the same words stands in (see **Outcome**).
+
+### Outcome (2026-10-31)
+
+- **What changed.** Jev's `personal` criterion adds how the candidate works (the tools, setup and workflow they use, including how they use AI); `general` adds a question about the code or the solution being worked on in the interview, even with "you" or "your" (`jevClient.js`). The regex router gets `background:your-setup` and `background:pt-seu-setup` (`intentRouter.js`): the live case was decided by the regex, Jev below its floor. The comment that freezes the regex router now names that exception.
+- **The check.** A new set of 36 turns, written before any router ran on them and kept in the KB repo: 16 questions about the candidate's setup and AI workflow, and 20 technical or live-coding turns with the same words, including the two 2026-10-28 shapes. Jev ran twice before and twice after.
+
+  | Check | Before: regex / Jev | After: regex / Jev |
+  |---|---|---|
+  | 16 setup questions routed general | 9 / 2, 2 | 4 / 0, 0 |
+  | Setup note sent (11 questions with one) | 1 / 5, 5 | 3 / 6, 6 |
+  | 20 technical turns routed personal | 2 / 4, 4 | 2 / 1, 2 |
+  | Eval (133) and synthetic (40): confusion matrices | — | unchanged, both routers |
+
+  The direct acceptance question routes personal and sends the setup note with both routers. The regex cues were written after reading the 16 questions, so the regex column there is a tuning figure; the Jev columns and the 20 technical turns are a test. The two technical turns the regex still routes personal come from older cues: item 5's live-coding guard.
+- **Replays** (`--router jev`, no LLM). 2026-10-28: the scenario turn ("você conhece algum recurso…") routes general, route errors 1 → 0; "escalável pelo quê?" stays general. Unlabeled armed turns that moved: technical questions to general, two questions on how the candidate steers an agent to personal, and one hypothetical about an API's rate limits from ambiguous (0.59–0.60) to below Jev's floor, where the older regex cue `behavioral:example-when-you` routes it personal. Not fixed here: that cue is item 5's.
+- **Routing on the extracted question** (proposed step 4). Over the 185 recorded turns whose extracted question differs from the turn, it fixes the scenario turn but takes the labeled route away from 22 turns with the regex and 14 with Jev. Not adopted; `resolve` still routes the whole turn.
+- **Unchanged.** `npm test`, and the offline live eval (no route or label differences; one timing check and two note-chunk counts that also differ between two runs of the same code). Jev below the floor on the eval: 12 → 14 of 133.
 
 ---
 

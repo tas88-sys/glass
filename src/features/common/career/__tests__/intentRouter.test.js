@@ -157,6 +157,17 @@ table('personal (employer/project names from the CV)', 'personal', [
     'harborlights was a startup, right?',
 ]);
 
+table('personal (the candidate\'s own tools and setup, future-work item 13)', 'personal', [
+    'Can you explain your AI setup to the panel?',
+    'You can bring your own setup, like your club md and the skills you usually use.',
+    'Is your setup the same at home and at work?',
+    'Do you keep a CLAUDE.md in every repo?',
+    'Which commands are in your coding agent?',
+    'Me conta do seu setup de trabalho.',
+    'Quais são suas ferramentas favoritas?',
+    'Como você usa IA pra escrever testes?',
+]);
+
 table('company', 'company', [
     'Why do you want to join Bridge?',
     'Why do you want to work here?',
@@ -241,6 +252,13 @@ table('general (no second-person background cue)', 'general', [
     'Quais casos de falha um circuit breaker cobre?',
     'Dê exemplos de race condition.',
     'Microsserviços e suas vantagens: quando usar?',
+    // The setup on screen, not the candidate's (future-work item 13).
+    'In your setup, the cache is created before the client, right?',
+    'Your setup function opens two connections.',
+    'Why does your setup script need sudo?',
+    'What goes into a CLAUDE.md file?',
+    'No seu setup aqui o banco sobe antes da API?',
+    'O setup do projeto roda as migrations?',
     '',
 ]);
 
