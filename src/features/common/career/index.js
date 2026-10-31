@@ -575,17 +575,21 @@ function createCareerModule(options = {}) {
 
     /**
      * FR-021: the numbers and known names in a finished answer that appear
-     * nowhere in what the model was given. Never throws; [] when the answer had
-     * no career block.
+     * nowhere in what the model was given, the result numbers the notes give
+     * to another result, and the "never used" technologies it claims (not on
+     * an invitation). Never throws; [] when the answer had no career block.
      * @param {string} answer
-     * @param {{ block?: string, addendum?: string }|null} context  from getCareerContext
+     * @param {{ block?: string, addendum?: string, invite?: boolean }|null} context  from getCareerContext
      * @param {string} [conversation]  the question and transcript the model saw
      */
     function checkAnswer(answer, context, conversation) {
         try {
             if (!snap || !context || !context.block) return [];
             const given = [context.block, context.addendum, conversation].filter(x => typeof x === 'string').join('\n');
-            const found = findUnsupported(answer, given, snap.entities.concat(snap.companyNames));
+            const found = findUnsupported(answer, given, snap.entities.concat(snap.companyNames), {
+                notes: context.block,
+                notUsed: context.invite ? [] : snap.notUsed,
+            });
             careerDebug(`[career] check unverified=${found.length}`);
             return found;
         } catch (err) {

@@ -145,6 +145,18 @@ describe('career module: the manifest\'s notUsed list in the addendum (item 10)'
         const general = await mod.getCareerContext("What's the difference between a mutex and a channel?", { prev: null, activeCompany: null });
         assert.equal(general.addendum, '');
     });
+
+    it('checkAnswer marks a claimed never-used technology and a number from another result, not the list on an invitation (item 10b)', async () => {
+        const dir = await kb(FILES, { ...MANIFEST, notUsed: ['Tidewire', 'Ferrous'] });
+        const { mod } = career({ CAREER_KB_PATH: dir });
+        await mod.warm();
+        const block = '[Stories]\n- At Quillsoft the review time fell 40%.';
+        const answer = 'At Quillsoft I chose Tidewire and cut review time by 40%.';
+        assert.deepEqual(mod.checkAnswer(answer, { block }, ''), ['Tidewire (never used)']);
+        assert.deepEqual(mod.checkAnswer(answer, { block, invite: true }, ''), []);
+        assert.deepEqual(mod.checkAnswer('At Quillsoft I cut cloud cost by 40%.', { block }, ''), ['40% (other result)']);
+        assert.deepEqual(mod.checkAnswer('At Quillsoft I cut cloud cost by 40%.', { block }, 'them: did cloud cost drop 40%?'), []);
+    });
 });
 
 describe('kbService: indexing (FR-002, FR-004, FR-005)', () => {

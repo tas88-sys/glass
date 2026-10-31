@@ -122,6 +122,93 @@ describe('findUnsupported: known names (FR-021)', () => {
     });
 });
 
+describe('findUnsupported: neighborhood (future-work item 10b)', () => {
+    const names = ['Lumen Works', 'Harbor Co'];
+    const notes = [
+        '[Results]',
+        '- Lumen Works: cloud cost cut by 40%.',
+        '- Lumen Works: deploy time down from 2 h to 30 min.',
+        '## Harbor Co',
+        '- ticket triage 25% faster',
+        '- Side project: delivery 3 to 5 times faster.',
+        '- Led 5 engineers.',
+    ].join('\n');
+    const check = (answer, conversation = '') => findUnsupported(answer, `${notes}\n${conversation}`, names, { notes });
+
+    it('marks a number the notes give to another result at the same employer', () => {
+        assert.deepEqual(check('At Lumen Works I cut ingestion time by 40%.'), ['40% (other result)']);
+        assert.deepEqual(check('Na Lumen Works reduzi o tempo de ingestão em 40%.'), ['40% (other result)']);
+    });
+
+    it('passes the same number with the same result, in either language', () => {
+        assert.deepEqual(check('At Lumen Works I cut cloud cost by 40%.'), []);
+        assert.deepEqual(check('Na Lumen Works reduzi o custo de nuvem em 40%.'), []);
+        assert.deepEqual(check('Deploys dropped to 30 min.'), []);
+    });
+
+    it('marks the same result told at another employer', () => {
+        assert.deepEqual(check('At Harbor Co I cut cloud cost by 40%.'), ['40% (other result)']);
+        assert.deepEqual(check('At Harbor Co ticket triage got 25% faster.'), []);
+    });
+
+    it('takes the employer from the heading above the note line', () => {
+        assert.deepEqual(check('At Lumen Works ticket triage got 25% faster.'), ['25% (other result)']);
+    });
+
+    it('checks a multiplier, and a range start as the range', () => {
+        assert.deepEqual(check('Data processing got 3-5x faster.'), ['3 (other result)', '5 (other result)']);
+        assert.deepEqual(check('Delivery got 3 to 5x faster.'), []);
+    });
+
+    it('leaves a bare number to the presence check', () => {
+        assert.deepEqual(check('We ran 5 queue workers.'), []);
+    });
+
+    it('passes a number the question or transcript holds', () => {
+        assert.deepEqual(check('At Lumen Works I cut ingestion time by 40%.', 'them: did ingestion drop 40%?'), []);
+    });
+
+    it('passes a number with nothing near it to compare', () => {
+        assert.deepEqual(check('It came out 40% lower.'), []);
+    });
+
+    it('is off without the notes', () => {
+        assert.deepEqual(findUnsupported('At Lumen Works I cut ingestion time by 40%.', notes, names), []);
+    });
+});
+
+describe('findUnsupported: never-used technologies (future-work item 10b)', () => {
+    const opts = { notUsed: ['Tidewire', 'Ferrous'] };
+    const check = (answer, given = '') => findUnsupported(answer, given, ['Lumen Works'], opts);
+
+    it('marks one claimed in the first person or at a known employer', () => {
+        assert.deepEqual(check('I chose Tidewire for the event bus.'), ['Tidewire (never used)']);
+        assert.deepEqual(check('Usei tidewire no projeto de filas.'), ['Tidewire (never used)']);
+        assert.deepEqual(check('Lumen Works ran on Tidewire.', 'Lumen Works'), ['Tidewire (never used)']);
+        assert.deepEqual(check('- At Lumen Works: migrei os serviços; cada um lia filas Tidewire.', 'Lumen Works'), ['Tidewire (never used)']);
+    });
+
+    it('passes a negated mention or one after "instead of"', () => {
+        assert.deepEqual(check('I have never used Tidewire.'), []);
+        assert.deepEqual(check("I haven't used Tidewire."), []);
+        assert.deepEqual(check('Nunca usei Tidewire, só filas simples.'), []);
+        assert.deepEqual(check('I picked a log store instead of Tidewire.'), []);
+        assert.deepEqual(check('Usei filas em vez de Tidewire.'), []);
+    });
+
+    it('passes a general mention', () => {
+        assert.deepEqual(check('Tidewire is a log-based broker.'), []);
+    });
+
+    it('marks it even when the given text names it (the addendum lists it)', () => {
+        assert.deepEqual(check('I chose Tidewire.', 'The candidate has never used: Tidewire, Ferrous.'), ['Tidewire (never used)']);
+    });
+
+    it('lists each name once, in answer order', () => {
+        assert.deepEqual(check('I used Ferrous. Then I chose Tidewire, and I kept Ferrous.'), ['Ferrous (never used)', 'Tidewire (never used)']);
+    });
+});
+
 describe('findUnsupported: output', () => {
     it('lists findings in answer order, once each', () => {
         assert.deepEqual(findUnsupported('40% at Bridge, then 40% again and 7 releases.', '', ['Bridge']), ['40%', 'Bridge', '7']);

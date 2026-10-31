@@ -444,6 +444,14 @@ the flagged record would otherwise take the slot of the file's correction.
    a number given as an example ("e.g., > 300 lines"), and that number repeated later in the
    answer. Percentages ("50 %" too), money and durations are always checked. The cost: "cut
    500 errors a day" is not.
+   Presence is not enough for a result number (a percentage, money, a duration or a multiplier
+   like "3x") that only the notes hold. A note line has to hold it together with what it
+   measures (a word within five words of it in the answer) and the employer the answer's line
+   names, or it is listed as "40% (other result)". This is the case of a cost cut told as a time
+   cut. A number the question or the transcript holds passes on presence, and a bare number
+   ("5 workers") is checked on presence only. A technology the manifest lists as never used
+   (`notUsed`) is listed as "Tidewire (never used)" when the answer names it in the first person
+   or next to an employer, without a negation or "instead of". Invitations are left out.
    Numbers written as words and names outside the manifest are not checked.
 
 **How Jev picks a route** (spec `specs/2026-10-13-career-router-jev/`). With `TYPESAFE_API_KEY`
