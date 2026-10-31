@@ -461,6 +461,47 @@ measuring. 22 got the story through some note (the pitch, the study banks, the p
   conhece", "Have you created the index on that column?") come from older cues ("você conhece",
   "you created"). Live-coding talk that reuses experience verbs stays open.
 
+## R25: English questions, Portuguese notes (future-work item 5)
+
+**Question.** R15 to R17 found answers written in Portuguese that an English question did not
+reach. R15's hand translations were never saved, so the check could not be rerun. With the notes
+as they are now, does an English question reach a Portuguese note as often as the Portuguese one?
+
+**The check.** The 53 Portuguese eval items that have a gold note, translated by hand into the
+English an interviewer would use. The set is kept in the KB repo (C5), written before measuring, with
+the same gold, route and company. A scratchpad script ran both versions of each item through
+`getCareerContext` with the route fixed to the item's label, so routing errors (item 5's other
+gaps) stay out, and with the eval's leave-source-out. No TypeSafe, Groq or other quota: the vectors
+are local.
+
+**Finding.** English is not behind.
+
+| Items with a gold note outside the card (51) | Portuguese question | English question |
+|---|---|---|
+| Gold section in the block | 37 | 40 |
+| Lost in this language only | 6 | 3 |
+
+- The three English-only misses each have the gold section just outside the block:
+  - 7th of 6, behind English sections on the same topic;
+  - 8th, behind six English sections on the same topic;
+  - 2nd in the full ranking, but another section of the same note file ranks first, and only one
+    section per file is sent.
+- The other way round is larger. Six items are lost only in Portuguese, since most study-bank
+  titles are in English:
+  - two through the one-per-file cap;
+  - three ranked 15th to 34th;
+  - one not ranked at all.
+- Two sections per file (`MAX_PER_FILE = 2`) nets zero in each language: Portuguese gains two
+  items and loses two, as the second sections push others out of the 9,000-character block, and
+  English gains one and loses one. Not adopted.
+
+**Decision.** No change in code or notes.
+- The gap R15 to R17 left in English is closed by the notes work done since (Portuguese beside
+  English titles, English subsections in three answers).
+- The three English misses rank just outside the block behind sections on the same topic.
+- Adding English headings for them would tune the notes to these items for no measured gain.
+- The skills note's technology list (R17) still waits for the candidate's review.
+
 ---
 
 ## Summary of Decisions
@@ -484,3 +525,4 @@ measuring. 22 got the story through some note (the pitch, the study banks, the p
 | R15 | Portuguese "had to" is a stopword; Portuguese verb forms share the infinitive stem | Medium (eval +1 item, BM25-only +3.8 pts) |
 | R16 | English twins of the Portuguese present-tense and job cues; three that open technical prompts route ambiguous | High (held-out checks) |
 | R17 | More experience verbs; past-event requests personal; other "tell me about a …" ambiguous | Medium (held-out checks of 10 and 10) |
+| R25 | English questions reach Portuguese notes as often as Portuguese ones (40 vs 37 of 51); no change, two sections per file nets zero | Medium (53 hand translations, route fixed) |
