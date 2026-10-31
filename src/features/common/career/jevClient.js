@@ -48,7 +48,8 @@ const ROUTE_CRITERIA = {
         'motivations, why they are leaving, salary, availability, or one of `candidate_names`; ' +
         'also the details of a project or system the candidate did or described: how it worked, its numbers, their choices, ' +
         'or what they meant by something they said; ' +
-        'also how the candidate works: the tools, setup and workflow they use, including how they use AI. ' +
+        'also how the candidate works: the tools, setup and workflow they use, including how they use AI; ' +
+        'also an invitation to mention something the interview did not ask about. ' +
         'E.g. "Tell me about a time you disagreed with a teammate" / "Me conta de uma vez que você discordou do seu time"; ' +
         '"And how many services did you end up with?" / "Quando você diz que o serviço era assíncrono, o que você quer dizer?"; ' +
         '"Walk me through the AI tools you work with" / "Me mostra como você trabalha com agentes de IA"',

@@ -10,10 +10,12 @@
 // Jev misses: measure them with scripts/eval-career-kb.js --router jev and
 // change the Jev criteria (jevClient.js) instead. The exception: a cue for a
 // case this router itself decided live, with Jev below its confidence floor
-// (future-work item 13), measured with both routers; and a guard that keeps
+// (future-work item 13), measured with both routers; a guard that keeps
 // talk about the code on the screen out of the experience cues (item 5),
-// measured with this router only. stripCuePhrases still
-// builds every retrieval query.
+// measured with this router only; and cues by topic for English questions
+// about the candidate (item 5), for the turns Jev leaves below its floor,
+// measured with both routers. stripCuePhrases still builds every retrieval
+// query.
 //
 // Classifies one interviewer turn as
 //   personal  — about the candidate's own background (inject notes)
@@ -73,11 +75,11 @@ const PERSONAL_CUES = [
     // Past tense asks about what the candidate did ("What was your biggest project?").
     // Present "what is your ..." stays out: it is often an opinion ("your approach"), an ambiguous cue.
     ['background:what-was-your', /\b(?:what|which) (?:was|were) your\b|\bwhat (?:has|have) been your\b/],
-    ['background:in-your-last', /\bin your (?:last|current|previous|past|former) \w+/],
+    ['background:in-your-last', /\b(?:in|at) your (?:last|current|previous|past|former) \w+/],
     ['background:good-at', /\b(?:are you|you are|you would be|would you be) (?:\w+ )?(?:good|strong|great|best) (?:at|in)\b/],
     ['background:why-leaving', /\bwhy (?:are you|did you|do you want to|would you) (?:\w+ )?(?:leav|look|chang|switch|mov|quit)\w*/],
     ['background:future', /\bwhere do you see yourself\b|\bwhat motivates you\b|\bwhat are you looking for\b/],
-    ['background:logistics', /\b(?:salary|compensation|pay) (?:expectation|expectations|range|requirement|requirements)\b|\bnotice period\b|\bwhen (?:can|could) you start\b/],
+    ['background:logistics', /\b(?:salary|compensation|pay) (?:expectation|expectations|range|requirement|requirements)\b|\b(?:salary|compensation|pay) (?:\w+ ){0,3}(?:are|do|would) you (?:\w+ )?(?:target|expect|look|ask|aim)\w*|\bnotice period\b|\bhow much notice\b|\bwhen (?:can|could|would|will) you (?:be able to |be ready to )?(?:start|join)\b/],
     ['background:where-based', /\bwhere (?:are you|do you) (?:based|located|from|live)\b/],
     // Experience (second person, past or perfect)
     ['experience:have-you', /\bhave you (?:\w+ )?(?:worked|used|led|built|managed|designed|implemented|handled|dealt|had|done|seen|faced|run|shipped|owned|migrated|written|mentored|deployed|scaled|introduced|tried|been|set up|adopted|automated|maintained|integrated|launched|contributed|coached|hired|interviewed|taught|trained|supported|architected|standardized|standardised)\b/],
@@ -94,6 +96,16 @@ const PERSONAL_CUES = [
     ['background:why-change', /\b(?:reason|reasons|motivation)(?: why)? (?:that )?you\b(?: \w+){0,4} (?:leav|chang|mov|switch|quit|look\w* (?:for|around|elsewhere)|open to)\w*|\bwhat (?:would|could|might|made|makes|is making) (?:make )?you\b(?: \w+){0,3} (?:leav|chang|mov|switch|quit|look\w* (?:for|around|elsewhere)|open to)\w*/],
     ['background:start-date', /\bhow (?:soon|quickly|long|much time) (?:would|could|will|can|do) you (?:\w+ ){0,4}(?:start|join|be available)\b|\b(?:after|once) (?:you )?(?:get|getting|receive|receiving|accept|accepting) (?:an|the|our) offer\b/],
     ['background:do-well', /\byou (?:would|could|will|might) (?:do|perform) (?:\w+ )?(?:well|great|best)\b|\byou (?:would|could|will) (?:shine|excel|stand out)\b|\bwe (?:have not|did not) (?:yet )?(?:covered|discussed|talked about|asked (?:you )?about)\b/],
+    // English questions about the candidate by topic (future-work item 5): why they
+    // are looking, an invitation to add what was not asked, what working somewhere
+    // was like, how comfortable they are with a technology, the next role. Each
+    // needs "you": "what's pushing the latency up" and "how comfortable is the
+    // database" stay general.
+    ['background:job-search', /\byour job (?:search|hunt)\b|\b(?:pushing|driving|prompting|motivating|making|got|made|led|leading|brought) you (?:\w+ ){0,2}(?:to )?(?:look(?:ing)? (?:at|for|around|elsewhere)|start(?:ed)? looking|think(?:ing)? about (?:a )?(?:change|move|leaving))\b|\b(?:making|makes|made) you want to (?:move|leave|change|switch)\b/],
+    ['background:anything-to-add', /\b(?:anything|something) (?:else )?about yourself\b|\bwe (?:did not|have not|never) (?:get to )?ask(?:ed)?(?: you)? about\b|\b(?:did not|never|have not) (?:get|got|had|have) (?:the |a )?chance to(?: (?:mention|say|share|tell|talk|bring|add)\b|$)/],
+    ['background:what-was-it-like', /\bwhat (?:was|is|has been) it like (?:to )?(?:work|working|being)\b|\bhow (?:was|is) (?:the|your) experience (?:of|with|at|in)\b/],
+    ['background:comfortable-with', /\bhow (?:comfortable|confident|familiar) (?:are you|do you feel|would you say you are)\b|\b(?:would|are) you (?:be )?(?:comfortable|confident) (?:\w+ )?(?:with|in|using|working|writing)\b|\brate yourself\b/],
+    ['background:next-role', /\b(?:ideal|dream) (?:next )?(?:role|job|position|company)\b|\byour next (?:role|job|position)\b/],
     // "Tell me about a launch that went well": a request about something that happened.
     ['behavioral:tell-me-about-a-past', /\b(?:tell|talk) (?:me|us) (?:\w+ )?about (?:a|an|one|some) (?:\w+ ){1,4}(?:that|which) (?:\w+ )?(?:went|worked|failed|succeeded|broke|shipped|launched|happened|turned out|saved|changed|grew|scaled)\b/],
     ['behavioral:example-having-to', /\bexample (?:of )?(?:having to|having had to|you had to|you needed to)\b|\b(?:do|did) you have (?:an|a|any|one|some) (?:\w+ )?(?:example|story|situation|instance)s?\b/],
