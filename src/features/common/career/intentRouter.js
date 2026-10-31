@@ -8,8 +8,10 @@
 // regex, a network error, a timeout, an open circuit, low confidence), and
 // stays the synchronous gate while Jev is off. Do not add cues for phrasings
 // Jev misses: measure them with scripts/eval-career-kb.js --router jev and
-// change the Jev criteria (jevClient.js) instead. stripCuePhrases still builds
-// every retrieval query.
+// change the Jev criteria (jevClient.js) instead. The exception: a cue for a
+// case this router itself decided live, with Jev below its confidence floor
+// (future-work item 13), measured with both routers. stripCuePhrases still
+// builds every retrieval query.
 //
 // Classifies one interviewer turn as
 //   personal  — about the candidate's own background (inject notes)
@@ -57,6 +59,10 @@ const PERSONAL_CUES = [
     ['background:what-you-do', /\bwhat (?:do|are) you (?:do|doing|working on|currently|building|focused on)\b|\bwhat (?:kind|type) of (?:work|projects|role) (?:do|did|are) you\b/],
     ['background:fragment', /^(?:and |so )?(?:any|some|much|prior|previous|professional|hands on) (?:experience|exposure|background) (?:with|in|on|using)\b|^(?:and |so )?(?:current|expected|desired) (?:salary|compensation|role|company|employer|stack|location)\b/],
     ['background:your-career', /\byour (?:background|career|resume|cv|experience|journey|trajectory|track record|professional|story|path|workflow|workflows|routine|tooling|stack(?! trace))\b/],
+    // The candidate's own tools ("your AI setup", "your CLAUDE.md", which the STT
+    // hears as "club md"). Live-coding talk about the setup on screen stays out:
+    // "in your setup the env file…", "your setup function".
+    ['background:your-setup', /\byour (?:ai|coding|dev|development|agent|agentic|llm) (?:setup|tooling|tools|workflow|stack|assistant|assistants|agent|agents)\b|(?<!\b(?:in|on|from|to|into) )\byour (?:own |usual |current |personal )?setup\b(?! (?:method|function|func|script|scripts|file|files|step|steps|hook|hooks|code|block|phase|call|here|there))|\byou (?:\w+ ){0,2}(?:claude|club|cloud) ?md\b|\byour (?:claude|club|cloud) ?md\b|\b(?:skills|hooks|commands|agents) (?:that )?you (?:usually |normally |always |currently )?(?:use|built|created|wrote|keep|rely on)\b/],
     ['background:your-role', /\byour (?:\w+ )?(?:current|previous|last|past|former|first|main|day to day|daily) (?:role|job|position|company|employer|team|project|manager|work|responsibilities|duties)\b|\byour (?:\w+ )?(?:responsibilities|duties|tech stack)\b/],
     ['background:your-trait', /\byour (?:biggest|greatest|main|key|top|best|worst|proudest|major) (?:weakness|weaknesses|strength|strengths|achievement|achievements|accomplishment|challenge|failure|mistake|win|contribution|lesson|regret|impact|project|projects)\b/],
     ['background:your-strengths', /\byour (?:strengths|weaknesses|strong points|weak points|achievements|accomplishments)\b/],
@@ -103,6 +109,8 @@ const PERSONAL_CUES = [
     ['background:pt-apresente', /\b(?:se apresent\w*|apresente se|apresenta se)\b/],
     ['background:pt-sua-trajetoria', /\b(?:sua|tua) (?:experiencia|trajetoria|carreira|historia|jornada|formacao|funcao|rotina|stack|maior|principal|ultima|atual|atuacao|contribuicao)\b/],
     ['background:pt-seu-momento', /\b(?:seu|teu) (?:momento|maior|principal|ultimo|atual|trabalho|emprego|cargo|papel|time|projeto|perfil|curriculo|background|ponto|pacote)\b/],
+    // Twins of background:your-setup. "No seu setup aqui…" is the code on screen.
+    ['background:pt-seu-setup', new RegExp(`(?<!\\b(?:no|nesse|neste) )\\b(?:seu|teu) setup\\b(?! (?:aqui|ai|do (?:projeto|teste)))|\\b(?:suas|tuas) (?:skills|ferramentas)\\b|\\bcomo (?:que )?${YOU} (?:\\w+ )?(?:usa|utiliza) (?:a |o |os )?(?:ia|ai|llms?|agentes?|claude|copilot|cursor)\\b`)],
     // Only nouns that name a person's record: "seus/suas" is also "its" ("Kafka e seus
     // desafios"), so "desafios", "impactos" and "resultados" alone stay out.
     ['background:pt-seus-pontos', /\b(?:seus|suas|teus|tuas) (?:\w+ )?(?:pontos|qualidades|defeitos|conquistas|realizacoes|experiencias|projetos|responsabilidades|contribuicoes|aprendizados)\b/],

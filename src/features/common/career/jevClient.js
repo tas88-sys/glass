@@ -47,9 +47,11 @@ const ROUTE_CRITERIA = {
         'Asks the candidate about their own background: past experience, something they did, their career, strengths and weaknesses, ' +
         'motivations, why they are leaving, salary, availability, or one of `candidate_names`; ' +
         'also the details of a project or system the candidate did or described: how it worked, its numbers, their choices, ' +
-        'or what they meant by something they said. ' +
+        'or what they meant by something they said; ' +
+        'also how the candidate works: the tools, setup and workflow they use, including how they use AI. ' +
         'E.g. "Tell me about a time you disagreed with a teammate" / "Me conta de uma vez que você discordou do seu time"; ' +
-        '"And how many services did you end up with?" / "Quando você diz que o serviço era assíncrono, o que você quer dizer?"',
+        '"And how many services did you end up with?" / "Quando você diz que o serviço era assíncrono, o que você quer dizer?"; ' +
+        '"Walk me through the AI tools you work with" / "Me mostra como você trabalha com agentes de IA"',
     company:
         'Asks the candidate about the interviewer\'s company or this role: why they want to join, what they know about the company, ' +
         'what they think of the job opening, or a company from `note_companies` named as the one interviewing; ' +
@@ -60,7 +62,9 @@ const ROUTE_CRITERIA = {
         'Asks the candidate a hypothetical, habitual or opinion question, where their experience may help but is not asked for directly. ' +
         'E.g. "How would you handle a production outage?" / "Como você lida com prazos apertados?"',
     general:
-        'Anything else: a technical or factual question that is not about the candidate\'s own work, small talk, or a statement that asks nothing, ' +
+        'Anything else: a technical or factual question that is not about the candidate\'s own work, ' +
+        'a question about the code or the solution being worked on in the interview (even when it says "you" or "your"), ' +
+        'small talk, or a statement that asks nothing, ' +
         'such as the interviewer presenting themselves, their company or the role. ' +
         'E.g. "What is the difference between a process and a thread?" / "Aqui na empresa a gente faz deploy toda semana."',
 };
