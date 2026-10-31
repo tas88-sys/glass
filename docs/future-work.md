@@ -17,7 +17,7 @@ One step at a time, each with its own plan, a fresh session per step. When a ste
 | [x] 5 | 14. The live check marks technical constants | `findUnsupported`. Before 10b: 10b needs its false-alarm rate measured, and that is not readable with this noise in. The Groq daily limit ran out again after 3 of the pending answers, so 10a's and 11's measurements move to the start of step 6. |
 | [x] 6 | 10b. Neighborhood check and marking "not used" technologies (item 10, steps 2–3 and 4 second half) | Same file as 14, now without the noise. Measured offline on the replay answers that kept their notes. 10a's and 11's real-LLM measurements still wait for the Groq daily limit (the "Pending from" sections). |
 | [x] 7 | 13. A question about the candidate's own setup routes general | After 9, since the 2026-10-29 turn had no question and should then get no answer; what is left are real questions about the setup. Uses item 5's held-out sets, so it can share a plan with item 5. |
-| [ ] 8 | 15. STT terms heard as other words | Independent, lowest severity, costliest to measure (audio eval before and after). Can move into any gap. |
+| [x] 8 | 15. STT terms heard as other words | Independent, lowest severity, costliest to measure (audio eval before and after). Can move into any gap. **Merged with its measurement pending** (item 15, acceptance box 1): no external quota was spent on this step. |
 
 Notes for the plans:
 
@@ -721,7 +721,7 @@ What shipped, in `findUnsupported`:
 
 ## 15. STT — interview terms heard as other words
 
-**Status:** Pending. Found on 2026-10-29 in an English session; not started.
+**Status:** Done (2026-10-31, branch `2026-10-31-stt-interview-keyterms`), measurement pending. Found on 2026-10-29 in an English session.
 **Severity:** LOW to MEDIUM (wrong words reach the extracted question and the note search)
 **Code:** `TECH_KEYTERMS` (`src/features/listen/sttKeyterms.js`); Deepgram only.
 
@@ -748,5 +748,16 @@ The extracted question for one turn was "how you take benefit of **a yard** to b
 
 ### Acceptance (when implemented)
 
-- [ ] The live eval's word error on the added terms goes down, and no other item gets worse.
-- [ ] The keyterm list stays under Deepgram's cap (`sttKeyterms` unit tests).
+- [ ] The live eval's word error on the added terms goes down, and no other item gets worse. **Pending:** the next audio live eval run (no quota was spent for this step). Phase A has no turn with these terms yet: add invented ones to `fixtures/interview.json` and run them with and without the new terms. A clean TTS voice may already hear them right, since the session's errors came from a real speaker.
+- [x] The keyterm list stays under Deepgram's cap (`sttKeyterms` unit tests).
+
+### Outcome (2026-10-31)
+
+- **Added to `TECH_KEYTERMS`:** "API token", "rate limit", "rate limiter", "unbuffered channel", "buffered channel", "Claude Code", "CLAUDE.md", "AI agent", "AI tools", "AI setup".
+- **"AI" goes only inside phrases.** Step 2 (does a two-letter "AI" bias ordinary words?) needs the audio measurement. Until then, phrases give the term context without boosting "AI" alone; Deepgram's own guidance is to avoid short, broad keyterms. Add "AI" alone only if the measurement shows the phrases do not fix "a yard" / "the air".
+- **The cap:** `MAX_KEYTERMS` is now the 50 names plus the whole fixed list (93), so the fixed list always fits; before, 50 names would have cut its last terms.
+- **The token cap (500 per request):**
+  - a test estimates one token per 3 characters of each term;
+  - the fixed list comes to about 134 tokens;
+  - with 50 names of 20 characters, the whole list stays under 500.
+- **The real notes:** they give 47 names, so the list comes to 90 terms and about 280 estimated tokens. Every technical term is kept, and each one goes to Deepgram as its own `keyterm=`.
