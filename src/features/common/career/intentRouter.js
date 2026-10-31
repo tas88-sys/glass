@@ -10,7 +10,9 @@
 // Jev misses: measure them with scripts/eval-career-kb.js --router jev and
 // change the Jev criteria (jevClient.js) instead. The exception: a cue for a
 // case this router itself decided live, with Jev below its confidence floor
-// (future-work item 13), measured with both routers. stripCuePhrases still
+// (future-work item 13), measured with both routers; and a guard that keeps
+// talk about the code on the screen out of the experience cues (item 5),
+// measured with this router only. stripCuePhrases still
 // builds every retrieval query.
 //
 // Classifies one interviewer turn as
@@ -51,7 +53,7 @@ const PERSONAL_CUES = [
     // Behavioral framing
     ['behavioral:tell-me-about-a-time', /\b(?:tell|walk) (?:me|us) (?:\w+ )?(?:about|through) (?:a|an|one|the) (?:time|situation|moment|occasion|example|instance|project|case)\b/],
     ['behavioral:a-time-when', /\b(?:a|one|the last) (?:time|occasion|instance) (?:when|where|that|in which|you)\b/],
-    ['behavioral:example-when-you', /\bexample (?:of )?(?:a time|when you|where you|from your|in which you|of how you)\b/],
+    ['behavioral:example-when-you', /^(?!.*\b(?:imagine|suppose|assume)\b).*\bexample (?:of )?(?:a time|when you(?! would)|where you|from your|in which you|of how you)\b/],
     ['behavioral:have-you-ever', /\bhave you (?:ever|been)\b/],
     // Background
     ['background:about-yourself', /\b(?:about|introduce|describe|present) yourself\b/],
@@ -273,6 +275,14 @@ function companyNameCue(s, companies) {
  * @param {{ prev?: {route:string, ts:number, queryTerms?:string[]}|null, entities?: string[], companies?: string[], now?: number }} [ctx]
  * @returns {{ route: 'personal'|'company'|'ambiguous'|'general', cue: string|null }}
  */
+// A turn that points at the code on the screen ("this function", "that column",
+// "nessa fila") is about the code, whatever experience verb it carries: "Have you
+// handled the nil case in this function?" asks about the snippet, not the career
+// (future-work item 5, live-coding talk). Needs a demonstrative before a code noun;
+// "the" alone is not enough ("how did you handle the cache invalidation at X").
+const CODE_NOUN = '(?:function|method|class|loop|column|index|query|table|list|array|map|slice|string|variable|line|code|snippet|test|handler|request|connection|queue|lock|cache|endpoint|parser|condition|branch|block|file|struct|goroutine|thread|retry|timeout|return|value|input|output|funcao|metodo|classe|laco|coluna|indice|consulta|tabela|lista|mapa|variavel|linha|codigo|trecho|teste|requisicao|conexao|fila|condicao|ramo|bloco|arquivo|retorno|valor|entrada|saida|path|error|erro|caminho)';
+const CODE_ON_SCREEN = new RegExp(`\\b(?:this|that|these|those|ess[ea]s?|nes[st][ea]s?|dess[ea]s?|dest[ea]s?|est[ea]s?) (?:\\w+ )?${CODE_NOUN}\\b`);
+
 function classifyCareerIntent(text, ctx = {}) {
     const general = { route: 'general', cue: null };
     if (typeof text !== 'string') return general;
@@ -291,6 +301,8 @@ function classifyCareerIntent(text, ctx = {}) {
             return { route: prev.route, cue: 'follow-up' };
         }
     }
+
+    if (CODE_ON_SCREEN.test(s)) return { route: 'general', cue: 'code:on-screen' };
 
     const personal = firstMatch(PERSONAL_CUES, s);
     if (personal) return { route: 'personal', cue: personal };

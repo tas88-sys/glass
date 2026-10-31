@@ -260,7 +260,7 @@ Four gaps are still open after T038 to T040. Each was measured with the eval, `s
 
 ### Acceptance
 
-- [ ] A live-coding turn set exists, and its turns routed personal are counted before and after any guard.
+- [x] A live-coding turn set exists, and its turns routed personal are counted before and after any guard. (2026-11-01, branch `2026-11-01-career-route-livecode`, research R23: 36 invented turns, 26 routed personal before and 7 after, with 24 controls about the candidate still personal. Measured with the regex only, no TypeSafe quota: Jev is not measured on this set. The old EN #12 hypothetical now routes ambiguous. The 7 left have no demonstrative, so a guard would also catch questions about the candidate.)
 - [ ] On a new English held-out set, questions about the candidate routed general are counted before and after. (Item 13 did this for one topic only, questions about the candidate's setup and AI workflow: see its **Outcome**. A general held-out set is still to write.)
 - [ ] The eval's Portuguese questions asked in English send the right note as often as in Portuguese, or the gap is explained.
 - [ ] The ambiguous threshold is set from labeled turns (T027).

@@ -348,3 +348,38 @@ recorded sessions whose extracted question differs from the turn, routing on the
 fixes the 2026-10-28 scenario turn but takes the labeled route away from 22 turns with the regex
 and 14 with Jev (mostly questions about the candidate whose subject is earlier in the turn), and
 Jev then routes another labeled general turn personal. Not adopted.
+
+## R23: talk about the code on the screen, routed personal (future-work item 5, live-coding gap)
+
+The older experience cues (`experience:have-you`, `you-past`, `did-you`, `pt-voce-past`,
+`pt-voce-habito`, `behavioral:pt-um-momento`) match an interviewer turn about a snippet as well as
+one about the candidate: "Have you handled the nil case in this function?" asks about the code, and
+the answer was getting notes and the first-person addendum.
+
+**Decision.** In `intentRouter.js`, a guard before the personal cues: a demonstrative before a code
+noun ("this function", "that column", "nessa fila", "esse lock") routes general (`code:on-screen`).
+"The" alone does not count, since "how did you handle the cache invalidation at X" is about the
+candidate. And `behavioral:example-when-you` skips a turn that says "imagine", "suppose" or
+"assume", and "when you would": those are hypotheticals.
+
+**Measured with the regex only** (no TypeSafe quota was spent, so Jev is not measured; the guard is
+in the fallback that decides when Jev cannot). A set of 60 invented turns written before the change:
+36 about the code on the screen (EN and PT) and 24 controls with the same verbs about the candidate.
+
+| Check | Before | After |
+|---|---|---|
+| 36 live-coding turns routed personal | 26 | 7 |
+| 24 control turns routed personal | 24 | 24 |
+| Eval (133): confusion matrix | unchanged | unchanged |
+| Synthetic (40): confusion matrix | unchanged | unchanged |
+
+- The 7 left have no demonstrative ("the cache before the client", "a conexão no caminho de erro
+  aqui"). Catching them needs a bare "the" or "aqui", which would also catch questions about the
+  candidate.
+- Over the 698 recorded interviewer turns and eval questions, 8 turns change. Five only get the new
+  cue name (general before and after). Of the three that change route: the 2026-10-28 scenario turn
+  (labeled general) goes from personal to general, one unlabeled technical turn of the same session
+  goes from personal to general, and 2026-10-29 #12 (the hypothetical about an API's limits, left
+  by item 13) goes from personal to ambiguous, as Jev had it.
+- Not measured: Jev on these turns. When Jev decides (confidence at or above 0.5) the guard is not
+  in play.

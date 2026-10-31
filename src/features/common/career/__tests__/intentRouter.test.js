@@ -259,7 +259,28 @@ table('general (no second-person background cue)', 'general', [
     'What goes into a CLAUDE.md file?',
     'No seu setup aqui o banco sobe antes da API?',
     'O setup do projeto roda as migrations?',
+    // The code on the screen, with an experience verb (future-work item 5).
+    'Have you handled the nil case in this function?',
+    'Have you added an index on that column yet?',
+    'Did you close the connection in this error path?',
+    'Give me an example of when you would hit the rate limit with this loop.',
+    'Give me an example of when you\'d overflow the queue.',
+    'Você já tratou a lista vazia nessa função?',
+    'Você criou o índice nessa coluna?',
+    'Você usa esse lock pra quê?',
+    'Imagine this other example where you are building a client for an external API with request limits. What approach do you follow?',
+    'Conte sobre a estrutura de dados que você escolheu nesse código.',
     '',
+]);
+
+// The same verbs about the candidate, no code on the screen: still personal.
+table('personal (experience verbs without code on the screen, future-work item 5)', 'personal', [
+    'Have you handled the nil case in production incidents?',
+    'Have you built monitoring from scratch at a previous job?',
+    'Give me an example of when you disagreed with a teammate.',
+    'Você já tratou erro de fila em produção?',
+    'Você criou algum monitoramento do zero num emprego anterior?',
+    'Me dá um exemplo de quando você usou cache.',
 ]);
 
 describe('cue names', () => {
