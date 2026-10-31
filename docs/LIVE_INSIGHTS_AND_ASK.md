@@ -533,7 +533,8 @@ flowchart TB
   personal. A `companies` name makes it company only after a phrase such as "heard of", "know
   about", "join", "conhece" or "trabalhar na".
 - **Close enough** (ambiguous route): at least one of the sections it would send has a cosine of
-  at least the model's threshold (0.35 for Arctic Embed); when the answer is keyword-only, at
+  at least the model's threshold (0.35 for Arctic Embed, checked against labeled turns in R26 of
+  the career-context spec); when the answer is keyword-only, at
   least half the query terms, and two or more, appear in one of them.
 - **The answer gate.** Live Answer answers turns that look like questions. While the notes are
   loaded, a turn the router calls personal or company is answered too, so a statement such as
