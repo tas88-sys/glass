@@ -270,6 +270,15 @@ table('general (no second-person background cue)', 'general', [
     'Você usa esse lock pra quê?',
     'Imagine this other example where you are building a client for an external API with request limits. What approach do you follow?',
     'Conte sobre a estrutura de dados que você escolheu nesse código.',
+    // The words of the English topic cues, about a system or a process (future-work item 5).
+    'What is driving the memory up on this pod?',
+    'What made the deploy start failing yesterday?',
+    'When could the worker join the cluster again after a restart?',
+    'Is there anything in the handler we did not cover with tests?',
+    'What was it like before the cache was added?',
+    'How comfortable is the broker with ten thousand partitions?',
+    'What is the ideal batch size for this consumer?',
+    'So what\'s your next step?',
     '',
 ]);
 
@@ -281,6 +290,26 @@ table('personal (experience verbs without code on the screen, future-work item 5
     'Você já tratou erro de fila em produção?',
     'Você criou algum monitoramento do zero num emprego anterior?',
     'Me dá um exemplo de quando você usou cache.',
+]);
+
+// English questions about the candidate that no cue matched (future-work item 5).
+table('personal (English topics: job search, start date, what was left out, comfort, next role)', 'personal', [
+    'What has been driving you to look around lately?',
+    'Is the money making you want to switch?',
+    'How is your job search going so far?',
+    'When would you be ready to start?',
+    'How much notice do you have to give?',
+    'What compensation are you aiming for?',
+    'Is there anything about yourself we should hear before we finish?',
+    'Anything you never had the chance to mention?',
+    'Is there something we did not ask you about?',
+    'What was it like working with a fully distributed team?',
+    'How was your experience at the agency?',
+    'How familiar are you with Terraform?',
+    'Are you confident writing Rust in production?',
+    'What is your dream job, honestly?',
+    'What do you want from your next role?',
+    'What did you like about the team at your previous company?',
 ]);
 
 describe('cue names', () => {

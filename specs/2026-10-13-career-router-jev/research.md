@@ -383,3 +383,50 @@ in the fallback that decides when Jev cannot). A set of 60 invented turns writte
   by item 13) goes from personal to ambiguous, as Jev had it.
 - Not measured: Jev on these turns. When Jev decides (confidence at or above 0.5) the guard is not
   in play.
+
+## R24: English questions about the candidate, routed general (future-work item 5, English gap)
+
+R16 left English questions about the candidate with no regex cue: the reason behind a job search,
+"when could you join", "something we didn't ask about", "what was it like working at…", "would you
+be comfortable with…". R16 and R17 came before Jev, so nobody had measured Jev on them.
+
+**The check.** A set of 57 invented English turns, written before any router ran on them and kept in
+the KB repo (C5): 32 questions about the candidate (R16's six misses among them) and 25 controls
+with the same words about a system, the code or the interviewer's company (general or ambiguous).
+Jev ran twice before and twice after (R20), the regex once.
+
+**What it showed.** Jev routed 30 of the 32 personal in both runs. The two misses were invitations to
+add something the interview did not ask about: Jev answered below its floor (0.31, 0.28) and the
+regex, with no cue, routed them general. The regex alone routed 9 of the 32 personal.
+
+**Decision.**
+- Jev's `personal` criterion adds "an invitation to mention something the interview did not ask
+  about". A first wording, "anything about themselves that the interview has not covered", also
+  moved an eval habit question ("how do you stay up to date", labeled ambiguous) to personal in both
+  runs, so it was narrowed once.
+- The frozen regex router gets cues by topic for the fallback, each needing "you":
+  `background:job-search`, `anything-to-add`, `what-was-it-like`, `comfortable-with` and
+  `next-role`. `background:logistics` adds the target salary, "how much notice" and "when would you
+  start or join", and `in-your-last` takes "at your last…". The comment marked FROZEN names the
+  exception.
+- The cues were written knowing the set, so the regex column is a tuning figure; the Jev columns
+  are a test, except the two invitations the criterion names.
+
+| Check | Before: regex / Jev | After: regex / Jev |
+|---|---|---|
+| 32 questions about the candidate routed personal | 9 / 30, 30 | 28 / 32, 32 |
+| 25 controls routed personal | 1 / 0, 0 | 1 / 0, 0 |
+| Set: Jev below the floor | 12, 11 | 10, 8 |
+| Eval (133): confusion matrix | — | regex unchanged; Jev the same six misses (q040 flips between general and company, as in R18) |
+| Eval: Jev below the floor | 13, 13 | 11, 14 |
+| Synthetic (40): confusion matrix | — | unchanged |
+
+- The one control the regex routes personal is an older cue ("what would make you choose…",
+  `experience:you-past`), not this change.
+- Over the 698 recorded interviewer turns and the questions of the eval, synthetic, setup (R22) and
+  live-coding (R23) sets, no route changes. A first `next-role` with "your next step" moved one
+  labeled scenario turn ("what's your next step?") to personal, so "step" and "move" were dropped.
+- The regex still misses four (a commitment coming up, "do you prefer remote or hybrid", "what would
+  you have done differently", the hardest feedback): Jev routes them personal above the floor.
+- Cost: about 1,400 TypeSafe calls (two rounds after, since the criterion was narrowed once), no
+  Groq or Deepgram.

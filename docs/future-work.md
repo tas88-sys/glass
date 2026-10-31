@@ -237,7 +237,7 @@ Which key and model to use. One run is about 120 model calls (an answer and a ju
 
 ## 5. Live Answer career context — open routing and retrieval items
 
-**Status:** Pending. Found on 2026-10-11 while comparing questions in English and Portuguese; not started.
+**Status:** Pending. Found on 2026-10-11 while comparing questions in English and Portuguese. The live-coding and English-questions gaps were done on 2026-11-01 (acceptance boxes 1 and 2); the Portuguese-note and ambiguous-gate gaps are open.
 **Spec:** `specs/2026-10-11-live-answer-career-context/` (research R15 to R17)
 
 ### Summary
@@ -247,7 +247,7 @@ Four gaps are still open after T038 to T040. Each was measured with the eval, `s
 | Item | What happens | Example |
 |------|--------------|---------|
 | **Live-coding talk routed personal** | Older experience cues also match a turn about the code on screen. The answer then gets notes and the first-person addendum. | "Have you created the index on that column?" (`experience:you-past`), "Conte sobre uma estrutura de dados que você conhece" (`experience:pt-voce-habito`), "Have you handled the nil case?" (`experience:have-you`) |
-| **English questions about the candidate that still route general** | No cue matches, so no notes are sent. These six were R16's held-out misses; they are no longer held out. | "What's pushing you to look for something new?", "When could you join if we made an offer?", "Is there something you'd like to add that we didn't ask about?", "What's the reason behind your job search?", "What was it like working at a startup?", "Would you be comfortable working with Python?" |
+| **English questions about the candidate that still route general** | Done on 2026-11-01 (R24 in the Jev spec): Jev routed most of them personal already; its criterion and the regex fallback now cover the rest. Before, no regex cue matched, so with Jev below its floor no notes were sent. These six were R16's held-out misses; they are no longer held out. | "What's pushing you to look for something new?", "When could you join if we made an offer?", "Is there something you'd like to add that we didn't ask about?", "What's the reason behind your job search?", "What was it like working at a startup?", "Would you be comfortable working with Python?" |
 | **English question, note written in Portuguese** | The route is right, but the note ranks too low: its words do not match and the vectors match across languages less surely. | "Have you ever built a system from scratch?" (the story's note ranks 8th, not sent); "What's the biggest thing you've built from the ground up?" (not in the top 40); one eval item hits in Portuguese and misses in English |
 | **Ambiguous gate just under the threshold** | A turn routed ambiguous sends nothing when its closest note scores just under the 0.35 gate. The threshold is not calibrated yet (T027). | Before R17, "Conte sobre um lançamento que deu certo" routed ambiguous and its closest note scored 0.349. R17 routes that one personal, but any other ambiguous turn can fall just under. |
 
@@ -261,7 +261,7 @@ Four gaps are still open after T038 to T040. Each was measured with the eval, `s
 ### Acceptance
 
 - [x] A live-coding turn set exists, and its turns routed personal are counted before and after any guard. (2026-11-01, branch `2026-11-01-career-route-livecode`, research R23: 36 invented turns, 26 routed personal before and 7 after, with 24 controls about the candidate still personal. Measured with the regex only, no TypeSafe quota: Jev is not measured on this set. The old EN #12 hypothetical now routes ambiguous. The 7 left have no demonstrative, so a guard would also catch questions about the candidate.)
-- [ ] On a new English held-out set, questions about the candidate routed general are counted before and after. (Item 13 did this for one topic only, questions about the candidate's setup and AI workflow: see its **Outcome**. A general held-out set is still to write.)
+- [x] On a new English held-out set, questions about the candidate routed general are counted before and after. (2026-11-01, branch `2026-11-01-career-route-en-personal`, research R24: 32 invented questions about the candidate and 25 controls. Jev routed 30 of the 32 personal before and 32 after, in two runs each; the two it missed were invitations to add what the interview did not ask about, which its criterion now names. The regex fallback went from 9 to 28 with cues by topic; those cues were written knowing the set. No control, eval item or recorded turn moved to personal. Item 13 had done the setup topic.)
 - [ ] The eval's Portuguese questions asked in English send the right note as often as in Portuguese, or the gap is explained.
 - [ ] The ambiguous threshold is set from labeled turns (T027).
 
