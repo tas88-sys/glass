@@ -708,7 +708,7 @@ TTS (Gemini, cached) → 100 ms PCM chunks → SttService (Deepgram/Gemini live)
 
 | | What | Checks that fail the run |
 |---|---|---|
-| A | Invented interview in pt-BR then en-US (`fixtures/interview.json`): direct questions, a request with no question mark, context then question, follow-ups, monologue, the candidate's own question | answer shown or not, as each turn expects; a key term; no error |
+| A | Invented interview in pt-BR then en-US (`fixtures/interview.json`): direct questions, a request with no question mark, context then question, follow-ups, monologue, the candidate's own question, technical terms the STT keyterms favor (`sttTerms`) | answer shown or not, as each turn expects; a key term; no error |
 | B | Questions sampled per route from `glass-eval/questions.jsonl` in the notes; a company question is preceded by "here at <company>…"; after each answer the candidate says its headline back, so the transcript alternates as in an interview | route; notes injected (personal/company) or not (general); company detected; answer shown. When the router gives the script text itself another route than its label, the route and notes checks only warn: that is a router gap, which `scripts/eval-career-kb.js` measures; the live eval fails only when audio and STT change a route the router gets right |
 | C | Ask, default mode, on an ops screen | order id, latency and error code read from the image; the screenshot was sent; a model that sees images answered |
 | D | Ask, code mode, on a hard grid problem; once in JavaScript and once in the saved language | five sections in order; a code block; **the JavaScript runs against 22 hidden tests**, one of them a 220×220 grid that a quadratic solution cannot finish (a function under another name than the screen's fails, and the detail says how it does under its own name); the Go answer compiles, when Go is installed |
@@ -718,6 +718,7 @@ TTS (Gemini, cached) → 100 ms PCM chunks → SttService (Deepgram/Gemini live)
 
 - **Warnings** (they do not fail the run):
   - STT word error rate above 0.25;
+  - a term of the turn's `sttTerms` missing from the transcript (future-work item 15);
   - the first token more than 6 s after the final transcript;
   - the answer in a different language from the question;
   - a fallback to another model;
@@ -787,6 +788,10 @@ and numbers only.
 
   `npm run eval:live -- --block-providers groq,gemini,deepgram --fast` checks the gate and the
   career routes with Jev in about 80 s, at no LLM or STT cost.
+
+  `npm run eval:live -- --only A --stt-provider deepgram --llm-models openai/gpt-oss-120b
+  --block-providers groq,typesafe` measures the STT alone: the only listed model is blocked, so
+  the stub answers, and Gemini stays open for the TTS. About 4 minutes of Deepgram on two sessions.
 
 `--help` lists all of them. The exit code is 1 when any check that fails the run did not pass.
 

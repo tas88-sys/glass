@@ -17,7 +17,7 @@ One step at a time, each with its own plan, a fresh session per step. When a ste
 | [x] 5 | 14. The live check marks technical constants | `findUnsupported`. Before 10b: 10b needs its false-alarm rate measured, and that is not readable with this noise in. The Groq daily limit ran out again after 3 of the pending answers, so 10a's and 11's measurements move to the start of step 6. |
 | [x] 6 | 10b. Neighborhood check and marking "not used" technologies (item 10, steps 2–3 and 4 second half) | Same file as 14, now without the noise. Measured offline on the replay answers that kept their notes. 10a's and 11's real-LLM measurements still wait for the Groq daily limit (the "Pending from" sections). |
 | [x] 7 | 13. A question about the candidate's own setup routes general | After 9, since the 2026-10-29 turn had no question and should then get no answer; what is left are real questions about the setup. Uses item 5's held-out sets, so it can share a plan with item 5. |
-| [x] 8 | 15. STT terms heard as other words | Independent, lowest severity, costliest to measure (audio eval before and after). Can move into any gap. **Merged with its measurement pending** (item 15, acceptance box 1): no external quota was spent on this step. |
+| [x] 8 | 15. STT terms heard as other words | Independent, lowest severity, costliest to measure (audio eval before and after). Can move into any gap. Merged with its measurement pending; **measured on 2026-11-01**. The new terms did not raise the count heard right (7 of 12 before and after), and "Claude Code" is still heard as "Cloud Code" (item 15, acceptance box 1, still open). |
 
 Notes for the plans:
 
@@ -721,7 +721,7 @@ What shipped, in `findUnsupported`:
 
 ## 15. STT — interview terms heard as other words
 
-**Status:** Done (2026-10-31, branch `2026-10-31-stt-interview-keyterms`), measurement pending. Found on 2026-10-29 in an English session.
+**Status:** Done (2026-10-31, branch `2026-10-31-stt-interview-keyterms`). Measured on 2026-11-01 (branch `2026-11-01-stt-keyterms-measure`): acceptance box 1 is not met, see **Measurement**. Found on 2026-10-29 in an English session.
 **Severity:** LOW to MEDIUM (wrong words reach the extracted question and the note search)
 **Code:** `TECH_KEYTERMS` (`src/features/listen/sttKeyterms.js`); Deepgram only.
 
@@ -748,7 +748,7 @@ The extracted question for one turn was "how you take benefit of **a yard** to b
 
 ### Acceptance (when implemented)
 
-- [ ] The live eval's word error on the added terms goes down, and no other item gets worse. **Pending:** the next audio live eval run (no quota was spent for this step). Phase A has no turn with these terms yet: add invented ones to `fixtures/interview.json` and run them with and without the new terms. A clean TTS voice may already hear them right, since the session's errors came from a real speaker.
+- [ ] The live eval's word error on the added terms goes down, and no other item gets worse. **Not met** (2026-11-01, see **Measurement**): no other item got worse, but the terms heard right stayed at 7 of 12. The clean TTS voice already heard five of the eight new turns right without the new terms, and "Claude Code" and "CLAUDE.md" stay wrong with them.
 - [x] The keyterm list stays under Deepgram's cap (`sttKeyterms` unit tests).
 
 ### Outcome (2026-10-31)
@@ -761,3 +761,23 @@ The extracted question for one turn was "how you take benefit of **a yard** to b
   - the fixed list comes to about 134 tokens;
   - with 50 names of 20 characters, the whole list stays under 500.
 - **The real notes:** they give 47 names, so the list comes to 90 terms and about 280 estimated tokens. Every technical term is kept, and each one goes to Deepgram as its own `keyterm=`.
+
+### Measurement (2026-11-01)
+
+- **The turns:** eight invented interviewer turns with the terms joined phase A of the live eval (`fixtures/interview.json`): six in English and two in Portuguese, one of them "AI" alone. Each lists its terms in `sttTerms`, and the eval now warns when the transcript misses one ("STT heard the key terms").
+- **The runs:** phase A in audio twice, on the same cached Gemini TTS clips. "Before" swapped in the keyterm list from before this item (80 terms sent); "after" used the current one (90 terms sent, as the app log shows). The LLM was replaced by the local stub (`--llm-models` with a blocked model), so the only quota spent was about 16 minutes of Deepgram streaming (two runs of about 4 minutes, two sessions each) and 10 TTS clips.
+
+| Turn | Before | After |
+|---|---|---|
+| API token, rate limits, rate limiter, unbuffered/buffered channel, AI, AI tools (English, 5 turns) | all heard right | all heard right |
+| "Claude Code" (English and Portuguese) | "Cloud Code" | "Cloud Code" |
+| "CLAUDE.md" | "Cloud. Md" | "Cloud. Md" |
+| "unbuffered channel", "buffered channel" said in Portuguese | "Ambuffer Channel", "Buffer Channel" | "unbuffer channel", "buffer channel" |
+
+- **Terms heard right:** 7 of 12 before and after. The Portuguese channels moved closer but still miss the "-ed".
+- **The other 17 turns of phase A:** none got worse, and three got better (all within the noise of one or two words). The mean word error went from 0.051 to 0.038.
+- **What it shows:**
+  - The keyterms change nothing that a clean voice gets wrong, except the English words inside a Portuguese sentence.
+  - "Claude" is heard as "cloud" with the keyterm or without it.
+  - A clean voice already hears the English terms that the real speaker on 2026-10-29 lost, so this run cannot show whether the list fixes those.
+- **Open:** "Cloud Code" and "Cloud. Md" are not fixed by keyterms. A fix would need something else, for example Deepgram's find-and-replace or a rewrite of the transcript before the question is extracted. That is a new decision; nothing was changed for it.
