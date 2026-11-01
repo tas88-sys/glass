@@ -902,6 +902,16 @@ Pick based on what kind of question it is:
    The previous answer is kept in memory while the app runs; deep dives and probes don't replace
    it, so they keep building on the last design.
 
+   **Practice run (Windows):** `npm run practice:sd-live` plays a mock interviewer
+   (`scripts/windows/sd-live-interviewer.ps1`). The computer reads the interviewer's lines aloud
+   through the speakers or headphones, so Listen hears them as *Them*, while you answer into the
+   mic as *Me*. At each step the script shows what to say and what to type into Ask. It clears
+   itself before the Ask so it stays out of the screenshot, then lists what to check. The nine
+   steps cover the opening kit, the design kit with the confirmed scale, a deep dive, a probe, a
+   changed requirement, a probe on the new design, `full`, and Stop wiping the memory. Wear
+   headphones: on speakers the mic also picks up the voice. Add `-- -Step 4` to start at step 4,
+   or `-- -Rate -2` to slow the voice.
+
 4. **Screenshot-only Ask (when the question is on the screen).** If the interviewer's prompt is
    visible (shared coding problem, design canvas, slide), press `Ctrl/Cmd+Enter` with the Ask
    box open to send just the screenshot (§5); the model solves what it sees.

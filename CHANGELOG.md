@@ -20,6 +20,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
   - It is the only Ask mode that reads the Listen transcript, so the interviewer's answers count as confirmed. It also reads its own last kit in the session, so deep dives and follow-ups build on the same design.
   - The estimates use per-day formulas and count page loads apart from items, so the new mode avoids the 100× storage error a System Design answer made.
   - Live eval phase H runs one interview through the five routes.
+- **A practice interviewer for System Design · Live** (Windows): `npm run practice:sd-live` reads an interviewer's lines aloud, so Listen hears them as the interviewer, and walks you through nine steps: what to say, what to type into Ask, and what the answer should show.
 
 #### Fixed
 

@@ -20,7 +20,8 @@
         "build:web": "cd pickleglass_web && npm run build && cd ..",
         "build:all": "npm run build:renderer && npm run build:web",
         "watch:renderer": "node build.js --watch",
-        "shortcut:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows/create-desktop-shortcut.ps1"
+        "shortcut:win": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows/create-desktop-shortcut.ps1",
+        "practice:sd-live": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows/sd-live-interviewer.ps1"
     },
     "keywords": [
         "glass",
