@@ -160,7 +160,9 @@ class WindowLayoutManager {
         const { x: workAreaX, y: workAreaY, width: screenWidth, height: screenHeight } = display.workArea;
 
         const PAD = 5;
-        const CARET_RIGHT_OFFSET = 40; // px from right edge of header to caret center; tuned in P5.6
+        // px from right edge of header to caret center; tuned in P5.6 at a 393 px header,
+        // +31 when the header grew to 424 px, so the picker opens where it did.
+        const CARET_RIGHT_OFFSET = 71;
 
         const x = headerBounds.x + headerBounds.width - CARET_RIGHT_OFFSET - (modePickerBounds.width / 2);
         const y = headerBounds.y + headerBounds.height + PAD;

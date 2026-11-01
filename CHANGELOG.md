@@ -21,6 +21,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
   - The estimates use per-day formulas and count page loads apart from items, so the new mode avoids the 100× storage error a System Design answer made.
   - Live eval phase H runs one interview through the five routes.
 
+#### Fixed
+
+- **A bare system name now always starts the interview.** Typing `twitter` with only a desktop on screen once got "No problem yet" instead of the opening kit. The prompt now reads a product or system name typed alone as the problem, whatever the screenshot shows, and phase H checks it (case H6).
+- **Ask mode labels no longer wrap in the header.** With the shortcut chips shown, "Ask · Code", "Ask · Debug", "Ask · SysDes" and "Ask · SD Live" all broke onto two lines in the 393 px header. The header is now 424 px wide, and the mode picker still opens beside the caret.
+
 ### Header drag follow (spec `2026-10-27-header-drag-follow`)
 
 #### Fixed

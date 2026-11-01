@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <!-- Ask (System Design · Live) scenario: a plain desktop with no problem on it,
+       as on the screen behind a bare "twitter" Ask. Generic icons only. -->
+  <defs>
+    <radialGradient id="bg" cx="0.55" cy="0.5" r="0.75">
+      <stop offset="0" stop-color="#1b3f9e"/>
+      <stop offset="0.6" stop-color="#0b1c4a"/>
+      <stop offset="1" stop-color="#050b1e"/>
+    </radialGradient>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#bg)"/>
+  <g fill="none" stroke-width="40" opacity="0.55">
+    <path d="M420 640 C 640 260, 1180 120, 1380 360 S 1500 900, 980 1020" stroke="#2f6bff"/>
+    <path d="M360 700 C 600 340, 1120 220, 1320 420 S 1420 900, 900 1040" stroke="#3d7dff"/>
+    <path d="M520 560 C 760 200, 1260 80, 1460 320 S 1640 860, 1100 1000" stroke="#1f55e0"/>
+    <path d="M300 820 C 620 520, 1060 420, 1240 560 S 1360 960, 820 1060" stroke="#4a8cff"/>
+  </g>
+  <g font-family="Segoe UI, Arial, sans-serif" font-size="14" fill="#ffffff" text-anchor="middle">
+    <rect x="18" y="12" width="40" height="44" rx="6" fill="#9fb4d8"/><text x="38" y="76">Recycle Bin</text>
+    <rect x="18" y="112" width="40" height="40" rx="8" fill="#e8453c"/><text x="38" y="176">Browser</text>
+    <rect x="18" y="212" width="40" height="40" rx="8" fill="#2496ed"/><text x="38" y="276">Containers</text>
+    <rect x="18" y="312" width="40" height="40" rx="8" fill="#f4b400"/><text x="38" y="376">Files</text>
+    <rect x="18" y="412" width="40" height="40" rx="8" fill="#7e57c2"/><text x="38" y="476">Code Editor</text>
+    <rect x="18" y="512" width="40" height="40" rx="8" fill="#43a047"/><text x="38" y="576">Music</text>
+    <rect x="1766" y="12" width="40" height="34" rx="4" fill="#f9c74f"/><text x="1786" y="76">Photos</text>
+    <rect x="1766" y="112" width="40" height="34" rx="4" fill="#f9c74f"/><text x="1786" y="176">Downloads</text>
+  </g>
+  <rect y="1032" width="1920" height="48" fill="#11141c" opacity="0.95"/>
+  <g fill="#5f8cff">
+    <rect x="716" y="1044" width="24" height="24" rx="3"/>
+    <rect x="760" y="1044" width="24" height="24" rx="3" fill="#f4b400"/>
+    <rect x="804" y="1044" width="24" height="24" rx="12" fill="#e8453c"/>
+    <rect x="848" y="1044" width="24" height="24" rx="3" fill="#7e57c2"/>
+    <rect x="892" y="1044" width="24" height="24" rx="3" fill="#cfd8dc"/>
+  </g>
+  <g font-family="Segoe UI, Arial, sans-serif" font-size="13" fill="#ffffff" text-anchor="end">
+    <text x="1900" y="1052">23:33</text>
+    <text x="1900" y="1070">31/10/2026</text>
+  </g>
+</svg>

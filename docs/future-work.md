@@ -829,7 +829,8 @@ A new mode, **System Design · Live** (`system_design_live`), next to `system_de
   - the session's last kit answer, cut to 6,000 characters.
 
   A deep dive or a probe doesn't replace the kit, so the next question still builds on the design. It lives in memory: an app restart forgets it.
-- **UI:** the picker lists five modes (window 184 × 178). The header pill reads "Ask · SD Live", because the header is fixed at 393 px.
+- **UI:** the picker lists five modes (window 184 × 178). The header pill reads "Ask · SD Live". The header window grew from 393 to 424 px: with the shortcut chips shown, every mode label (Code, Debug, SysDes, SD Live) wrapped onto two lines at 393. The widest pill measures 416 px.
+- **Follow-up (2026-11-01):** a typed `twitter` with only a desktop on screen once got the "No problem yet" line. The answer came from Gemini Flash-Lite: the screenshot moves the models that see images first, and Qwen was skipped for its key's 1,000-token output limit. About 60 retries on every model of the list, the real screenshot included, all gave the opening kit, so it was a rare misroute. The prompt now says that a product or system name typed alone is a problem to design and that a screen with no problem on it never cancels it, and phase H gained case H6 (`twitter` over `fixtures/desktop.svg`).
 - **Prompt size:** ~3,100 tokens (Groq counted 3,088 in), ~4,700 with a previous answer. System Design's is ~3,900.
 
 ### Measurement (live eval, `--text --only E,H --judge`)

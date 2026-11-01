@@ -202,7 +202,7 @@ Every window is held in a single `Map` called `windowPool` (`windowManager.js:35
 ```mermaid
 flowchart TB
     subgraph pool["windowPool : Map&lt;name, BrowserWindow&gt;"]
-        header["'header' (393x47, always created)"]
+        header["'header' (424x47, always created)"]
         ask["'ask' (600 wide)"]
         listen["'listen' (400 wide)"]
         settings["'settings' (240, hover)"]

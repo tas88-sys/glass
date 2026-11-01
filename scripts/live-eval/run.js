@@ -19,7 +19,8 @@
 //      against hidden tests; then once more in the saved code language
 //   E  Ask system design mode with a hard prompt in the screenshot
 //   H  Ask System Design · Live: one interview in five Asks (screenshot, opening,
-//      design from the transcript, deep dive and probe on the previous answer);
+//      design from the transcript, deep dive and probe on the previous answer),
+//      plus a bare system name ("twitter") with only a desktop on screen;
 //      each must take its route, in its word budget
 //   F  stress: a burst of questions (abort and replace), a long session (the
 //      30-turn prompt cap, the Insights lane), and Answer turned off
@@ -623,7 +624,7 @@ async function phaseH(ctx) {
             const paths = checks.mentions(text, ['/write path/', '/read path/']);
             item.checks.push(check('a write path and a read path', !paths.missing.length, 'fail', paths.missing.length ? `missing ${paths.missing.join(', ')}` : ''));
         }
-        if (c.image) {
+        if (c.problemOnScreen) {
             const numbers = checks.concreteNumbers(text);
             item.metrics.concreteNumbers = numbers;
             item.checks.push(check('at least 8 concrete numbers with units', numbers >= 8, 'fail', `${numbers}`));
@@ -1062,9 +1063,10 @@ async function rejudge(args) {
     const cfg = loadConfig(args);
     const images = { C: 'ask-image.jpg', D: 'code-problem.jpg', E: 'system-design.jpg' };
     for (const it of run.items) {
-        // Phase G sends the screenshot only on its image items, phase H only on its first case.
+        // Phase G sends the screenshot only on its image items, phase H only on the cases that name one.
+        const hCase = it.phase === 'H' ? liveDesignCases.CASES.find(c => c.id === it.id) : null;
         const name = it.phase === 'G' ? (it.kind === 'ask-image' ? 'ask-image.jpg' : null)
-            : it.phase === 'H' ? (it.metrics?.imageSent ? 'system-design.jpg' : null)
+            : it.phase === 'H' ? (it.metrics?.imageSent && hCase && hCase.image ? hCase.image.replace(/\.svg$/, '.jpg') : null)
                 : images[it.phase];
         const file = name && path.join(dir, name);
         if (file && fs.existsSync(file)) it.imageBase64 = fs.readFileSync(file).toString('base64');
