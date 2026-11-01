@@ -62,6 +62,17 @@ any terminal. The output goes to `%LOCALAPPDATA%\glass-logs\glass.log` (the prev
 `glass.prev.log`). The shortcut points at this checkout, so run the command again after cloning on
 another machine or moving the repo.
 
+### Practice a system design interview (Windows)
+
+```bash
+npm run practice:sd-live
+```
+
+Plays a mock interviewer for the Ask mode System Design · Live. The interviewer's lines are read
+aloud, so Listen hears them as *Them*, and the script tells you what to say and type at each
+step and what the answer should show. Wear headphones. See
+[`docs/LIVE_INSIGHTS_AND_ASK.md`](docs/LIVE_INSIGHTS_AND_ASK.md) §6.2, flow 3.
+
 ## Highlights
 
 
