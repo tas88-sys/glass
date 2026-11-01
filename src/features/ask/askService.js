@@ -14,7 +14,7 @@ const getWindowPool = () => {
 
 const sessionRepository = require('../common/repositories/session');
 const askRepository = require('./repositories');
-const { buildAskMessages, formatConversationForAsk } = require('./askPrompt');
+const { buildAskMessages, formatConversationForAsk, normalizeAskMode, isLiveDesignKit } = require('./askPrompt');
 const settingsService = require('../settings/settingsService');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -36,6 +36,21 @@ try {
     sharp = null;
 }
 let lastScreenshot = null;
+
+/**
+ * The Listen transcript ("me: …" / "them: …"), for System Design · Live. Read
+ * lazily: listenService never requires askService, so there is no cycle.
+ * @returns {string[]}
+ */
+function listenTranscript() {
+    try {
+        const turns = require('../listen/listenService').getConversationHistory();
+        return Array.isArray(turns) ? turns.slice() : [];
+    } catch (err) {
+        console.warn('[AskService] Listen transcript unavailable:', err.message);
+        return [];
+    }
+}
 
 async function captureScreenshot(options = {}) {
     if (process.platform === 'darwin') {
@@ -138,6 +153,8 @@ class AskService {
             errorMessage: '',
             showTextInput: true,
         };
+        // The last complete System Design · Live kit: { sessionId, question, answer }.
+        this.lastLiveDesign = null;
         console.log('[AskService] Service instance created.');
     }
 
@@ -259,10 +276,18 @@ class AskService {
             const screenshotResult = await captureScreenshot({ quality: 'medium' });
             const screenshotBase64 = screenshotResult.success ? screenshotResult.base64 : null;
 
-            const conversationHistory = this._formatConversationForPrompt(conversationHistoryRaw);
-
             // Read mode + language from settings (single source of truth).
             const currentSettings = await settingsService.getSettings();
+
+            // System Design · Live also sees the Listen transcript and its own last
+            // answer in this session; every other mode gets what it got before.
+            let historyRaw = conversationHistoryRaw;
+            let previousAnswer = null;
+            if (normalizeAskMode(currentSettings.askMode) === 'system_design_live') {
+                if (!historyRaw || historyRaw.length === 0) historyRaw = listenTranscript();
+                if (this.lastLiveDesign && this.lastLiveDesign.sessionId === sessionId) previousAnswer = this.lastLiveDesign;
+            }
+            const conversationHistory = this._formatConversationForPrompt(historyRaw);
 
             // Prompt and messages: askPrompt.js (the live eval builds the same ones).
             const { askMode, profile, systemPrompt, messages } = buildAskMessages({
@@ -271,6 +296,7 @@ class AskService {
                 conversationHistory,
                 preferredCodeLanguage: currentSettings.preferredCodeLanguage,
                 screenshotBase64,
+                previousAnswer,
             });
             console.log(`[AskService] askMode='${askMode}', profile='${profile}'`);
 
@@ -299,7 +325,7 @@ class AskService {
                     reader.cancel(signal.reason).catch(() => { /* 이미 취소된 경우의 오류는 무시 */ });
                 });
 
-                await this._processStream(reader, askWin, sessionId, signal);
+                await this._processStream(reader, askWin, sessionId, signal, { askMode, userPrompt });
                 return { success: true };
 
             } catch (multimodalError) {
@@ -331,7 +357,7 @@ class AskService {
                         fallbackReader.cancel(signal.reason).catch(() => {});
                     });
 
-                    await this._processStream(fallbackReader, askWin, sessionId, signal);
+                    await this._processStream(fallbackReader, askWin, sessionId, signal, { askMode, userPrompt });
                     return { success: true };
                 } else {
                     // 다른 종류의 에러이거나 스크린샷이 없었다면 그대로 throw
@@ -367,10 +393,11 @@ class AskService {
      * @param {BrowserWindow} askWin
      * @param {number} sessionId 
      * @param {AbortSignal} signal
+     * @param {{ askMode?: string, userPrompt?: string }} [meta] - a complete System Design · Live kit is kept for the next question
      * @returns {Promise<void>}
      * @private
      */
-    async _processStream(reader, askWin, sessionId, signal) {
+    async _processStream(reader, askWin, sessionId, signal, meta = {}) {
         const decoder = new TextDecoder();
         // isLoading stays true until the first token (see askStreamState.js), so the
         // window keeps showing "Thinking..." while models fail over or think.
@@ -429,6 +456,11 @@ class AskService {
             }
         } finally {
             const fullResponse = stream.fullResponse;
+            // Only a complete kit (opening, design or full) is kept: a deep dive or a
+            // probe answer must not replace the design the next question builds on.
+            if (meta.askMode === 'system_design_live' && !failed && !signal.aborted && isLiveDesignKit(fullResponse)) {
+                this.lastLiveDesign = { sessionId, question: String(meta.userPrompt || '').trim(), answer: fullResponse };
+            }
             if (ownsState()) {
                 this.state.isLoading = false;
                 this.state.isStreaming = false;

@@ -372,8 +372,9 @@ Key behaviors, all in `askService.js`:
    - The image is base64-encoded and attached inline as a multimodal `image_url` part
      (`:301-306`).
 2. **Prompt assembly** (`:259-299`): the system prompt is chosen by **Ask mode** (§13) —
-   `default`, `code`, `debug`, or `system_design` — read from settings; `code` mode injects the
-   preferred language token.
+   `default`, `code`, `debug`, `system_design` or `system_design_live` — read from settings;
+   `code` mode injects the preferred language token. Only `system_design_live` adds context: the
+   Listen transcript and its own last kit answer in the session (`askPrompt.js`, §13).
 3. **Streaming** via `createStreamingLLM(provider, …)` (`:308-314`); SSE chunks are parsed in
    `_processStream` (`:401-474`) and broadcast to `AskView` over `ask:stateUpdate`. It also
    honors the Gemini failover sentinels `_reset` and `_final_model` (`:425-439`, see §10).
@@ -1324,8 +1325,8 @@ Glass can run fully local — no cloud, no API key:
 ## 13. Prompts & Ask modes
 
 Prompt text lives in `promptTemplates.js` (`profilePrompts`) and is assembled by
-`promptBuilder.getSystemPrompt(profile, history, …)`. Ask has **four modes**, chosen from the
-`mode-picker` window and stored in settings (`featureBridge.js:83` `VALID_ASK_MODES`):
+`promptBuilder.getSystemPrompt(profile, history, …)`. Ask has **five modes**, chosen from the
+`mode-picker` window and stored in settings (`featureBridge.js:84` `VALID_ASK_MODES`):
 
 | Ask mode | Prompt profile | Purpose |
 |---|---|---|
@@ -1333,6 +1334,7 @@ Prompt text lives in `promptTemplates.js` (`profilePrompts`) and is assembled by
 | `code` | `pickle_glass_code` | Coding-interview solution: code + reasoning + time/space complexity (honors preferred language) |
 | `debug` | `pickle_glass_debug` | Debug the code in the screenshot: issues, fixes, optimizations |
 | `system_design` | `pickle_glass_system_design` | Staff-level system-design co-pilot: 12-section phased design with numbers |
+| `system_design_live` | `pickle_glass_system_design_live` | System Design · Live: one short answer per interview stage (opening kit, design kit, deep dive, probe), built on the Listen transcript and the previous kit (future-work item 16) |
 
 The Listen summary uses the `pickle_glass_analysis` profile with a `{{CONVERSATION_HISTORY}}`
 token. The `default` analysis profile encodes a strict decision hierarchy (answer recent

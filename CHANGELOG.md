@@ -6,6 +6,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 
 ## [Unreleased]
 
+### System Design · Live (future-work item 16)
+
+#### Added
+
+- **A fifth Ask mode, System Design · Live**, for following a system design interview stage by stage. System Design stays as it was.
+  - What you type picks a short answer:
+    - the problem alone gives an opening kit: restatement and agenda, scope, questions, assumptions to propose, estimates, check-in;
+    - `design`, once the requirements are known, gives a design kit: API, diagram with write and read paths, storage, deep dives, check against the requirements;
+    - a topic gives a deep dive;
+    - the interviewer's question gives a probe answer;
+    - `full` gives both kits.
+  - It is the only Ask mode that reads the Listen transcript, so the interviewer's answers count as confirmed. It also reads its own last kit in the session, so deep dives and follow-ups build on the same design.
+  - The estimates use per-day formulas and count page loads apart from items, so the new mode avoids the 100× storage error a System Design answer made.
+  - Live eval phase H runs one interview through the five routes.
+
 ### Header drag follow (spec `2026-10-27-header-drag-follow`)
 
 #### Fixed

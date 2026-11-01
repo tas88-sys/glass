@@ -65,8 +65,9 @@ async function readLikeAskService(response) {
  * @param {string} [o.preferredCodeLanguage]
  * @param {{ base64: string }|null} o.image
  * @param {() => object} o.llmInfo - harness.setupModels().llmInfo
+ * @param {{ question: string, answer: string }|null} [o.previousAnswer] - System Design · Live only
  */
-async function runAsk({ tag, mode, userPrompt, history, preferredCodeLanguage, image, llmInfo }) {
+async function runAsk({ tag, mode, userPrompt, history, preferredCodeLanguage, image, llmInfo, previousAnswer = null }) {
     const { buildAskMessages, formatConversationForAsk } = req('features/ask/askPrompt');
     const factory = req('features/common/ai/factory');
     const harness = require('./harness');
@@ -77,6 +78,7 @@ async function runAsk({ tag, mode, userPrompt, history, preferredCodeLanguage, i
         conversationHistory: formatConversationForAsk(history),
         preferredCodeLanguage,
         screenshotBase64: image ? image.base64 : null,
+        previousAnswer,
     });
     const info = llmInfo();
     if (!info || !info.apiKey) throw new Error('no LLM configured');
@@ -92,7 +94,7 @@ async function runAsk({ tag, mode, userPrompt, history, preferredCodeLanguage, i
         portkeyVirtualKey: info.provider === 'openai-glass' ? info.apiKey : undefined,
     });
 
-    const out = { tag, mode: built.askMode, profile: built.profile, withImage: !!image, startedAt, firstTokenAt: null, endAt: null, text: '', responseModel: null, hadFallback: false, error: null, textOnlyRetry: false, calls: [] };
+    const out = { tag, mode: built.askMode, profile: built.profile, systemPromptChars: built.systemPrompt.length, withImage: !!image, startedAt, firstTokenAt: null, endAt: null, text: '', responseModel: null, hadFallback: false, error: null, textOnlyRetry: false, calls: [] };
     await inAskContext(tag, async () => {
         let response;
         try {

@@ -216,7 +216,7 @@ function getDefaultSettings() {
         fontSize: 14,
         contentProtection: true,
         // ── NEW: Ask mode shortcuts ──
-        askMode: 'default',                // 'default' | 'code' | 'debug' | 'system_design'
+        askMode: 'default',                // 'default' | 'code' | 'debug' | 'system_design' | 'system_design_live'
         preferredCodeLanguage: 'go',       // free-text; empty → infer from screenshot
         liveFeatures: 'both',              // 'both' | 'answer' | 'insights' — which Listen lanes run
         sttLanguage: 'pt-BR',              // 'pt-BR' | 'en-US' — language both STT sessions listen for
