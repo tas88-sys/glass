@@ -21,6 +21,7 @@ const CASES = [
         expect: 'design',
         userPrompt: 'Design this.',
         image: 'system-design.svg',
+        problemOnScreen: true,
         history: [],
     },
     {
@@ -50,6 +51,15 @@ const CASES = [
         userPrompt: 'what if the timeline cache cluster goes down?',
         history: TRANSCRIPT_CONFIRMED,
         previous: 'H3-design',
+    },
+    {
+        // A bare system name with only a desktop on screen once got the
+        // "No problem yet" line (2026-10-31): the name alone is the problem.
+        id: 'H6-bare-name',
+        expect: 'opening',
+        userPrompt: 'twitter',
+        image: 'desktop.svg',
+        history: [],
     },
 ];
 

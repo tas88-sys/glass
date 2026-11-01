@@ -727,7 +727,7 @@ function getCurrentDisplay(window) {
 
 function createWindows() {
     const HEADER_HEIGHT        = 47;
-    const DEFAULT_WINDOW_WIDTH = 393;
+    const DEFAULT_WINDOW_WIDTH = 424; // the main header pill (HeaderController._resizeForMain)
 
     const primaryDisplay = screen.getPrimaryDisplay();
     const { y: workAreaY, width: screenWidth } = primaryDisplay.workArea;

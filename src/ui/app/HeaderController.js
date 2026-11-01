@@ -228,8 +228,10 @@ class HeaderTransitionManager {
 
     async _resizeForMain() {
         if (!window.api) return;
-        console.log('[HeaderController] _resizeForMain: Resizing window to 393x47');
-        return window.api.headerController.resizeHeaderWindow({ width: 393, height: 47 }).catch(() => {});
+        // 424: the pill with the longest Ask label ("Ask · SD Live") and both
+        // shortcut chips measures 414 px; at 393 every mode label wrapped.
+        console.log('[HeaderController] _resizeForMain: Resizing window to 424x47');
+        return window.api.headerController.resizeHeaderWindow({ width: 424, height: 47 }).catch(() => {});
     }
 
     async _resizeForApiKey(height = 370) {

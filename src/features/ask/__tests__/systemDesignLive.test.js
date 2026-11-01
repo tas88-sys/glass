@@ -91,6 +91,13 @@ describe('pickle_glass_system_design_live prompt', () => {
         }
     });
 
+    it('reads a bare system name as a problem, whatever the screen shows', () => {
+        // A typed "twitter" with only a desktop on screen once got "No problem yet" (2026-10-31).
+        assert.match(prompt, /or just "twitter": a product or system name typed on its own means "design it"/);
+        assert.match(prompt, /A screenshot with no problem on it \(a desktop, an editor, other apps\) adds nothing and never cancels a system named in the typed text/);
+        assert.match(prompt, /6\. Only when the typed text is empty or names no product or system, AND neither the transcript nor the screenshot names one/);
+    });
+
     it('spells the kit headings the live eval checks, in order', () => {
         for (const names of [LIVE_OPENING_SECTIONS, LIVE_DESIGN_SECTIONS]) {
             let from = 0;
