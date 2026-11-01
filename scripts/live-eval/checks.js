@@ -38,6 +38,19 @@ function wer(ref, hyp) {
     return Math.round((prev[h.length] / r.length) * 1000) / 1000;
 }
 
+/**
+ * Which terms the transcript has, each as its words in a row (future-work item 15:
+ * the STT keyterms). Compared as words(), so "CLAUDE.md" matches "claude md".
+ * @returns {{ heard: string[], missed: string[] }}
+ */
+function heardTerms(terms, transcript) {
+    const said = ` ${words(transcript).join(' ')} `;
+    const heard = [];
+    const missed = [];
+    for (const term of terms || []) (said.includes(` ${words(term).join(' ')} `) ? heard : missed).push(term);
+    return { heard, missed };
+}
+
 const PT = new Set(['de', 'que', 'nao', 'para', 'com', 'uma', 'os', 'as', 'no', 'na', 'se', 'por', 'mais', 'dos', 'das', 'como', 'mas', 'ao', 'ele', 'isso', 'voce', 'sua', 'seu', 'ou', 'quando', 'muito', 'nos', 'ja', 'tambem', 'so', 'pelo', 'pela', 'ate', 'entre', 'depois', 'sem', 'mesmo', 'cada', 'em', 'um', 'e', 'o', 'a', 'do', 'da']);
 const EN = new Set(['the', 'of', 'and', 'to', 'in', 'is', 'that', 'for', 'it', 'with', 'as', 'on', 'be', 'at', 'by', 'this', 'are', 'or', 'an', 'from', 'which', 'you', 'your', 'we', 'can', 'will', 'not', 'but', 'if', 'each', 'when', 'use', 'into', 'than', 'then', 'so', 'a']);
 
@@ -232,6 +245,7 @@ module.exports = {
     candidateReply,
     words,
     wer,
+    heardTerms,
     detectLang,
     answerShape,
     answerWords,

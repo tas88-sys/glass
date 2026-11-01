@@ -243,7 +243,7 @@ function lengthChecks(item, text, add) {
     add('no closing paragraph', !checks.endsWithClosingParagraph(text), 'warn', 'bullets, then a paragraph');
 }
 
-function sttChecks(item, ex, said, audio) {
+function sttChecks(item, ex, said, audio, terms) {
     if (!audio) return;
     const ref = Array.isArray(said) ? said.join(' ') : said;
     if (!ex.transcript) {
@@ -253,6 +253,12 @@ function sttChecks(item, ex, said, audio) {
     const w = checks.wer(ref, ex.transcript);
     item.metrics.wer = w;
     item.checks.push(check(`STT word error ≤ ${WER_LIMIT}`, w <= WER_LIMIT, 'warn', `wer=${w}`));
+    if (terms?.length) {
+        // The keyterms the STT is told to favor (sttKeyterms.js, future-work item 15).
+        const t = checks.heardTerms(terms, ex.transcript);
+        item.metrics.sttTerms = t;
+        item.checks.push(check('STT heard the key terms', !t.missed.length, 'warn', t.missed.length ? `missed ${t.missed.join(', ')}` : ''));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -306,7 +312,7 @@ function evalLiveTurn(t, ex, { phase, audio, privateItem = false, ctx = {} }) {
         item.checks.push(check('gate kept the LLM out', ex.answers.length === 0, 'warn', ex.answers.length ? `LLM called, model said ${ex.answers.map(x => x.status).join(',')}` : ''));
     }
     item.checks.push(check('no error', errors.length === 0, 'fail', errors.map(e => e.error).join('; ')));
-    sttChecks(item, ex, t.text, audio);
+    sttChecks(item, ex, t.text, audio, t.sttTerms);
     return item;
 }
 

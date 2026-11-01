@@ -41,6 +41,17 @@ describe('wer', () => {
     });
 });
 
+describe('heardTerms (item 15)', () => {
+    it('finds each term as its words in a row, ignoring case and punctuation', () => {
+        assert.deepEqual(c.heardTerms(['CLAUDE.md', 'Claude Code', 'API token'], 'What goes into your claude.md? I use Claude code daily, and an IP token.'),
+            { heard: ['CLAUDE.md', 'Claude Code'], missed: ['API token'] });
+    });
+    it('does not match a term inside a longer word', () => {
+        assert.deepEqual(c.heardTerms(['AI'], 'how you take benefit of a yard to build the things'), { heard: [], missed: ['AI'] });
+        assert.deepEqual(c.heardTerms(['rate limiter'], 'write your own rate limiters'), { heard: [], missed: ['rate limiter'] });
+    });
+});
+
 describe('detectLang', () => {
     it('tells Portuguese from English and ignores code', () => {
         assert.equal(c.detectLang('Para garantir isso, eu usaria uma chave de idempotência no servidor e não no cliente.'), 'pt');
