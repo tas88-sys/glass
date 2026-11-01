@@ -19,7 +19,7 @@ One step at a time, each with its own plan, a fresh session per step. When a ste
 | [x] 7 | 13. A question about the candidate's own setup routes general | After 9, since the 2026-10-29 turn had no question and should then get no answer; what is left are real questions about the setup. Uses item 5's held-out sets, so it can share a plan with item 5. |
 | [x] 8 | 15. STT terms heard as other words | Independent, lowest severity, costliest to measure (audio eval before and after). Can move into any gap. Merged with its measurement pending; **measured on 2026-11-01**. The new terms did not raise the count heard right (7 of 12 before and after), and "Claude Code" is still heard as "Cloud Code" (item 15, acceptance box 1, still open). |
 
-Item 16 (System Design · Live, 2026-10-31) came in outside this order.
+Items 16 (System Design · Live, 2026-10-31) and 17 (System Design fixes, 2026-11-01) came in outside this order.
 
 Notes for the plans:
 
@@ -811,7 +811,7 @@ The System Design Ask answers the problem name with a 12-section essay: a ~3,900
 
 ### Decision
 
-A new mode, **System Design · Live** (`system_design_live`), next to `system_design`. `system_design` stays as it is: its profile is byte-identical, and a unit test holds its hash.
+A new mode, **System Design · Live** (`system_design_live`), next to `system_design`. `system_design` stays as it is: its profile is byte-identical, and a unit test holds its hash. (2026-11-01: item 17 fixed the `system_design` content in place and kept its flow. The hash test is replaced by tests of the fixes.)
 
 ### What shipped (2026-10-31)
 
@@ -858,5 +858,102 @@ Last run:
 
 ### Open
 
-- The eval passes the phase A/B transcript to Ask phases C, D and E. The app never does: outside System Design · Live, Ask gets no transcript. Separate from this item.
-- The `system_design` profile keeps the issues above (the stale "Opening 30s pitch" exemption, the 100 KB default). Left alone by decision.
+- The eval passes the phase A/B transcript to Ask phases C, D and E. The app never does: outside System Design · Live, Ask gets no transcript. Separate from this item. (2026-11-01: phase E no longer does, item 17. C and D still do.)
+- The `system_design` profile kept the issues above (the stale "Opening 30s pitch" exemption, the 100 KB default). Fixed by item 17 (2026-11-01).
+
+---
+
+## 17. Ask — fix the System Design mode's content, keeping its flow
+
+**Status:** Done on 2026-11-01, branch `2026-11-01-system-design-ask-fixes`. Comes from the issues that item 16 found and left in place. Outside the work order at the top.
+**Severity:** LOW-MEDIUM
+**Code:**
+- the profile `pickle_glass_system_design` (`src/features/common/prompts/promptTemplates.js`);
+- live eval phase E (`scripts/live-eval/run.js`, `fixtures/system-design-cases.js`, `judge.js`, `checks.js`).
+
+### Summary
+
+System Design is the simpler mode: one Ask gives one complete written design, in twelve sections. Item 16 left its prompt alone, with these issues:
+- **Estimation defaults.**
+  - "100 KB image-meta" made storage about 100× too high.
+  - Nothing kept items/s apart from requests/s, so a timeline read was multiplied by 20 items per page.
+  - Nothing kept egress from being counted twice.
+- **Requirements as fact.** They were "written as if the interviewer just confirmed them".
+- **Typed constraints had no rule.** A problem typed with constraints ("twitter, 10M DAU, feed only") matched neither Rule A nor Rule B.
+- **Rule B pointed at nothing.**
+  - A deep dive came out as twelve "(unchanged — see prior turn)" lines plus the target. Each Ask is a single turn, so there is no prior turn.
+  - The Rule C line and the "Opening 30s pitch … Section 10" exemption were stale.
+- **Nothing kept the sections consistent.** Push vs pull could be decided twice, and §8 could name workers that the diagram didn't have.
+- **Multi-region was forced** even when only one region was given.
+- **Phase E saw none of this.**
+  - It had one case and checked only headings, numbers and the screenshot's requirements.
+  - It sent the phase A/B transcript, which the app never sends to this mode.
+
+### Proposed
+
+Fix the content, and keep the flow: one Ask, the twelve sections, Rule B for a deep dive, the three phases, and no transcript. Measure it with a phase E that can see each issue.
+
+### Acceptance
+
+- [x] Phase E on the old prompt fails the new checks:
+  - E1 and E2: no (given)/(assumed) marks;
+  - E2: a full multi-region Phase 3 for "US only";
+  - E3: the placeholders, judge 1/5.
+- [x] Phase E on the new prompt has 0 fails in four runs in a row.
+- [x] Unit tests hold the twelve sections and each fix in the prompt.
+
+### What shipped (2026-11-01)
+
+- **Rule A** also takes a problem with its constraints. Typed or on-screen constraints are used as given and marked (given).
+- **Rule B** answers alone, under `## Deep dive: <target>`, with no placeholder lines. It states the numbers it relies on and never points at another section.
+- **§0** is the first line. Its peak QPS is the one §3's formula gives, never a guess.
+- **§2:** every requirement ends with (given) or (assumed), with an example line in the prompt.
+- **§3:**
+  - read requests/s are counted apart from items/s, with no multiplying by items per page twice and no extra safety factor;
+  - egress = read requests/s × response size, counted once;
+  - fan-out writes/s = writes/s × average followers.
+- **Defaults:**
+  - a text post with metadata ~1 KB;
+  - image metadata < 1 KB;
+  - an image 200 KB–2 MB;
+  - read availability usually 99.99%.
+- **Phase 3** for one region: 2 bullets, **Trigger** and **First step**. The full delta comes only when the requirements need more than one region.
+- **Consistency:** §7–§11 never contradict the Trade-off Roll-up, and every component a mechanism relies on is in the diagram or a Phase 2 delta.
+- **Removed:** the Rule C line and the stale exemption.
+- **Prompt size:** about 17,600 characters, up from 15,900 (~+430 tokens, ~4,300 in all).
+- **Phase E:**
+  - three cases, each with no transcript, as in the app:
+    - E1, the rate-limiter screenshot;
+    - E2, `twitter, 10M DAU, home timeline only, US only`;
+    - E3, `deep dive on the cache`;
+  - new checks:
+    - no placeholder;
+    - §0 comes first;
+    - ≥ 3 (given)/(assumed) marks in §2;
+    - the typed scale is used;
+    - Phase 3 has ≤ 3 bullets for one region (warn);
+    - a deep dive opens with `## Deep dive:` and has no §0, names TTL, names stampede handling (warn), and stays ≤ 600 words (warn);
+  - the judge's rubrics also score estimate sanity, consistency between sections, and requirements marked as assumed.
+
+### Measurement (live eval, `--text --only E --judge`)
+
+| Run | E1 screenshot | E2 typed constraints | E3 deep dive |
+|---|---|---|---|
+| old prompt | 0 marks (fail) · judge 5 | 0 marks (fail), Phase 3 of 5 bullets · judge 5 | 12 placeholder lines (fail) · judge 1 |
+| new prompt, 4 runs | 9–10 marks, §0 first · judge 5, 5, 5, 5 | 9–10 marks, Phase 3 of 1–2 bullets, 10M used · judge 5, 5, 5, 5 | ~270–350 words, alone · judge 4, 5, 5, 5 |
+
+- **On the old prompt, E2 repeated the original errors:**
+  - 6.6k read requests/s × 20 items, with a "5× safety factor" on top: 660k read ops/s;
+  - a 5 KB tweet;
+  - 3.3 GB/s of ingress.
+
+  The judge still scored it 5/5. The deterministic checks, not the judge, are what catch these issues. The new prompt gives 6k peak QPS, 1 KB posts, 118 MB/s egress and 11 TB a year with 3 replicas.
+- **Answered by:** E1 by gemini-3.5-flash-lite (the screenshot moves vision models first), E2 by gpt-oss-120b or gemini-3.5-flash-lite, E3 by gpt-oss-20b.
+- **Warnings:** all from fallbacks under Groq's per-minute token limit.
+- **During tuning:**
+  - gpt-oss-20b once left the marks off; the §2 example line fixed it;
+  - gpt-oss-120b once wrote Trigger and First step plus two extra bullets (a warning).
+
+### Open
+
+- A deep dive with no problem in the request makes up its own scale (e.g. 50M DAU), marked as assumed. Typing the problem along with the target ("deep dive on the cache for twitter, 10M DAU") gives it the right numbers.

@@ -1333,7 +1333,7 @@ Prompt text lives in `promptTemplates.js` (`profilePrompts`) and is assembled by
 | `default` | `pickle_glass_analysis` | General live co-pilot — answer the question / define the term / solve what's on screen |
 | `code` | `pickle_glass_code` | Coding-interview solution: code + reasoning + time/space complexity (honors preferred language) |
 | `debug` | `pickle_glass_debug` | Debug the code in the screenshot: issues, fixes, optimizations |
-| `system_design` | `pickle_glass_system_design` | Staff-level system-design co-pilot: 12-section phased design with numbers |
+| `system_design` | `pickle_glass_system_design` | Staff-level system-design co-pilot: 12-section phased design with numbers, assumptions marked; a deep dive answers alone |
 | `system_design_live` | `pickle_glass_system_design_live` | System Design · Live: one short answer per interview stage (opening kit, design kit, deep dive, probe), built on the Listen transcript and the previous kit (future-work item 16) |
 
 The Listen summary uses the `pickle_glass_analysis` profile with a `{{CONVERSATION_HISTORY}}`

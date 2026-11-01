@@ -27,6 +27,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Fork ba
 - **A bare system name now always starts the interview.** Typing `twitter` with only a desktop on screen once got "No problem yet" instead of the opening kit. The prompt now reads a product or system name typed alone as the problem, whatever the screenshot shows, and phase H checks it (case H6).
 - **Ask mode labels no longer wrap in the header.** With the shortcut chips shown, "Ask · Code", "Ask · Debug", "Ask · SysDes" and "Ask · SD Live" all broke onto two lines in the 393 px header. The header is now 424 px wide, and the mode picker still opens beside the caret.
 
+### System Design fixes (future-work item 17)
+
+#### Fixed
+
+- **System Design answers have the right numbers and mark what is assumed.** Same flow: one Ask still gives the twelve sections.
+  - **Estimates:** a text post is ~1 KB and image metadata < 1 KB (the old 100 KB default made storage ~100× too high). Read requests are counted apart from the items they return, and egress is counted once.
+  - **Requirements:** each one ends with (given) or (assumed), and constraints typed with the problem ("twitter, 10M DAU, feed only") are used as given.
+  - **Consistency:** the opening pitch comes first and uses the estimate's peak QPS. No section contradicts the trade-off table, and every worker or queue a mechanism needs is in the diagram.
+  - **One region given:** multi-region is only the trigger for a second region.
+- **A System Design deep dive answers alone.** "deep dive on the cache" used to print twelve "(unchanged — see prior turn)" lines, pointing at a turn that doesn't exist. It now gives only the cache, under one heading.
+- **Live eval phase E tests what the app sends.** It has three cases (screenshot, typed constraints, deep dive), each with no transcript. New checks cover each fix above.
+
 ### Header drag follow (spec `2026-10-27-header-drag-follow`)
 
 #### Fixed
