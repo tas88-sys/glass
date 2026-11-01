@@ -114,6 +114,28 @@ describe('sections', () => {
         const r = c.systemDesignSections(all.replace('## 7. Part 7', 'Part 7'));
         assert.deepEqual(r.missing, [7]);
     });
+    it('reads one system design section, up to the next numbered one', () => {
+        const all = Array.from({ length: 12 }, (_, i) => `## ${i}. Part ${i}\ntext ${i}`).join('\n');
+        assert.equal(c.systemDesignSection(all, 2).trim(), 'Part 2\ntext 2');
+        assert.equal(c.systemDesignSection(all, 11).trim(), 'Part 11\ntext 11');
+        assert.equal(c.systemDesignSection('## 1. A\nx', 2), '');
+        // A subheading inside the section stays in it.
+        assert.match(c.systemDesignSection('## 6. Arch\n### Phase 3\n- a\n## 7. Deep\n- b', 6), /### Phase 3\n- a\n$/);
+    });
+    it('tells whether the answer starts with section 0', () => {
+        assert.equal(c.startsWithSection0('## 0. Opening Pitch\n> I will…\n## 1. Questions'), true);
+        assert.equal(c.startsWithSection0('Intro line\n## 0. Opening Pitch'), true);
+        assert.equal(c.startsWithSection0('## 1. Clarifying Questions\n## 0. Opening Pitch'), false);
+        assert.equal(c.startsWithSection0('## 10. Snippets'), false);
+        assert.equal(c.startsWithSection0('no headings'), false);
+    });
+    it('counts the bullets under a heading, without the say-aloud line', () => {
+        const text = '### Phase 3 — Multi-region delta\n- trigger: EU users\n- RPO 30 s\n**Say aloud:** one line\n### Trade-off Roll-up\n- x';
+        assert.equal(c.bulletsUnder(text, 'Phase 3').length, 2);
+        assert.equal(c.bulletsUnder('- **Say aloud:** x\n', 'Phase 3').length, 0);
+        // A narrow no-break space in the heading, as gpt-oss writes it.
+        assert.equal(c.bulletsUnder('### Phase 3 — Multi-region\n- a\n- b\n- c', 'Phase 3').length, 3);
+    });
     it('counts numbers with units', () => {
         assert.equal(c.concreteNumbers('2M QPS, p99 5 ms, 3 replicas, 40 GB, 99.9%'), 5);
     });

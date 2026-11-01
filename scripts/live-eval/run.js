@@ -17,7 +17,9 @@
 //   C  Ask with a screenshot (default mode): facts only the image has
 //   D  Ask code mode with a hard problem in the screenshot; the code is run
 //      against hidden tests; then once more in the saved code language
-//   E  Ask system design mode with a hard prompt in the screenshot
+//   E  Ask system design mode, one Ask per case with no transcript, as in the
+//      app: a hard prompt in the screenshot, a problem typed with its
+//      constraints, and a deep dive (only the named part, no placeholders)
 //   H  Ask System Design · Live: one interview in five Asks (screenshot, opening,
 //      design from the transcript, deep dive and probe on the previous answer),
 //      plus a bare system name ("twitter") with only a desktop on screen;
@@ -83,6 +85,7 @@ const { runAsk } = require('./ask');
 const { createJudge } = require('./judge');
 const checks = require('./checks');
 const codeProblem = require('./fixtures/code-problem');
+const designCases = require('./fixtures/system-design-cases');
 const liveDesignCases = require('./fixtures/system-design-live-cases');
 const { buildGo } = require('./goBuild');
 const { consoleLine, writeReports, statusOf } = require('./report');
@@ -94,7 +97,7 @@ const PHASE_NAMES = {
     B: 'B · Career routes (your notes)',
     C: 'C · Ask with a screenshot',
     D: 'D · Ask code with a screenshot',
-    E: 'E · Ask system design with a screenshot',
+    E: 'E · Ask system design',
     H: 'H · Ask System Design · Live',
     F: 'F · Stress',
     G: 'G · Each model alone',
@@ -538,21 +541,65 @@ async function phaseD(ctx, history) {
     return items;
 }
 
-async function phaseE(ctx, history) {
-    const image = await renderScreenshot(path.join(FIX, 'system-design.svg'), path.join(ctx.outDir, 'system-design.jpg'));
-    const prompt = 'Design this.';
-    const r = await runAsk({ tag: 'E', mode: 'system_design', userPrompt: prompt, history, image, llmInfo: ctx.models.llmInfo });
-    const item = askItem('E', 'system-design', 'system-design', r, prompt);
-    imageChecks(ctx, item, r);
-    const sec = checks.systemDesignSections(r.text);
-    item.checks.push(check('sections 0 to 11 in order', sec.ok, 'fail', [sec.missing.length ? `missing ${sec.missing.join(', ')}` : '', sec.ordered ? '' : 'out of order'].filter(Boolean).join('; ')));
-    const numbers = checks.concreteNumbers(r.text);
-    item.metrics.concreteNumbers = numbers;
-    item.checks.push(check('at least 8 concrete numbers with units', numbers >= 8, 'fail', `${numbers}`));
-    requirementsCheck(item, r.text);
-    item.imageBase64 = image.base64;
-    ctx.emit(item);
-    return [item];
+// A Rule B deep dive answers alone: a word budget, as a warning.
+const DEEP_DIVE_MAX_WORDS = 600;
+
+// Each case is one Ask with no transcript, as in the app: featureBridge sends
+// an empty history to this mode (only System Design · Live reads the transcript).
+async function phaseE(ctx) {
+    const items = [];
+    for (const c of designCases.CASES) {
+        const image = c.image ? await renderScreenshot(path.join(FIX, c.image), path.join(ctx.outDir, c.image.replace(/\.svg$/, '.jpg'))) : null;
+        const r = await runAsk({ tag: `E:${c.id}`, mode: 'system_design', userPrompt: c.userPrompt, history: [], image, llmInfo: ctx.models.llmInfo });
+        const item = askItem('E', c.id, c.kind, r, c.userPrompt);
+        if (image) imageChecks(ctx, item, r);
+        else {
+            item.checks.push(check('no error', !r.error, 'fail', r.error || ''));
+            if (item.metrics.resets) item.checks.push(check('answered without fallback', false, 'warn', `${item.metrics.resets} fallback(s): ${item.metrics.fallbackModels.join(' → ')}`));
+        }
+        const text = r.text;
+        const sec = checks.systemDesignSections(text);
+        const words = checks.answerWords(text);
+        item.metrics.words = words;
+        item.checks.push(check('no "see prior turn" placeholder', !/see prior turn/i.test(text), 'fail'));
+
+        if (c.expect === 'full') {
+            item.checks.push(check('sections 0 to 11 in order', sec.ok, 'fail', [sec.missing.length ? `missing ${sec.missing.join(', ')}` : '', sec.ordered ? '' : 'out of order'].filter(Boolean).join('; ')));
+            item.checks.push(check('starts with section 0 (the opening pitch)', checks.startsWithSection0(text), 'fail'));
+            const marks = (checks.systemDesignSection(text, 2).match(/\((?:given|assumed)\)/gi) || []).length;
+            item.metrics.requirementMarks = marks;
+            item.checks.push(check('requirements marked (given) or (assumed), at least 3', marks >= 3, 'fail', `${marks}`));
+        }
+        if (c.expect === 'deep-dive') {
+            // Its own subheadings may be numbered ("### 1. Key design"); the 12-section shape starts at § 0.
+            const first = (/^#{1,4}\s.*$/m.exec(text) || [''])[0];
+            item.checks.push(check('answers only the named part (opens with "## Deep dive:", no section 0)', /^#{1,4}\s*Deep dive:/i.test(first) && !/^#{1,4}\s*(?:section\s*)?0\./mi.test(text), 'fail', first ? `first heading: ${first.slice(0, 60)}` : 'no heading'));
+            item.checks.push(check(`at most ${DEEP_DIVE_MAX_WORDS} words`, words <= DEEP_DIVE_MAX_WORDS, 'warn', `${words} words`));
+        }
+        if (c.problemOnScreen) {
+            const numbers = checks.concreteNumbers(text);
+            item.metrics.concreteNumbers = numbers;
+            item.checks.push(check('at least 8 concrete numbers with units', numbers >= 8, 'fail', `${numbers}`));
+            requirementsCheck(item, text);
+        }
+        if (c.mentionsScale) {
+            const m = checks.mentions(text, c.mentionsScale);
+            item.checks.push(check('uses the scale typed with the problem', m.found.length > 0, 'fail', m.found.length ? '' : 'no 10 million'));
+        }
+        if (c.singleRegion) {
+            const bullets = checks.bulletsUnder(text, 'Phase 3').length;
+            item.metrics.phase3Bullets = bullets;
+            item.checks.push(check('a short Phase 3 (one region given): at most 3 bullets', bullets <= 3, 'warn', `${bullets} bullets`));
+        }
+        for (const { terms, severity } of c.mentionsAll || []) {
+            const m = checks.mentions(text, terms);
+            item.checks.push(check(`names ${terms[0]}`, m.found.length > 0, severity, m.found.length ? `found ${m.found.join(', ')}` : `none of ${terms.join(', ')}`));
+        }
+        if (image) item.imageBase64 = image.base64;
+        items.push(item);
+        ctx.emit(item);
+    }
+    return items;
 }
 
 // The requirements in fixtures/system-design.svg (phases E and H).
@@ -1006,7 +1053,7 @@ async function judgeItems(ctx, items) {
     }
     ctx.out(`[judge] scoring with ${judge.model}`);
     for (const it of items) {
-        if (!it.answer || !['live', 'live-career', 'ask', 'ask-image', 'code', 'system-design', 'system-design-live-opening', 'system-design-live-design', 'system-design-live-deep-dive', 'system-design-live-probe'].includes(it.kind) || it.phase === 'F') continue;
+        if (!it.answer || !['live', 'live-career', 'ask', 'ask-image', 'code', 'system-design', 'system-design-text', 'system-design-deep-dive', 'system-design-live-opening', 'system-design-live-design', 'system-design-live-deep-dive', 'system-design-live-probe'].includes(it.kind) || it.phase === 'F') continue;
         it.judge = await judge.score({
             kind: it.kind,
             question: Array.isArray(it.question) ? it.question.join(' ') : it.question || it.extracted || '',
@@ -1063,11 +1110,12 @@ async function rejudge(args) {
     const cfg = loadConfig(args);
     const images = { C: 'ask-image.jpg', D: 'code-problem.jpg', E: 'system-design.jpg' };
     for (const it of run.items) {
-        // Phase G sends the screenshot only on its image items, phase H only on the cases that name one.
+        // Phase G sends the screenshot only on its image items, phases E and H only on the cases that name one.
         const hCase = it.phase === 'H' ? liveDesignCases.CASES.find(c => c.id === it.id) : null;
         const name = it.phase === 'G' ? (it.kind === 'ask-image' ? 'ask-image.jpg' : null)
             : it.phase === 'H' ? (it.metrics?.imageSent && hCase && hCase.image ? hCase.image.replace(/\.svg$/, '.jpg') : null)
-                : images[it.phase];
+                : it.phase === 'E' ? (it.metrics?.imageSent ? images.E : null)
+                    : images[it.phase];
         const file = name && path.join(dir, name);
         if (file && fs.existsSync(file)) it.imageBase64 = fs.readFileSync(file).toString('base64');
         delete it.judge;
@@ -1221,7 +1269,7 @@ async function main() {
     }
     if (args.phases.includes('E')) {
         out('— Ask system design');
-        items.push(...(await phaseE(ctx, history)));
+        items.push(...(await phaseE(ctx)));
     }
     if (args.phases.includes('H')) {
         out('— Ask System Design · Live');

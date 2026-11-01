@@ -3,7 +3,7 @@
  *
  * Ask mode System Design · Live (system_design_live, future-work item 16): its
  * own profile, the transcript and the previous kit in its prompt, and nothing
- * changed for the other modes, the System Design profile included.
+ * changed for the other modes. Also the System Design profile's fixes (item 17).
  *
  * Run: node --test src/features/ask/__tests__/systemDesignLive.test.js
  */
@@ -12,8 +12,6 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const crypto = require('node:crypto');
-const { profilePrompts } = require('../../common/prompts/promptTemplates');
 const { buildAskMessages, formatConversationForAsk, normalizeAskMode, isLiveDesignKit, PREVIOUS_ANSWER_MAX_CHARS } = require('../askPrompt');
 const { LIVE_OPENING_SECTIONS, LIVE_DESIGN_SECTIONS } = require('../../../../scripts/live-eval/checks');
 
@@ -118,9 +116,47 @@ describe('pickle_glass_system_design_live prompt', () => {
 });
 
 describe('the System Design profile', () => {
-    it('is unchanged', () => {
-        // sha256 of the profile on main before System Design · Live was added.
-        const hash = crypto.createHash('sha256').update(JSON.stringify(profilePrompts.pickle_glass_system_design)).digest('hex');
-        assert.equal(hash, '33e5024f8835fa5d42266ac21f03e8971ccf77ff5d1e6d6fb99597f0661b17be');
+    // Item 16 kept this profile byte-identical; item 17 (2026-11-01) fixed it in place,
+    // keeping its flow: one Ask, the twelve sections, Rule B for a deep dive.
+    const prompt = build('system_design').systemPrompt;
+
+    it('keeps its twelve sections, in order', () => {
+        let from = 0;
+        for (let i = 0; i < 12; i++) {
+            const at = prompt.indexOf(`\n## ${i}. `, from);
+            assert.ok(at >= 0, `"## ${i}." missing or out of order`);
+            from = at + 1;
+        }
+    });
+
+    it('has no placeholder for a prior turn and no stale text', () => {
+        assert.doesNotMatch(prompt, /see prior turn/);
+        assert.doesNotMatch(prompt, /Rule C/);
+        assert.doesNotMatch(prompt, /100 KB image-meta/);
+        assert.doesNotMatch(prompt, /as if the interviewer just confirmed them/);
+        assert.doesNotMatch(prompt, /Opening 30s pitch/);
+    });
+
+    it('uses typed constraints as given and marks the rest as assumed', () => {
+        assert.match(prompt, /twitter, 10M DAU, feed only/);
+        assert.match(prompt, /\(given\)/);
+        assert.match(prompt, /\(assumed\)/);
+    });
+
+    it('carries the corrected estimation rules', () => {
+        assert.match(prompt, /image metadata < 1 KB/);
+        assert.match(prompt, /Never multiply by items per page twice/);
+        assert.match(prompt, /Fan-out writes\/s = writes\/s × average followers/);
+        assert.match(prompt, /Egress = read requests\/s × response size, counted once/);
+    });
+
+    it('keeps the sections consistent with each other', () => {
+        assert.match(prompt, /the first line of the answer is "## 0\. Opening Pitch"/);
+        assert.match(prompt, /never contradict the Trade-off Roll-up/);
+        assert.match(prompt, /appears in the Phase 1 diagram or a Phase 2 delta/);
+    });
+
+    it('answers a deep dive alone, under its own heading', () => {
+        assert.match(prompt, /## Deep dive: <target>/);
     });
 });

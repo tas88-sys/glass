@@ -157,6 +157,29 @@ function systemDesignSections(text) {
     return { ok: !missing.length && ordered, missing, ordered };
 }
 
+const sectionHeading = n => new RegExp(`^#{1,4}\\s*(?:section\\s*)?${n}\\.`, 'mi');
+
+/** System design: the text of section n, from its heading to the next numbered section (or the end); '' when absent. */
+function systemDesignSection(text, n) {
+    const s = String(text || '');
+    const start = sectionHeading(n).exec(s);
+    if (!start) return '';
+    const rest = s.slice(start.index + start[0].length);
+    const next = /^#{1,4}\s*(?:section\s*)?\d{1,2}\./m.exec(rest);
+    return next ? rest.slice(0, next.index) : rest;
+}
+
+/** System design: whether the answer's first markdown heading is section 0 (the opening pitch streams first). */
+function startsWithSection0(text) {
+    const first = /^#{1,4}\s.*$/m.exec(String(text || ''));
+    return !!first && sectionHeading(0).test(first[0]);
+}
+
+/** Bullet lines under a heading, up to the next heading ("Say aloud" lines left out). */
+function bulletsUnder(text, name) {
+    return sectionLines(text, name).filter(l => /^(?:[-*•]|\d+[.)])\s/.test(l) && !/say aloud/i.test(l));
+}
+
 /** System Design · Live: the headings of its two kits, in order (pickle_glass_system_design_live). */
 const LIVE_OPENING_SECTIONS = ['Frame', 'Scope', 'Questions', 'Assumptions', 'Estimates', 'Check-in'];
 const LIVE_DESIGN_SECTIONS = ['Requirements used', 'API', 'Design', 'Deep dives', 'Check against requirements', 'Next questions'];
@@ -181,10 +204,10 @@ function liveDesignRoute(text) {
     return 'unknown';
 }
 
-/** The non-empty lines under a markdown heading, up to the next heading. */
+/** The non-empty lines under a markdown heading, up to the next heading. A space in the name matches any space (models write "Phase 3"). */
 function sectionLines(text, name) {
     const lines = String(text || '').split(/\r?\n/);
-    const re = new RegExp(`^#{1,4}\\s*${escapeRe(name)}\\b`, 'i');
+    const re = new RegExp(`^#{1,4}\\s*${escapeRe(name).replace(/ /g, '\\s+')}\\b`, 'i');
     const start = lines.findIndex(l => re.test(l));
     if (start < 0) return [];
     const out = [];
@@ -291,6 +314,9 @@ module.exports = {
     plainMath,
     sectionsInOrder,
     systemDesignSections,
+    systemDesignSection,
+    startsWithSection0,
+    bulletsUnder,
     liveDesignRoute,
     sectionLines,
     concreteNumbers,
