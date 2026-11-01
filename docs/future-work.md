@@ -12,10 +12,10 @@ One step at a time, each with its own plan, a fresh session per step. When a ste
 |------|------|----------|
 | [x] 1 | 12. Confirmation one-liner in the wrong language | Small and isolated. It touches the same prompt as 10 and 11, so it goes first and sets up the prompt test and eval loop. |
 | [x] 2 | 9. The extracted question picks the wrong span | First stage of the flow: it decides whether a turn is answered and which span goes to routing and the note search, so the evals of 10 and 11 run on the right questions. It also stops the answers to reported questions that produced the "not used" technology claim. |
-| [x] 3 | 10a. Prompt rule, temperature 0.2–0.3 on personal/ambiguous, "not used" list in the addendum (item 10, steps 1 and 4 first half) | The only HIGH item, and its cheap half. The "not used" list needs a `notUsed` field in the career KB manifest, which lives in the separate, private KB repo. **Merged with two measurements pending** (item 10, "Pending from 10a"): moved to the start of step 6, with item 11's. |
-| [x] 4 | 11. Answers too long | Same prompt. After 10a because the lower temperature already changes answer length; measured before 10a, the numbers would be stale. **Merged with its measurements pending** (item 11, "Pending from 11"), together with 10a's: step 5 started them, step 6 finishes them. |
+| [x] 3 | 10a. Prompt rule, temperature 0.2–0.3 on personal/ambiguous, "not used" list in the addendum (item 10, steps 1 and 4 first half) | The only HIGH item, and its cheap half. The "not used" list needs a `notUsed` field in the career KB manifest, which lives in the separate, private KB repo. **Merged with two measurements pending**; both run on 2026-11-01 (item 10, "Measurement of 10a"). |
+| [x] 4 | 11. Answers too long | Same prompt. After 10a because the lower temperature already changes answer length; measured before 10a, the numbers would be stale. **Merged with its measurements pending**; run on 2026-11-01, together with 10a's (item 11, "Measurement"). |
 | [x] 5 | 14. The live check marks technical constants | `findUnsupported`. Before 10b: 10b needs its false-alarm rate measured, and that is not readable with this noise in. The Groq daily limit ran out again after 3 of the pending answers, so 10a's and 11's measurements move to the start of step 6. |
-| [x] 6 | 10b. Neighborhood check and marking "not used" technologies (item 10, steps 2–3 and 4 second half) | Same file as 14, now without the noise. Measured offline on the replay answers that kept their notes. 10a's and 11's real-LLM measurements still wait for the Groq daily limit (the "Pending from" sections). |
+| [x] 6 | 10b. Neighborhood check and marking "not used" technologies (item 10, steps 2–3 and 4 second half) | Same file as 14, now without the noise. Measured offline on the replay answers that kept their notes. 10a's and 11's real-LLM measurements were run on 2026-11-01 (item 10, "Measurement of 10a"; item 11, "Measurement"). |
 | [x] 7 | 13. A question about the candidate's own setup routes general | After 9, since the 2026-10-29 turn had no question and should then get no answer; what is left are real questions about the setup. Uses item 5's held-out sets, so it can share a plan with item 5. |
 | [x] 8 | 15. STT terms heard as other words | Independent, lowest severity, costliest to measure (audio eval before and after). Can move into any gap. Merged with its measurement pending; **measured on 2026-11-01**. The new terms did not raise the count heard right (7 of 12 before and after), and "Claude Code" is still heard as "Cloud Code" (item 15, acceptance box 1, still open). |
 
@@ -418,7 +418,7 @@ The answer prompt quotes the whole interviewer turn (`makeLiveAnswer`, `asked = 
 
 ## 10. Live Answer career context — a real number attached to the wrong claim
 
-**Status:** 10a done — 2026-10-30, branch `2026-10-30-career-answer-grounding` (step 3 of the work order), with two measurements pending (below). 10b done — 2026-10-30, branch `2026-10-30-career-check-neighborhood` (step 6). Found on 2026-10-28 in the same session as item 9.
+**Status:** 10a done — 2026-10-30, branch `2026-10-30-career-answer-grounding` (step 3 of the work order), measured on 2026-11-01 (below). 10b done — 2026-10-30, branch `2026-10-30-career-check-neighborhood` (step 6). Found on 2026-10-28 in the same session as item 9.
 **Severity:** HIGH (the candidate may say a wrong number about their own work)
 **Code:** `findUnsupported` (`src/features/common/career/answerCheck.js`), `checkAnswer` (`src/features/common/career/index.js:584`), `makeLiveAnswer` (`src/features/listen/summary/summaryService.js`, `temperature: 0.7`)
 
@@ -453,6 +453,7 @@ Neither was marked: the live check (FR-021) passes a number when it appears **an
 - [ ] A replay of the concurrency turn with the same notes states no metric the notes tie to a different result.
   - **Not met by 10a:** with the rule, the turn still moved a cost reduction onto response time (see Outcome).
   - **10b marks it instead of preventing it:** on the replay answers of that turn, the moved multipliers are listed as "(other result)" (Outcome of 10b). The answer still states them, so the box stays open.
+  - **Measured again on 2026-11-01** (shipped wording, item 11's length rule): the concurrency turn moved a percentage the notes tie to a cost onto a run time, and 10b's check did not mark it (not traced).
 - [x] Unit cases for `findUnsupported`: same number, same employer, different result → flagged; same number and result → not flagged; Portuguese answer with an English note → not flagged.
 - [x] False-alarm rate of the neighborhood check measured and recorded here before it ships. It was measured on the replay answers, not on the eval set (see Outcome of 10b).
 - [x] A personal answer naming a technology from the "not used" list is marked in the panel (10b). The other half is met: with the addendum line, the 2026-10-29 turn (forced with `--arm`, since item 9's gate now skips it) names none.
@@ -521,24 +522,37 @@ The sample is small. 11's replay adds answers when the Groq limit allows, and th
   - two first-token timing checks swapped;
   - two items took one note chunk more or less.
 
-### Pending from 10a (run at the start of step 6, with item 11's)
+### Measurement of 10a (2026-11-01)
 
-The Groq daily token limit ran out mid-measurement, and again at the start of step 4. When it is back:
+Run once the Groq daily limit was back, together with item 11's. The same ten career turns (four Portuguese, six English), `openai/gpt-oss-120b`, one answer each, with the shipped wording and item 11's length rule. Counted by hand against the notes block each answer saw:
 
-1. **Finish the replay of the shipped wording.** Six turns are missing:
-   - command: `--resume` on the same `--arm` lists, with `--answers-for arm`;
-   - record the three columns above for all ten turns.
-2. **Run the live eval with the judge**, `npm run eval:live -- --text --only A,B --judge`, and compare with the run before 10a (23 pass, 9 warn, judge mean 4.87, routes 10/12).
-   - Run it on commit `77ee925` (a worktree): 10a's code and the word counts, without item 11's prompt. Leave out the two length checks when counting pass and warn.
-   - Accept: judge mean not lower, same route accuracy.
-   - If the mean drops (answers drier under the stricter rule), revisit the wording before item 11 builds on it.
-   - The same run gives item 11 its "before" lengths.
+| Run | Answers | Metric invented or moved to another result | Technique placed at an employer from a general note | "Not used" technology claimed |
+|---|---|---|---|---|
+| Before (main, 0.7) | 10 | 4 | 1 | 1 |
+| First rule wording, 0.3, list | 10 | 3 | 1 | 0 |
+| Shipped wording, with the length rule | 10 (9 with notes) | 2 | 2 | 0 |
+
+- The two metrics: a percentage the notes tie to a cost, put on a run time (the concurrency turn again), and an error rate "near zero" that the notes do not state.
+- The two techniques: a general concurrency pattern placed at an employer, and a circuit breaker placed at an employer.
+- No answer is empty or PASSIVE. Median length 59.5 words (94 before).
+- The rows are not like for like: the last one also runs item 11's length rule, and shorter answers have fewer claims to get wrong.
+
+**Live eval with the judge**, `--text --only A,B --judge`, on commit `77ee925` (10a's code and the word counts, without item 11's prompt), compared with the run before 10a:
+
+| | Before 10a | 10a (`77ee925`) |
+|---|---|---|
+| Pass / warn (without the two length checks) | 23 / 9 | 26 / 6 |
+| Judge mean | 4.87 | 4.78 |
+| Career routes | 10/12 | 10/12 |
+
+- The judge mean is **0.09 lower** (23 answers, about two points), so "judge mean not lower" is not met on this comparison. The lowest score is 4, and correctness averages 4.96. One run per side; the judge's own run-to-run spread was not measured.
+- The routes are the same. The wording is not revisited here: item 11's run below, on top of 10a, keeps the mean at 4.78.
 
 ---
 
 ## 11. Live Answer — answers too long to read while speaking
 
-**Status:** Done, measurements pending — 2026-10-30, branch `2026-10-30-live-answer-length` (step 4 of the work order). The prompt budget shipped before any real-LLM run, because the Groq daily limit was used up; see "Pending from 11". Found on 2026-10-28 in the same session as item 9.
+**Status:** Done — 2026-10-30, branch `2026-10-30-live-answer-length` (step 4 of the work order). The prompt budget shipped before any real-LLM run, because the Groq daily limit was used up; measured on 2026-11-01 (branch `2026-11-01-length-measurements`), see "Measurement". The next real session is still to check. Found on 2026-10-28 in the same session as item 9.
 **Severity:** MEDIUM
 **Code:** the user message in `makeLiveAnswer` (`src/features/listen/summary/summaryService.js`, "Answer … directly and concisely", `maxTokens: 900`). Related: `specs/2026-06-01-interview-live-answer-readability/`.
 
@@ -555,8 +569,8 @@ Of the 34 answers in the session: median about 100 words, 17 over 100, 7 over 15
 
 ### Acceptance (when implemented)
 
-- [ ] On the live eval and the next real session, median ≤ 60 words and no answer over 120, with no rise in empty or cut answers.
-- [ ] No answer ends with a summary paragraph.
+- [ ] On the live eval and the next real session, median ≤ 60 words and no answer over 120, with no rise in empty or cut answers. **Met on the live eval** (median 52, none over 120) **and on the replay** (none over 120; median 64, Portuguese 67). **The next real session is still to check.**
+- [x] No answer ends with a summary paragraph. 0 of 17 replay answers and 0 of 23 live-eval answers (7 and 2 before).
 - [ ] If the panel fold ships: an answer over 3 bullets shows the headline and 3 bullets, and the rest opens on click.
 
 ### What shipped (2026-10-30)
@@ -581,21 +595,39 @@ Of the 34 answers in the session: median about 100 words, 17 over 100, 7 over 15
 - `npm test`;
 - the live eval offline: no check, label or route differences beyond the two new checks.
 
-### Pending from 11 (run at the start of step 6)
+### Measurement (2026-11-01)
 
-1. **Replay before and after, gpt-oss-120b, one answer per turn.**
-   - Turns: the ten career turns of 10a's replay, plus the seven Portuguese turns whose real answers ran over 120 words.
-   - Before: commit `77ee925`, in a worktree. After: `main`.
-   - Record the median and longest answer, the count over 120, the answers that end in a paragraph, and any empty, cut or PASSIVE answer.
-   - This replay also gives 10a's "after" table.
-   - **Done so far (2026-10-30):** 3 of the 17 "after" answers and 2 "before", then the daily limit ran out again (each answer takes about 6,500 tokens, so the two replays alone need more than a day's 200,000).
-     - After: 46, 55 and 72 words. None ends in a paragraph, and none is empty or PASSIVE.
-     - The two turns run on both sides went from 100 to 72 words and from 70 to 55.
-     - The answers stayed in that session's scratchpad, so step 6 reruns all 17 on each side. Plan two days: "after" first, then "before", then the judge.
-2. **The live eval with the judge**, `--text --only A,B --judge`, after (on `main`), against 10a's run before (on `77ee925`, "Pending from 10a").
-3. **Accept** with: median ≤ 60, nothing over 120, no closing paragraph, no rise in empty, cut or PASSIVE answers, and a judge mean not lower.
-   - If the judge mean drops, or the median lands over 70, revise the wording once and measure again. Answers too thin to carry a career result are the risk to look for.
-   - If it still misses, record the result here and propose the fold.
+**Replay, gpt-oss-120b, one answer per turn.** The 17 turns of the plan: 11 Portuguese and 6 English, before on commit `77ee925` (a worktree), after on `main`.
+
+| Run | Answers | Median words | Longest | Over 120 | Ends in a paragraph | Empty, cut or PASSIVE |
+|---|---|---|---|---|---|---|
+| Portuguese, before | 11 | 135 | 213 | 7 | 6 | 0 |
+| Portuguese, after | 11 | 67 | 76 | 0 | 0 | 0 |
+| English, before | 6 | 80.5 | 183 | 1 | 1 | 0 |
+| English, after | 6 | 59.5 | 69 | 0 | 0 | 0 |
+| All, before | 17 | 118 | 213 | 8 | 7 | 0 |
+| All, after | 17 | 64 | 76 | 0 | 0 | 0 |
+
+- 16 of the 17 answers got shorter; one English answer went from 53 to 69 words.
+- "Cut" means an answer that ends without punctuation. The replay log does not record the stop reason.
+- The route changed in 6 of the 17 turns between the two runs: Jev is nondeterministic, and route accuracy is not compared here.
+- `cmp-check10b.js` on these answers: no mark on the "after" answers, two on the "before" (one number in one answer, a coverage target that matches an unrelated result: a false alarm).
+
+**Live eval with the judge**, `--text --only A,B --judge`, the 32 items both runs have (the "after" run also has the 8 new STT-term turns of item 15):
+
+| | Before (`77ee925`) | After |
+|---|---|---|
+| Judged answers | 23 | 23 |
+| Judge mean (correctness / relevance / concision / speakability) | 4.78 (4.96 / 5.00 / 4.61 / 4.74) | 4.78 (4.91 / 4.96 / 4.83 / 4.74) |
+| Lowest score | 4 | 4 |
+| Median words / longest | 95 / 179 | 52 / 76 |
+| Over 120 / ends in a paragraph | 5 / 2 | 0 / 0 |
+
+- Four scores moved: two went from 5 to 4, two from 4 to 5.
+- **Caveats.** The Groq limits forced more fallbacks in the "after" run: 21 of its 31 answers came from a model other than gpt-oss-120b (before: 11 of 23). The word counts there mix models. The run was made with the item 17 branch checked out (`54fb2cd`), which changes only the System Design mode.
+- Pass and warn (without the two length checks): 26 and 6 before, 24 and 8 after. The "answered without fallback" check explains most of it: it warns on 4 items that did not warn before, and on 1 that did.
+
+**Accept.** Median under 70 and the judge mean not lower: the wording of `LENGTH_RULE` is not revised, and the panel fold is not proposed, since no answer ran over 120. The only target left open is the median of 60 on a real session: the replay's Portuguese median is 67.
 
 ---
 
