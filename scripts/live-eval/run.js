@@ -9,7 +9,7 @@
 // Run it through npm (launch.js starts it with the Node inside Electron, which
 // loads better-sqlite3 to read the app's settings read-only).
 //
-// Phases (--only A,B,...; default A,B,C,D,E,G; --stress adds F):
+// Phases (--only A,B,...; default A,B,C,D,E,H,G; --stress adds F):
 //   A  interview: invented questions in pt-BR and en-US, said by TTS into the
 //      STT sessions; the question gate, the speaker gate, answers, follow-ups
 //   B  career routes: questions sampled from CAREER_KB_PATH/glass-eval/questions.jsonl
@@ -18,6 +18,9 @@
 //   D  Ask code mode with a hard problem in the screenshot; the code is run
 //      against hidden tests; then once more in the saved code language
 //   E  Ask system design mode with a hard prompt in the screenshot
+//   H  Ask System Design · Live: one interview in five Asks (screenshot, opening,
+//      design from the transcript, deep dive and probe on the previous answer);
+//      each must take its route, in its word budget
 //   F  stress: a burst of questions (abort and replace), a long session (the
 //      30-turn prompt cap, the Insights lane), and Answer turned off
 //   G  each model: every model of the list alone (the other phases only reach
@@ -55,7 +58,7 @@
 //                        means no --judge. With no model left, a local stub answers:
 //                        the gate, the career router (Jev), retrieval and the answer
 //                        lane still run, checks on the answer's words become info,
-//                        and the Ask phases (C, D, E) are skipped
+//                        and the Ask phases (C, D, E, H) are skipped
 //   --out <dir>          report folder (default %LOCALAPPDATA%\glass-live-eval\<time>)
 //   --verbose            echo the app's own log lines (always in app.log)
 //
@@ -79,6 +82,7 @@ const { runAsk } = require('./ask');
 const { createJudge } = require('./judge');
 const checks = require('./checks');
 const codeProblem = require('./fixtures/code-problem');
+const liveDesignCases = require('./fixtures/system-design-live-cases');
 const { buildGo } = require('./goBuild');
 const { consoleLine, writeReports, statusOf } = require('./report');
 const offline = require('./offline');
@@ -90,6 +94,7 @@ const PHASE_NAMES = {
     C: 'C · Ask with a screenshot',
     D: 'D · Ask code with a screenshot',
     E: 'E · Ask system design with a screenshot',
+    H: 'H · Ask System Design · Live',
     F: 'F · Stress',
     G: 'G · Each model alone',
 };
@@ -131,7 +136,7 @@ function parseArgs(argv) {
     a.blocked = offline.parseBlocked(a.blockProviders != null ? a.blockProviders : process.env.LIVE_EVAL_BLOCK_PROVIDERS);
     const endpointModels = a.endpointModels != null ? a.endpointModels : process.env.LIVE_EVAL_ENDPOINT_MODELS;
     a.endpointModels = String(endpointModels || '').split(',').map(s => s.trim()).filter(Boolean);
-    const phases = a.only || ['A', 'B', 'C', 'D', 'E', 'G'];
+    const phases = a.only || ['A', 'B', 'C', 'D', 'E', 'H', 'G'];
     if (a.stress && !phases.includes('F')) phases.push('F');
     a.phases = phases;
     return a;
@@ -543,21 +548,116 @@ async function phaseE(ctx, history) {
     const numbers = checks.concreteNumbers(r.text);
     item.metrics.concreteNumbers = numbers;
     item.checks.push(check('at least 8 concrete numbers with units', numbers >= 8, 'fail', `${numbers}`));
-    const reqs = [
-        ['429 / Retry-After', ['/retry-after/', '429']],
-        ['per-region failure', ['/region(?:al)? (?:failure|outage|loss)/', '/(?:lose|losing|lost) (?:a |one )?region/', '/fail[- ]?open/']],
-        ['p99 under 5 ms', ['/5\\s?ms/']],
-        ['global quota ±5%', ['/±\\s?5\\s?%/', '/5\\s?%/']],
-        ['quota changes in 10 s', ['/10\\s?s(?:ec|econds)?\\b/']],
-        ['an algorithm', ['token bucket', 'sliding window', 'gcra', 'leaky bucket']],
-        ['scale from the image', ['/2\\s?m(?:illion)?\\b/', '/2,000,000/', '/50\\s?m(?:illion)?\\b/']],
-    ];
-    const hit = reqs.filter(([, terms]) => checks.mentions(r.text, terms).found.length);
-    item.metrics.requirementsCovered = `${hit.length}/${reqs.length}`;
-    item.checks.push(check('covers the requirements in the image (≥ 5 of 7)', hit.length >= 5, 'fail', `missing: ${reqs.filter(x => !hit.includes(x)).map(x => x[0]).join(', ') || 'none'}`));
+    requirementsCheck(item, r.text);
     item.imageBase64 = image.base64;
     ctx.emit(item);
     return [item];
+}
+
+// The requirements in fixtures/system-design.svg (phases E and H).
+const RATE_LIMITER_REQUIREMENTS = [
+    ['429 / Retry-After', ['/retry-after/', '429']],
+    ['per-region failure', ['/region(?:al)? (?:failure|outage|loss)/', '/(?:lose|losing|lost) (?:a |one )?region/', '/fail[- ]?open/']],
+    ['p99 under 5 ms', ['/5\\s?ms/']],
+    ['global quota ±5%', ['/±\\s?5\\s?%/', '/5\\s?%/']],
+    ['quota changes in 10 s', ['/10\\s?s(?:ec|econds)?\\b/']],
+    ['an algorithm', ['token bucket', 'sliding window', 'gcra', 'leaky bucket']],
+    ['scale from the image', ['/2\\s?m(?:illion)?\\b/', '/2,000,000/', '/50\\s?m(?:illion)?\\b/']],
+];
+
+function requirementsCheck(item, text) {
+    const reqs = RATE_LIMITER_REQUIREMENTS;
+    const hit = reqs.filter(([, terms]) => checks.mentions(text, terms).found.length);
+    item.metrics.requirementsCovered = `${hit.length}/${reqs.length}`;
+    item.checks.push(check('covers the requirements in the image (≥ 5 of 7)', hit.length >= 5, 'fail', `missing: ${reqs.filter(x => !hit.includes(x)).map(x => x[0]).join(', ') || 'none'}`));
+}
+
+// ---------------------------------------------------------------------------
+// Phase H (Ask System Design · Live)
+// ---------------------------------------------------------------------------
+
+// Word budgets of pickle_glass_system_design_live, per route.
+const LIVE_WORD_LIMITS = { opening: 450, design: 750, 'deep-dive': 300, probe: 90 };
+
+async function phaseH(ctx) {
+    const items = [];
+    const answers = {};
+    for (const c of liveDesignCases.CASES) {
+        const image = c.image ? await renderScreenshot(path.join(FIX, c.image), path.join(ctx.outDir, c.image.replace(/\.svg$/, '.jpg'))) : null;
+        const earlier = c.previous ? answers[c.previous] : null;
+        const previousAnswer = earlier && earlier.text ? { question: earlier.question, answer: earlier.text } : null;
+        const r = await runAsk({ tag: `H:${c.id}`, mode: 'system_design_live', userPrompt: c.userPrompt, history: c.history, image, llmInfo: ctx.models.llmInfo, previousAnswer });
+        const item = askItem('H', c.id, `system-design-live-${c.expect}`, r, c.userPrompt);
+        item.history = c.history.join('\n');
+        item.metrics.systemPromptChars = r.systemPromptChars;
+        item.metrics.previousAnswer = !!previousAnswer;
+        if (c.previous) item.previous = c.previous;
+        if (image) imageChecks(ctx, item, r);
+        else {
+            item.checks.push(check('no error', !r.error, 'fail', r.error || ''));
+            if (item.metrics.resets) item.checks.push(check('answered without fallback', false, 'warn', `${item.metrics.resets} fallback(s): ${item.metrics.fallbackModels.join(' → ')}`));
+        }
+        if (c.previous) item.checks.push(check(`builds on ${c.previous}`, !!previousAnswer, 'fail', previousAnswer ? '' : `${c.previous} gave no answer`));
+
+        const text = r.text;
+        const route = checks.liveDesignRoute(text);
+        const words = checks.answerWords(text);
+        item.metrics.route = route;
+        item.metrics.words = words;
+        item.checks.push(check(`takes the ${c.expect} route`, route === c.expect, 'fail', `got ${route}`));
+        const limit = LIVE_WORD_LIMITS[c.expect];
+        item.checks.push(check(`at most ${limit} words`, words <= limit, 'warn', `${words} words`));
+
+        if (c.expect === 'opening' || c.expect === 'design') {
+            const names = c.expect === 'design' ? checks.LIVE_DESIGN_SECTIONS : checks.LIVE_OPENING_SECTIONS;
+            const sec = checks.sectionsInOrder(text, names);
+            item.checks.push(check(`${c.expect} kit headings in order`, sec.ok, 'fail', [sec.missing.length ? `missing ${sec.missing.join(', ')}` : '', sec.outOfOrder.length ? `out of order ${sec.outOfOrder.join(', ')}` : ''].filter(Boolean).join('; ')));
+        }
+        if (c.expect === 'opening') {
+            const questions = checks.sectionLines(text, 'Questions').filter(l => l.includes('?'));
+            item.checks.push(check('at least 3 questions to ask', questions.length >= 3, 'fail', `${questions.length}`));
+            const out = checks.mentions(checks.sectionLines(text, 'Scope').join('\n'), ['/\\bout\\b/']);
+            item.checks.push(check('an out-of-scope list', out.found.length > 0, 'fail'));
+        }
+        if (c.expect === 'design') {
+            const paths = checks.mentions(text, ['/write path/', '/read path/']);
+            item.checks.push(check('a write path and a read path', !paths.missing.length, 'fail', paths.missing.length ? `missing ${paths.missing.join(', ')}` : ''));
+        }
+        if (c.image) {
+            const numbers = checks.concreteNumbers(text);
+            item.metrics.concreteNumbers = numbers;
+            item.checks.push(check('at least 8 concrete numbers with units', numbers >= 8, 'fail', `${numbers}`));
+            requirementsCheck(item, text);
+        }
+        if (c.mentionsScale) {
+            const m = checks.mentions(text, c.mentionsScale);
+            item.checks.push(check('uses the scale the interviewer gave', m.found.length > 0, 'fail', m.found.length ? '' : 'no 10 million'));
+            const multiRegion = /^#{1,4}[^\n]*(?:multi-?region|geo)/mi.test(text);
+            item.checks.push(check('no multi-region section (one region confirmed)', !multiRegion, 'warn'));
+        }
+        if (c.mentionsAny) {
+            const m = checks.mentions(text, c.mentionsAny);
+            item.checks.push(check('names a key term', m.found.length > 0, 'fail', m.found.length ? `found ${m.found.join(', ')}` : `none of ${c.mentionsAny.join(', ')}`));
+        }
+        if (c.expect === 'deep-dive') {
+            const first = String(text).split('\n').map(l => l.trim()).find(Boolean) || '';
+            item.checks.push(check('starts with "## Deep dive:"', /^#{1,4}\s*Deep dive:/i.test(first), 'warn', first.slice(0, 60)));
+        }
+        if (c.expect === 'probe') {
+            // The first line is the answer said aloud, a "> " quote in the prompt's shape.
+            const first = (String(text).split('\n').map(l => l.trim()).find(Boolean) || '').replace(/^>\s*/, '').replace(/[*_#`]/g, '');
+            const headlineWords = first.split(/\s+/).filter(Boolean).length;
+            item.metrics.headlineWords = headlineWords;
+            item.checks.push(check('direct answer first (≤ 25 words)', headlineWords <= 25, 'warn', `${headlineWords} words`));
+            item.checks.push(check('a trade-off line', checks.mentions(text, ['/trade-?off:/']).found.length > 0, 'warn'));
+        }
+
+        answers[c.id] = { question: c.userPrompt, text };
+        if (image) item.imageBase64 = image.base64;
+        items.push(item);
+        ctx.emit(item);
+    }
+    return items;
 }
 
 // ---------------------------------------------------------------------------
@@ -905,14 +1005,15 @@ async function judgeItems(ctx, items) {
     }
     ctx.out(`[judge] scoring with ${judge.model}`);
     for (const it of items) {
-        if (!it.answer || !['live', 'live-career', 'ask', 'ask-image', 'code', 'system-design'].includes(it.kind) || it.phase === 'F') continue;
+        if (!it.answer || !['live', 'live-career', 'ask', 'ask-image', 'code', 'system-design', 'system-design-live-opening', 'system-design-live-design', 'system-design-live-deep-dive', 'system-design-live-probe'].includes(it.kind) || it.phase === 'F') continue;
         it.judge = await judge.score({
             kind: it.kind,
             question: Array.isArray(it.question) ? it.question.join(' ') : it.question || it.extracted || '',
             answer: it.answer,
             transcript: it.history,
             notes: it.kind === 'live-career' ? it.notes : undefined,
-            extra: it.testResult ? `hidden tests passed ${it.testResult.passed}/${it.testResult.total}${it.testResult.error ? ` (${it.testResult.error})` : ''}` : undefined,
+            extra: it.testResult ? `hidden tests passed ${it.testResult.passed}/${it.testResult.total}${it.testResult.error ? ` (${it.testResult.error})` : ''}`
+                : it.previous ? `PREVIOUS ANSWER (${it.previous}), which this one builds on:\n${items.find(x => x.id === it.previous)?.answer || '(none)'}` : undefined,
             imageBase64: it.imageBase64,
         });
         ctx.out(`  judge ${it.phase} ${it.id}: ${it.judge.error ? `error ${it.judge.error}` : `${it.judge.score}/5`}`);
@@ -961,8 +1062,10 @@ async function rejudge(args) {
     const cfg = loadConfig(args);
     const images = { C: 'ask-image.jpg', D: 'code-problem.jpg', E: 'system-design.jpg' };
     for (const it of run.items) {
-        // Phase G sends the screenshot only on its image items.
-        const name = it.phase === 'G' ? (it.kind === 'ask-image' ? 'ask-image.jpg' : null) : images[it.phase];
+        // Phase G sends the screenshot only on its image items, phase H only on its first case.
+        const name = it.phase === 'G' ? (it.kind === 'ask-image' ? 'ask-image.jpg' : null)
+            : it.phase === 'H' ? (it.metrics?.imageSent ? 'system-design.jpg' : null)
+                : images[it.phase];
         const file = name && path.join(dir, name);
         if (file && fs.existsSync(file)) it.imageBase64 = fs.readFileSync(file).toString('base64');
         delete it.judge;
@@ -1026,7 +1129,7 @@ async function main() {
     }
     harness.useStubLlm(stubLlm);
     if (stubLlm) {
-        const skipped = args.phases.filter(p => ['C', 'D', 'E', 'G'].includes(p));
+        const skipped = args.phases.filter(p => ['C', 'D', 'E', 'H', 'G'].includes(p));
         if (skipped.length) {
             args.phases = args.phases.filter(p => !skipped.includes(p));
             blockNotes.push(`phases ${skipped.join(',')} skipped: they need a real model`);
@@ -1117,6 +1220,10 @@ async function main() {
     if (args.phases.includes('E')) {
         out('— Ask system design');
         items.push(...(await phaseE(ctx, history)));
+    }
+    if (args.phases.includes('H')) {
+        out('— Ask System Design · Live');
+        items.push(...(await phaseH(ctx)));
     }
     if (args.phases.includes('G')) {
         out('— Each model alone');

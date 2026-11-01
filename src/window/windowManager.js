@@ -649,8 +649,8 @@ function createFeatureWindows(header, namesToCreate) {
             // mode-picker (hover panel — parent: undefined mirrors settings/shortcut-settings pattern)
             case 'mode-picker': {
                 const modePicker = new BrowserWindow({
-                    width: 160,
-                    height: 144,         // 4 rows × 36px = 144
+                    width: 184,          // fits "System Design · Live"
+                    height: 178,         // 5 rows × 34px + 8px list padding
                     frame: false,
                     transparent: true,
                     hasShadow: false,

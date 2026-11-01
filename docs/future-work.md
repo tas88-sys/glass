@@ -19,6 +19,8 @@ One step at a time, each with its own plan, a fresh session per step. When a ste
 | [x] 7 | 13. A question about the candidate's own setup routes general | After 9, since the 2026-10-29 turn had no question and should then get no answer; what is left are real questions about the setup. Uses item 5's held-out sets, so it can share a plan with item 5. |
 | [x] 8 | 15. STT terms heard as other words | Independent, lowest severity, costliest to measure (audio eval before and after). Can move into any gap. Merged with its measurement pending; **measured on 2026-11-01**. The new terms did not raise the count heard right (7 of 12 before and after), and "Claude Code" is still heard as "Cloud Code" (item 15, acceptance box 1, still open). |
 
+Item 16 (System Design · Live, 2026-10-31) came in outside this order.
+
 Notes for the plans:
 
 - **Replay of the 2026-10-28 and 2026-10-29 sessions.** Items 9, 10, 11 and 14 accept against a replay of those sessions with their notes. Build it in step 2 and reuse it after. It runs locally only, outside this repo: the turns and the notes are private and this repo is public. Only anonymized cases go into the repo's tests.
@@ -781,3 +783,79 @@ The extracted question for one turn was "how you take benefit of **a yard** to b
   - "Claude" is heard as "cloud" with the keyterm or without it.
   - A clean voice already hears the English terms that the real speaker on 2026-10-29 lost, so this run cannot show whether the list fixes those.
 - **Open:** "Cloud Code" and "Cloud. Md" are not fixed by keyterms. A fix would need something else, for example Deepgram's find-and-replace or a rewrite of the transcript before the question is extracted. That is a new decision; nothing was changed for it.
+
+---
+
+## 16. Ask — a System Design mode that follows the live interview
+
+**Status:** Done on 2026-10-31, branch `2026-10-31-system-design-live-mode`. Found the same day, by reviewing a System Design answer against a standard interview flow. Outside the work order at the top.
+**Severity:** MEDIUM
+**Code:**
+- the profile `pickle_glass_system_design_live` (`src/features/common/prompts/promptTemplates.js`);
+- `askPrompt.js` (the mode, the context block, `isLiveDesignKit`) and `askService.js` (`listenTranscript`, `lastLiveDesign`);
+- the mode lists in `featureBridge.js`, `ModePickerView.js`, `MainHeader.js` and `windowManager.js`;
+- live eval phase H.
+
+### Summary
+
+The System Design Ask answers the problem name with a 12-section essay: a ~3,900-token prompt and a ~4,200-token answer. Read during an interview, it has the wrong shape:
+- It writes the requirements "as if the interviewer just confirmed them", and commits to a scale before any question.
+- It can't use what the interviewer said: Ask gets no Listen transcript, and each Ask is a single turn.
+- What to say next sits somewhere in twelve sections. There are no check-ins and no walkthrough of the write and read paths, and the Baseline → 10× → multi-region phases are forced whatever the requirements.
+- A run on "twitter" (qwen3.8-27b):
+  - skipped Section 0;
+  - overestimated storage and bandwidth about 100× (the prompt's own "100 KB image-meta" default, plus items per page counted twice);
+  - contradicted itself on push vs pull fan-out.
+
+  Phase E checks only the headings, so none of this fails the eval.
+
+### Decision
+
+A new mode, **System Design · Live** (`system_design_live`), next to `system_design`. `system_design` stays as it is: its profile is byte-identical, and a unit test holds its hash.
+
+### What shipped (2026-10-31)
+
+- **Routes**, picked by what is typed. Word budgets in brackets:
+  - probe, for the interviewer's question (90);
+  - deep dive, for a named part (300);
+  - full, both kits, for practice;
+  - design, when the requirements are stated in the transcript, the typed text or the screenshot, or the typed text is just `design` (750);
+  - opening, when only the problem is known (450).
+- **Opening kit:** Frame, Scope, Questions, Assumptions, Estimates, Check-in. The estimates use per-day formulas, count requests apart from items, and give fan-out writes.
+- **Design kit:** Requirements used, API, Design (numbered diagram, write and read paths, storage table, Decisions), Deep dives, Check against requirements, Next questions.
+- **In every answer:** lines to say aloud are quotes, values are marked (confirmed) or (assumed), and multi-region appears only when the requirements need it.
+- **Context, in this mode only:**
+  - the Listen transcript (30 turns);
+  - the session's last kit answer, cut to 6,000 characters.
+
+  A deep dive or a probe doesn't replace the kit, so the next question still builds on the design. It lives in memory: an app restart forgets it.
+- **UI:** the picker lists five modes (window 184 × 178). The header pill reads "Ask · SD Live", because the header is fixed at 393 px.
+- **Prompt size:** ~3,100 tokens (Groq counted 3,088 in), ~4,700 with a previous answer. System Design's is ~3,900.
+
+### Measurement (live eval, `--text --only E,H --judge`)
+
+The first run failed H1 and overran the budgets. Three prompt fixes followed:
+- a screenshot that writes out the requirements counts as confirmed;
+- "design" triggers only as the whole typed text;
+- a fixed shape for the probe, hard budgets, and per-day estimate formulas.
+
+Last run:
+
+| Case | Route | Words | Judge |
+|---|---|---|---|
+| H1 rate limiter screenshot | design | 628 | 5 |
+| H2 "Design a Twitter-like feed." | opening | 381 | 5 |
+| H3 `design` after the interviewer's answers | design | 646 | 4 |
+| H4 deep dive, on H3 | deep dive | 261 | 5 |
+| H5 interviewer's question, on H3 | probe | 83 | 5 |
+
+- 0 fail. The warnings:
+  - fallbacks: Groq's free tier allows 8,000 tokens per minute, and the eval sends five ~4k-token Asks in a row (in an interview they are minutes apart);
+  - H5's spoken first line, at 31 words.
+- Phase E passed (judge 5/5), with its prompt unchanged.
+- The pro judge models were out of quota, so gemini-3.5-flash-lite judged.
+
+### Open
+
+- The eval passes the phase A/B transcript to Ask phases C, D and E. The app never does: outside System Design · Live, Ask gets no transcript. Separate from this item.
+- The `system_design` profile keeps the issues above (the stale "Opening 30s pitch" exemption, the 100 KB default). Left alone by decision.

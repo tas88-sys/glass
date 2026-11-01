@@ -157,6 +157,43 @@ function systemDesignSections(text) {
     return { ok: !missing.length && ordered, missing, ordered };
 }
 
+/** System Design · Live: the headings of its two kits, in order (pickle_glass_system_design_live). */
+const LIVE_OPENING_SECTIONS = ['Frame', 'Scope', 'Questions', 'Assumptions', 'Estimates', 'Check-in'];
+const LIVE_DESIGN_SECTIONS = ['Requirements used', 'API', 'Design', 'Deep dives', 'Check against requirements', 'Next questions'];
+
+const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const hasHeading = (text, name) => new RegExp(`^#{1,4}\\s*${escapeRe(name)}\\s*$`, 'mi').test(String(text || ''));
+
+/**
+ * The route a System Design · Live answer took, read from its shape: 'full'
+ * (both kits), 'design', 'opening', 'deep-dive', 'probe' (text with no
+ * heading) or 'unknown'.
+ */
+function liveDesignRoute(text) {
+    const s = String(text || '');
+    const opening = hasHeading(s, 'Frame') && hasHeading(s, 'Questions');
+    const design = hasHeading(s, 'Requirements used') && hasHeading(s, 'Deep dives');
+    if (opening && design) return 'full';
+    if (design) return 'design';
+    if (opening) return 'opening';
+    if (/^#{1,4}\s*Deep dive:/mi.test(s)) return 'deep-dive';
+    if (s.trim() && !/^#{1,4}\s/m.test(s)) return 'probe';
+    return 'unknown';
+}
+
+/** The non-empty lines under a markdown heading, up to the next heading. */
+function sectionLines(text, name) {
+    const lines = String(text || '').split(/\r?\n/);
+    const re = new RegExp(`^#{1,4}\\s*${escapeRe(name)}\\b`, 'i');
+    const start = lines.findIndex(l => re.test(l));
+    if (start < 0) return [];
+    const out = [];
+    for (let i = start + 1; i < lines.length && !/^#{1,4}\s/.test(lines[i]); i++) {
+        if (lines[i].trim()) out.push(lines[i].trim());
+    }
+    return out;
+}
+
 /** Concrete numbers with units (QPS, ms, GB, replicas, ...). */
 function concreteNumbers(text) {
     const re = /\b\d[\d.,]*\s*(?:k|m|b|million|billion|mil|milh(?:oes|ões)|bilh(?:oes|ões))?\s*(?:qps|rps|req(?:uests)?\/s|ms|s\b|gb|tb|mb|kb|%|dau|mau|replicas?|nodes?|shards?|regions?|keys?|rpm)/gi;
@@ -254,9 +291,13 @@ module.exports = {
     plainMath,
     sectionsInOrder,
     systemDesignSections,
+    liveDesignRoute,
+    sectionLines,
     concreteNumbers,
     codeBlocks,
     runJsSolution,
     quantile,
     CODE_SECTIONS,
+    LIVE_OPENING_SECTIONS,
+    LIVE_DESIGN_SECTIONS,
 };

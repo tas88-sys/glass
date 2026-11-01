@@ -119,6 +119,33 @@ describe('sections', () => {
     });
 });
 
+describe('System Design · Live routes (phase H)', () => {
+    const kit = names => names.map(n => `## ${n}\n- line`).join('\n');
+    const opening = kit(c.LIVE_OPENING_SECTIONS).replace('## Questions\n- line', '## Questions\n1. How many users? (why: scale)\n2. Global? (why: regions)\n3. Media? (why: storage)');
+    const design = kit(c.LIVE_DESIGN_SECTIONS);
+    // The 12-section System Design answer, trimmed: the shape phase H must not accept.
+    const oldShape = '## 1. Clarifying Questions\n1. **Scope:** Full feed? `(why: fan-out)`\n## 2. Requirements\n**Functional**\n- Users can post\n## 6. High-Level Architecture — 3 Phases\n### Phase 1 — Baseline\n## 7. Deep Dives\n**1. The "Celebrity" Hotspot Problem**';
+
+    it('reads the route from the shape', () => {
+        assert.equal(c.liveDesignRoute(opening), 'opening');
+        assert.equal(c.liveDesignRoute(design), 'design');
+        assert.equal(c.liveDesignRoute(`${opening}\n${design}`), 'full');
+        assert.equal(c.liveDesignRoute('## Deep dive: celebrity fan-out\n- **Problem:** 50M writes'), 'deep-dive');
+        assert.equal(c.liveDesignRoute('Serve the last cached page.\n- replicas per shard\nTrade-off: stale pages'), 'probe');
+        assert.equal(c.liveDesignRoute(''), 'unknown');
+    });
+    it('does not take the old 12-section answer for a kit', () => {
+        assert.equal(c.liveDesignRoute(oldShape), 'unknown');
+        assert.equal(c.sectionsInOrder(oldShape, c.LIVE_DESIGN_SECTIONS).ok, false);
+    });
+    it('accepts both kits in order and finds the lines under a heading', () => {
+        assert.equal(c.sectionsInOrder(opening, c.LIVE_OPENING_SECTIONS).ok, true);
+        assert.equal(c.sectionsInOrder(design, c.LIVE_DESIGN_SECTIONS).ok, true);
+        assert.equal(c.sectionLines(opening, 'Questions').filter(l => l.includes('?')).length, 3);
+        assert.deepEqual(c.sectionLines(opening, 'Nope'), []);
+    });
+});
+
 describe('codeBlocks and runJsSolution', () => {
     const tests = codeProblem.tests();
     it('extracts fenced blocks with their language', () => {

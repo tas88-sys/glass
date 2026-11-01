@@ -3,7 +3,7 @@ import { html, css, LitElement } from '../assets/lit-core-2.7.4.min.js';
 /**
  * ModePickerView — Lit element for the Ask mode picker popup window.
  *
- * Renders 4 mode buttons. On click:
+ * Renders 5 mode buttons. On click:
  *   1. await setAskMode(mode)   — IPC round-trip to persist the new mode
  *   2. await closeWindow()      — hide the window
  * This ordering prevents a race between the IPC completion and the window close
@@ -19,7 +19,7 @@ class ModePickerView extends LitElement {
     static styles = css`
         :host {
             display: block;
-            width: 160px;
+            width: 184px;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             color: rgba(255, 255, 255, 0.9);
             user-select: none;
@@ -176,6 +176,7 @@ class ModePickerView extends LitElement {
                 ${this._renderMode('Code', 'code')}
                 ${this._renderMode('Debug', 'debug')}
                 ${this._renderMode('System Design', 'system_design')}
+                ${this._renderMode('System Design · Live', 'system_design_live')}
             </ul>
         `;
     }

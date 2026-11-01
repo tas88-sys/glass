@@ -402,6 +402,7 @@ export class MainHeader extends LitElement {
             case 'code':          return 'Ask · Code';
             case 'debug':         return 'Ask · Debug';
             case 'system_design': return 'Ask · SysDes';
+            case 'system_design_live': return 'Ask · SD Live';
             default:              return 'Ask';
         }
     }

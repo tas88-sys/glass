@@ -713,6 +713,7 @@ TTS (Gemini, cached) → 100 ms PCM chunks → SttService (Deepgram/Gemini live)
 | C | Ask, default mode, on an ops screen | order id, latency and error code read from the image; the screenshot was sent; a model that sees images answered |
 | D | Ask, code mode, on a hard grid problem; once in JavaScript and once in the saved language | five sections in order; a code block; **the JavaScript runs against 22 hidden tests**, one of them a 220×220 grid that a quadratic solution cannot finish (a function under another name than the screen's fails, and the detail says how it does under its own name); the Go answer compiles, when Go is installed |
 | E | Ask, system design mode, on a global rate limiter prompt | sections 0–11 in order; ≥ 8 numbers with units; ≥ 5 of 7 requirements from the image |
+| H | Ask, System Design · Live, one interview in five Asks (`fixtures/system-design-live-cases.js`): the rate limiter screenshot; a bare problem; `design` after a transcript where the interviewer gives scale and scope; a deep dive and an interviewer question, both on the previous answer | each takes its route (design, opening, design, deep dive, probe); the kit's headings in order; ≥ 3 questions and an out-of-scope list in the opening kit; a write path and a read path in the design kit; the screenshot's numbers and requirements; the scale the interviewer gave; a key term in the deep dive. Over the word budget (450 / 750 / 300 / 90), a multi-region section with one region confirmed, or a probe without a trade-off line only warn |
 | F | `--stress`: a burst of 5 questions 1 s apart; 32 filler turns then a question with both lanes on; Answer off | last question answered and no late update from a replaced answer; prompt holds the last 30 turns; Insights every 5 turns; no answer call with Answer off |
 | G | Each model of the list alone, plus `--endpoint-models`: one Live Answer turn, one Ask in text, the screenshot Ask when the catalog says the model sees images, and `--kb-per-model` career questions per route (default 1) with the notes, the router and the in-memory vectors, as in phase B. A tokens-per-minute limit makes it wait what the provider asks and try again, twice. The other phases only reach the first model that answers, so this is the only phase that tries the fallbacks | an answer with a key term and no error, per model; for a model that sees images, the facts from the screenshot. **A provider out of reach (rate limit, spent quota, 503, OmniRoute cooling down) only warns:** the model is out of reach, the app is not broken. `eachModel` in the aggregates has one line per model |
 
@@ -782,7 +783,7 @@ and numbers only.
   - **The blocked models leave the LLM list.** When none is left, a local stub streams a fixed
     answer. The gate, the career router (Jev, which is not blocked unless you name `typesafe`),
     retrieval, the prompt and the answer lane still run for real. Checks on what the answer
-    says become info, and phases C, D, E (Ask) are skipped.
+    says become info, and phases C, D, E, H (Ask) are skipped.
   - **Other services:** a blocked STT provider or a blocked Gemini (the TTS) means `--text`. A
     blocked Gemini also turns `--judge` off.
 
@@ -882,8 +883,24 @@ Pick based on what kind of question it is:
    (or paste it), press Enter. This is the most reliable way to get a direct answer to a
    *specific* spoken question, because you're handing the model the exact text. Choose the Ask
    **mode** to match: `default` for general, `code` for a coding problem, `debug` to fix code on
-   screen, `system_design` for a design prompt (`featureBridge.js:83`,
+   screen, `system_design` for a full written design, `system_design_live` to follow a design
+   interview stage by stage (`featureBridge.js:84`,
    [`../ARCHITECTURE.md` §13](../ARCHITECTURE.md)).
+
+   **System Design · Live** is the only mode that also reads the Listen transcript (what the
+   interviewer said counts as confirmed) and its own last kit answer in the session. What you
+   type picks the answer:
+
+   | You type | You get |
+   |---|---|
+   | the problem only ("Design a URL shortener") | **opening kit**: restatement and agenda, scope, 3–5 questions, assumptions to propose, estimates, check-in line (≤ 450 words) |
+   | `design` (or `next`) once the interviewer has answered, or the problem with its numbers, or a screenshot that lists them | **design kit**: requirements used, API, diagram with write and read paths, storage, 2 deep dives, check against the requirements, next questions (≤ 750 words) |
+   | a part to expand ("deep dive cache", "estimates") | **deep dive** on that part only (≤ 300 words) |
+   | the interviewer's question ("what if Redis goes down?") | **probe**: a one-line answer to say, 2–3 reasons, the trade-off (≤ 90 words) |
+   | `full` | both kits, for practice |
+
+   The previous answer is kept in memory while the app runs; deep dives and probes don't replace
+   it, so they keep building on the last design.
 
 4. **Screenshot-only Ask (when the question is on the screen).** If the interviewer's prompt is
    visible (shared coding problem, design canvas, slide), press `Ctrl/Cmd+Enter` with the Ask
@@ -899,6 +916,9 @@ Pick based on what kind of question it is:
   question into Ask** (flow 3) or **click the matching suggested question** (flow 2).
 - **For a coding / system-design prompt on screen:** put Ask in `code` / `system_design` mode
   and use **screenshot-only Ask** (flow 4).
+- **For a live system design round:** keep Listen on and use `system_design_live`: the problem
+  first, `design` after the clarifying questions, then a topic or the interviewer's question
+  (flow 3).
 - Keep Ask in **`default` mode** if you want the panel's clickable suggestions to work
   (flow 2) — they're blocked in the other modes.
 

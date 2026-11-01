@@ -81,7 +81,7 @@ module.exports = {
     ipcMain.handle('ollama:shutdown', async (event, force = false) => await ollamaService.handleShutdown(force));
 
     // Ask Mode Shortcuts — IPC handlers
-    const VALID_ASK_MODES = ['default', 'code', 'debug', 'system_design'];
+    const VALID_ASK_MODES = ['default', 'code', 'debug', 'system_design', 'system_design_live'];
 
     ipcMain.handle('mainHeader:getAskMode', async () => {
         const s = await settingsService.getSettings();
