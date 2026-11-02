@@ -1058,3 +1058,172 @@ Fix the content, and keep the flow: one Ask, the twelve sections, Rule B for a d
 ### Open
 
 - A deep dive with no problem in the request makes up its own scale (e.g. 50M DAU), marked as assumed. Typing the problem along with the target ("deep dive on the cache for twitter, 10M DAU") gives it the right numbers.
+
+---
+
+## Items 19 to 25: from the real session of 2026-11-02
+
+Found reviewing a real English screening session on 2026-11-02: 11 minutes, 19 answers, all routes right, no question missed. Not in the work order at the top; each gets its own plan. Number 18 is taken by the System Design · Live proposals.
+
+The same session met item 11's length target for the first time on a real session: median 52 words, longest 105, none over 120, none ending in a summary paragraph. It was a screening with no technical questions, so it does not compare one to one with the sessions of 2026-10-28 and 2026-10-29. It also brought back items 1 (one question split over two turns got two answers with different numbers), 10 (an invented start date, marked; a practice placed at the wrong employer, not marked) and 15 ("Claude Code" heard as "cloud code").
+
+## 19. Live Answer career context — the answer confirms a wrong order of employers
+
+**Status:** Open, found on 2026-11-02 (answer #7 of the session).
+**Severity:** HIGH (a false fact about the candidate, said at the point the interviewer is checking)
+**Code:** the career addendum (`ADDENDUM_TEMPLATE`, `src/features/common/career/contextBuilder.js`); `findUnsupported` (`answerCheck.js`), which checks numbers and never-used technologies only.
+
+### Summary
+
+The interviewer restated the candidate's history in the wrong order and in the wrong relation: an employer of record and the clients it placed the candidate with, told as three jobs one after the other. The answer, from the fallback model (gpt-oss-20b), opened by confirming that order. Its bullets corrected it only in part, and the candidate corrected it out loud. The canonical card states the relation; the check cannot see it, since it holds no number.
+
+A smaller case in the same session: an answer gave the candidate's current title the start date of the latest client, not the date of the title.
+
+### Proposed
+
+1. **Prompt:** when the interviewer restates the candidate's history, the answer checks it against the canonical facts and corrects what differs, first line first, instead of agreeing.
+2. **Card:** state the employer-of-record relation and the dates in one line the model can quote ("employed by X since …; placed with A (dates), then B (dates)").
+3. **Check, later:** compare the order of known employer names in an answer with the card's order and dates. Measure false alarms on the replay answers first, as 10b did.
+
+### Acceptance (when implemented)
+
+- [ ] A replay of this turn opens by correcting the order, five runs out of five, on the main model and on the fallback model.
+- [ ] No answer in the replay set of items 10 and 11 gets worse on the hand count.
+
+---
+
+## 20. Live Answer — a restatement or an echo gets a full answer again
+
+**Status:** Open, found on 2026-11-02 (answers #8 to #10 and #13).
+**Severity:** MEDIUM
+**Code:** the question gate (`questionGate.js`: `isBackchannel`, `endsWithConfirmationCheck`); the live answer prompt in `summaryService.js`.
+
+### Summary
+
+The interviewer restated what the candidate had just said ("So basically you are with [employer]." / "Just couple days? Okay."). Each restatement got a full answer: three answers in 34 seconds said the same thing, and one echoed the candidate's own words back. Item 12 covers a confirmation check with a tag ("…, okay?") and gives it one line; these turns have no tag, or the tag follows an echo of the candidate's last turn.
+
+The extra answers also spend the per-minute quota (see item 22).
+
+### Proposed
+
+1. **Gate:** a short turn that mostly repeats the candidate's last turn (word overlap above a threshold, a few words, no question word) is a restatement: answer it with one line, as item 12 does, or not at all.
+2. **Prompt:** when the turn restates the previous answer, reply in one line ("Yes, exactly", or the one correction) instead of repeating the answer.
+3. **De-dup:** skip an answer whose text would match the previous answer's headline.
+
+### Acceptance (when implemented)
+
+- [ ] On this session's replay, the three restatements give at most one line each, and the real questions keep their answers.
+- [ ] The live eval loses no question it answers today.
+
+---
+
+## 21. Live Answer career context — a follow-up answers about the wrong referent
+
+**Status:** Open, found on 2026-11-02 (answer #6).
+**Severity:** MEDIUM
+**Code:** the follow-up state in `src/features/common/career/index.js` (`vectorQueryText`, `prev.anchorText`, spec FR-006 and FR-009, E41 and E42).
+
+### Summary
+
+The candidate had just named a former employer; the interviewer asked a short follow-up about it ("the same company… the client, or?"). The follow-up kept the previous question's anchor and notes, which were about another subject, and the answer spoke about a different employer. The candidate's last turn, which held the referent, did not weigh in the search.
+
+A follow-up chain also carried unrelated notes into a later answer (#10).
+
+### Proposed
+
+1. For a follow-up, add the names and key terms of the candidate's last turn to the keyword query, next to the previous question's terms.
+2. When the follow-up names, or the candidate's last turn names, an employer the anchor does not, drop the anchor.
+3. Replay cases, anonymized: a follow-up about the employer the candidate just named.
+
+### Acceptance (when implemented)
+
+- [ ] A replay of this turn answers about the employer the candidate named.
+- [ ] E41 and E42 still pass, and the KB eval does not lose recall.
+
+---
+
+## 22. Live Answer — a burst of turns pushes answers off the main model, and the reason is not kept
+
+**Status:** Open, found on 2026-11-02.
+**Severity:** MEDIUM
+**Code:** the Groq provider chain (`src/features/common/ai/`), `live_answers` (`src/features/listen/summary/repositories/liveAnswers.js`, schema in `src/features/common/config/schema.js`).
+
+### Summary
+
+7 of 19 answers came from fallback models (3 gpt-oss-20b, 3 qwen, 1 gemini), against 4 of 34 and 3 of 18 in the two earlier sessions. All seven fell in a two-minute stretch with ten answers in a row. Three of the session's five worst answers are among them, item 19's included. The pattern matches the per-minute token limit of the main model, shared with the router and the insights, but the row keeps only the model that answered, not why the main one was skipped.
+
+### Proposed
+
+1. **Record the reason:** save the fallback's cause in `live_answers` (rate limit per minute or per day, error, timeout) and show it in `export-live-answers.js`.
+2. **Spend less in a burst:** item 20's restatements are part of it; also check what else draws on the same model's per-minute budget during an answer.
+3. Then decide, with the numbers: a second key or provider for bursts, or a faster fallback order.
+
+### Acceptance (when implemented)
+
+- [ ] The export shows the reason for each fallback.
+- [ ] On the next real session, the fallbacks and their causes are counted, and the decision in step 3 is taken from them.
+
+---
+
+## 23. STT — the "CLAUDE.md" keyterm pulls other words toward "Claude"
+
+**Status:** Open, found on 2026-11-02. A side effect of item 15.
+**Severity:** LOW
+**Code:** `src/features/listen/sttKeyterms.js`.
+
+### Summary
+
+The candidate said "CLT" (a Brazilian employment contract) and the transcript read "CLAUDE contract", in the keyterm's casing. The same turn heard the other contract type ("PJ") as "two b". "Claude Code" was still heard as "cloud code" in real speech.
+
+### Proposed
+
+1. Check whether "CLAUDE.md" is worth its slot: compare the audio eval with and without it.
+2. If the contract terms come up in interviews, try adding them ("CLT", "PJ") and measure as item 15 did.
+
+### Acceptance (when implemented)
+
+- [ ] The audio eval keeps the terms item 15 got right, and "CLT" is no longer heard as "CLAUDE".
+
+---
+
+## 24. Live Answer career context — the questions for the interviewer repeat
+
+**Status:** Open, found on 2026-11-02 (answers #1 and #18).
+**Severity:** LOW
+**Code:** `INVITE_ADDENDUM` (`contextBuilder.js`); the invite route (spec 2026-10-13-career-router-jev, R21).
+
+### Summary
+
+The two invitations to ask questions, at the start and at the end, got the same suggested questions. The second one ignored what the interviewer had said in between about the role.
+
+### Proposed
+
+1. The invite answer leaves out questions the conversation already answered and questions an earlier invite answer suggested.
+
+### Acceptance (when implemented)
+
+- [ ] A replay of both invitations gives different questions, and none the conversation already answered.
+
+---
+
+## 25. Live Answer career context — a question about the start date does not get the availability note
+
+**Status:** Open, found on 2026-11-02 (answers #11 and #12; the note came with #1 and #18 instead).
+**Severity:** LOW to MEDIUM. Related to item 5 (retrieval).
+**Code:** the note search (`retriever.js`, `bm25.js`); the router's company and invite routes.
+
+### Summary
+
+Asked how soon the candidate could start, the answer did not get the note that holds the availability. One answer invented a number of weeks (the check marked it); the other gave a different one and a line that contradicted it. The same note came with the two invitations to ask questions, where it did not help.
+
+The private notes also give the start date in more than one version; fixing that is a notes task, outside this repo.
+
+### Proposed
+
+1. Add availability and start-date phrasings, in English and Portuguese, to the KB eval's question sets, and check where the note ranks.
+2. If it ranks low, add the missing terms to the search (a synonym list or the note's title) rather than a special case.
+
+### Acceptance (when implemented)
+
+- [ ] The KB eval's start-date questions retrieve the availability note in the top k.
+- [ ] A replay of this turn states the note's start date and no invented number.
