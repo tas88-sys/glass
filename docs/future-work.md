@@ -12,7 +12,7 @@ One step at a time, each with its own plan, a fresh session per step. When a ste
 |------|------|----------|
 | [x] 1 | 12. Confirmation one-liner in the wrong language | Small and isolated. It touches the same prompt as 10 and 11, so it goes first and sets up the prompt test and eval loop. |
 | [x] 2 | 9. The extracted question picks the wrong span | First stage of the flow: it decides whether a turn is answered and which span goes to routing and the note search, so the evals of 10 and 11 run on the right questions. It also stops the answers to reported questions that produced the "not used" technology claim. |
-| [x] 3 | 10a. Prompt rule, temperature 0.2–0.3 on personal/ambiguous, "not used" list in the addendum (item 10, steps 1 and 4 first half) | The only HIGH item, and its cheap half. The "not used" list needs a `notUsed` field in the career KB manifest, which lives in the separate, private KB repo. **Merged with two measurements pending**; both run on 2026-11-01 (item 10, "Measurement of 10a"). |
+| [x] 3 | 10a. Prompt rule, temperature 0.2–0.3 on personal/ambiguous, "not used" list in the addendum (item 10, steps 1 and 4 first half) | The only HIGH item, and its cheap half. The "not used" list needs a `notUsed` field in the career KB manifest, which lives in the separate, private KB repo. **Merged with two measurements pending**; both run on 2026-11-01 (item 10, "Measurement of 10a"). Its judge-mean drop is within the spread between runs (same section). |
 | [x] 4 | 11. Answers too long | Same prompt. After 10a because the lower temperature already changes answer length; measured before 10a, the numbers would be stale. **Merged with its measurements pending**; run on 2026-11-01, together with 10a's (item 11, "Measurement"). |
 | [x] 5 | 14. The live check marks technical constants | `findUnsupported`. Before 10b: 10b needs its false-alarm rate measured, and that is not readable with this noise in. The Groq daily limit ran out again after 3 of the pending answers, so 10a's and 11's measurements move to the start of step 6. |
 | [x] 6 | 10b. Neighborhood check and marking "not used" technologies (item 10, steps 2–3 and 4 second half) | Same file as 14, now without the noise. Measured offline on the replay answers that kept their notes. 10a's and 11's real-LLM measurements were run on 2026-11-01 (item 10, "Measurement of 10a"; item 11, "Measurement"). |
@@ -564,8 +564,26 @@ Run once the Groq daily limit was back, together with item 11's. The same ten ca
 | Judge mean | 4.87 | 4.78 |
 | Career routes | 10/12 | 10/12 |
 
-- The judge mean is **0.09 lower** (23 answers, about two points), so "judge mean not lower" is not met on this comparison. The lowest score is 4, and correctness averages 4.96. One run per side; the judge's own run-to-run spread was not measured.
-- The routes are the same. The wording is not revisited here: item 11's run below, on top of 10a, keeps the mean at 4.78.
+- The judge mean is **0.09 lower** (23 answers, about two points). The lowest score is 4, and correctness averages 4.96.
+- The routes are the same.
+
+**Spread between runs (2026-11-01).** The 0.09 is smaller than the gap between two runs from before 10a. These are the four saved runs, all judged by gemini-3.5-flash-lite, on the 22 items all four judged. No new run was made.
+
+| Run | Mean (22) | Career items (11) | Answers not from gpt-oss-120b |
+|---|---|---|---|
+| Before 10a, `main` on 2026-10-30 | 4.73 | 4.82 | 9 |
+| Before 10a, item 13's branch on 2026-10-30 (the "before" above) | 4.86 | 4.82 | 10 |
+| 10a (`77ee925`) | 4.77 | 4.73 | 10 |
+| 10a and item 11 (`main` on 2026-11-01) | 4.77 | 4.82 | 15 |
+
+- The two runs from before 10a, made the same day, are **0.13** apart. The "before" above is the higher of the two. The other one is lower than both runs with 10a.
+- That pair is not identical code: item 13's branch also changes which span of the turn is taken as the question. In every run, fallbacks swap the model on some items.
+- The judge runs at temperature 0, so most of the spread comes from the answers.
+- On the career items, the only ones 10a changes, `77ee925` lost a point on two items:
+  - a project told inside another story, the kind of error 10a targets;
+  - bullets that are hard to say aloud, on an answer from the fallback model.
+  - Both scored 5 again in the run with item 11.
+- **"Judge mean not lower": not distinguishable from the spread between runs.** The wording is not revisited. Narrowing the spread would take repeated runs on each side, which costs Groq quota, so it is not planned.
 
 ---
 
