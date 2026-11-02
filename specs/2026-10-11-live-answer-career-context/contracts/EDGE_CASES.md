@@ -38,6 +38,7 @@
 | E55 | An answer names a `notUsed` technology to deny it ("I have never used X", "usei Y em vez de X") or in general terms ("X is a log broker") | Not flagged | FR-021 |
 | E56 | A bare number the notes hold, away from its note context ("ran 5 workers") | Checked on presence only, not on its neighborhood | FR-021 |
 | E57 | A note line holds several results ("60% lower storage cost; exports from a day to minutes; launch on time"), and the answer gives the 60% with words of another one ("cut the exports' run time by 60%") | Flagged as "60% (other result)": only the words of the number's own clause in the note count | FR-021 |
+| E58 | A card bullet packs several results with numbers ("- Lumen Works: 60% lower storage cost; exports from a day to minutes; 120 paying users") | The block gives one line per result, each with the label, so a number reads next to its own result; a bullet with one numbered part, or a `;` inside parentheses, stays as it is; chunks are not touched | FR-013 |
 | E11 | Turn in Portuguese, best note in English | Retrieved through the vector side; answer in Portuguese | FR-009, FR-014 |
 | E12 | Turn names a tool or vendor exactly | BM25 rank carries it into the fused top k | FR-008, FR-010 |
 | E13 | "why us" with active company A; notes of B rank higher | B's chunks dropped; A's and untagged chunks kept | FR-011 |

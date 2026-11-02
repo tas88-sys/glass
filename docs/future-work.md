@@ -454,6 +454,7 @@ Neither was marked: the live check (FR-021) passes a number when it appears **an
   - **Not met by 10a:** with the rule, the turn still moved a cost reduction onto response time (see Outcome).
   - **10b marks it instead of preventing it:** on the replay answers of that turn, the moved multipliers are listed as "(other result)" (Outcome of 10b). The answer still states them, so the box stays open.
   - **Measured again on 2026-11-01** (shipped wording, item 11's length rule): the concurrency turn moved a percentage the notes tie to a cost onto a run time, and 10b's check did not mark it. The same day the check was narrowed so it does (see "Follow-up of 10b"). The answer still states the number, so the box stays open.
+  - **Card split, measured on 2026-11-02:** with one line per result in the card, 0 of 5 replays of the turn state a number. Without it, 0 of 5 move one either, so the test cannot credit the split: inconclusive by the rule set before the run (see "Card split"). The box stays open.
 - [x] Unit cases for `findUnsupported`: same number, same employer, different result → flagged; same number and result → not flagged; Portuguese answer with an English note → not flagged.
 - [x] False-alarm rate of the neighborhood check measured and recorded here before it ships. It was measured on the replay answers, not on the eval set (see Outcome of 10b).
 - [x] A personal answer naming a technology from the "not used" list is marked in the panel (10b). The other half is met: with the addendum line, the 2026-10-29 turn (forced with `--arm`, since item 9's gate now skips it) names none.
@@ -540,6 +541,37 @@ The sample is small. 11's replay adds answers when the Groq limit allows, and th
 - The two other cases in 10a's table give no number (an error rate "near zero", and two techniques placed at employers), so this check cannot see them.
 
 **Unchanged:** `npm test`, plus three new cases: a number told with another result's words is marked, the number with its own result's words passes in both languages, and a line with one number keeps the whole-line rule.
+
+### Card split (2026-11-02)
+
+**Why.** The percentage the concurrency turn moved comes from the canonical card, from a bullet that packs four results of one employer separated by `;`. The question asks for no result.
+
+**The change** (`splitResults` in `contextBuilder.js`, spec FR-013, E58): a card bullet whose `;`-separated parts hold two or more numbers is given one line per part, each with the bullet's label. It does not split a bullet with one numbered part or a `;` inside parentheses, and it does not touch the chunks. The real card has 2 such bullets and grows by 120 characters (3,810 to 3,930).
+
+**Rule, set before the run:** the box is ticked only if 0 of 5 answers with the split move a card number and the other nine career turns bring no new kind of error, empty answer or PASSIVE. If `main` also moves a number in 1 of 5 or fewer, the test cannot tell the two apart.
+
+**Concurrency turn, 5 answers per side**, gpt-oss-120b, route personal in all 10:
+
+| Side | Answers | Number moved to another result | Any number stated |
+|---|---|---|---|
+| `main` | 5 | 0 | 1 |
+| Card split | 5 | 0 | 0 |
+
+- On `main`, the one number is the card's percentage, kept on its own result (cost) but credited to the concurrency pipelines.
+- In the three earlier measurements (10a's before, first wording and shipped wording), this turn moved a number each time. Today `main` did not, so the result is **inconclusive**.
+- Both sides still place the same general concurrency techniques at employers.
+
+**The other nine career turns of 10a's measurement**, once each with the split, counted by hand against the notes block each answer saw:
+
+| Run | Answers | Metric invented or moved | Technique placed at an employer from a general note | "Not used" technology claimed |
+|---|---|---|---|---|
+| Shipped wording with the length rule (2026-11-01, ten turns) | 10 | 2 | 2 | 0 |
+| Card split (concurrency turn from one of the five runs, plus nine) | 10 | 1 | 2 | 0 |
+
+- What is left: the rate-limit turn still places a rate limiter and a circuit breaker at an employer and says its errors fell to "near zero". Neither comes from the card.
+- No answer is empty or PASSIVE. The check marks one bare HTTP status (429) with no HTTP word near it, the cost E49 already accepts.
+
+**Unchanged:** `npm test` (four new cases), and the live eval offline, regex and Jev: zero check, label or route differences. Because the card is longer, 6 of 145 items (4 of 43 with Jev) fit one note chunk fewer under the 9,000-character cap. The KB eval differs only in timings and in the count of other companies' chunks on other routes (310 to 306).
 
 ### Measurement of 10a (2026-11-01)
 

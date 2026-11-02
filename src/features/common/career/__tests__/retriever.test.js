@@ -324,6 +324,37 @@ describe('buildContextBlock (FR-013)', () => {
     });
 });
 
+describe('buildContextBlock: one line per result in the card (future-work item 10, E58)', () => {
+    const scored = (chunk, i) => ({ chunk, score: 1 / (60 + i + 1), bm25Rank: i + 1, vectorRank: null, cosine: null, coverage: 1, matchedTerms: 2 });
+    const card = core => buildContextBlock({ core, hits: [] }).block.slice('[canonical facts]\n'.length);
+
+    it('a bullet with several numbered parts becomes one line per part, each with its label', () => {
+        const core = '## Numbers\n- Lumen Works: 60% lower storage cost; exports from a day to minutes; 120 paying users.';
+        assert.equal(card(core), '## Numbers\n- Lumen Works: 60% lower storage cost\n- Lumen Works: exports from a day to minutes\n- Lumen Works: 120 paying users.');
+    });
+
+    it('keeps the indentation and the * marker', () => {
+        assert.equal(card('- Code standard:\n  * Pilot: 3x faster; 40 issues found'), '- Code standard:\n  * Pilot: 3x faster\n  * Pilot: 40 issues found');
+    });
+
+    it('leaves a line with one numbered part, no label, no bullet, or a ; inside parentheses as it is', () => {
+        const lines = [
+            '- Languages: Portuguese (native); English, 4+ years; Spanish basic.',
+            '- Shipped 60% lower cost; exports in minutes; 120 users.',
+            'Lumen Works: 60% lower cost; 120 users.',
+            '- Search (hybrid; 2 indexes; 3 rankers): merged with RRF; 40 ms p95.',
+            '- Router: picks one of 3 paths (contract; LLM; web); tested on 133 questions.',
+        ];
+        for (const l of lines) assert.equal(card(l), l);
+    });
+
+    it('does not touch the chunks', () => {
+        const body = '- Lumen Works: 60% lower cost; 120 users.';
+        const { block } = buildContextBlock({ core: '', hits: [scored(mk(1, { body }), 0)] });
+        assert.equal(block, `[n1 › Section 1]\n${body}`);
+    });
+});
+
 describe('buildAddendum (FR-014)', () => {
     const fill = (company, notUsed) => ADDENDUM_TEMPLATE.replace('{COMPANY_CLAUSE}', company).replace('{NOT_USED_CLAUSE}', notUsed);
 
