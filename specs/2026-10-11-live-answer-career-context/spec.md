@@ -134,7 +134,7 @@ During a live interview, the interviewer asks "Tell me about a time you disagree
   - When it clears, the injection is the same as on the `personal` route: card, chunks and addendum.
 
 **Prompt and UI**
-- **FR-013**: The context block MUST put the canonical card first, then chunks under their breadcrumb titles (format in contracts), deduplicated, capped at 9,000 characters and cut at paragraph boundaries.
+- **FR-013**: The context block MUST put the canonical card first, then chunks under their breadcrumb titles (format in contracts), deduplicated, capped at 9,000 characters and cut at paragraph boundaries. A card bullet whose `;`-separated parts hold two or more numbers MUST be given one line per part, each with the bullet's label.
   - The card is never cut: chunks fill the budget left after it, lowest-ranked dropped first.
   - If the card alone exceeds the cap, it is injected whole without chunks and a debug warning is logged.
 - **FR-014**: `makeLiveAnswer` MUST pass the block as `customPrompt` and append the first-person addendum (contracts) to the user message only when a block is injected. On the `general` route, or when disabled, the messages MUST be byte-identical to today's. The addendum MUST keep each number with the result, project and employer the notes give it (no estimates), and place a technology at an employer only when the notes say it was used there; when the manifest lists `notUsed` names, it MUST also name them as never used (not on an invitation, R21). An answer with a block MUST be asked at temperature 0.3, 0.7 otherwise (future-work item 10: at 0.7 the answers embellished the notes' facts).
