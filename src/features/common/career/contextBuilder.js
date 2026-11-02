@@ -9,7 +9,8 @@
 //   [<chunk title>]
 //   <chunk body>
 //
-// The card is never cut. Chunks fill what is left of MAX_BLOCK_CHARS in rank
+// The card is never cut; a bullet holding several numbered results is given
+// one line per result (splitResults). Chunks fill what is left of MAX_BLOCK_CHARS in rank
 // order; the first one that does not fit whole is cut at a paragraph
 // boundary and the rest are dropped.
 
@@ -33,12 +34,34 @@ const ADDENDUM_TEMPLATE =
 // carry it (promptTemplates' outputInstructions comes after customPrompt).
 const neutralize = s => s.replace(/\{\{CONVERSATION_HISTORY\}\}/g, 'CONVERSATION_HISTORY');
 
+// Future-work item 10: a card bullet that packs several results ("- X: 60% lower
+// cost; backups from a day to minutes; 120 users") let the model tie a number to
+// the result next to it. Such a bullet is given one line per part, each with the
+// bullet's label. A ';' inside parentheses leaves the line as it is.
+const CARD_BULLET_RE = /^(\s*[-*]\s+)([^:\n]{1,80}):\s+(.+)$/;
+
+function splitResults(card) {
+    return card.split('\n').map(line => {
+        const m = CARD_BULLET_RE.exec(line);
+        if (!m) return line;
+        const parts = m[3].split(';').map(p => p.trim()).filter(Boolean);
+        if (parts.filter(p => /\d/.test(p)).length < 2) return line;
+        let depth = 0;
+        for (const ch of m[3]) {
+            if (ch === '(') depth++;
+            else if (ch === ')') depth--;
+            else if (ch === ';' && depth > 0) return line;
+        }
+        return parts.map(p => `${m[1]}${m[2]}: ${p}`).join('\n');
+    }).join('\n');
+}
+
 /**
  * @param {{ core: string, hits: Array<{chunk: object}>, maxChars?: number }} input
  * @returns {{ block: string, sources: string[], chunkIds: string[], cardOverCap: boolean }}
  */
 function buildContextBlock({ core, hits, maxChars = MAX_BLOCK_CHARS }) {
-    const card = typeof core === 'string' ? neutralize(core.trim()) : '';
+    const card = typeof core === 'string' ? splitResults(neutralize(core.trim())) : '';
     const cardSection = card ? `${BLOCK_CARD_LABEL}\n${card}` : '';
 
     // Group hits by path + title (pieces of one section share a header), in rank order.
