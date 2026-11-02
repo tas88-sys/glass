@@ -133,6 +133,11 @@ const wordRe = (name, flags) => new RegExp(`(?<![\\p{L}\\p{N}])${escapeRe(name)}
 // a bare number ("5 workers") is a parameter more often than a result.
 const RESULT_KINDS = new Set(['percent', 'money', 'duration', 'times']);
 const NEIGHBORHOOD = 5;
+// On a note line that holds several numbers, only the words near the number
+// matched count, within its own clause: "60% lower cost; backups from a day to
+// minutes; launch on time" gives the 60% no "backups" and no "time".
+const NOTE_WINDOW = 5;
+const CLAUSE_ENDS = [';', '. '];
 // Words that say which way a number moved, or only that it did, not what it
 // measures: "redução" on both sides would hide a cost cut told as a time cut.
 const DIRECTION_WORDS = new Set(`
@@ -188,7 +193,7 @@ function noteLines(notes) {
         if (/^#{1,6}\s/.test(t)) heading = t;
         const keys = new Set();
         for (const n of numbersIn(line)) for (const k of n.keys) keys.add(k);
-        out.push({ text: line, context: `${section}\n${heading}\n${line}`, keys });
+        out.push({ text: line, context: `${section}\n${heading}\n${line}`, keys, numbers: numbersIn(line) });
     }
     return out;
 }
@@ -218,8 +223,15 @@ function fitsNotes(answer, n, lines, names) {
             if (!named.some(name => wordRe(foldAccents(name), 'iu').test(context))) return false;
         }
         if (!words.length) return true;
-        const there = new Set(contentWords(l.text, skip));
-        return words.some(w => there.has(w));
+        if (l.numbers.length < 2) return words.some(w => new Set(contentWords(l.text, skip)).has(w));
+        return l.numbers.filter(m => m.keys.some(k => n.keys.includes(k))).some(m => {
+            const start = Math.max(...CLAUSE_ENDS.map(c => l.text.lastIndexOf(c, m.at))) + 1;
+            const ends = CLAUSE_ENDS.map(c => l.text.indexOf(c, m.end)).filter(i => i !== -1);
+            const end = ends.length ? Math.min(...ends) : l.text.length;
+            const there = new Set(contentWords(l.text.slice(start, m.at), skip).slice(-NOTE_WINDOW)
+                .concat(contentWords(l.text.slice(m.end, end), skip).slice(0, NOTE_WINDOW)));
+            return words.some(w => there.has(w));
+        });
     });
 }
 

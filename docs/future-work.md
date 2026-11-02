@@ -453,7 +453,7 @@ Neither was marked: the live check (FR-021) passes a number when it appears **an
 - [ ] A replay of the concurrency turn with the same notes states no metric the notes tie to a different result.
   - **Not met by 10a:** with the rule, the turn still moved a cost reduction onto response time (see Outcome).
   - **10b marks it instead of preventing it:** on the replay answers of that turn, the moved multipliers are listed as "(other result)" (Outcome of 10b). The answer still states them, so the box stays open.
-  - **Measured again on 2026-11-01** (shipped wording, item 11's length rule): the concurrency turn moved a percentage the notes tie to a cost onto a run time, and 10b's check did not mark it (not traced).
+  - **Measured again on 2026-11-01** (shipped wording, item 11's length rule): the concurrency turn moved a percentage the notes tie to a cost onto a run time, and 10b's check did not mark it. The same day the check was narrowed so it does (see "Follow-up of 10b"). The answer still states the number, so the box stays open.
 - [x] Unit cases for `findUnsupported`: same number, same employer, different result → flagged; same number and result → not flagged; Portuguese answer with an English note → not flagged.
 - [x] False-alarm rate of the neighborhood check measured and recorded here before it ships. It was measured on the replay answers, not on the eval set (see Outcome of 10b).
 - [x] A personal answer naming a technology from the "not used" list is marked in the panel (10b). The other half is met: with the addendum line, the 2026-10-29 turn (forced with `--arm`, since item 9's gate now skips it) names none.
@@ -521,6 +521,25 @@ The sample is small. 11's replay adds answers when the Groq limit allows, and th
 - The live eval offline (137 items), with the same score: 130 pass, 6 warn and 1 fail, the fail already on `main`. The "no unverified names or numbers" check is the same on every item, since the stub answers hold no number from the notes. The rest of the run differed in two places, neither of which the check can cause, since it runs after the answer:
   - two first-token timing checks swapped;
   - two items took one note chunk more or less.
+
+### Follow-up of 10b (2026-11-01)
+
+**The miss.** In 10a's measurement, the concurrency turn put a percentage on a run time, and the check let it pass. The notes give that percentage to a cost, on a line that holds several results separated by `;`. The check compared the answer's words with the whole note line, and two of them were on that line by chance: one from the next result ("backups"), and "time" from a "launch on time" further on.
+
+**The fix** (`fitsNotes`, spec FR-021, E57): when the note line holds several numbers, only the words near the matched number count, within five words and inside its own clause, up to a `;` or a sentence end. A line with a single number is checked as before.
+
+**Measured on the 47 replay answers that kept their notes block** (10a's and 11's runs):
+
+| Rule on the note side | New marks | Real | False alarms | Marks removed |
+|---|---|---|---|---|
+| A window of 5, 7 or 10 words around the number | 0 | 0 | 0 | 0 |
+| The same window, stopped at the clause | 1 | 1 | 0 | 0 |
+
+- The window alone does not catch the case: the next result's word is three words away, past the `;`. The clause stop catches it with any of the three sizes. The smallest, 5, shipped, matching the answer side.
+- The one new mark is the concurrency turn's percentage.
+- The two other cases in 10a's table give no number (an error rate "near zero", and two techniques placed at employers), so this check cannot see them.
+
+**Unchanged:** `npm test`, plus three new cases: a number told with another result's words is marked, the number with its own result's words passes in both languages, and a line with one number keeps the whole-line rule.
 
 ### Measurement of 10a (2026-11-01)
 

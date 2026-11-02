@@ -177,6 +177,27 @@ describe('findUnsupported: neighborhood (future-work item 10b)', () => {
     });
 });
 
+describe('findUnsupported: a note line with several results (future-work item 10b)', () => {
+    const names = ['Lumen Works'];
+    const notes = '- Lumen Works: 60% lower storage cost; exports from a day to minutes; 120 paying users; launch on time.';
+    const check = answer => findUnsupported(answer, notes, names, { notes });
+
+    it('marks a number told with a word from another result of the line', () => {
+        assert.deepEqual(check('At Lumen Works I ran the exports in parallel and cut their run time by 60%.'), ['60% (other result)']);
+        assert.deepEqual(check('Na Lumen Works paralelizei as exportações e reduzi o tempo de execução em 60%.'), ['60% (other result)']);
+    });
+
+    it('passes the number with the words of its own result, in either language', () => {
+        assert.deepEqual(check('At Lumen Works I cut storage cost by 60%.'), []);
+        assert.deepEqual(check('Na Lumen Works reduzi o custo de storage em 60%.'), []);
+    });
+
+    it('keeps the whole line when it holds one number', () => {
+        const one = '- Lumen Works: 60% lower storage cost, and exports from a day to minutes.';
+        assert.deepEqual(findUnsupported('At Lumen Works the exports got 60% faster.', one, names, { notes: one }), []);
+    });
+});
+
 describe('findUnsupported: never-used technologies (future-work item 10b)', () => {
     const opts = { notUsed: ['Tidewire', 'Ferrous'] };
     const check = (answer, given = '') => findUnsupported(answer, given, ['Lumen Works'], opts);
