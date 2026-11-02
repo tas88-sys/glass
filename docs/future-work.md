@@ -621,7 +621,7 @@ Run once the Groq daily limit was back, together with item 11's. The same ten ca
 
 ## 11. Live Answer — answers too long to read while speaking
 
-**Status:** Done — 2026-10-30, branch `2026-10-30-live-answer-length` (step 4 of the work order). The prompt budget shipped before any real-LLM run, because the Groq daily limit was used up; measured on 2026-11-01 (branch `2026-11-01-length-measurements`), see "Measurement". The next real session is still to check. Found on 2026-10-28 in the same session as item 9.
+**Status:** Done — 2026-10-30, branch `2026-10-30-live-answer-length` (step 4 of the work order). The prompt budget shipped before any real-LLM run, because the Groq daily limit was used up; measured on 2026-11-01 (branch `2026-11-01-length-measurements`), see "Measurement". Checked on a real English session on 2026-11-02 (see "Real session"); a real Portuguese session is still to check. Found on 2026-10-28 in the same session as item 9.
 **Severity:** MEDIUM
 **Code:** the user message in `makeLiveAnswer` (`src/features/listen/summary/summaryService.js`, "Answer … directly and concisely", `maxTokens: 900`). Related: `specs/2026-06-01-interview-live-answer-readability/`.
 
@@ -638,7 +638,7 @@ Of the 34 answers in the session: median about 100 words, 17 over 100, 7 over 15
 
 ### Acceptance (when implemented)
 
-- [ ] On the live eval and the next real session, median ≤ 60 words and no answer over 120, with no rise in empty or cut answers. **Met on the live eval** (median 52, none over 120) **and on the replay** (none over 120; median 64, Portuguese 67). **The next real session is still to check.**
+- [ ] On the live eval and the next real session, median ≤ 60 words and no answer over 120, with no rise in empty or cut answers. **Met on the live eval** (median 52, none over 120) **and on the replay** (none over 120; median 64, Portuguese 67). **Met on the real English session of 2026-11-02** (median 52, none over 120, none empty or cut). **A real Portuguese session is still to check.**
 - [x] No answer ends with a summary paragraph. 0 of 17 replay answers and 0 of 23 live-eval answers (7 and 2 before).
 - [ ] If the panel fold ships: an answer over 3 bullets shows the headline and 3 bullets, and the rest opens on click.
 
@@ -697,6 +697,22 @@ Of the 34 answers in the session: median about 100 words, 17 over 100, 7 over 15
 - Pass and warn (without the two length checks): 26 and 6 before, 24 and 8 after. The "answered without fallback" check explains most of it: it warns on 4 items that did not warn before, and on 1 that did.
 
 **Accept.** Median under 70 and the judge mean not lower: the wording of `LENGTH_RULE` is not revised, and the panel fold is not proposed, since no answer ran over 120. The only target left open is the median of 60 on a real session: the replay's Portuguese median is 67.
+
+### Real session (2026-11-02)
+
+The first real session since the budget shipped: an English screening, 11 minutes, 19 answers, counted with `answerWords` as the live eval does.
+
+| Session | Answers | Median words | Longest | Over 60 | Over 120 | Ends in a paragraph | Empty, error or PASSIVE |
+|---|---|---|---|---|---|---|---|
+| 2026-10-28, Portuguese (before) | 34 | 95 | 275 | 30 | 10 | 19 | 0 |
+| 2026-10-29, English (before) | 17 | 72 | 182 | 10 | 3 | 3 | 1 PASSIVE |
+| 2026-11-02, English | 19 | 52 | 105 | 5 | 0 | 0 | 0 |
+
+- 7 of the 19 answers came from fallback models (item 22). Split by model: gpt-oss-120b 12 answers, median 53, longest 83; the fallbacks 7, median 43, longest 105.
+- The longest answer (105 words) is the one item 19 records: a fallback model confirming a restatement.
+- **Limit:** a screening with no technical questions, so it does not compare one to one with the 2026-10-28 and 2026-10-29 sessions, which had them.
+
+Box 1 is met for English. It stays open until a real Portuguese session is checked: the replay's Portuguese median, 67, is the one over target.
 
 ---
 
