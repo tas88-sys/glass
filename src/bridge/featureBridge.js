@@ -22,7 +22,10 @@ const liveDesign = require('../features/ask/liveDesign');
  * ends) and tells the listen window, for the "SD Live" badge.
  */
 function applyAskMode(mode) {
+    const wasSdLive = liveDesign.isSdLive();
     listenService.setAskMode(mode);
+    // 18.11 rule 3: text typed in another mode is never sent as a kit request.
+    if (liveDesign.isSdLive() && !wasSdLive) askService.onEnterSdLive();
     const windowManager = require('../window/windowManager');
     const listenWin = windowManager.windowPool && windowManager.windowPool.get('listen');
     if (listenWin && !listenWin.isDestroyed()) {

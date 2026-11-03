@@ -178,6 +178,13 @@ contextBridge.exposeInMainWorld('api', {
     onShowTextInput: (callback) => ipcRenderer.on('ask:showTextInput', callback),
     removeOnShowTextInput: (callback) => ipcRenderer.removeListener('ask:showTextInput', callback),
     
+    // System Design · Live (future-work 18.11, rule 3): the second Ctrl+Enter
+    // sends the box; closing Ask, or entering the mode, clears it.
+    onSendFromBox: (callback) => ipcRenderer.on('ask:sendFromBox', callback),
+    removeOnSendFromBox: (callback) => ipcRenderer.removeListener('ask:sendFromBox', callback),
+    onClearInput: (callback) => ipcRenderer.on('ask:clearInput', callback),
+    removeOnClearInput: (callback) => ipcRenderer.removeListener('ask:clearInput', callback),
+
     onScrollResponseUp: (callback) => ipcRenderer.on('aks:scrollResponseUp', callback),
     removeOnScrollResponseUp: (callback) => ipcRenderer.removeListener('aks:scrollResponseUp', callback),
     onScrollResponseDown: (callback) => ipcRenderer.on('aks:scrollResponseDown', callback),
