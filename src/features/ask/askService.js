@@ -214,11 +214,13 @@ class AskService {
     async toggleAskButton(inputScreenOnly = false) {
         const askWindow = getWindowPool()?.get('ask');
         const sdLive = this.liveDesign.isSdLive();
+        // A fixed line per key in System Design · Live, read by npm run practice:sd-live.
+        const keyLog = (what) => { if (sdLive) console.log(`[SD Live] key: ${inputScreenOnly ? 'Ctrl+Enter' : 'Ask button'} → ${what}`); };
 
         // 18.11 rule 3: Ask still shows during its closing fade; a key then does
         // nothing, so Esc followed at once by Ctrl+Enter never sends.
         if (sdLive && askWindow && askWindow.isVisible() && Date.now() < this._askClosingUntil) {
-            console.log('[AskService] Ask is closing: key ignored');
+            keyLog('ignored, Ask is closing');
             return;
         }
 
@@ -227,6 +229,7 @@ class AskService {
             // 18.11 rule 3: in System Design · Live the second press sends what is
             // in the box, through the Ask window, as Enter does.
             if (sdLive) {
+                keyLog('send the box');
                 if (!askWindow.isDestroyed()) askWindow.webContents.send('ask:sendFromBox');
                 return;
             }
@@ -239,13 +242,16 @@ class AskService {
 
         if (askWindow && askWindow.isVisible() && hasContent) {
             this.state.showTextInput = !this.state.showTextInput;
+            keyLog(this.state.showTextInput ? 'show the box over the answer' : 'hide the box');
             this._broadcastState();
         } else {
             if (askWindow && askWindow.isVisible()) {
+                keyLog('hide Ask');
                 internalBridge.emit('window:requestVisibility', { name: 'ask', visible: false });
                 this.state.isVisible = false;
                 this._markAskClosing();
             } else {
+                keyLog('show Ask');
                 console.log('[AskService] Showing hidden Ask window');
                 internalBridge.emit('window:requestVisibility', { name: 'ask', visible: true });
                 this.state.isVisible = true;
@@ -265,6 +271,9 @@ class AskService {
             }
             // 18.11 rule 4: closing cancels a kit being written; nothing is stored,
             // and the next request may start at once.
+            if (this.liveDesign.isSdLive()) {
+                console.log(`[SD Live] close Ask${this._kitInFlight ? ' — the kit being written is cancelled' : ''}`);
+            }
             this._kitInFlight = null;
 
             this.state = {
@@ -321,15 +330,19 @@ class AskService {
         const empty = !String(typed || '').trim();
         const now = Date.now();
         if (empty && now - this._lastSdSendAt < SD_DEDUP_MS) {
-            console.log('[AskService] SD Live: a second empty send within 300 ms — dropped');
+            console.log('[SD Live] ask: a second empty send within 300 ms — dropped');
             return { success: false, deduped: true };
         }
         this._lastSdSendAt = now;
         if (this._kitInFlight) {
+            console.log('[SD Live] ask: refused — a kit is still being written');
             this._showNotice(NOTICE_KIT_BUSY);
             return { success: false, refused: true };
         }
-        if (this._sdLock) return { success: false, refused: true };
+        if (this._sdLock) {
+            console.log('[SD Live] ask: refused — another send is starting');
+            return { success: false, refused: true };
+        }
 
         const token = {};
         this._sdLock = token;
@@ -340,6 +353,7 @@ class AskService {
             const kit = this.liveDesign.getKit(sessionId);
             resolved = resolveLiveRequest(typed, kit ? kit.kind : null);
             if (resolved.hint) {
+                console.log('[SD Live] ask: hint only — the design kit is done');
                 this._showNotice(resolved.hint);
                 return { success: false, hint: true };
             }
@@ -350,7 +364,7 @@ class AskService {
             if (this._sdLock === token) this._sdLock = null;
         }
 
-        console.log(`[AskService] SD Live: '${String(typed || '').trim().slice(0, 30)}' → '${resolved.send.slice(0, 30)}' (kit request: ${resolved.kitRequest || 'no'})`);
+        console.log(`[SD Live] ask: send '${String(typed || '').trim().slice(0, 30)}' → '${resolved.send.slice(0, 30)}' (kit request: ${resolved.kitRequest || 'no'})`);
         try {
             return await this._send(resolved.send, conversationHistoryRaw, { askMode: SD_LIVE, sessionId, kitRequest: resolved.kitRequest, typed });
         } finally {
@@ -618,6 +632,9 @@ class AskService {
             if (meta.askMode === SD_LIVE && !failed && !signal.aborted) {
                 const kind = classifyKitAnswer(fullResponse, meta.kitRequest || null);
                 if (kind) this.liveDesign.storeKit({ sessionId, kind, question: meta.userPrompt, answer: fullResponse });
+                console.log(kind ? `[SD Live] ask: ${kind} kit stored` : '[SD Live] ask: answer done, not a kit — nothing stored');
+            } else if (meta.askMode === SD_LIVE) {
+                console.log(`[SD Live] ask: ${signal.aborted ? 'cancelled' : 'failed'} — nothing stored`);
             }
             if (ownsState()) {
                 this.state.isLoading = false;

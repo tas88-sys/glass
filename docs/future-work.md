@@ -1092,9 +1092,9 @@ Fix the content, and keep the flow: one Ask, the twelve sections, Rule B for a d
 ### Summary
 
 System Design · Live (item 16) answers only what is typed into Ask. Live Answer answers the interviewer's questions by itself. In a system design round, the candidate keeps going back and forth between the interview and the Ask box:
-- **Six typed Asks per round.** The practice script (`npm run practice:sd-live`) types in steps 1, 3, 4, 5, 6 and 7.
-  - Steps 5 and 7 retype the question the interviewer just asked ("what if the timeline cache cluster goes down?", "why not just use a single SQL database for the tweets?"), which the transcript already has.
-  - Steps 3 and 6 are the word `design`.
+- **Six typed Asks per round.** The item-16 practice script (`npm run practice:sd-live`, before v1 rewrote it) typed in steps 1, 3, 4, 5, 6 and 7.
+  - Steps 5 and 7 retyped the question the interviewer had just asked ("what if the timeline cache cluster goes down?", "why not just use a single SQL database for the tweets?"), which the transcript already had.
+  - Steps 3 and 6 were the word `design`.
 - **Two answers to one question.** The answer lane runs in every Ask mode (`summaryService.js` never reads `askMode`), and `design` is one of its interview cues (`questionGate.js:36`).
   - The interviewer's "Design a Twitter feed" already gets a generic ~60-word answer from `pickle_glass_analysis`.
   - "What if Redis goes down?" gets one that doesn't know the design: the last kit lives only in `askService.lastLiveDesign` (`askService.js:157`, `:461`).
@@ -1567,15 +1567,18 @@ A deep dive the candidate wants in full is still typed into Ask ("deep dive cach
   - the first token within 6 s;
   - exactly one call per interviewer turn;
   - tokens per call no higher than today's Live Answer, measured in the same run.
-- [x] `npm run practice:sd-live` gains (2026-11-02, 13 steps; not yet run in the app):
-  - a behavioral prologue: 2–3 behavioral questions before the design round, answered from the KB;
-  - a misuse step: Ctrl+Enter and Esc in a row before anything, typing while a kit is written, a stray Ctrl+Enter pair after the design kit.
+- [x] `npm run practice:sd-live` gains (2026-11-02, 18 steps after the setup; not yet run in the app):
+  - a behavioral prologue: 2 behavioral questions before the design round, answered from the KB;
+  - misuse steps: Ctrl+Enter and Esc in a row before anything, the header Ask button, typing while a kit is written, a stray Ctrl+Enter pair and a held Ctrl+Enter after the design kit;
+  - the in-app checks of the acceptance list: Ctrl+Enter with the VM window focused (step 7), a restart with System Design · Live saved (step 3), Esc and Ctrl+\ while a kit is written (step 9), closing Ask during a kit (step 10), `opening: uber` after the design kit (step 15), text typed in Default cleared on entering the mode, and a held Ctrl+Enter that asks once (step 17).
 
-  The whole script then runs with no typing except the problem, `design` for the changed requirement, the optional deep dive and `full`:
-  - two clicks, into the mode and back;
-  - the opening kit once by typing `twitter`, and once by Ctrl+Enter twice;
-  - the design kit by Ctrl+Enter twice;
-  - probes answered on their own in the script's current steps 4 to 7. Step 6's line gets one from the old design, before `design` is typed.
+  Each step checks itself from the Glass log. The app writes one `[SD Live]` line per load or change of the mode, per key in the mode, per send, refusal, hint, dropped repeat, stored kit, cancelled kit, silent turn and probe (`askService.js`, `summaryService.js`). The script reads the lines a step added and marks each expected count PASS or FAIL. It then asks for the checks only the eye can make, and writes a report with every result and the step's log lines to `%LOCALAPPDATA%\glass-practice\`. The log exists when Glass is started from the desktop shortcut or `start-glass.ps1`; with `npm start` in a terminal the automatic checks are skipped.
+
+  The script types only the problem, `design` (steps 9, 10 and 13), the deep dive (step 11), `opening: uber` (step 15) and a word to be cleared (step 17):
+  - the mode switches are clicks: into the mode, back to Default, and again in the new session;
+  - the opening kit by typing `twitter` (step 5), and by a held Ctrl+Enter in a new session (step 17);
+  - the design kit by Ctrl+Enter twice, with the VM focused (step 7);
+  - probes answered on their own in steps 11 to 14. Step 13's line gets one from the old design, before `design` is typed.
 - [ ] Before a real interview: one full run of the script with the same provider list and keys, checked against the list the script shows.
 
 **Effort:** about 3 sessions:

@@ -946,14 +946,26 @@ Pick based on what kind of question it is:
    through the speakers or headphones, so Listen hears them as *Them*, while you answer into the
    mic as *Me*. At each step the script shows what to say and what to type or press. It clears
    itself before the interviewer speaks so it stays out of the screenshot, then lists what to
-   check. The thirteen steps follow the v1 interview (item 18.11): two behavioral questions in
-   Default, the switch to System Design · Live, keys pressed out of order, the opening kit typed
-   (and a request refused while it is written), the silent clarifying stage, the design kit by
-   Ctrl+Enter twice, a stray Ctrl+Enter pair (the hint), probes answered by themselves, a
-   changed requirement and `design`, the switch back to Default, and a new session's opening
-   kit by Ctrl+Enter twice. Wear
-   headphones: on speakers the mic also picks up the voice. Add `-- -Step 4` to start at step 4,
-   or `-- -Rate -2` to slow the voice.
+   check. The eighteen steps follow the v1 interview (item 18.11) and its in-app checks:
+   - two behavioral questions in Default, the switch to System Design · Live, and a restart with
+     the mode saved;
+   - keys pressed out of order, the opening kit typed (and a request refused while it is
+     written), and the silent clarifying stage;
+   - the design kit by Ctrl+Enter twice with the VM window focused;
+   - a stray Ctrl+Enter pair and a held Ctrl+Enter (the hint), Esc and Ctrl+\ during a kit, and
+     closing Ask to cancel one;
+   - probes answered by themselves, a deep dive, a changed requirement and `design`, and
+     `opening: uber` after the design kit (Live Answer silent again);
+   - the switch back to Default, and a new session where typed text is cleared on entering the
+     mode and a held Ctrl+Enter asks for one opening kit.
+
+   Each step checks itself from the Glass log: the app writes an `[SD Live]` line for each mode
+   change, key, send, refusal, hint, stored or cancelled kit, silent turn and probe. The script
+   marks each expected count PASS or FAIL, asks you for what only the screen shows, and writes a
+   report to `%LOCALAPPDATA%\glass-practice\`. Start Glass from the desktop shortcut or
+   `scripts/windows/start-glass.ps1` so the log exists; with `npm start` in a terminal the
+   automatic checks are skipped. Wear headphones: on speakers the mic also picks up the voice.
+   Add `-- -Step 4` to start at step 4, or `-- -Rate -2` to slow the voice.
 
    **System Design** answers in one go: the twelve sections for the problem, or, for a part
    ("deep dive on the cache"), only that part. Type the constraints with the problem

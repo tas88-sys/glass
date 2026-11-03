@@ -232,6 +232,8 @@ class SummaryService {
     setAskMode(mode) {
         const wasSdLive = this.liveDesign.isSdLive();
         this.liveDesign.setAskMode(mode);
+        // A fixed line per load or change, read by npm run practice:sd-live.
+        console.log(`[SD Live] mode: ${this.liveDesign.getAskMode()} (SD Live ${this.liveDesign.isSdLive() ? 'on' : 'off'})`);
         if (wasSdLive === this.liveDesign.isSdLive()) return;
         if (this.answerDebounceTimer) {
             clearTimeout(this.answerDebounceTimer);
@@ -618,7 +620,7 @@ class SummaryService {
         }
         const kit = this.liveDesign.getKit(this.currentSessionId);
         if (!kit || kit.kind !== 'design') {
-            laDebug('[live-answer] SD Live: no design kit in this session — silent');
+            console.log(`[SD Live] lane: ${speaker} turn, no design kit in this session — silent`);
             return;
         }
         if (fromThem && isBackchannel(text)) return;
@@ -763,7 +765,7 @@ class SummaryService {
             if (probe) {
                 probeKit = this.liveDesign.isSdLive() ? this.liveDesign.getKit(this.currentSessionId) : null;
                 if (!probeKit || probeKit.kind !== 'design') {
-                    laDebug('[live-answer] SD Live: no design kit when the debounce fired — dropped');
+                    console.log('[SD Live] lane: no design kit when the debounce fired — dropped');
                     return;
                 }
             }
@@ -806,6 +808,7 @@ class SummaryService {
                     // general answer does below.
                     record.route = 'sd-probe';
                     this.careerPrev = null;
+                    console.log(`[SD Live] lane: probe #${answerId} from the design kit`);
                     await this.makeLiveAnswer(this.conversationHistory, signal, { id: answerId, question, record, probe: { excerpt: probeKit.excerpt } });
                     return;
                 }
