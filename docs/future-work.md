@@ -621,7 +621,7 @@ Run once the Groq daily limit was back, together with item 11's. The same ten ca
 
 ## 11. Live Answer — answers too long to read while speaking
 
-**Status:** Done — 2026-10-30, branch `2026-10-30-live-answer-length` (step 4 of the work order). The prompt budget shipped before any real-LLM run, because the Groq daily limit was used up; measured on 2026-11-01 (branch `2026-11-01-length-measurements`), see "Measurement". Checked on a real English session on 2026-11-02 (see "Real session"); a real Portuguese session is still to check. Found on 2026-10-28 in the same session as item 9.
+**Status:** Done — 2026-10-30, branch `2026-10-30-live-answer-length` (step 4 of the work order). The prompt budget shipped before any real-LLM run, because the Groq daily limit was used up; measured on 2026-11-01 (branch `2026-11-01-length-measurements`), see "Measurement". Checked on real sessions on 2026-11-02 (English) and 2026-11-03 (Portuguese), see "Real session". Found on 2026-10-28 in the same session as item 9.
 **Severity:** MEDIUM
 **Code:** the user message in `makeLiveAnswer` (`src/features/listen/summary/summaryService.js`, "Answer … directly and concisely", `maxTokens: 900`). Related: `specs/2026-06-01-interview-live-answer-readability/`.
 
@@ -638,7 +638,7 @@ Of the 34 answers in the session: median about 100 words, 17 over 100, 7 over 15
 
 ### Acceptance (when implemented)
 
-- [ ] On the live eval and the next real session, median ≤ 60 words and no answer over 120, with no rise in empty or cut answers. **Met on the live eval** (median 52, none over 120) **and on the replay** (none over 120; median 64, Portuguese 67). **Met on the real English session of 2026-11-02** (median 52, none over 120, none empty or cut). **A real Portuguese session is still to check.**
+- [x] On the live eval and the next real session, median ≤ 60 words and no answer over 120, with no rise in empty or cut answers. **Met on the live eval** (median 52, none over 120) **and on the replay** (none over 120; median 64, Portuguese 67). **Met on the real English session of 2026-11-02** (median 52, none over 120, none empty or cut). **Met on the real Portuguese session of 2026-11-03** (median 45, none over 120, none empty or cut).
 - [x] No answer ends with a summary paragraph. 0 of 17 replay answers and 0 of 23 live-eval answers (7 and 2 before).
 - [ ] If the panel fold ships: an answer over 3 bullets shows the headline and 3 bullets, and the rest opens on click.
 
@@ -707,12 +707,14 @@ The first real session since the budget shipped: an English screening, 11 minute
 | 2026-10-28, Portuguese (before) | 34 | 95 | 275 | 30 | 10 | 19 | 0 |
 | 2026-10-29, English (before) | 17 | 72 | 182 | 10 | 3 | 3 | 1 PASSIVE |
 | 2026-11-02, English | 19 | 52 | 105 | 5 | 0 | 0 | 0 |
+| 2026-11-03, Portuguese | 43 | 45 | 115 | 11 | 0 | 0 | 1 PASSIVE (right) |
 
 - 7 of the 19 answers came from fallback models (item 22). Split by model: gpt-oss-120b 12 answers, median 53, longest 83; the fallbacks 7, median 43, longest 105.
+- On 2026-11-03 (a culture-fit interview, 32 minutes), 17 of the 43 answers came from fallback models. Split by model: gpt-oss-120b 25 answers, median 57, longest 115; the fallbacks 17, median 39, longest 59. Without the fallbacks the median is still under 60.
 - The longest answer (105 words) is the one item 19 records: a fallback model confirming a restatement.
 - **Limit:** a screening with no technical questions, so it does not compare one to one with the 2026-10-28 and 2026-10-29 sessions, which had them.
 
-Box 1 is met for English. It stays open until a real Portuguese session is checked: the replay's Portuguese median, 67, is the one over target.
+Box 1 is met for English and, on 2026-11-03, for Portuguese: ticked. The replay's Portuguese median (67) stays over 60; the real session's is under it.
 
 ---
 
@@ -1168,6 +1170,8 @@ A follow-up chain also carried unrelated notes into a later answer (#10).
 
 7 of 19 answers came from fallback models (3 gpt-oss-20b, 3 qwen, 1 gemini), against 4 of 34 and 3 of 18 in the two earlier sessions. All seven fell in a two-minute stretch with ten answers in a row. Three of the session's five worst answers are among them, item 19's included. The pattern matches the per-minute token limit of the main model, shared with the router and the insights, but the row keeps only the model that answered, not why the main one was skipped.
 
+Seen again on 2026-11-03, larger: 17 of 43 answers came from fallback models (11 gpt-oss-20b, 4 qwen, 2 gemini). Four of them had only one other answer in the minute before, so it is not bursts alone. The answer that came from gemini took 5 seconds to its first token.
+
 ### Proposed
 
 1. **Record the reason:** save the fallback's cause in `live_answers` (rate limit per minute or per day, error, timeout) and show it in `export-live-answers.js`.
@@ -1191,10 +1195,18 @@ A follow-up chain also carried unrelated notes into a later answer (#10).
 
 The candidate said "CLT" (a Brazilian employment contract) and the transcript read "CLAUDE contract", in the keyterm's casing. The same turn heard the other contract type ("PJ") as "two b". "Claude Code" was still heard as "cloud code" in real speech.
 
+Seen again on 2026-11-03, wider than "CLAUDE.md":
+- two company names from the notes (folders of other hiring processes) took the place of an employer's name and of an AWS service's name;
+- the fixed term "Django" took the place of ".NET";
+- "cloud" became "Claude" in "the cloud was AWS".
+
+The other way, the entity names worked: two names that another recorder of the same call got wrong (an API vendor's and a team's) came out right here.
+
 ### Proposed
 
 1. Check whether "CLAUDE.md" is worth its slot: compare the audio eval with and without it.
 2. If the contract terms come up in interviews, try adding them ("CLT", "PJ") and measure as item 15 did.
+3. Send the STT only the names that can come up: the employers, the entities and the active company, not every company folder of the notes. Drop a fixed term whose pull costs more than it fixes ("Django" first), measured on the audio eval.
 
 ### Acceptance (when implemented)
 
@@ -1243,3 +1255,157 @@ The private notes also give the start date in more than one version; fixing that
 
 - [ ] The KB eval's start-date questions retrieve the availability note in the top k.
 - [ ] A replay of this turn states the note's start date and no invented number.
+
+---
+
+## Items 26 to 31: from the real session of 2026-11-03
+
+Found reviewing a real Portuguese culture-fit interview on 2026-11-03: 32 minutes, 43 answers, one PASSIVE (right), no question missed. Cross-checked against a second transcript of the same call, from another recorder. Not in the work order at the top; each gets its own plan.
+
+The session met item 11's length target in Portuguese (see item 11). It also brought back:
+- item 1: two questions split over turns got three and two answers;
+- item 10: claims the candidate had just contradicted, and a title inflated from "founding engineer" to "founder";
+- item 15: "Claude Code" heard as "Cloud Code";
+- item 20: 11 of 43 answers went to turns with no question, three of them 80 to 115 words while the interviewer was presenting;
+- items 22 and 23, updated there.
+
+## 26. Live Answer career context — pay numbers reach the screen although the card says not to state them
+
+**Status:** Open, found on 2026-11-03 (four answers).
+**Severity:** HIGH (what the candidate says about pay is a negotiation: a number on the screen can anchor it, and one was wrong)
+**Code:** the card goes into the block as is (`buildContextBlock`, `src/features/common/career/contextBuilder.js`); the pay cues `background:pt-salario` and `background:logistics` (`intentRouter.js`); `findUnsupported` (`answerCheck.js`) marks only numbers the notes lack.
+
+### Summary
+
+The card has a "not stated" line: no numbers for pay, benefits or expectations; if asked, say it is early. Four answers to pay questions gave the base salary to the unit, benefit values, a yearly total and an expectation range. One gave the profit-sharing multiple wrong; the candidate gave a lower one a minute later. The numbers come from notes of earlier hiring processes (debriefs and transcripts) that the search brought with the question. None was marked, because the notes hold them.
+
+### Proposed
+
+1. **Manifest:** a `notStated` list of topics in the KB manifest, as `notUsed` is, turned into an addendum line that wins over the notes: "State no numbers for …; say …".
+2. **Block:** on a pay turn (the cues above, or Jev's route), drop money figures from the chunks, or leave out chunks whose title is a pay topic. The card line stays.
+3. **Check:** on a pay turn, mark a currency amount or a "N salaries" multiple even when the notes hold it.
+
+### Acceptance (when implemented)
+
+- [ ] A replay of the four pay turns gives no money figure and no multiple, on the main model and on a fallback model.
+- [ ] Answers to other turns keep their numbers (the replay set of items 10 and 11).
+
+---
+
+## 27. Live Answer career context — a question about the candidate falls to the general route when Jev is unsure, and the answer invents
+
+**Status:** Open, found on 2026-11-03 (three answers; seven turns decided by the regex after Jev).
+**Severity:** MEDIUM to HIGH
+**Code:** `jevRouter.js` (below `minConfidence`, `regexDecision(…, 'low')`, logged as `regex(low)`); the regex cues in `intentRouter.js`; the general route gets no notes and no card (`index.js`, `route === 'general'`).
+
+### Summary
+
+In seven turns Jev answered under its confidence floor and the regex decided. Three were questions about the candidate in forms the regex does not cover ("is all of your cloud on one provider?", "and is there profit sharing?", "what is it like there today?"). They went general and got no notes, and the answers made the facts up: a second cloud provider for AI work, a quarterly bonus tied to goals, colleagues who had left. One was written in the second person, as if about the interviewer.
+
+### Proposed
+
+1. Under the floor, when Jev's own pick is personal, keep personal with the card only (no chunks) instead of going general.
+2. Regex cues for questions about the candidate's current setup in the plural ("de vocês", "your team's"), measured on item 5's sets.
+3. The general prompt: when the turn asks about the candidate and no notes came, answer in the first person with only what the turn says, or say what to check.
+
+### Acceptance (when implemented)
+
+- [ ] A replay of the three turns routes personal, or answers with no invented fact.
+- [ ] Item 5's and item 13's sets lose no accuracy.
+
+---
+
+## 28. Live Answer career context — a question about life outside work gets a work pitch or invented details
+
+**Status:** Open, found on 2026-11-03 (two answers).
+**Severity:** MEDIUM
+**Code:** the note search (`retriever.js`, `bm25.js`); the live answer prompt in `summaryService.js`.
+
+### Summary
+
+Two turns asked about the candidate outside work: who they are without the badge, where they live, what they eat, what they like to do. One answer gave the professional pitch. The other invented food and sports preferences. The notes hold the candidate's hobbies, but no chunk with them came.
+
+### Proposed
+
+1. Add off-work phrasings, in Portuguese and English, to the KB eval's question sets, and check where the hobby notes rank.
+2. The prompt: for a question about life outside work, use only what the notes or the card say; with nothing, give one line for the candidate to fill in, not invented details.
+3. For the KB, outside this repo: a line about life outside work in the card.
+
+### Acceptance (when implemented)
+
+- [ ] The KB eval's off-work questions retrieve the hobby note in the top k.
+- [ ] A replay of both turns states no invented preference.
+
+---
+
+## 29. Live Answer career context — a short company name is neither heard nor detected
+
+**Status:** Open, found on 2026-11-03.
+**Severity:** MEDIUM
+**Code:** `companyNamesFor` (`kbService.js`: the aliases, else the folder name); `compileCompanyDetector` (`index.js`, fuzzy matching only from `FUZZY_MIN_LEN` = 7 characters); `keyterms` (`index.js`); `sttKeyterms.js`; `CAREER_KB_COMPANY`.
+
+### Summary
+
+The interviewer's company had a notes folder but no alias in the manifest, so its name reached the STT keyterms and the company detector as the lowercase folder name: one short word.
+
+- The STT wrote it five other ways, two of them names of other companies.
+- The detector never matched, since the name is too short for fuzzy matching.
+- The one company-route turn got no notes about the company, and its answer named another company.
+- The company's research note came into one answer only, through the search.
+
+### Proposed
+
+1. Warn, in the debug log and in the KB eval, when a company folder has no alias. Title-case the folder name when it is used as a keyterm.
+2. Match the STT's variants of short names: aliases per company in the manifest (the KB's job), or a sound-alike match for names under 7 characters, measured for false switches (E32).
+3. Document `CAREER_KB_COMPANY` as the way to fix the company for a session, and check that it also sends the name to the STT.
+
+### Acceptance (when implemented)
+
+- [ ] A replay of this session with the fix detects the company on its first mention, and the company-route turn gets the company's notes.
+- [ ] E31 and E32 still pass.
+
+---
+
+## 30. Live Answer career context — the check marks numbers the card writes in words
+
+**Status:** Open, found on 2026-11-03 (four of the seven marked answers).
+**Severity:** LOW to MEDIUM (false marks teach the candidate to ignore the real ones)
+**Code:** `findUnsupported` and `fitsNotes` (`src/features/common/career/answerCheck.js`), which read digits in the notes only.
+
+### Summary
+
+Four marked answers were right. The card writes some numbers in words ("about six years", "five and a half", "cut by half"), the answers gave digits ("6", "5,5", "50 %"), and the check found no such number in the notes. Two answers also had "13 years" marked as another result, against a card line that says "13+ years"; the cause is not checked yet.
+
+Among the other marked answers, two real marks: an invented duration and an invented benefit value.
+
+### Proposed
+
+1. Read number words in the note lines as numbers: English and Portuguese, up to twenty, the tens, "half", "and a half", "a dozen".
+2. Find why "13" is marked as another result next to "13+", and add the case to the tests.
+
+### Acceptance (when implemented)
+
+- [ ] The four answers come out unmarked, and the two real marks stay.
+- [ ] On the replay answers of 10b and 14, no real mark is lost.
+
+---
+
+## 31. Live Answer — a connection check after a career answer is taken as a follow-up
+
+**Status:** Open, found on 2026-11-03 (three answers).
+**Severity:** MEDIUM. Related to item 20.
+**Code:** Jev's follow-up score (`jevRouter.js`, `FOLLOW_UP_MIN`); the question gate (`questionGate.js`, `isBackchannel`).
+
+### Summary
+
+Right after a career answer, the interviewer's audio dropped: "did it freeze?", "are you back?". Jev scored both turns as follow-ups, so they kept the personal route and got career notes. One answer added two bullets about the stack and took 5 seconds on a fallback model. In the same stretch, a garbled one-word fragment (the STT's version of "automation") got a made-up one-line answer.
+
+### Proposed
+
+1. **Gate:** a short connection check ("travou?", "voltou?", "está me ouvindo?", "can you hear me?", "you froze") is not a question. No answer, or one fixed line without the LLM.
+2. **Follow-up:** a turn of one or two words needs a content word or a follow-up marker to keep the previous route.
+
+### Acceptance (when implemented)
+
+- [ ] A replay of these turns shows no career content.
+- [ ] Item 9's and item 12's cases still pass.
