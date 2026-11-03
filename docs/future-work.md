@@ -19,7 +19,7 @@ One step at a time, each with its own plan, a fresh session per step. When a ste
 | [x] 7 | 13. A question about the candidate's own setup routes general | After 9, since the 2026-10-29 turn had no question and should then get no answer; what is left are real questions about the setup. Uses item 5's held-out sets, so it can share a plan with item 5. |
 | [x] 8 | 15. STT terms heard as other words | Independent, lowest severity, costliest to measure (audio eval before and after). Can move into any gap. Merged with its measurement pending; **measured on 2026-11-01**. The new terms did not raise the count heard right (7 of 12 before and after), and "Claude Code" is still heard as "Cloud Code" (item 15, acceptance box 1, still open). |
 
-Items 16 (System Design · Live, 2026-10-31) and 17 (System Design fixes, 2026-11-01) came in outside this order. Item 18 (System Design · Live without typing, 2026-11-01) is a list of proposals, not planned yet.
+Items 16 (System Design · Live, 2026-10-31) and 17 (System Design fixes, 2026-11-01) came in outside this order. Item 18 (System Design · Live without typing, 2026-11-01) is a list of proposals; its v1, 18.11, was built on 2026-11-02 (branch `2026-11-02-system-design-live-no-typing`), with the checks in the app still to do.
 
 Notes for the plans:
 
@@ -1079,7 +1079,7 @@ Fix the content, and keep the flow: one Ask, the twelve sections, Rule B for a d
 
 ## 18. System Design · Live — answer without typing, like Live Answer
 
-**Status:** Proposal, 2026-11-01. Not planned yet: each proposal below would get its own plan and branch. Outside the work order at the top. **The v1 chosen on 2026-11-02 is 18.11**: the user's scenario, with every stage decision made by hand.
+**Status:** Proposal, 2026-11-01. Not planned yet: each proposal below would get its own plan and branch. Outside the work order at the top. **The v1 chosen on 2026-11-02 is 18.11**: the user's scenario, with every stage decision made by hand. It was built the same day (see its **Status**).
 **Severity:** MEDIUM (enhancement)
 **Code it would touch:**
 - the answer lane in `src/features/listen/summary/summaryService.js`, and `questionGate.js`;
@@ -1299,6 +1299,10 @@ This replaces the recommended order above. On 2026-11-02 the user chose 18.11 as
 
 #### 18.11 v1: one interview, behavioral then System Design, with no automatic stage decision (chosen 2026-11-02)
 
+**Status:** Built on 2026-11-02, branch `2026-11-02-system-design-live-no-typing`.
+- Done: the unit tests, the live harness (phases H and I) and the practice script; see **Acceptance**.
+- Still to do: the checks in the app by hand, first among them Ctrl+Enter with the VM's window focused, and a full run of the script before a real interview.
+
 **The scenario the user wants:**
 1. Live Answer is on.
 2. The first part of the interview is behavioral, answered from the career KB, as today.
@@ -1353,7 +1357,7 @@ A deep dive the candidate wants in full is still typed into Ask ("deep dive cach
 
    Today an empty Ask leaves the choice between opening and design to the prompt's routing (`promptTemplates.js:767-769`), and a model can pick wrong. `design` exists (routing rule 4). `opening` is new, and gives the OPENING KIT. With nothing typed, the model takes the problem from the transcript or the screenshot. That is the one judgment left in this path, which is why typing the problem is the recommended way.
 2. **What a typed text asks for.**
-   - **Fixed words** are sent as typed, kit or no kit: `opening`, `opening: <problem>`, `design`, `next` (the same as `design`, as in routing rule 4), `design: <problem and requirements>`, `full`.
+   - **Fixed words** are sent as fixed requests, kit or no kit: `opening`, `opening: <problem>`, `design`, `next` (the same as `design`, as in routing rule 4), `design: <problem and requirements>`, `full`. The word goes in lower case, as `word` or `word: <text>`: `Design.` is sent as `design`.
      - A fixed word is the whole text, or the word followed by a colon. Case is ignored, and so are a final period, spaces at either end and a space before the colon. `design:` with nothing after it is `design`. `design?` is not a fixed word.
      - "design twitter feed" is not a fixed word: it is a problem.
      - **The fixed words get a route of their own**, first in the prompt's routing:
@@ -1453,7 +1457,7 @@ A deep dive the candidate wants in full is still typed into Ask ("deep dive cach
 | Ctrl+\ hides every window while a kit is written | Windows are only hidden (`windowManager.js:257-262`); the kit keeps streaming and is stored | Same |
 | Text left in the box, Ask closed and opened again | The text stays: the box is only hidden, never rebuilt (`AskView.js:1453`), and only a send clears it (`:1337`). A later Enter sends it | The box is cleared on close (rule 3) |
 | Typed text sent while a kit is written | The kit is canceled | Refused, text kept (rule 4) |
-| A fixed word typed with no kit (`design`, `full`) | Routed by the prompt | Sent as typed (rule 2) |
+| A fixed word typed with no kit (`design`, `full`) | Routed by the prompt | Sent as the fixed request (rule 2) |
 | Empty send after a design kit | Routed by the prompt, usually a new design kit | A hint, no request (rule 1) |
 | Esc, then Ctrl+Enter during the closing fade | Takes the send branch: Ask still reads as visible (`windowManager.js:448`, `askService.js:172`) | No request: Ask counts as closed from the press of Esc (rule 3) |
 | Ctrl+Enter while Ctrl+\ has hidden every window | Shows Ask alone, with no header (`askService.js:187-195`); no request | Same |
@@ -1518,10 +1522,10 @@ A deep dive the candidate wants in full is still typed into Ask ("deep dive cach
 - restoring the kit from the DB after a restart.
 
 **Acceptance:**
-- [ ] Unit tests:
+- [x] Unit tests (2026-11-02: `liveDesign.test.js`, `askService.systemDesignLive.test.js`, `liveAnswerSdLive.test.js`, `golden.test.js`; the whole suite, 1786 tests, passes):
   - rule 1: an empty send with no kit → `opening`; with an opening kit → `design`; with a design kit → the hint and no request;
   - rule 2:
-    - each fixed word, in any case and with a final period, is sent as typed, with and without a kit;
+    - each fixed word, in any case and with a final period, is sent as the fixed request, with and without a kit;
     - "design twitter feed" with no kit → `opening: design twitter feed`;
     - other text with no kit → `opening: <text>`, even when the transcript names another system or carries numbers;
     - other text with a kit → as typed;
@@ -1544,7 +1548,18 @@ A deep dive the candidate wants in full is still typed into Ask ("deep dive cach
   - Ctrl+Enter held down for 2 s: one kit;
   - Esc and Ctrl+\ while a kit is written: the kit finishes and is stored;
   - a stray Ctrl+Enter pair after the design kit: the hint, no request.
-- [ ] Live, through the harness (`--text`), in English and Portuguese:
+- [x] Live, through the harness (`--text`), in English and Portuguese. Measured on 2026-11-02 (`npm run eval:live -- --only I --text --fast`, then `--only H`):
+  - **Phase I (the lane): 11 of 11 pass.**
+    - No call on the problem or on "Assume about 10 million…", in either language.
+    - One call per probe, 5 probes, all on gpt-oss-120b. First token 1.2–1.4 s, 48–64 words, PROBE shape.
+    - Each probe names the kit's choice: Redis and rebuild, Cassandra, pull.
+    - A probe's prompt is about 6,300 characters, against about 10,900 for today's Live Answer in the same run.
+  - **Phase H (the kits):** every case takes its route, the Portuguese `design` (H7) included, which came out in Portuguese with the headings as given.
+    - H1 (`design` with the rate limiter screenshot) fails one check in both runs, "a write path and a read path". It always goes to Gemini 3.5 Flash-Lite, since the screenshot skips the models of the list that read no images. That model named the path "Write / Check path".
+    - On 2026-11-01, before this change, the same case on the same model failed 3 runs out of 6, the route included.
+    - The other cases only warn: on fallbacks, on word counts, and once, H5 on a fallback model, on a direct answer of 31 words (the limit is 25).
+
+  The checks:
   - the probe shape, at most 90 words;
   - it names the store from the kit's Decisions line;
   - no answer on the script's "Assume about 10 million…" line;
@@ -1552,7 +1567,7 @@ A deep dive the candidate wants in full is still typed into Ask ("deep dive cach
   - the first token within 6 s;
   - exactly one call per interviewer turn;
   - tokens per call no higher than today's Live Answer, measured in the same run.
-- [ ] `npm run practice:sd-live` gains:
+- [x] `npm run practice:sd-live` gains (2026-11-02, 13 steps; not yet run in the app):
   - a behavioral prologue: 2–3 behavioral questions before the design round, answered from the KB;
   - a misuse step: Ctrl+Enter and Esc in a row before anything, typing while a kit is written, a stray Ctrl+Enter pair after the design kit.
 

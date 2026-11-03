@@ -198,6 +198,10 @@ contextBridge.exposeInMainWorld('api', {
     
     // Live features — which panes show (spec 2026-10-12-live-features-toggle)
     getLiveFeatures: () => ipcRenderer.invoke('settings:getLiveFeatures'),
+    // The Ask mode, for the "SD Live" badge (future-work 18.11, rule 9)
+    getAskMode: () => ipcRenderer.invoke('mainHeader:getAskMode'),
+    onAskModeChanged: (callback) => ipcRenderer.on('listen:askModeChanged', callback),
+    removeOnAskModeChanged: (callback) => ipcRenderer.removeListener('listen:askModeChanged', callback),
 
     // Listeners
     onSessionStateChanged: (callback) => ipcRenderer.on('session-state-changed', callback),

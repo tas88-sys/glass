@@ -87,6 +87,8 @@ const checks = require('./checks');
 const codeProblem = require('./fixtures/code-problem');
 const designCases = require('./fixtures/system-design-cases');
 const liveDesignCases = require('./fixtures/system-design-live-cases');
+const liveProbeCases = require('./fixtures/system-design-live-probes');
+const liveDesign = require('../../src/features/ask/liveDesign');
 const { buildGo } = require('./goBuild');
 const { consoleLine, writeReports, statusOf } = require('./report');
 const offline = require('./offline');
@@ -99,6 +101,7 @@ const PHASE_NAMES = {
     D: 'D · Ask code with a screenshot',
     E: 'E · Ask system design',
     H: 'H · Ask System Design · Live',
+    I: 'I · Live Answer in System Design · Live (probes)',
     F: 'F · Stress',
     G: 'G · Each model alone',
 };
@@ -140,7 +143,7 @@ function parseArgs(argv) {
     a.blocked = offline.parseBlocked(a.blockProviders != null ? a.blockProviders : process.env.LIVE_EVAL_BLOCK_PROVIDERS);
     const endpointModels = a.endpointModels != null ? a.endpointModels : process.env.LIVE_EVAL_ENDPOINT_MODELS;
     a.endpointModels = String(endpointModels || '').split(',').map(s => s.trim()).filter(Boolean);
-    const phases = a.only || ['A', 'B', 'C', 'D', 'E', 'H', 'G'];
+    const phases = a.only || ['A', 'B', 'C', 'D', 'E', 'H', 'I', 'G'];
     if (a.stress && !phases.includes('F')) phases.push('F');
     a.phases = phases;
     return a;
@@ -634,8 +637,16 @@ async function phaseH(ctx) {
         const image = c.image ? await renderScreenshot(path.join(FIX, c.image), path.join(ctx.outDir, c.image.replace(/\.svg$/, '.jpg'))) : null;
         const earlier = c.previous ? answers[c.previous] : null;
         const previousAnswer = earlier && earlier.text ? { question: earlier.question, answer: earlier.text } : null;
-        const r = await runAsk({ tag: `H:${c.id}`, mode: 'system_design_live', userPrompt: c.userPrompt, history: c.history, image, llmInfo: ctx.models.llmInfo, previousAnswer });
+        // Future-work 18.11: what askService sends for the typed text, against the
+        // kit the previous case left (rules 1, 2 and 5), in the interviewer's language.
+        const kitKind = earlier && earlier.text ? liveDesign.classifyKitAnswer(earlier.text, earlier.kitRequest) : null;
+        const resolved = liveDesign.resolveLiveRequest(c.userPrompt, kitKind);
+        if (resolved.hint) throw new Error(`phase H case ${c.id} resolves to a hint, not a request`);
+        const answerLanguage = liveDesign.interviewLanguage(c.history, c.userPrompt);
+        const r = await runAsk({ tag: `H:${c.id}`, mode: 'system_design_live', userPrompt: resolved.send, history: c.history, image, llmInfo: ctx.models.llmInfo, previousAnswer, answerLanguage });
         const item = askItem('H', c.id, `system-design-live-${c.expect}`, r, c.userPrompt);
+        item.metrics.sent = resolved.send;
+        item.metrics.answerLanguage = answerLanguage;
         item.history = c.history.join('\n');
         item.metrics.systemPromptChars = r.systemPromptChars;
         item.metrics.previousAnswer = !!previousAnswer;
@@ -700,10 +711,98 @@ async function phaseH(ctx) {
             item.checks.push(check('a trade-off line', checks.mentions(text, ['/trade-?off:/']).found.length > 0, 'warn'));
         }
 
-        answers[c.id] = { question: c.userPrompt, text };
+        if (c.lang) {
+            const got = checks.detectLang(text);
+            item.checks.push(check(`answer in the interviewer's language (${c.lang})`, got === c.lang, 'fail', `detected ${got}`));
+        }
+
+        answers[c.id] = { question: resolved.send, text, kitRequest: resolved.kitRequest };
         if (image) item.imageBase64 = image.base64;
         items.push(item);
         ctx.emit(item);
+    }
+    return items;
+}
+
+// ---------------------------------------------------------------------------
+// Phase I: the Live Answer lane in System Design · Live (future-work 18.11)
+// ---------------------------------------------------------------------------
+
+/** Each run: the clarifying lines get no call, then each probe one PROBE answer from the stored kit. */
+async function phaseI(ctx) {
+    const items = [];
+    for (const run of liveProbeCases.RUNS) {
+        const s = harness.createSession({ cfg: ctx.cfg, career: ctx.career, tts: null, audio: false, log: ctx.out, liveFeatures: 'answer', textPace: false });
+        const state = liveDesign.createLiveDesign();
+        s.summary.liveDesign = state;
+        const sessionId = `eval-sd-${run.id}`;
+        s.summary.setSessionId(sessionId);
+        s.summary.setAskMode('system_design_live');
+        const lang = langTag(run.lang);
+        const emit = item => {
+            items.push(item);
+            ctx.emit(item);
+        };
+
+        // Rule 6: no design kit yet, no LLM call and nothing shown.
+        for (const [i, text] of run.beforeKit.entries()) {
+            const ex = await s.exchange({ speaker: 'them', text, lang: run.lang });
+            const laneCalls = ex.calls.filter(c => c.lane === 'answer');
+            const item = { phase: 'I', id: `${run.id}:before-kit-${i + 1}`, kind: 'live', lang: run.lang, question: text, answer: '', checks: [], metrics: { calls: laneCalls.length, answers: ex.answers.length } };
+            item.checks.push(check('no LLM call before the design kit', laneCalls.length === 0, 'fail', `${laneCalls.length} call(s)`));
+            item.checks.push(check('nothing shown', ex.answers.length === 0, 'fail', `${ex.answers.length} answer(s)`));
+            emit(item);
+        }
+
+        // Rule 7: one PROBE answer per question, built on the kit.
+        state.storeKit({ sessionId, kind: 'design', question: 'design', answer: run.kit });
+        const probeChars = [];
+        for (const p of run.probes) {
+            const ex = await s.exchange({ speaker: 'them', text: p.text, lang: run.lang });
+            const laneCalls = ex.calls.filter(c => c.lane === 'answer');
+            const shown = ex.answers.filter(a => a.text);
+            const a = shown[shown.length - 1] || ex.answers[ex.answers.length - 1] || null;
+            const item = {
+                phase: 'I',
+                id: `${run.id}:${p.id}`,
+                kind: 'live',
+                lang: run.lang,
+                question: p.text,
+                answer: a?.text || '',
+                checks: [],
+                metrics: liveMetrics(ex, a, { calls: laneCalls.length, promptChars: laneCalls[0]?.promptChars ?? null }),
+            };
+            item.checks.push(check('one LLM call for the turn', laneCalls.length === 1, 'fail', `${laneCalls.length} call(s)`));
+            item.checks.push(check('answer shown', shown.length >= 1, 'fail', shown.length ? '' : `statuses: ${ex.answers.map(x => x.status).join(',') || 'gate did not fire'}`));
+            if (a?.text) {
+                const words = checks.answerWords(a.text);
+                const route = checks.liveDesignRoute(a.text);
+                item.metrics.words = words;
+                item.metrics.route = route;
+                item.checks.push(answerCheck(ctx, 'at most 90 words', words <= 90, 'warn', `${words} words`));
+                item.checks.push(answerCheck(ctx, 'PROBE shape (no headings)', route === 'probe', 'warn', `got ${route}`));
+                const m = checks.mentions(a.text, p.mentionsAny);
+                item.checks.push(answerCheck(ctx, 'builds on the kit (names its choice)', m.found.length > 0, 'fail', m.found.length ? `found ${m.found.join(', ')}` : `none of ${p.mentionsAny.join(', ')}`));
+                const got = checks.detectLang(a.text);
+                item.checks.push(answerCheck(ctx, `answer in ${lang}`, got === lang || got === 'unknown', 'warn', `detected ${got}`));
+            }
+            if (item.metrics.firstTokenMs != null) {
+                item.checks.push(check(`first token ≤ ${FIRST_TOKEN_BUDGET_MS / 1000}s after the turn`, item.metrics.firstTokenMs <= FIRST_TOKEN_BUDGET_MS, 'warn', `${item.metrics.firstTokenMs} ms`));
+            }
+            item.checks.push(check('no error', !ex.answers.some(x => x.status === 'error'), 'fail', ex.answers.filter(x => x.status === 'error').map(x => x.error).join('; ')));
+            if (item.metrics.promptChars) probeChars.push(item.metrics.promptChars);
+            emit(item);
+        }
+
+        // Today's Live Answer in the same run, for the prompt size.
+        s.summary.setAskMode('default');
+        const ex = await s.exchange({ speaker: 'them', text: run.baseline, lang: run.lang });
+        const base = ex.calls.find(c => c.lane === 'answer')?.promptChars ?? null;
+        const max = probeChars.length ? Math.max(...probeChars) : null;
+        const item = { phase: 'I', id: `${run.id}:prompt-size`, kind: 'live', lang: run.lang, question: run.baseline, answer: '', checks: [], metrics: { baselinePromptChars: base, maxProbePromptChars: max } };
+        item.checks.push(check("a probe's prompt is no larger than today's Live Answer prompt", base != null && max != null && max <= base, 'warn', `${max} vs ${base} chars`));
+        emit(item);
+        await s.stop();
     }
     return items;
 }
@@ -1274,6 +1373,10 @@ async function main() {
     if (args.phases.includes('H')) {
         out('— Ask System Design · Live');
         items.push(...(await phaseH(ctx)));
+    }
+    if (args.phases.includes('I')) {
+        out('— Live Answer in System Design · Live');
+        items.push(...(await phaseI(ctx)));
     }
     if (args.phases.includes('G')) {
         out('— Each model alone');

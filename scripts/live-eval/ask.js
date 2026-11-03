@@ -66,9 +66,10 @@ async function readLikeAskService(response) {
  * @param {{ base64: string }|null} o.image
  * @param {() => object} o.llmInfo - harness.setupModels().llmInfo
  * @param {{ question: string, answer: string }|null} [o.previousAnswer] - System Design · Live only
+ * @param {'pt'|'en'|null} [o.answerLanguage] - System Design · Live only (future-work 18.11, rule 11)
  */
-async function runAsk({ tag, mode, userPrompt, history, preferredCodeLanguage, image, llmInfo, previousAnswer = null }) {
-    const { buildAskMessages, formatConversationForAsk } = req('features/ask/askPrompt');
+async function runAsk({ tag, mode, userPrompt, history, preferredCodeLanguage, image, llmInfo, previousAnswer = null, answerLanguage = null }) {
+    const { buildAskMessages, formatConversationForAsk, askUserText } = req('features/ask/askPrompt');
     const factory = req('features/common/ai/factory');
     const harness = require('./harness');
 
@@ -79,6 +80,7 @@ async function runAsk({ tag, mode, userPrompt, history, preferredCodeLanguage, i
         preferredCodeLanguage,
         screenshotBase64: image ? image.base64 : null,
         previousAnswer,
+        answerLanguage,
     });
     const info = llmInfo();
     if (!info || !info.apiKey) throw new Error('no LLM configured');
@@ -104,7 +106,7 @@ async function runAsk({ tag, mode, userPrompt, history, preferredCodeLanguage, i
                 // askService retries without the screenshot: the answer is then blind.
                 out.textOnlyRetry = true;
                 out.firstError = err.userMessage || err.message;
-                const textOnly = [{ role: 'system', content: built.systemPrompt }, { role: 'user', content: `User Request: ${userPrompt.trim()}` }];
+                const textOnly = [{ role: 'system', content: built.systemPrompt }, { role: 'user', content: askUserText(userPrompt, built.askMode === 'system_design_live' ? answerLanguage : null) }];
                 try {
                     response = await llm.streamChat(textOnly);
                 } catch (err2) {

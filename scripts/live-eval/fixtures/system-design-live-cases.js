@@ -4,6 +4,10 @@
 // One interview in five Asks: each case names the route the answer must take.
 // `previous` names an earlier case whose answer goes back in as the previous
 // answer, as askService does within one session. Generic content only.
+// Each userPrompt is what the candidate types; phase H sends it the way
+// askService does since item 18.11 (liveDesign.resolveLiveRequest): with no kit,
+// text that is not a fixed word asks for its opening kit ("twitter" →
+// "opening: twitter"), so a request for the design kit types `design`.
 
 const TRANSCRIPT_CONFIRMED = [
     'them: Design a Twitter-like home timeline.',
@@ -17,9 +21,11 @@ const TRANSCRIPT_CONFIRMED = [
 
 const CASES = [
     {
+        // The problem and its scale only on screen. Since 18.11 "Design this."
+        // with no kit would ask for the opening kit; the design kit is `design`.
         id: 'H1-screenshot',
         expect: 'design',
-        userPrompt: 'Design this.',
+        userPrompt: 'design',
         image: 'system-design.svg',
         problemOnScreen: true,
         history: [],
@@ -60,6 +66,24 @@ const CASES = [
         userPrompt: 'twitter',
         image: 'desktop.svg',
         history: [],
+    },
+    {
+        // 18.11 rule 11: `design` carries no language; the kit follows the
+        // interviewer's Portuguese, with its headings as given.
+        id: 'H7-design-pt',
+        expect: 'design',
+        userPrompt: 'design',
+        history: [
+            'them: Vamos projetar a timeline inicial de uma rede social parecida com o Twitter.',
+            'me: Antes de começar, quantos usuários ativos por dia, e é uma região só?',
+            'them: Digamos 10 milhões de usuários ativos por dia, todos no Brasil.',
+            'me: Quais funcionalidades entram? Postar, seguir, a timeline?',
+            'them: Só postar, seguir e a timeline. Busca e notificações ficam de fora.',
+            'me: A timeline pode atrasar alguns segundos?',
+            'them: Pode, alguns segundos tudo bem. Mas um post aceito nunca pode ser perdido.',
+        ],
+        lang: 'pt',
+        mentionsScale: ['/10\\s?m(?:i(?:lh[õo]es|llion))?\\b/', '10.000.000', '10,000,000'],
     },
 ];
 

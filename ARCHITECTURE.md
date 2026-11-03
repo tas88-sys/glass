@@ -372,9 +372,14 @@ Key behaviors, all in `askService.js`:
    - The image is base64-encoded and attached inline as a multimodal `image_url` part
      (`:301-306`).
 2. **Prompt assembly** (`:259-299`): the system prompt is chosen by **Ask mode** (§13) —
-   `default`, `code`, `debug`, `system_design` or `system_design_live` — read from settings;
+   `default`, `code`, `debug`, `system_design` or `system_design_live` — read once per request
+   from the copy `liveDesign.js` keeps in memory (featureBridge loads it from settings at start,
+   after each saved change and when the signed-in user changes; future-work item 18.11);
    `code` mode injects the preferred language token. Only `system_design_live` adds context: the
-   Listen transcript and its own last kit answer in the session (`askPrompt.js`, §13).
+   Listen transcript, the kit stored for the session and the interview's language
+   (`askPrompt.js`, §13). In that mode the request itself is decided by fixed rules first
+   (`liveDesign.resolveLiveRequest`: an empty send asks for the opening kit, then the design kit,
+   then only shows a hint; a kit being written is never replaced by a new request).
 3. **Streaming** via `createStreamingLLM(provider, …)` (`:308-314`); SSE chunks are parsed in
    `_processStream` (`:401-474`) and broadcast to `AskView` over `ask:stateUpdate`. It also
    honors the Gemini failover sentinels `_reset` and `_final_model` (`:425-439`, see §10).
@@ -1334,7 +1339,13 @@ Prompt text lives in `promptTemplates.js` (`profilePrompts`) and is assembled by
 | `code` | `pickle_glass_code` | Coding-interview solution: code + reasoning + time/space complexity (honors preferred language) |
 | `debug` | `pickle_glass_debug` | Debug the code in the screenshot: issues, fixes, optimizations |
 | `system_design` | `pickle_glass_system_design` | Staff-level system-design co-pilot: 12-section phased design with numbers, assumptions marked; a deep dive answers alone |
-| `system_design_live` | `pickle_glass_system_design_live` | System Design · Live: one short answer per interview stage (opening kit, design kit, deep dive, probe), built on the Listen transcript and the previous kit (future-work item 16) |
+| `system_design_live` | `pickle_glass_system_design_live` | System Design · Live: one short answer per interview stage (opening kit, design kit, deep dive, probe), built on the Listen transcript and the previous kit (future-work item 16). Route 0 handles the fixed requests the app sends (`opening[: X]`, `design[: X]`, `next`, `full`; item 18.11) |
+
+In `system_design_live`, Live Answer stops using `pickle_glass_analysis` and the career notes: with
+no design kit in the Listen session it makes no call, and with one it answers each interviewer
+question in the PROBE shape from `pickle_glass_system_design_probe`, with the kit's excerpt
+(`liveProbePrompt.js`, `liveDesign.kitExcerpt`; future-work item 18.11). The two profiles share
+their design rules, cheat sheets and PROBE format as constants at the top of `promptTemplates.js`.
 
 The Listen summary uses the `pickle_glass_analysis` profile with a `{{CONVERSATION_HISTORY}}`
 token. The `default` analysis profile encodes a strict decision hierarchy (answer recent
