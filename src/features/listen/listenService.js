@@ -102,6 +102,11 @@ class ListenService {
         this.summaryService.setLiveFeatures(mode);
     }
 
+    /** Future-work 18.11 rule 10: the Ask mode the answer lane follows. */
+    setAskMode(mode) {
+        this.summaryService.setAskMode(mode);
+    }
+
     async handleTranscriptionComplete(speaker, text) {
         console.log(`[ListenService] Transcription complete: ${speaker} - ${text}`);
         
@@ -153,6 +158,8 @@ class ListenService {
                 const settingsService = require('../settings/settingsService');
                 const settings = await settingsService.getSettings();
                 this.setLiveFeatures(settings.liveFeatures);
+                // 18.11 rule 10: the saved Ask mode, read again at each session.
+                this.setAskMode(settings.askMode);
             } catch (err) {
                 console.error('[Live] could not read the saved mode:', err.message);
                 this.setLiveFeatures('both');

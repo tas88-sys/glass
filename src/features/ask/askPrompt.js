@@ -64,6 +64,24 @@ function liveDesignContext(conversationHistory, previousAnswer) {
     return parts.join('\n\n');
 }
 
+const LANGUAGE_NAMES = Object.freeze({ pt: 'Portuguese', en: 'English' });
+
+/**
+ * The user turn's text. In System Design · Live it names the interview's
+ * language when it is clear (future-work 18.11, rule 11): the typed text is
+ * often a fixed word ("design") that carries none. The text-only retry in
+ * askService sends the same text.
+ * @param {string} userPrompt
+ * @param {'pt'|'en'|null} [answerLanguage] - System Design · Live only
+ * @returns {string}
+ */
+function askUserText(userPrompt, answerLanguage = null) {
+    const text = `User Request: ${String(userPrompt || '').trim()}`;
+    const name = LANGUAGE_NAMES[answerLanguage];
+    if (!name) return text;
+    return `${text}\n\nThe interview is in ${name}: write the whole answer in ${name}, whatever the language of the request, keeping technical terms as they are commonly said and the kit headings exactly as given.`;
+}
+
 /**
  * The Listen transcript as the Ask prompt shows it: the last 30 turns.
  * @param {string[]} conversationTexts - ["me: …", "them: …", …]
@@ -84,9 +102,10 @@ function formatConversationForAsk(conversationTexts) {
  * @param {string} [o.preferredCodeLanguage] - used in 'code' mode only
  * @param {string|null} [o.screenshotBase64] - JPEG
  * @param {{ question?: string, answer?: string }|null} [o.previousAnswer] - used in 'system_design_live' mode only
+ * @param {'pt'|'en'|null} [o.answerLanguage] - used in 'system_design_live' mode only
  * @returns {{ askMode: string, profile: string, systemPrompt: string, messages: object[] }}
  */
-function buildAskMessages({ askMode: rawMode, userPrompt, conversationHistory, preferredCodeLanguage, screenshotBase64, previousAnswer = null }) {
+function buildAskMessages({ askMode: rawMode, userPrompt, conversationHistory, preferredCodeLanguage, screenshotBase64, previousAnswer = null, answerLanguage = null }) {
     const askMode = normalizeAskMode(rawMode);
     const profile = PROFILE_BY_MODE[askMode];
 
@@ -112,7 +131,7 @@ function buildAskMessages({ askMode: rawMode, userPrompt, conversationHistory, p
         {
             role: 'user',
             content: [
-                { type: 'text', text: `User Request: ${userPrompt.trim()}` },
+                { type: 'text', text: askUserText(userPrompt, askMode === 'system_design_live' ? answerLanguage : null) },
             ],
         },
     ];
@@ -127,4 +146,4 @@ function buildAskMessages({ askMode: rawMode, userPrompt, conversationHistory, p
     return { askMode, profile, systemPrompt, messages };
 }
 
-module.exports = { VALID_MODES, PROFILE_BY_MODE, PREVIOUS_ANSWER_MAX_CHARS, normalizeAskMode, isLiveDesignKit, formatConversationForAsk, buildAskMessages };
+module.exports = { VALID_MODES, PROFILE_BY_MODE, PREVIOUS_ANSWER_MAX_CHARS, normalizeAskMode, isLiveDesignKit, cutAtLine, askUserText, formatConversationForAsk, buildAskMessages };

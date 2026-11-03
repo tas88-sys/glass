@@ -14,6 +14,21 @@ const { LIVE_FEATURES, liveFeaturesState } = require('../features/listen/liveFea
 const { STT_LANGUAGES, normalizeSttLanguage } = require('../features/listen/sttLanguage');
 const permissionService = require('../features/common/services/permissionService');
 const encryptionService = require('../features/common/services/encryptionService');
+const liveDesign = require('../features/ask/liveDesign');
+
+/**
+ * Future-work 18.11 rule 10: applies an Ask mode to what is kept in memory (the
+ * answer lane drops its waiting turns when System Design · Live starts or
+ * ends) and tells the listen window, for the "SD Live" badge.
+ */
+function applyAskMode(mode) {
+    listenService.setAskMode(mode);
+    const windowManager = require('../window/windowManager');
+    const listenWin = windowManager.windowPool && windowManager.windowPool.get('listen');
+    if (listenWin && !listenWin.isDestroyed()) {
+        listenWin.webContents.send('listen:askModeChanged', { mode: liveDesign.getAskMode(), sdLive: liveDesign.isSdLive() });
+    }
+}
 
 module.exports = {
   // Renderer로부터의 요청을 수신하고 서비스로 전달
@@ -88,10 +103,21 @@ module.exports = {
         return s.askMode || 'default';
     });
 
+    // Future-work 18.11 rule 10: the Ask mode kept in memory for the answer lane
+    // and Ask, loaded now (auth is initialized before this bridge) and again
+    // when the signed-in user changes, since settings are per user.
+    const loadAskMode = () => settingsService.getSettings()
+        .then(s => applyAskMode(s.askMode))
+        .catch(err => console.error('[FeatureBridge] could not read the saved Ask mode:', err.message));
+    loadAskMode();
+    require('./internalBridge').on('auth:userChanged', loadAskMode);
+
     ipcMain.handle('mainHeader:setAskMode', async (event, mode) => {
         const coercedMode = VALID_ASK_MODES.includes(mode) ? mode : 'default';
         try {
-            await settingsService.saveSettings({ askMode: coercedMode });
+            const saved = await settingsService.saveSettings({ askMode: coercedMode });
+            if (!saved || saved.success === false) throw new Error((saved && saved.error) || 'the mode was not saved');
+            applyAskMode(coercedMode);
             // Push change to header window via windowPool
             const windowManager = require('../window/windowManager');
             const headerWin = windowManager.windowPool.get('header');

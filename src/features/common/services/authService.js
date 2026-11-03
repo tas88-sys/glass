@@ -173,6 +173,9 @@ class AuthService {
                 win.webContents.send('user-state-changed', userState);
             }
         });
+        // Settings are per user: featureBridge reloads what it keeps in memory
+        // (the Ask mode, future-work 18.11 rule 10).
+        require('../../../bridge/internalBridge').emit('auth:userChanged', userState);
     }
 
     getCurrentUserId() {
