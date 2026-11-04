@@ -142,6 +142,7 @@ function sectionsInOrder(text, names) {
 }
 
 const CODE_SECTIONS = ['Clarifying Questions', 'Reasoning / Think-Out-Loud', 'Solution', 'Time Complexity', 'Space Complexity'];
+const DEBUG_SECTIONS = ['Issues Identified', 'Specific Improvements and Corrections', 'Optimizations', 'Explanation of Changes Needed', 'Key Points'];
 
 /** System design: "## 0." … "## 11." present and in order. */
 function systemDesignSections(text) {
@@ -276,6 +277,38 @@ function codeBlocks(text) {
 }
 
 /**
+ * The comments inside an answer's fenced code blocks, one per line: `//` and
+ * `#` line comments and the lines of block comments. Phase L asks whether
+ * they stayed in English when the interview is in Portuguese.
+ * @param {string} text
+ * @returns {string}
+ */
+function codeComments(text) {
+    const out = [];
+    for (const { code } of codeBlocks(text)) {
+        let inBlock = false;
+        for (const line of code.split('\n')) {
+            if (inBlock) {
+                const end = line.indexOf('*/');
+                out.push(line.slice(0, end < 0 ? undefined : end).replace(/^\s*\*\s?/, ''));
+                if (end >= 0) inBlock = false;
+                continue;
+            }
+            const open = line.indexOf('/*');
+            if (open >= 0) {
+                const end = line.indexOf('*/', open + 2);
+                out.push(line.slice(open + 2, end < 0 ? undefined : end).replace(/^\*+\s?/, ''));
+                if (end < 0) inBlock = true;
+                continue;
+            }
+            const m = /(?:^|[\s;{}()])(?:\/\/|#)\s?(.*)$/.exec(line);
+            if (m) out.push(m[1]);
+        }
+    }
+    return out.map(l => l.trim()).filter(Boolean).join('\n');
+}
+
+/**
  * Run a JavaScript solution against tests in a fresh vm context.
  * @param {string} code
  * @param {string} fnName
@@ -365,9 +398,11 @@ module.exports = {
     designDiagram,
     concreteNumbers,
     codeBlocks,
+    codeComments,
     runJsSolution,
     quantile,
     CODE_SECTIONS,
+    DEBUG_SECTIONS,
     LIVE_OPENING_SECTIONS,
     LIVE_DESIGN_SECTIONS,
 };

@@ -1330,6 +1330,20 @@ This replaces the recommended order above. On 2026-11-02 the user chose 18.11 as
     - Groq refused 23 of the 36 Qwen requests after the change for the key's limits (output per minute, tokens per minute).
     - Two flagged kits came from Gemini's content, not from its diagram: on the final wording, one rate limiter kit with two write paths and no read path (1 of 15); after the change, one opening kit sent back for `design` (1 of 54 design requests; 0 of 9 before).
   - Step 11 of the script asked to read the line under the diagram, which step 10 had cleared from Ask. The candidate now says the design from memory.
+  - **Ask modes other than System Design · Live had no language rule** (found 2026-11-04 when the user asked that every Ask mode follow the interview's language, as Live Answer does).
+    - `buildAskMessages` named the language in System Design · Live only, and the other modes get no transcript. With nothing typed and an English problem on screen, a Portuguese interview got English answers.
+    - Rule 11 now covers every mode, with the STT language as its last source while Listen runs (see rule 11). New phase L of the live eval measures it, one Ask per mode (`fixtures/ask-language-cases.js`).
+  - **Measured live on 2026-11-04, phase L** (`%LOCALAPPDATA%\glass-live-eval\language-2026-11-04\`):
+
+    | | Before (1 run) | After |
+    |---|---|---|
+    | gemini-3.5-flash-lite | 5 of the 6 Asks of the other modes in the wrong language. Portuguese interview: Default, Code, Debug and System Design in English. English interview with Portuguese typed: Default in Portuguese, Code in English | 3 runs, 21 Asks: all 21 in the interview's language, read one by one. The check flagged one terse English Default answer (159 characters) as unknown. Every heading in English and in order; the code comments in English; the Default answer's facts from the image 3/3; the debug fix of the loop bound 3/3 |
+    | qwen/qwen3.8-27b | not measured | 7 cases, one per run: Default and Debug in a Portuguese interview answered, both in Portuguese, with the headings in English. Groq refused the other 5 on the model's daily token limit (200,000), spent by the day's runs |
+
+    - Phase H after the change (Gemini, 4 runs): the English kit in English 4/4, the Portuguese kit in Portuguese 4/4. H1, H2 and H6 now carry the English sentence, named by the STT language, and kept their route and headings 4/4.
+    - Not from this change:
+      - The code's hidden tests failed in 2 of 6 code answers: one used LeetCode's `MinPriorityQueue`, which does not exist in JavaScript, as both code answers did before the change; one timed out on the 220×220 grid.
+      - The probe case (H5) went the deep-dive route in 2 of 4 runs (1 of 15 earlier on 2026-11-04). Its request was the same before and after the change, since the interviewer's English turns already named the language.
 - Still to do: the checks in the app by hand, first among them Ctrl+Enter with the VM's window focused, and a full run of the script before a real interview.
 
 **The scenario the user wants:**
@@ -1460,10 +1474,18 @@ A deep dive the candidate wants in full is still typed into Ask ("deep dive cach
 11. **The interview's language.**
     - Kits and probes answer in the language of the interviewer's turns, which the code reads with `questionLanguage` (`questionLanguage.js:27`), as Live Answer already does for a question.
       - For a kit, the code reads the last 6 interviewer turns, so a behavioral part in another language doesn't decide.
-      - The language sentence goes in the request, so the text-only retry, which rebuilds the request (`askService.js:337-343`), keeps it.
-      - The prompt's rule (`promptTemplates.js:898`) puts the language a request names first.
-    - The fixed words carry no language. Today the prompt answers "in the language of the typed text" (`promptTemplates.js:898`), so `design` typed in a Portuguese interview could give an English kit.
+      - The language sentence goes in the request, so the text-only retry, which rebuilds the request (`askService.js:549`), keeps it.
+      - The prompt's rule (`promptTemplates.js:926`) puts the language a request names first.
+    - The fixed words carry no language. Without this rule the prompt answers "in the language of the typed text" (`promptTemplates.js:926`), so `design` typed in a Portuguese interview could give an English kit.
     - When the turns are unclear, the typed text's language decides. When that is unclear too, the prompt's rule stays.
+    - **Since 2026-11-04 the rule covers every Ask mode** (Default, Code, Debug and System Design too), decided in one place, `askAnswerLanguage` (`askLanguage.js:51`), in this order:
+      1. the interviewer's last 6 turns;
+      2. the typed text, when its language is clear;
+      3. while a Listen session runs, the speech-to-text language (`sttLanguage`, the language Listen hears the interview in). It covers a first turn too short to tell ("Vamos desenhar o Twitter." has one word of the Portuguese list) followed by `opening`;
+      4. else no language is named, and each mode answers as before. With no Listen session there is no interview.
+    - The other modes read the Listen transcript only for its language and only while Listen runs. Their prompt still has no transcript ("No conversation history available.").
+    - In every mode the headings stay in English, since the kit and the eval find the sections by them, and so does code, with its names and comments (the user's choice). The sentence is in `askUserText` (`askPrompt.js:81`); System Design · Live keeps its own wording.
+    - Each Ask logs the language and what named it: `[AskService] answer language: pt (turns)`.
 
 **Leaving the stage.** In v1 the candidate leaves by switching back to Default, and the badge is the reminder. Stop also ends it: the stored kit belongs to that Listen session (`askService.js:288`), so a new session starts with no kit. A second design problem starts in one of two ways, and rule 1's order starts again from either:
 - typing `opening: <problem>` into Ask (rule 2), which stores a new opening kit;

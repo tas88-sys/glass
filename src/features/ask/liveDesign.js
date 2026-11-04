@@ -13,13 +13,15 @@
  * - resolveLiveRequest: what an Ask send asks for (rules 1 and 2).
  * - classifyKitAnswer: the type a finished answer is stored as (rule 5).
  * - kitExcerpt: the part of a design kit a probe gets (rule 7).
- * - interviewLanguage: the interview's language for a kit (rule 11).
+ * - interviewLanguage: the interview's language (rule 11), from askLanguage.js.
  */
 
 'use strict';
 
 const { normalizeAskMode, cutAtLine } = require('./askPrompt');
-const { questionLanguage } = require('../listen/summary/questionLanguage');
+// The interview's language (rule 11) lives in askLanguage.js since every Ask
+// mode uses it; re-exported here for the callers that read it from this file.
+const { interviewLanguage, LANGUAGE_TURNS } = require('./askLanguage');
 
 const SD_LIVE = 'system_design_live';
 
@@ -31,9 +33,6 @@ const KIT_MIN_WORDS = 120;
 
 /** How much of a design kit a probe gets when the kit has none of the expected parts (rule 7). */
 const EXCERPT_MAX_CHARS = 2500;
-
-/** The interviewer turns that decide a kit's language (rule 11). */
-const LANGUAGE_TURNS = 6;
 
 const HINT_DESIGN_DONE = 'Design kit done. Type `design` to update it after a change.';
 
@@ -137,21 +136,6 @@ function kitExcerpt(answer) {
     if (picks.length) parts.push(`Deep dives:\n${picks.join('\n')}`);
 
     return cutAtLine(parts.join('\n\n'), EXCERPT_MAX_CHARS);
-}
-
-/**
- * The interview's language for a kit (rule 11): the last interviewer turns,
- * then the typed text; null when neither is clear.
- * @param {string[]} turns - ["me: …", "them: …"]
- * @param {string} [typed]
- * @returns {'pt'|'en'|null}
- */
-function interviewLanguage(turns, typed = '') {
-    const them = (Array.isArray(turns) ? turns : [])
-        .filter(t => /^them:/i.test(String(t)))
-        .slice(-LANGUAGE_TURNS)
-        .map(t => String(t).replace(/^them:\s*/i, ''));
-    return questionLanguage(them.join(' ')) || questionLanguage(typed);
 }
 
 /** The state: one per app. Tests and the eval harness make their own. */

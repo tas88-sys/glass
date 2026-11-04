@@ -43,6 +43,10 @@ const world = {
     holdCall: null,     // streamChat waits for it before it returns
     holdStream: null,   // the stream stays open until it resolves
     visible: true,
+    listening: false,   // a Listen session runs (listenService.isSessionActive)
+    sttLanguage: 'pt-BR',
+    screen: false,      // desktopCapturer gives a screen, so the Ask carries a screenshot
+    failImage: false,   // the next call with an image fails as a model without vision would
 };
 
 const sent = [];
@@ -55,20 +59,30 @@ const windowPool = new Map([['ask', fakeWindow]]);
 
 stub('electron', {
     BrowserWindow: function BrowserWindow() {},
-    desktopCapturer: { getSources: async () => [] },   // no screen: the Ask goes without a screenshot
+    // No screen by default: the Ask goes without a screenshot.
+    desktopCapturer: {
+        getSources: async () => (world.screen ? [{ thumbnail: { toJPEG: () => Buffer.from('jpeg'), getSize: () => ({ width: 1, height: 1 }) } }] : []),
+    },
 });
 stub('../../../window/windowManager', { windowPool });
 stub('../../common/repositories/session', { getOrCreateActive: async () => world.sessionId });
 stub('../repositories', { addAiMessage: async m => { world.db.push(m); return { id: 'm' }; } });
-stub('../../settings/settingsService', { getSettings: async () => ({ askMode: 'not-read-here', preferredCodeLanguage: 'go', liveFeatures: world.liveFeatures }) });
+stub('../../settings/settingsService', { getSettings: async () => ({ askMode: 'not-read-here', preferredCodeLanguage: 'go', liveFeatures: world.liveFeatures, sttLanguage: world.sttLanguage }) });
 stub('../../common/services/modelStateService', {
     getCurrentModelInfo: async () => (world.modelOk ? { provider: 'groq', model: 'test-model', apiKey: 'test-key', keys: {} } : null),
 });
-stub('../../listen/listenService', { getConversationHistory: () => { world.transcriptReads++; return world.transcript; } });
+stub('../../listen/listenService', {
+    getConversationHistory: () => { world.transcriptReads++; return world.transcript; },
+    isSessionActive: () => world.listening,
+});
 stub('../../common/ai/factory', {
     createStreamingLLM: () => ({
         streamChat: async (messages) => {
             world.calls.push(messages);
+            if (world.failImage && Array.isArray(messages[1].content) && messages[1].content.some(c => c.type === 'image_url')) {
+                world.failImage = false;
+                throw new Error('This model does not support image input');
+            }
             if (world.holdCall) await world.holdCall.p;
             const text = world.reply;
             const hold = world.holdStream;
@@ -127,6 +141,10 @@ beforeEach(() => {
     world.holdCall = null;
     world.holdStream = null;
     world.visible = true;
+    world.listening = false;
+    world.sttLanguage = 'pt-BR';
+    world.screen = false;
+    world.failImage = false;
     windowPool.set('ask', fakeWindow);
     sent.length = 0;
     askService.liveDesign = createLiveDesign();
@@ -411,6 +429,18 @@ describe('18.11: language and Live Answer off', () => {
         assert.match(userOf(call), /^User Request: design\n\nThe interview is in Portuguese: write the whole answer in Portuguese/);
     });
 
+    it('turns too short to tell: the STT language decides while Listen runs, and nothing without it', async () => {
+        world.transcript = ['them: Vamos desenhar o Twitter.'];
+        world.listening = true;
+        world.sttLanguage = 'pt-BR';
+        let call = await ask('opening', OPENING);
+        assert.match(userOf(call), /^User Request: opening\n\nThe interview is in Portuguese: .*the kit headings exactly as given\.$/);
+        world.listening = false;
+        askService.liveDesign = createLiveDesign();
+        call = await ask('opening', OPENING);
+        assert.equal(userOf(call), 'User Request: opening');
+    });
+
     it('with Live Answer off, a kit request shows the warning and still runs', async () => {
         world.liveFeatures = 'insights';
         await ask('', OPENING);
@@ -421,7 +451,7 @@ describe('18.11: language and Live Answer off', () => {
 
 describe('askService in the other modes', () => {
     for (const mode of ['default', 'code', 'debug', 'system_design']) {
-        it(`${mode}: no transcript, no previous answer, the same prompt as before, the kit kept`, async () => {
+        it(`${mode}: without Listen, no transcript, no previous answer, the same prompt as before, the kit kept`, async () => {
             askService.liveDesign.storeKit({ sessionId: 'session-1', kind: 'opening', question: 'opening', answer: OPENING });
             setMode(mode);
             const call = await ask('Design a URL shortener.', '## 1. Clarifying Questions\n- ?');
@@ -430,6 +460,41 @@ describe('askService in the other modes', () => {
             assert.deepEqual(call, expected.messages);
             assert.equal(askService.liveDesign.getKit('session-1').answer, OPENING, `${mode} replaced the System Design · Live kit`);
             assert.equal(askService.state.notice, '');
+        });
+
+        it(`${mode}: while Listen runs, the transcript names the language only; the prompt keeps no transcript`, async () => {
+            world.listening = true;
+            world.sttLanguage = 'en-US';
+            world.transcript = ['them: Vamos projetar um encurtador de URL.', 'me: Quantos links por dia?', 'them: Cerca de 100 milhões, no Brasil.'];
+            setMode(mode);
+            const call = await ask('', 'Uma resposta.');
+            assert.equal(world.transcriptReads, 1);
+            const expected = buildAskMessages({ askMode: mode, userPrompt: '', conversationHistory: formatConversationForAsk([]), preferredCodeLanguage: 'go', screenshotBase64: null, answerLanguage: 'pt' });
+            assert.deepEqual(call, expected.messages);
+            assert.match(systemOf(call), /No conversation history available\./);
+            assert.doesNotMatch(systemOf(call), /encurtador/);
+            assert.match(userOf(call), /^User Request: \n\nThe interview is in Portuguese: .* Code, with its names and comments, stays in English\.$/);
+        });
+
+        it(`${mode}: while Listen runs with turns too short to tell, the STT language names it`, async () => {
+            world.listening = true;
+            world.sttLanguage = 'en-US';
+            world.transcript = ['them: ok'];
+            setMode(mode);
+            const call = await ask('', 'An answer.');
+            assert.match(userOf(call), /^User Request: \n\nThe interview is in English: write the whole answer in English/);
+        });
+
+        it(`${mode}: the text-only retry keeps the language`, async () => {
+            world.listening = true;
+            world.screen = true;
+            world.failImage = true;
+            setMode(mode);
+            const call = await ask('', 'Uma resposta.');
+            assert.equal(world.calls.length, 2);
+            assert.ok(Array.isArray(world.calls[0][1].content), 'the first call carried the screenshot');
+            // The default transcript is too short to tell; the STT language (pt-BR) names it.
+            assert.match(call[1].content, /^User Request: \n\nThe interview is in Portuguese: /);
         });
 
         it(`${mode}: the second Ctrl+Enter sends an empty request, as before`, async () => {

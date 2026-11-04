@@ -9,7 +9,7 @@
 // Run it through npm (launch.js starts it with the Node inside Electron, which
 // loads better-sqlite3 to read the app's settings read-only).
 //
-// Phases (--only A,B,...; default A,B,C,D,E,H,G; --stress adds F):
+// Phases (--only A,B,...; default A,B,C,D,E,H,I,L,G; --stress adds F):
 //   A  interview: invented questions in pt-BR and en-US, said by TTS into the
 //      STT sessions; the question gate, the speaker gate, answers, follow-ups
 //   B  career routes: questions sampled from CAREER_KB_PATH/glass-eval/questions.jsonl
@@ -26,6 +26,11 @@
 //      each must take its route, in its word budget; every Ask carries a
 //      screenshot as in the app (a desktop when the case names none), and the
 //      design kit needs a diagram with arrows that fits the Ask window
+//   L  the interview's language in every Ask mode (fixtures/ask-language-cases.js):
+//      one Ask per case, the language named as askService names it (the
+//      interviewer's turns, the typed text, the STT language); Portuguese
+//      interviews with nothing or English typed, English ones with Portuguese
+//      typed; the headings and the code stay in English
 //   F  stress: a burst of questions (abort and replace), a long session (the
 //      30-turn prompt cap, the Insights lane), and Answer turned off
 //   G  each model: every model of the list alone (the other phases only reach
@@ -40,7 +45,7 @@
 //   --fast               with --text, do not wait the time each turn takes to say
 //   --only A,C           phases to run
 //   --stress             add phase F
-//   --cases H3,H7        run only these phase H cases (by id prefix). Qwen answers
+//   --cases H3,L2        run only these phase H and L cases (by id prefix). Qwen answers
 //                        one kit per run: after its first, Groq refuses the next for
 //                        the key's output limit and the run skips Qwen. Measure it
 //                        one case per run, a minute apart (its 8,000 tokens a minute)
@@ -94,7 +99,10 @@ const codeProblem = require('./fixtures/code-problem');
 const designCases = require('./fixtures/system-design-cases');
 const liveDesignCases = require('./fixtures/system-design-live-cases');
 const liveProbeCases = require('./fixtures/system-design-live-probes');
+const askLanguageCases = require('./fixtures/ask-language-cases');
 const liveDesign = require('../../src/features/ask/liveDesign');
+const askLanguage = require('../../src/features/ask/askLanguage');
+const { questionLanguage } = require('../../src/features/listen/summary/questionLanguage');
 const { buildGo } = require('./goBuild');
 const { consoleLine, writeReports, statusOf } = require('./report');
 const offline = require('./offline');
@@ -150,7 +158,7 @@ function parseArgs(argv) {
     a.blocked = offline.parseBlocked(a.blockProviders != null ? a.blockProviders : process.env.LIVE_EVAL_BLOCK_PROVIDERS);
     const endpointModels = a.endpointModels != null ? a.endpointModels : process.env.LIVE_EVAL_ENDPOINT_MODELS;
     a.endpointModels = String(endpointModels || '').split(',').map(s => s.trim()).filter(Boolean);
-    const phases = a.only || ['A', 'B', 'C', 'D', 'E', 'H', 'I', 'G'];
+    const phases = a.only || ['A', 'B', 'C', 'D', 'E', 'H', 'I', 'L', 'G'];
     if (a.stress && !phases.includes('F')) phases.push('F');
     a.phases = phases;
     return a;
@@ -512,43 +520,55 @@ async function phaseD(ctx, history) {
         const r = await runAsk({ tag: `D:${run.id}`, mode: 'code', userPrompt: prompt, history, preferredCodeLanguage: run.language, image, llmInfo: ctx.models.llmInfo });
         const item = askItem('D', run.id, 'code', r, `${prompt} (language: ${run.language})`);
         imageChecks(ctx, item, r);
-        const sec = checks.sectionsInOrder(r.text, checks.CODE_SECTIONS);
-        item.checks.push(check('five sections in order', sec.ok, 'fail', [sec.missing.length ? `missing ${sec.missing.join(', ')}` : '', sec.outOfOrder.length ? `out of order ${sec.outOfOrder.join(', ')}` : ''].filter(Boolean).join('; ')));
-        const blocks = checks.codeBlocks(r.text);
-        const want = run.execute ? ['js', 'javascript'] : [run.language.toLowerCase(), run.language.toLowerCase() === 'go' ? 'golang' : run.language.toLowerCase()];
-        const block = blocks.find(b => want.includes(b.lang)) || null;
-        item.checks.push(check(`a ${run.language} code block`, !!block, 'fail', `blocks: ${blocks.map(b => b.lang || '?').join(',') || 'none'}`));
-        const complexity = checks.mentions(r.text, ['/o\\(\\s*m\\s*[·*x×]?\\s*n\\s*[·*x×]?\\s*log/', '/o\\(\\s*(?:mn|nm|m\\s*\\*\\s*n)\\s*log/', '/o\\(\\s*n\\s*log\\s*n\\s*\\)/']);
-        item.checks.push(check('states O(m·n·log(m·n)) time', complexity.found.length > 0, 'warn'));
-        if (run.execute && block) {
-            const tests = codeProblem.tests();
-            const res = checks.runJsSolution(block.code, codeProblem.FN_NAME, tests, { timeoutMs: 4000 });
-            item.metrics.tests = `${res.passed}/${res.total}`;
-            item.metrics.testsMs = res.ms;
-            // A function under another name (LeetCode's, say) still fails, but its tests tell a wrong
-            // name from a wrong algorithm.
-            let renamed = '';
-            const other = /no function named/.test(res.error || '') && (block.code.match(/\bfunction\s+([A-Za-z_$][\w$]*)\s*\(/) || [])[1];
-            if (other) {
-                const alt = checks.runJsSolution(block.code, other, tests, { timeoutMs: 4000 });
-                item.metrics.testsUnderOwnName = `${alt.passed}/${alt.total}`;
-                renamed = `named ${other}, not ${codeProblem.FN_NAME} as on the screen; under its own name it passes ${alt.passed}/${alt.total}`;
-            }
-            item.checks.push(check('code passes the hidden tests', res.loaded && res.passed === res.total, 'fail', renamed || res.error || res.failures.slice(0, 3).map(f => `${f.name}: ${f.error || `want ${f.expected}, got ${JSON.stringify(f.got)}`}`).join('; ')));
-            item.testResult = res;
-        }
-        if (/^(?:go|golang)$/i.test(run.language) && block) {
-            const built = buildGo(block.code);
-            item.metrics.goBuild = built.available ? (built.ok ? 'ok' : 'failed') : 'no go';
-            item.checks.push(built.available
-                ? check('the Go code compiles', built.ok, 'fail', built.error)
-                : check('the Go code compiles', false, 'info', 'not built: Go is not installed'));
-        }
+        codeAnswerChecks(item, r, run);
         item.imageBase64 = image.base64;
         items.push(item);
         ctx.emit(item);
     }
     return items;
+}
+
+/**
+ * The checks of a code-mode answer (phases D and L): the five sections, the
+ * code block, the complexity, the hidden tests when run.execute, and the Go
+ * build when the language is Go.
+ * @param {object} item - askItem
+ * @param {{ text: string }} r - runAsk result
+ * @param {{ language: string, execute: boolean }} run
+ */
+function codeAnswerChecks(item, r, run) {
+    const sec = checks.sectionsInOrder(r.text, checks.CODE_SECTIONS);
+    item.checks.push(check('five sections in order', sec.ok, 'fail', [sec.missing.length ? `missing ${sec.missing.join(', ')}` : '', sec.outOfOrder.length ? `out of order ${sec.outOfOrder.join(', ')}` : ''].filter(Boolean).join('; ')));
+    const blocks = checks.codeBlocks(r.text);
+    const want = run.execute ? ['js', 'javascript'] : [run.language.toLowerCase(), run.language.toLowerCase() === 'go' ? 'golang' : run.language.toLowerCase()];
+    const block = blocks.find(b => want.includes(b.lang)) || null;
+    item.checks.push(check(`a ${run.language} code block`, !!block, 'fail', `blocks: ${blocks.map(b => b.lang || '?').join(',') || 'none'}`));
+    const complexity = checks.mentions(r.text, ['/o\\(\\s*m\\s*[·*x×]?\\s*n\\s*[·*x×]?\\s*log/', '/o\\(\\s*(?:mn|nm|m\\s*\\*\\s*n)\\s*log/', '/o\\(\\s*n\\s*log\\s*n\\s*\\)/']);
+    item.checks.push(check('states O(m·n·log(m·n)) time', complexity.found.length > 0, 'warn'));
+    if (run.execute && block) {
+        const tests = codeProblem.tests();
+        const res = checks.runJsSolution(block.code, codeProblem.FN_NAME, tests, { timeoutMs: 4000 });
+        item.metrics.tests = `${res.passed}/${res.total}`;
+        item.metrics.testsMs = res.ms;
+        // A function under another name (LeetCode's, say) still fails, but its tests tell a wrong
+        // name from a wrong algorithm.
+        let renamed = '';
+        const other = /no function named/.test(res.error || '') && (block.code.match(/\bfunction\s+([A-Za-z_$][\w$]*)\s*\(/) || [])[1];
+        if (other) {
+            const alt = checks.runJsSolution(block.code, other, tests, { timeoutMs: 4000 });
+            item.metrics.testsUnderOwnName = `${alt.passed}/${alt.total}`;
+            renamed = `named ${other}, not ${codeProblem.FN_NAME} as on the screen; under its own name it passes ${alt.passed}/${alt.total}`;
+        }
+        item.checks.push(check('code passes the hidden tests', res.loaded && res.passed === res.total, 'fail', renamed || res.error || res.failures.slice(0, 3).map(f => `${f.name}: ${f.error || `want ${f.expected}, got ${JSON.stringify(f.got)}`}`).join('; ')));
+        item.testResult = res;
+    }
+    if (/^(?:go|golang)$/i.test(run.language) && block) {
+        const built = buildGo(block.code);
+        item.metrics.goBuild = built.available ? (built.ok ? 'ok' : 'failed') : 'no go';
+        item.checks.push(built.available
+            ? check('the Go code compiles', built.ok, 'fail', built.error)
+            : check('the Go code compiles', false, 'info', 'not built: Go is not installed'));
+    }
 }
 
 // A Rule B deep dive answers alone: a word budget, as a warning.
@@ -657,7 +677,9 @@ async function phaseH(ctx) {
         const kitKind = earlier && earlier.text ? liveDesign.classifyKitAnswer(earlier.text, earlier.kitRequest) : null;
         const resolved = liveDesign.resolveLiveRequest(c.userPrompt, kitKind);
         if (resolved.hint) throw new Error(`phase H case ${c.id} resolves to a hint, not a request`);
-        const answerLanguage = liveDesign.interviewLanguage(c.history, c.userPrompt);
+        // The language as askService names it while Listen runs (rule 11): the
+        // turns, the typed text, then the STT language of the interview.
+        const { language: answerLanguage } = askLanguage.askAnswerLanguage({ turns: c.history, typed: c.userPrompt, sttLanguage: c.sttLanguage || liveDesignCases.STT_LANGUAGE, listening: true });
         const r = await runAsk({ tag: `H:${c.id}`, mode: 'system_design_live', userPrompt: resolved.send, history: c.history, image, llmInfo: ctx.models.llmInfo, previousAnswer, answerLanguage });
         const item = askItem('H', c.id, `system-design-live-${c.expect}`, r, c.userPrompt);
         item.metrics.sent = resolved.send;
@@ -744,6 +766,78 @@ async function phaseH(ctx) {
 
         answers[c.id] = { question: resolved.send, text, kitRequest: resolved.kitRequest };
         if (image) item.imageBase64 = image.base64;
+        items.push(item);
+        ctx.emit(item);
+    }
+    return items;
+}
+
+// ---------------------------------------------------------------------------
+// Phase L: every Ask mode in the interview's language (future-work 18.11 rule 11)
+// ---------------------------------------------------------------------------
+
+async function phaseL(ctx) {
+    const items = [];
+    const cases = ctx.args.cases ? askLanguageCases.CASES.filter(c => ctx.args.cases.some(p => c.id.toUpperCase().startsWith(p))) : askLanguageCases.CASES;
+    for (const c of cases) {
+        const image = await renderScreenshot(path.join(FIX, c.image), path.join(ctx.outDir, c.image.replace(/\.svg$/, '.jpg')));
+        const sdLive = c.mode === 'system_design_live';
+        // As askService decides it while Listen runs: the turns, the typed
+        // text, then the STT language. Only System Design · Live gets the
+        // turns in its prompt; the other modes get no transcript, as in the app.
+        const { language, source } = askLanguage.askAnswerLanguage({ turns: c.history, typed: c.userPrompt, sttLanguage: c.sttLanguage || 'pt-BR', listening: true });
+        const send = sdLive ? liveDesign.resolveLiveRequest(c.userPrompt, null).send : c.userPrompt;
+        const r = await runAsk({ tag: `L:${c.id}`, mode: c.mode, userPrompt: send, history: sdLive ? c.history : [], preferredCodeLanguage: c.code ? c.code.language : undefined, image, llmInfo: ctx.models.llmInfo, answerLanguage: language });
+        const item = askItem('L', c.id, `language-${c.mode}`, r, c.userPrompt || '(nothing typed)');
+        item.history = c.history.join('\n');
+        item.metrics.answerLanguage = language;
+        item.metrics.languageSource = source;
+        imageChecks(ctx, item, r);
+        const text = r.text;
+
+        // A terse answer (a headline and a few facts) has too few common words for
+        // detectLang; the app's own detector, which also counts Portuguese
+        // accents, then decides on the prose outside the code blocks.
+        let got = checks.detectLang(text);
+        if (got === 'unknown') got = questionLanguage(String(text).replace(/```[\s\S]*?```/g, ' ').replace(/`[^`]*`/g, ' ')) || 'unknown';
+        item.metrics.detectedLanguage = got;
+        item.checks.push(check(`answer in the interview's language (${c.lang})`, language === c.lang && got === c.lang, 'fail', `named ${language} (${source}), detected ${got}`));
+
+        if (c.imageFacts) {
+            for (const [name, term] of [['order id from the image', '58213'], ['latency from the image', '/4[.,\\s]?870/'], ['error code from the image', '/issuer[_ ]timeout/']]) {
+                item.checks.push(check(name, checks.mentions(text, [term]).found.length > 0, 'fail'));
+            }
+        }
+        if (c.code) codeAnswerChecks(item, r, { ...c.code, id: c.id });
+        if (c.debug) {
+            const sec = checks.sectionsInOrder(text, checks.DEBUG_SECTIONS);
+            item.checks.push(check('the five debug headings, in English, in order', sec.ok, 'fail', [sec.missing.length ? `missing ${sec.missing.join(', ')}` : '', sec.outOfOrder.length ? `out of order ${sec.outOfOrder.join(', ')}` : ''].filter(Boolean).join('; ')));
+            // The bug on the screen: the loop stops one window early (i < nums.length - 1).
+            const fix = checks.mentions(text, ['/i\\s*<\\s*nums\\.length\\s*;/', '/i\\s*<=\\s*nums\\.length\\s*-\\s*1\\b/']);
+            item.checks.push(check('fixes the loop bound (i < nums.length)', fix.found.length > 0, 'fail'));
+        }
+        if (c.code || c.debug) {
+            // The user's choice (2026-11-04): code, with its names and comments, stays in English.
+            const comments = checks.codeComments(text);
+            const commentLang = checks.detectLang(comments);
+            item.metrics.commentLanguage = commentLang;
+            item.checks.push(check('code comments not in Portuguese', commentLang !== 'pt', 'warn', comments ? `detected ${commentLang}` : 'no comments'));
+        }
+        if (c.systemDesign) {
+            const sec = checks.systemDesignSections(text);
+            item.checks.push(check('sections 0 to 11 in order, headings in English', sec.ok, 'fail', [sec.missing.length ? `missing ${sec.missing.join(', ')}` : '', sec.ordered ? '' : 'out of order'].filter(Boolean).join('; ')));
+            item.checks.push(check('starts with section 0 (the opening pitch)', checks.startsWithSection0(text), 'fail'));
+        }
+        if (c.expectRoute) {
+            const route = checks.liveDesignRoute(text);
+            item.metrics.route = route;
+            item.checks.push(check(`takes the ${c.expectRoute} route`, route === c.expectRoute, 'fail', `got ${route}`));
+            const names = c.expectRoute === 'design' ? checks.LIVE_DESIGN_SECTIONS : checks.LIVE_OPENING_SECTIONS;
+            const sec = checks.sectionsInOrder(text, names);
+            item.checks.push(check(`${c.expectRoute} kit headings, in English, in order`, sec.ok, 'fail', [sec.missing.length ? `missing ${sec.missing.join(', ')}` : '', sec.outOfOrder.length ? `out of order ${sec.outOfOrder.join(', ')}` : ''].filter(Boolean).join('; ')));
+        }
+
+        item.imageBase64 = image.base64;
         items.push(item);
         ctx.emit(item);
     }
@@ -1304,7 +1398,7 @@ async function main() {
     }
     harness.useStubLlm(stubLlm);
     if (stubLlm) {
-        const skipped = args.phases.filter(p => ['C', 'D', 'E', 'H', 'G'].includes(p));
+        const skipped = args.phases.filter(p => ['C', 'D', 'E', 'H', 'L', 'G'].includes(p));
         if (skipped.length) {
             args.phases = args.phases.filter(p => !skipped.includes(p));
             blockNotes.push(`phases ${skipped.join(',')} skipped: they need a real model`);
@@ -1399,6 +1493,10 @@ async function main() {
     if (args.phases.includes('H')) {
         out('— Ask System Design · Live');
         items.push(...(await phaseH(ctx)));
+    }
+    if (args.phases.includes('L')) {
+        out('— The interview\'s language in every Ask mode');
+        items.push(...(await phaseL(ctx)));
     }
     if (args.phases.includes('I')) {
         out('— Live Answer in System Design · Live');

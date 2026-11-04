@@ -67,19 +67,25 @@ function liveDesignContext(conversationHistory, previousAnswer) {
 const LANGUAGE_NAMES = Object.freeze({ pt: 'Portuguese', en: 'English' });
 
 /**
- * The user turn's text. In System Design · Live it names the interview's
- * language when it is clear (future-work 18.11, rule 11): the typed text is
- * often a fixed word ("design") that carries none. The text-only retry in
+ * The user turn's text. In every mode it names the interview's language when
+ * askLanguage.askAnswerLanguage found one (future-work 18.11, rule 11): the
+ * typed text is often empty or a fixed word ("design") that carries none, and
+ * the prompts are in English. The headings stay as given (the kit and the eval
+ * find the sections by them), and so does code. The text-only retry in
  * askService sends the same text.
  * @param {string} userPrompt
- * @param {'pt'|'en'|null} [answerLanguage] - System Design · Live only
+ * @param {'pt'|'en'|null} [answerLanguage]
+ * @param {string} [askMode] - System Design · Live keeps its own sentence
  * @returns {string}
  */
-function askUserText(userPrompt, answerLanguage = null) {
+function askUserText(userPrompt, answerLanguage = null, askMode = 'default') {
     const text = `User Request: ${String(userPrompt || '').trim()}`;
     const name = LANGUAGE_NAMES[answerLanguage];
     if (!name) return text;
-    return `${text}\n\nThe interview is in ${name}: write the whole answer in ${name}, whatever the language of the request, keeping technical terms as they are commonly said and the kit headings exactly as given.`;
+    if (askMode === 'system_design_live') {
+        return `${text}\n\nThe interview is in ${name}: write the whole answer in ${name}, whatever the language of the request, keeping technical terms as they are commonly said and the kit headings exactly as given.`;
+    }
+    return `${text}\n\nThe interview is in ${name}: write the whole answer in ${name}, whatever the language of the request, keeping technical terms as they are commonly said and the section headings exactly as given. Code, with its names and comments, stays in English.`;
 }
 
 /**
@@ -102,7 +108,7 @@ function formatConversationForAsk(conversationTexts) {
  * @param {string} [o.preferredCodeLanguage] - used in 'code' mode only
  * @param {string|null} [o.screenshotBase64] - JPEG
  * @param {{ question?: string, answer?: string }|null} [o.previousAnswer] - used in 'system_design_live' mode only
- * @param {'pt'|'en'|null} [o.answerLanguage] - used in 'system_design_live' mode only
+ * @param {'pt'|'en'|null} [o.answerLanguage] - the interview's language (askLanguage.js), any mode
  * @returns {{ askMode: string, profile: string, systemPrompt: string, messages: object[] }}
  */
 function buildAskMessages({ askMode: rawMode, userPrompt, conversationHistory, preferredCodeLanguage, screenshotBase64, previousAnswer = null, answerLanguage = null }) {
@@ -131,7 +137,7 @@ function buildAskMessages({ askMode: rawMode, userPrompt, conversationHistory, p
         {
             role: 'user',
             content: [
-                { type: 'text', text: askUserText(userPrompt, askMode === 'system_design_live' ? answerLanguage : null) },
+                { type: 'text', text: askUserText(userPrompt, answerLanguage, askMode) },
             ],
         },
     ];

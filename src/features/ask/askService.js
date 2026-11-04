@@ -16,7 +16,8 @@ const sessionRepository = require('../common/repositories/session');
 const askRepository = require('./repositories');
 const { buildAskMessages, formatConversationForAsk, askUserText } = require('./askPrompt');
 const liveDesignState = require('./liveDesign');
-const { resolveLiveRequest, classifyKitAnswer, interviewLanguage } = liveDesignState;
+const { resolveLiveRequest, classifyKitAnswer } = liveDesignState;
+const { askAnswerLanguage } = require('./askLanguage');
 const { normalizeLiveFeatures, answerEnabled } = require('../listen/liveFeatures');
 const settingsService = require('../settings/settingsService');
 const path = require('node:path');
@@ -61,6 +62,21 @@ function listenTranscript() {
     } catch (err) {
         console.warn('[AskService] Listen transcript unavailable:', err.message);
         return [];
+    }
+}
+
+/**
+ * Whether a Listen session is running, i.e. there is an interview: then the
+ * Listen transcript and the speech-to-text language name the answer's
+ * language in every Ask mode (18.11 rule 11).
+ * @returns {boolean}
+ */
+function listenActive() {
+    try {
+        return require('../listen/listenService').isSessionActive() === true;
+    } catch (err) {
+        console.warn('[AskService] Listen state unavailable:', err.message);
+        return false;
     }
 }
 
@@ -447,17 +463,26 @@ class AskService {
             // prompt never see two modes.
             const currentSettings = await settingsService.getSettings();
 
-            // System Design · Live also sees the Listen transcript, the kit stored
-            // in this session and the interview's language; every other mode gets
-            // what it got before.
+            // System Design · Live also sees the Listen transcript and the kit
+            // stored in this session; every other mode gets the prompt it got
+            // before. Every mode answers in the interview's language (rule 11):
+            // the other modes read the transcript for that only, and only while
+            // Listen runs.
             let historyRaw = conversationHistoryRaw;
             let previousAnswer = null;
-            let answerLanguage = null;
+            const listening = listenActive();
+            if (sdLive && (!historyRaw || historyRaw.length === 0)) historyRaw = listenTranscript();
+            const languageTurns = sdLive ? historyRaw : (listening ? listenTranscript() : []);
+            const { language: answerLanguage, source: languageSource } = askAnswerLanguage({
+                turns: languageTurns,
+                typed: sdLive ? typed : userPrompt,
+                sttLanguage: currentSettings.sttLanguage,
+                listening,
+            });
+            console.log(`[AskService] answer language: ${answerLanguage || 'not named'}${languageSource ? ` (${languageSource})` : ''}`);
             if (sdLive) {
-                if (!historyRaw || historyRaw.length === 0) historyRaw = listenTranscript();
                 const kit = this.liveDesign.getKit(sessionId);
                 if (kit) previousAnswer = { question: kit.question, answer: kit.answer };
-                answerLanguage = interviewLanguage(historyRaw, typed);
                 // 18.11: without Live Answer the interviewer's questions get no probe.
                 if (kitRequest && !answerEnabled(normalizeLiveFeatures(currentSettings.liveFeatures)) && this.abortController?.signal === signal) {
                     this._showNotice(NOTICE_LIVE_ANSWER_OFF);
@@ -521,7 +546,7 @@ class AskService {
                         { role: 'system', content: systemPrompt },
                         {
                             role: 'user',
-                            content: askUserText(userPrompt, sdLive ? answerLanguage : null)
+                            content: askUserText(userPrompt, answerLanguage, askMode)
                         }
                     ];
 

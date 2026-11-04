@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <!-- Ask (debug mode) scenario: a short function with an off-by-one in its
+       loop bound and the failing test under it (phase L). Our own code. -->
+  <rect width="1920" height="1080" fill="#1a1a1a"/>
+  <rect x="0" y="0" width="1920" height="56" fill="#262626"/>
+  <text x="28" y="37" font-family="Segoe UI, Arial, sans-serif" font-size="22" fill="#e5e5e5" font-weight="bold">windowMax.js · Editor</text>
+
+  <!-- Editor -->
+  <rect x="16" y="72" width="1888" height="640" rx="10" fill="#1e1e1e"/>
+  <g font-family="Consolas, 'Courier New', monospace" font-size="26">
+    <g fill="#858585" text-anchor="end">
+      <text x="80" y="130">1</text><text x="80" y="170">2</text><text x="80" y="210">3</text>
+      <text x="80" y="250">4</text><text x="80" y="290">5</text><text x="80" y="330">6</text>
+      <text x="80" y="370">7</text><text x="80" y="410">8</text><text x="80" y="450">9</text>
+      <text x="80" y="490">10</text><text x="80" y="530">11</text><text x="80" y="570">12</text>
+    </g>
+    <text x="110" y="130"><tspan fill="#569cd6">function</tspan><tspan fill="#dcdcaa"> windowMax</tspan><tspan fill="#d4d4d4">(nums, k) {</tspan></text>
+    <text x="110" y="170" fill="#6a9955">    // largest sum of k consecutive numbers</text>
+    <text x="110" y="210"><tspan fill="#569cd6">    let</tspan><tspan fill="#d4d4d4"> sum = 0;</tspan></text>
+    <text x="110" y="250"><tspan fill="#c586c0">    for</tspan><tspan fill="#d4d4d4"> (</tspan><tspan fill="#569cd6">let</tspan><tspan fill="#d4d4d4"> i = 0; i &lt; k; i++) sum += nums[i];</tspan></text>
+    <text x="110" y="290"><tspan fill="#569cd6">    let</tspan><tspan fill="#d4d4d4"> best = sum;</tspan></text>
+    <text x="110" y="330"><tspan fill="#c586c0">    for</tspan><tspan fill="#d4d4d4"> (</tspan><tspan fill="#569cd6">let</tspan><tspan fill="#d4d4d4"> i = k; i &lt; nums.length - 1; i++) {</tspan></text>
+    <text x="110" y="370" fill="#d4d4d4">        sum += nums[i] - nums[i - k];</text>
+    <text x="110" y="410" fill="#d4d4d4">        best = Math.max(best, sum);</text>
+    <text x="110" y="450" fill="#d4d4d4">    }</text>
+    <text x="110" y="490"><tspan fill="#c586c0">    return</tspan><tspan fill="#d4d4d4"> best;</tspan></text>
+    <text x="110" y="530" fill="#d4d4d4">}</text>
+    <text x="110" y="570"><tspan fill="#d4d4d4">module.exports = { windowMax };</tspan></text>
+  </g>
+
+  <!-- Test output -->
+  <rect x="16" y="728" width="1888" height="336" rx="10" fill="#111111"/>
+  <text x="40" y="768" font-family="Segoe UI, Arial, sans-serif" font-size="20" fill="#a3a3a3">TERMINAL · npm test</text>
+  <g font-family="Consolas, 'Courier New', monospace" font-size="24">
+    <text x="40" y="816" fill="#4ec9b0">✓ windowMax([5, 1, 1, 1], 2) returns 6</text>
+    <text x="40" y="856" fill="#f14c4c">✗ windowMax([1, 2, 3, 4, 10], 2)</text>
+    <text x="80" y="896" fill="#d4d4d4">expected: 14</text>
+    <text x="80" y="936" fill="#d4d4d4">received: 7</text>
+    <text x="40" y="996" fill="#f14c4c">Tests: 1 failed, 1 passed, 2 total</text>
+  </g>
+</svg>

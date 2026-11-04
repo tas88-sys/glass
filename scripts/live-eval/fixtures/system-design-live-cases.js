@@ -14,6 +14,10 @@
 // DEFAULT_SCREEN, a plain desktop, as the app would (2026-11-04: phase H had
 // tested the design kit on gpt-oss only, and missed Qwen's diagrams with no arrows).
 const DEFAULT_SCREEN = 'desktop.svg';
+// The interview is in English, heard by Listen in English: the STT language a
+// case with no sttLanguage of its own decides with, when its turns and typed
+// text do not tell (askLanguage.askAnswerLanguage, 18.11 rule 11).
+const STT_LANGUAGE = 'en-US';
 
 const TRANSCRIPT_CONFIRMED = [
     'them: Design a Twitter-like home timeline.',
@@ -47,6 +51,7 @@ const CASES = [
         expect: 'design',
         userPrompt: 'design',
         history: TRANSCRIPT_CONFIRMED,
+        lang: 'en',
         mentionsScale: ['/10\\s?m(?:illion)?\\b/', '10,000,000'],
     },
     {
@@ -89,8 +94,9 @@ const CASES = [
             'them: Pode, alguns segundos tudo bem. Mas um post aceito nunca pode ser perdido.',
         ],
         lang: 'pt',
+        sttLanguage: 'pt-BR',
         mentionsScale: ['/10\\s?m(?:i(?:lh[õo]es|llion))?\\b/', '10.000.000', '10,000,000'],
     },
 ];
 
-module.exports = { CASES, TRANSCRIPT_CONFIRMED, DEFAULT_SCREEN };
+module.exports = { CASES, TRANSCRIPT_CONFIRMED, DEFAULT_SCREEN, STT_LANGUAGE };
