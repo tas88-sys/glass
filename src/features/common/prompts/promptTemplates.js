@@ -853,7 +853,19 @@ One line each for scope, scale and the key targets, marked (confirmed) or (assum
 ## API
 One endpoint or event per in-scope requirement: method, path, key inputs, output. The user comes from the auth token; writes that must not repeat take an idempotency key; lists use cursor pagination. For an infrastructure component, give the function signature instead.
 ## Design
-- ONE ASCII diagram in a fenced block. Number every box, then list the boxes under it, one per line ("(1) API gateway: auth, rate limits, routing").
+- ONE ASCII diagram in a \`\`\`text fenced block, drawn as a flow, not a list: arrows (→ ← ↑ ↓, or --> and v) join each box to the next box a request reaches, from the client at the top to the stores. Show the write path and the read path, and label the async hops "async". Number every box and give it a short name, at most 3 words (the details go in the list under the diagram). At most 70 characters per line, so it fits the overlay: when a row would be longer, continue it on the next line. A column of boxes with no arrows is not a diagram. The shape only: A to G stand for this design's own components, as many as it needs, each written by its name:
+  \`\`\`text
+  Client
+    ↓
+  (1) A
+    ├─ write ─→ (2) B ─→ (3) C
+    │               │ async
+    │               ↓
+    │           (4) D ─→ (5) E ─→ (6) F
+    │                                 ↑
+    └─ read ──→ (7) G ────────────────┘
+  \`\`\`
+- Under the diagram, list the boxes, one per line ("(1) API gateway: auth, rate limits, routing").
 - **Write path:** numbered steps, saying which are synchronous and which are async.
 - **Read path:** numbered steps.
 - **Storage:** a table with the columns Entity | Store | Key | Why, at most 5 rows.

@@ -23,7 +23,9 @@
 //   H  Ask System Design · Live: one interview in five Asks (screenshot, opening,
 //      design from the transcript, deep dive and probe on the previous answer),
 //      plus a bare system name ("twitter") with only a desktop on screen;
-//      each must take its route, in its word budget
+//      each must take its route, in its word budget; every Ask carries a
+//      screenshot as in the app (a desktop when the case names none), and the
+//      design kit needs a diagram with arrows that fits the Ask window
 //   F  stress: a burst of questions (abort and replace), a long session (the
 //      30-turn prompt cap, the Insights lane), and Answer turned off
 //   G  each model: every model of the list alone (the other phases only reach
@@ -38,6 +40,10 @@
 //   --fast               with --text, do not wait the time each turn takes to say
 //   --only A,C           phases to run
 //   --stress             add phase F
+//   --cases H3,H7        run only these phase H cases (by id prefix). Qwen answers
+//                        one kit per run: after its first, Groq refuses the next for
+//                        the key's output limit and the run skips Qwen. Measure it
+//                        one case per run, a minute apart (its 8,000 tokens a minute)
 //   --repeat N           run phase A N times and aggregate latency (default 1)
 //   --kb-sample N        questions per route in phase B (default 3)
 //   --kb-per-model N     career questions per route that each model answers in phase G,
@@ -118,6 +124,7 @@ function parseArgs(argv) {
         else if (k === '--fast') a.fast = true;
         else if (k === '--only') a.only = v().toUpperCase().split(',').map(s => s.trim()).filter(Boolean);
         else if (k === '--stress') a.stress = true;
+        else if (k === '--cases') a.cases = v().toUpperCase().split(',').map(s => s.trim()).filter(Boolean);
         else if (k === '--repeat') a.repeat = Math.max(1, Number(v()) || 1);
         else if (k === '--kb-sample') a.kbSample = Math.max(0, Number(v()) || 0);
         else if (k === '--kb-per-model') a.kbPerModel = Math.max(0, Number(v()) || 0);
@@ -629,12 +636,20 @@ function requirementsCheck(item, text) {
 
 // Word budgets of pickle_glass_system_design_live, per route.
 const LIVE_WORD_LIMITS = { opening: 450, design: 750, 'deep-dive': 300, probe: 90 };
+// Columns of the Ask window's code block before it scrolls sideways: 510 px
+// inside the <pre> at 6.05 px per character (11px Consolas), measured in the
+// app on 2026-11-04. The prompt asks for 70.
+const ASK_DIAGRAM_COLUMNS = 84;
+// The least a flow has; the practice run's lists of boxes had none.
+const MIN_DIAGRAM_ARROWS = 3;
 
 async function phaseH(ctx) {
     const items = [];
     const answers = {};
-    for (const c of liveDesignCases.CASES) {
-        const image = c.image ? await renderScreenshot(path.join(FIX, c.image), path.join(ctx.outDir, c.image.replace(/\.svg$/, '.jpg'))) : null;
+    const cases = ctx.args.cases ? liveDesignCases.CASES.filter(c => ctx.args.cases.some(p => c.id.toUpperCase().startsWith(p))) : liveDesignCases.CASES;
+    for (const c of cases) {
+        const screen = c.image || liveDesignCases.DEFAULT_SCREEN;
+        const image = await renderScreenshot(path.join(FIX, screen), path.join(ctx.outDir, screen.replace(/\.svg$/, '.jpg')));
         const earlier = c.previous ? answers[c.previous] : null;
         const previousAnswer = earlier && earlier.text ? { question: earlier.question, answer: earlier.text } : null;
         // Future-work 18.11: what askService sends for the typed text, against the
@@ -679,8 +694,19 @@ async function phaseH(ctx) {
             item.checks.push(check('an out-of-scope list', out.found.length > 0, 'fail'));
         }
         if (c.expect === 'design') {
-            const paths = checks.mentions(text, ['/write path/', '/read path/']);
-            item.checks.push(check('a write path and a read path', !paths.missing.length, 'fail', paths.missing.length ? `missing ${paths.missing.join(', ')}` : ''));
+            // A line that starts with the label: "Write path", "Write/Check path",
+            // "Read/Check path (hot path)", or the Portuguese kit's "Caminho de escrita".
+            const pathLabels = { 'write path': '/^[-*\\s]*write\\b[^\\n:]{0,25}path|^[-*\\s]*caminho de escrita/m', 'read path': '/^[-*\\s]*read\\b[^\\n:]{0,25}path|^[-*\\s]*caminho de leitura/m' };
+            const paths = checks.mentions(text, Object.values(pathLabels));
+            const missingPaths = Object.keys(pathLabels).filter(k => paths.missing.includes(pathLabels[k]));
+            item.checks.push(check('a write path and a read path', !missingPaths.length, 'fail', missingPaths.length ? `missing ${missingPaths.join(', ')}` : ''));
+            const d = checks.designDiagram(text);
+            item.metrics.diagramArrows = d.arrows;
+            item.metrics.diagramBoxes = d.boxes;
+            item.metrics.diagramWidth = d.widest;
+            item.checks.push(check(`a flow diagram under Design (≥ ${MIN_DIAGRAM_ARROWS} arrows)`, d.found && d.arrows >= MIN_DIAGRAM_ARROWS, 'fail', d.found ? `${d.arrows} arrows, ${d.boxes} boxes` : 'no fenced block under ## Design'));
+            item.checks.push(check('no skeleton name left in the diagram', !d.placeholders.length, 'fail', d.placeholders.join(', ')));
+            item.checks.push(check(`the diagram fits the Ask window (≤ ${ASK_DIAGRAM_COLUMNS} columns)`, d.widest <= ASK_DIAGRAM_COLUMNS, 'warn', `${d.widest} columns`));
         }
         if (c.problemOnScreen) {
             const numbers = checks.concreteNumbers(text);
@@ -1209,10 +1235,10 @@ async function rejudge(args) {
     const cfg = loadConfig(args);
     const images = { C: 'ask-image.jpg', D: 'code-problem.jpg', E: 'system-design.jpg' };
     for (const it of run.items) {
-        // Phase G sends the screenshot only on its image items, phases E and H only on the cases that name one.
+        // Phase G sends the screenshot only on its image items, phase E only on the cases that name one, phase H on every case (a desktop when the case names none).
         const hCase = it.phase === 'H' ? liveDesignCases.CASES.find(c => c.id === it.id) : null;
         const name = it.phase === 'G' ? (it.kind === 'ask-image' ? 'ask-image.jpg' : null)
-            : it.phase === 'H' ? (it.metrics?.imageSent && hCase && hCase.image ? hCase.image.replace(/\.svg$/, '.jpg') : null)
+            : it.phase === 'H' ? (it.metrics?.imageSent && hCase ? (hCase.image || liveDesignCases.DEFAULT_SCREEN).replace(/\.svg$/, '.jpg') : null)
                 : it.phase === 'E' ? (it.metrics?.imageSent ? images.E : null)
                     : images[it.phase];
         const file = name && path.join(dir, name);

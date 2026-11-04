@@ -1303,7 +1303,32 @@ This replaces the recommended order above. On 2026-11-02 the user chose 18.11 as
 - Done: the unit tests, the live harness (phases H and I) and the practice script; see **Acceptance**.
 - Found in the first practice run (2026-11-04) and fixed:
   - In Ask, an underscore inside a word (`tweet_id`, `next_cursor`) opened italics that ran to the end of the line. In the Storage table, that row lost its cells and the next row began a new table. Ask renders the stream with `src/ui/assets/smd.js`, which opened emphasis on any `_` before a letter. It now follows CommonMark: an underscore between letters or digits is text (`smd.test.js`). This predates item 18; Live Answer renders with `marked`, which never had it.
-  - The design kit listed the diagram's boxes on one line. The prompt now asks for one per line (the third edit `golden.test.js` allows).
+  - **The design kit's diagram was a column of numbered boxes with no arrows** in 2 of the 3 design kits seen on screen, all three from `qwen/qwen3.8-27b`. The legend under it came on one line.
+    - Why the kits come from Qwen and Gemini: every Ask carries a screenshot, so Groq puts the models that see images first (`order=vision-first`).
+    - The prompt only said "ONE ASCII diagram … Number every box".
+    - Phase H had never tested this: its transcript cases sent no image, so their kits came from gpt-oss, which never writes a kit in the app. No check looked at the diagram.
+  - **What changed:**
+    - **The prompt** (the third edit `golden.test.js` allows):
+      - a flow, not a list: arrows from box to box, the write and the read paths, async hops labelled;
+      - short box names (at most 3 words);
+      - at most 70 columns;
+      - a ```` ```text ```` block, so highlight.js leaves it uncoloured;
+      - a shape drawn with the letters A to G;
+      - the legend one per line.
+    - **Phase H:**
+      - every case sends a screenshot, as the app does;
+      - `checks.designDiagram` fails a design kit with fewer than 3 arrows or with the skeleton's letters left in it, and warns when the diagram is wider than the Ask window;
+      - `--cases` runs single cases. Qwen answers one kit per run, then Groq refuses it for the key's output limit.
+    - **Ask** (`AskView.js`): highlighted tokens inside a code block took the sans-serif font of the `*` rule, so `-`, `>` and `|` changed width and the diagram's columns drifted. They are monospace now: every glyph measured is 6.05 px except `▶`, which the prompt does not use. The window shows 84 columns.
+  - **Measured live on 2026-11-04** (`%LOCALAPPDATA%\glass-live-eval\diagram-2026-11-04\`):
+
+    | | Before | After |
+    |---|---|---|
+    | gemini-3.5-flash-lite | 9 design kits: all with arrows; 3 wider than the window (91–97 columns); 2 without box numbers | 15 design kits: all a flow with 4–8 arrows, numbered, in a `text` block; 14 within the window (one at 96) |
+    | qwen/qwen3.8-27b | 8 answered: 6 with ≥ 3 arrows; on the Twitter cases (H3/H7), 2 of 4 had 1 or 2 | 13 of 13 answered across the last four wordings of the rule had 5–12 arrows; 2 of 2 on the final wording; all within the window |
+
+    - Groq refused 23 of the 36 Qwen requests after the change for the key's limits (output per minute, tokens per minute).
+    - Two flagged kits came from Gemini's content, not from its diagram: on the final wording, one rate limiter kit with two write paths and no read path (1 of 15); after the change, one opening kit sent back for `design` (1 of 54 design requests; 0 of 9 before).
   - Step 11 of the script asked to read the line under the diagram, which step 10 had cleared from Ask. The candidate now says the design from memory.
 - Still to do: the checks in the app by hand, first among them Ctrl+Enter with the VM's window focused, and a full run of the script before a real interview.
 

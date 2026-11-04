@@ -35,7 +35,7 @@ describe('golden: what is sent outside System Design · Live (item 18.11, rule 8
         });
     }
 
-    it('System Design · Live changes only by its three edits (route 0, the language line and the box legend)', () => {
+    it('System Design · Live changes only by its three edits (route 0, the language line and the diagram rule)', () => {
         for (const variant of ['noSearch', 'search']) {
             let expected = golden.profiles.pickle_glass_system_design_live[variant];
             for (const { from, to } of SD_LIVE_GOLDEN_EDITS) {

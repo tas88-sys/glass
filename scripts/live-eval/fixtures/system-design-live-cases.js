@@ -8,6 +8,12 @@
 // askService does since item 18.11 (liveDesign.resolveLiveRequest): with no kit,
 // text that is not a fixed word asks for its opening kit ("twitter" →
 // "opening: twitter"), so a request for the design kit types `design`.
+// Every Ask in the app carries a screenshot (askService.js), and an image puts
+// the models that see images first (Groq order=vision-first): the kits come from
+// Qwen or Gemini, never gpt-oss. So a case with no image of its own sends
+// DEFAULT_SCREEN, a plain desktop, as the app would (2026-11-04: phase H had
+// tested the design kit on gpt-oss only, and missed Qwen's diagrams with no arrows).
+const DEFAULT_SCREEN = 'desktop.svg';
 
 const TRANSCRIPT_CONFIRMED = [
     'them: Design a Twitter-like home timeline.',
@@ -87,4 +93,4 @@ const CASES = [
     },
 ];
 
-module.exports = { CASES, TRANSCRIPT_CONFIRMED };
+module.exports = { CASES, TRANSCRIPT_CONFIRMED, DEFAULT_SCREEN };

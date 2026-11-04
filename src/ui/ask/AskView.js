@@ -131,6 +131,13 @@ export class AskView extends LitElement {
             word-break: normal !important;
         }
 
+        /* highlight.js wraps tokens in <span>s inside <code>. Without this they take
+           the sans-serif font of the "*" rule above, so "-", ">" and "|" change width
+           and the columns of an ASCII diagram drift (found 2026-11-04). */
+        .response-container code * {
+            font-family: 'Monaco', 'Menlo', 'Consolas', monospace !important;
+        }
+
         .response-container pre code {
             white-space: pre !important;
             word-wrap: normal !important;
