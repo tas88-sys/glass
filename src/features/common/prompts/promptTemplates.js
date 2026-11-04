@@ -853,7 +853,7 @@ One line each for scope, scale and the key targets, marked (confirmed) or (assum
 ## API
 One endpoint or event per in-scope requirement: method, path, key inputs, output. The user comes from the auth token; writes that must not repeat take an idempotency key; lists use cursor pagination. For an infrastructure component, give the function signature instead.
 ## Design
-- ONE ASCII diagram in a fenced block. Number every box and list the boxes under it ("(1) API gateway: auth, rate limits, routing").
+- ONE ASCII diagram in a fenced block. Number every box, then list the boxes under it, one per line ("(1) API gateway: auth, rate limits, routing").
 - **Write path:** numbered steps, saying which are synchronous and which are async.
 - **Read path:** numbered steps.
 - **Storage:** a table with the columns Entity | Store | Key | Why, at most 5 rows.

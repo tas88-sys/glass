@@ -353,8 +353,8 @@ $steps = @(
     },
     @{
         n = 11; title = 'STEP 11 - A probe answered by itself, and a deep dive (expect: PROBE in Listen)'
-        brief = @('Say the line under the diagram aloud, then press Enter and listen.')
-        say = @('The "> ..." line under the ASCII diagram.')
+        brief = @('Ask was emptied in step 10, so say your design from memory, then press Enter and listen.')
+        say = @('Your design in one sentence, e.g. "Tweets are fanned out to cached home timelines; celebrities are pulled at read time."')
         interviewer = "Let's go deeper. What happens when a celebrity with 50 million followers posts a tweet?"
         action = @(
             'Read the Live Answer aloud.',

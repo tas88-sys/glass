@@ -1301,6 +1301,10 @@ This replaces the recommended order above. On 2026-11-02 the user chose 18.11 as
 
 **Status:** Built on 2026-11-02, branch `2026-11-02-system-design-live-no-typing`.
 - Done: the unit tests, the live harness (phases H and I) and the practice script; see **Acceptance**.
+- Found in the first practice run (2026-11-04) and fixed:
+  - In Ask, an underscore inside a word (`tweet_id`, `next_cursor`) opened italics that ran to the end of the line. In the Storage table, that row lost its cells and the next row began a new table. Ask renders the stream with `src/ui/assets/smd.js`, which opened emphasis on any `_` before a letter. It now follows CommonMark: an underscore between letters or digits is text (`smd.test.js`). This predates item 18; Live Answer renders with `marked`, which never had it.
+  - The design kit listed the diagram's boxes on one line. The prompt now asks for one per line (the third edit `golden.test.js` allows).
+  - Step 11 of the script asked to read the line under the diagram, which step 10 had cleared from Ask. The candidate now says the design from memory.
 - Still to do: the checks in the app by hand, first among them Ctrl+Enter with the VM's window focused, and a full run of the script before a real interview.
 
 **The scenario the user wants:**
@@ -1539,7 +1543,7 @@ A deep dive the candidate wants in full is still typed into Ask ("deep dive cach
   - rule 8: Default again → today's messages, byte for byte; the other modes unchanged;
   - rule 11: the language comes from the interviewer's turns;
   - one test per edge-case row that can run without Electron;
-  - a snapshot taken before any change (`src/features/common/prompts/__tests__/golden/`): every profile's system prompt, the Ask messages of the other modes and the lane's messages for a fixed sequence of turns, compared byte for byte (rule 8). The System Design · Live prompt differs only by route 0 and its language line.
+  - a snapshot taken before any change (`src/features/common/prompts/__tests__/golden/`): every profile's system prompt, the Ask messages of the other modes and the lane's messages for a fixed sequence of turns, compared byte for byte (rule 8). The System Design · Live prompt differs only by route 0, its language line and, since 2026-11-04, the box legend one per line.
 - [ ] In the app, by hand:
   - first: Ctrl+Enter with the VM's window focused reaches Glass; and whether the box sees Ctrl+Enter;
   - Ctrl+Enter with "twitter" in the box sends "twitter";

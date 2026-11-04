@@ -3,6 +3,13 @@ Streaming Markdown Parser and Renderer
 MIT License
 Copyright 2024 Damian Tarnawski
 https://github.com/thetarnav/streaming-markdown
+
+Local change (glass, 2026-11-04): an underscore between letters or digits is
+text, as in CommonMark, so `tweet_id` no longer opens italics that swallow the
+rest of the line (and the cells of a table row). Three places, marked
+"Local change": the opener check before "No check hit", and the ITALIC_UND
+and STRONG_UND cases. Tests: src/ui/assets/__tests__/smd.test.js.
+The rest is upstream main as of 2025-05-04.
 */
 
 export const
@@ -463,6 +470,14 @@ function is_alnum(charcode) {
     return is_digit(charcode)                 || // 0-9
            (charcode >= 65 && charcode <= 90) || // A-Z
            (charcode >= 97 && charcode <= 122)   // a-z
+}
+
+/**
+ * Local change: one letter or digit of any script (é, ç, 1...).
+ * @param   {string } str
+ * @returns {boolean} */
+function is_word_char(str) {
+    return /^[\p{L}\p{N}]$/u.test(str)
 }
 
 /**
@@ -979,6 +994,14 @@ export function parser_write(p, chunk) {
             }
 
             if (symbol === p.pending) {
+                /* Local change: __a snake_case b__
+                                          ^  "_" before a letter or digit is text, not an inner italic
+                */
+                if ('_' === symbol && is_word_char(char)) {
+                    p.text   += p.pending
+                    p.pending = char
+                    continue
+                }
                 add_text(p)
                 /* **Bold**
                           ^
@@ -1009,6 +1032,14 @@ export function parser_write(p, chunk) {
 
             switch (p.pending) {
             case symbol:
+                /* Local change: _a snake_case b_
+                                        ^  "_" before a letter or digit does not close the italic
+                */
+                if ('_' === symbol && is_word_char(char)) {
+                    p.text   += p.pending
+                    p.pending = char
+                    continue
+                }
                 if (symbol === char) {
                     /* Decide between ***bold>em**em* and **bold*bold>em***
                                                  ^                       ^
@@ -1456,6 +1487,20 @@ export function parser_write(p, chunk) {
             p.pending = char
 
             p.token = MAYBE_URL
+            continue
+        }
+
+        /* Local change: tweet_id
+                              ^  "_" right after a letter or digit cannot open emphasis (CommonMark);
+                                 inside _..._ or __...__ it may close it, so it is left to those cases
+        */
+        if ('_' === char &&
+            p.token !== ITALIC_UND &&
+            p.token !== STRONG_UND &&
+            is_word_char(p.pending)
+        ) {
+            p.text   += p.pending + char
+            p.pending = ""
             continue
         }
 

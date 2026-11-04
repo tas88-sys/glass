@@ -1,10 +1,11 @@
 /**
  * sdLiveEdits.js
  *
- * The two intended changes to the System Design · Live prompt in item 18.11:
- * route 0 for the fixed requests, and the language line that puts the language
- * a request names first. golden.test.js applies them to the snapshot taken
- * before the change and expects today's prompt, byte for byte.
+ * The three intended changes to the System Design · Live prompt in item 18.11:
+ * route 0 for the fixed requests, the language line that puts the language a
+ * request names first, and the box legend one per line (the practice run of
+ * 2026-11-04 got it on one line). golden.test.js applies them to the snapshot
+ * taken before the change and expects today's prompt, byte for byte.
  */
 
 'use strict';
@@ -23,6 +24,10 @@ const SD_LIVE_GOLDEN_EDITS = [
     {
         from: '- Answer in the language of the typed text; when it is empty, in the language of the transcript.',
         to: '- Answer in the language the request names, when it names one; otherwise in the language of the typed text; when it is empty, in the language of the transcript.',
+    },
+    {
+        from: '- ONE ASCII diagram in a fenced block. Number every box and list the boxes under it ("(1) API gateway: auth, rate limits, routing").',
+        to: '- ONE ASCII diagram in a fenced block. Number every box, then list the boxes under it, one per line ("(1) API gateway: auth, rate limits, routing").',
     },
 ];
 
