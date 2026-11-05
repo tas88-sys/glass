@@ -2,11 +2,11 @@
 
 // Phase L: every Ask mode answers in the interview's language (future-work
 // 18.11, rule 11). Each case is one Ask with a screenshot, sent as askService
-// sends it: the interviewer's turns decide the language (askLanguage.js), then
-// the typed text, then the speech-to-text language while Listen runs. Only
-// System Design · Live puts the turns in its prompt; the other modes still get
-// no transcript, as in the app. The headings and the code stay in English.
-// Generic content only.
+// sends it: the speech-to-text language (sttLanguage) names the language
+// (askLanguage.js), whatever the turns or the typed text say. The turns are
+// the interview's, as Listen would hear it in that language; only System
+// Design · Live puts them in its prompt, the other modes get no transcript, as
+// in the app. The headings and the code stay in English. Generic content only.
 
 const PT_CODING = [
     'them: Agora vamos para a parte de código. Você consegue compartilhar a tela?',
@@ -31,6 +31,7 @@ const CASES = [
         ],
         userPrompt: 'Which request failed on this screen, how long did it take and what was the error code?',
         image: 'ask-image.svg',
+        sttLanguage: 'pt-BR',
         lang: 'pt',
         imageFacts: true,
     },
@@ -41,6 +42,7 @@ const CASES = [
         history: PT_CODING,
         userPrompt: '',
         image: 'code-problem.svg',
+        sttLanguage: 'pt-BR',
         lang: 'pt',
         code: { language: 'javascript', execute: true },
     },
@@ -54,6 +56,7 @@ const CASES = [
         ],
         userPrompt: '',
         image: 'debug-code.svg',
+        sttLanguage: 'pt-BR',
         lang: 'pt',
         debug: true,
     },
@@ -67,6 +70,7 @@ const CASES = [
         ],
         userPrompt: '',
         image: 'system-design.svg',
+        sttLanguage: 'pt-BR',
         lang: 'pt',
         systemDesign: true,
     },
@@ -77,6 +81,7 @@ const CASES = [
         history: EN_CODING,
         userPrompt: 'Resolva esse problema.',
         image: 'code-problem.svg',
+        sttLanguage: 'en-US',
         lang: 'en',
         code: { language: 'javascript', execute: true },
     },
@@ -90,14 +95,16 @@ const CASES = [
         ],
         userPrompt: 'Qual pedido falhou nessa tela?',
         image: 'ask-image.svg',
+        sttLanguage: 'en-US',
         lang: 'en',
     },
     {
-        // A turn too short to tell and a fixed word: the STT language decides.
-        id: 'L7-sd-live-stt',
+        // The practice of 2026-11-04: `twitter` typed with Listen off (no
+        // transcript) and the setting in Portuguese got an English kit.
+        id: 'L7-sd-live-twitter',
         mode: 'system_design_live',
-        history: ['them: Vamos desenhar o Twitter.'],
-        userPrompt: 'opening',
+        history: [],
+        userPrompt: 'twitter',
         image: 'desktop.svg',
         sttLanguage: 'pt-BR',
         lang: 'pt',

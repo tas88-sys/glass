@@ -65,21 +65,6 @@ function listenTranscript() {
     }
 }
 
-/**
- * Whether a Listen session is running, i.e. there is an interview: then the
- * Listen transcript and the speech-to-text language name the answer's
- * language in every Ask mode (18.11 rule 11).
- * @returns {boolean}
- */
-function listenActive() {
-    try {
-        return require('../listen/listenService').isSessionActive() === true;
-    } catch (err) {
-        console.warn('[AskService] Listen state unavailable:', err.message);
-        return false;
-    }
-}
-
 async function captureScreenshot(options = {}) {
     if (process.platform === 'darwin') {
         try {
@@ -382,7 +367,7 @@ class AskService {
 
         console.log(`[SD Live] ask: send '${String(typed || '').trim().slice(0, 30)}' → '${resolved.send.slice(0, 30)}' (kit request: ${resolved.kitRequest || 'no'})`);
         try {
-            return await this._send(resolved.send, conversationHistoryRaw, { askMode: SD_LIVE, sessionId, kitRequest: resolved.kitRequest, typed });
+            return await this._send(resolved.send, conversationHistoryRaw, { askMode: SD_LIVE, sessionId, kitRequest: resolved.kitRequest });
         } finally {
             if (this._kitInFlight === token) this._kitInFlight = null;
         }
@@ -413,9 +398,9 @@ class AskService {
     /**
      * @param {string} userPrompt - what is sent (in System Design · Live, the resolved request)
      * @param {string[]} conversationHistoryRaw
-     * @param {{ askMode: string, sessionId?: number|string, kitRequest?: 'opening'|'design'|null, typed?: string }} o
+     * @param {{ askMode: string, sessionId?: number|string, kitRequest?: 'opening'|'design'|null }} o
      */
-    async _send(userPrompt, conversationHistoryRaw, { askMode: requestMode, sessionId: knownSessionId = null, kitRequest = null, typed = '' }) {
+    async _send(userPrompt, conversationHistoryRaw, { askMode: requestMode, sessionId: knownSessionId = null, kitRequest = null }) {
         const sdLive = requestMode === SD_LIVE;
         internalBridge.emit('window:requestVisibility', { name: 'ask', visible: true });
         this.state = {
@@ -465,22 +450,14 @@ class AskService {
 
             // System Design · Live also sees the Listen transcript and the kit
             // stored in this session; every other mode gets the prompt it got
-            // before. Every mode answers in the interview's language (rule 11):
-            // the other modes read the transcript for that only, and only while
-            // Listen runs.
+            // before. Every mode answers in the interview's language, the STT
+            // language setting (rule 11, askLanguage.js).
             let historyRaw = conversationHistoryRaw;
             let previousAnswer = null;
-            const listening = listenActive();
-            if (sdLive && (!historyRaw || historyRaw.length === 0)) historyRaw = listenTranscript();
-            const languageTurns = sdLive ? historyRaw : (listening ? listenTranscript() : []);
-            const { language: answerLanguage, source: languageSource } = askAnswerLanguage({
-                turns: languageTurns,
-                typed: sdLive ? typed : userPrompt,
-                sttLanguage: currentSettings.sttLanguage,
-                listening,
-            });
-            console.log(`[AskService] answer language: ${answerLanguage || 'not named'}${languageSource ? ` (${languageSource})` : ''}`);
+            const { language: answerLanguage, source: languageSource } = askAnswerLanguage({ sttLanguage: currentSettings.sttLanguage });
+            console.log(`[AskService] answer language: ${answerLanguage} (${languageSource})`);
             if (sdLive) {
+                if (!historyRaw || historyRaw.length === 0) historyRaw = listenTranscript();
                 const kit = this.liveDesign.getKit(sessionId);
                 if (kit) previousAnswer = { question: kit.question, answer: kit.answer };
                 // 18.11: without Live Answer the interviewer's questions get no probe.

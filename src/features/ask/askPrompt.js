@@ -67,10 +67,10 @@ function liveDesignContext(conversationHistory, previousAnswer) {
 const LANGUAGE_NAMES = Object.freeze({ pt: 'Portuguese', en: 'English' });
 
 /**
- * The user turn's text. In every mode it names the interview's language when
- * askLanguage.askAnswerLanguage found one (future-work 18.11, rule 11): the
- * typed text is often empty or a fixed word ("design") that carries none, and
- * the prompts are in English. The headings stay as given (the kit and the eval
+ * The user turn's text. In every mode it names the interview's language, the
+ * STT language (askLanguage.js; future-work 18.11, rule 11): the typed text is
+ * often empty or a fixed word ("design") that carries none, and the prompts
+ * are in English. The headings stay as given (the kit and the eval
  * find the sections by them), and so does code. The text-only retry in
  * askService sends the same text.
  * @param {string} userPrompt

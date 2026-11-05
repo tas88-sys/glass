@@ -1429,9 +1429,8 @@ So, concretely, on first launch:
   (`listenService.js:281`) but no path passes the live transcript into `askService.sendMessage`.
   Pressing Ask during a meeting sends only your text + the current screenshot, not the
   conversation. Wiring it is a small change in `featureBridge.js`. Two exceptions since item
-  18.11: System Design · Live reads the transcript itself, and every mode reads the
-  transcript's language while Listen runs, to answer in it (`askLanguage.js`;
-  `docs/LIVE_INSIGHTS_AND_ASK.md` §5).
+  18.11: System Design · Live reads the transcript itself, and every mode answers in the
+  speech-to-text language setting (`askLanguage.js`; `docs/LIVE_INSIGHTS_AND_ASK.md` §5).
 - **Ask is stateless across presses** (§6) — by current wiring, not a model limitation.
 - **No STT failover / no reconnect-on-drop** (§7.3, §10) — a dropped live STT socket is logged,
   not recovered; the only resilience is the timed 20-min renewal and OpenAI keep-alive.

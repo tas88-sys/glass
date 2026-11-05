@@ -17,18 +17,28 @@ const c = require('../checks');
 const { CASES } = require('../fixtures/ask-language-cases');
 const liveCases = require('../fixtures/system-design-live-cases');
 const { askAnswerLanguage } = require('../../../src/features/ask/askLanguage');
+const { questionLanguage } = require('../../../src/features/listen/summary/questionLanguage');
 const { VALID_MODES } = require('../../../src/features/ask/askPrompt');
 
 describe('phase L cases', () => {
-    it('each case expects the language askService names, from the source it is about', () => {
-        const sources = {};
+    it('each case expects the language askService names: its STT language', () => {
         for (const k of CASES) {
-            const got = askAnswerLanguage({ turns: k.history, typed: k.userPrompt, sttLanguage: k.sttLanguage || 'pt-BR', listening: true });
-            assert.equal(got.language, k.lang, k.id);
-            sources[k.id] = got.source;
+            assert.ok(k.sttLanguage, `${k.id}: no sttLanguage`);
+            assert.deepEqual(askAnswerLanguage({ sttLanguage: k.sttLanguage }), { language: k.lang, source: 'stt' }, k.id);
         }
-        assert.equal(sources['L7-sd-live-stt'], 'stt', 'L7 is the STT fallback');
-        for (const id of ['L1-default-pt', 'L5-code-en', 'L6-default-en']) assert.equal(sources[id], 'turns', `${id}: the interview wins over the typed text`);
+    });
+
+    it('the interviewer speaks the STT language; the typed text of L1, L5 and L6 does not', () => {
+        for (const k of CASES) {
+            const them = k.history.filter(t => t.startsWith('them:')).join(' ');
+            if (them) assert.equal(questionLanguage(them), k.lang, k.id);
+        }
+        for (const id of ['L1-default-pt', 'L5-code-en', 'L6-default-en']) {
+            const k = CASES.find(x => x.id === id);
+            assert.notEqual(questionLanguage(k.userPrompt), k.lang, id);
+        }
+        const twitter = CASES.find(x => x.id === 'L7-sd-live-twitter');
+        assert.deepEqual([twitter.history, twitter.userPrompt, twitter.sttLanguage], [[], 'twitter', 'pt-BR']);
     });
 
     it('covers every Ask mode, in both languages, with a screen that exists', () => {
@@ -39,7 +49,7 @@ describe('phase L cases', () => {
 
     it('phase H: the English interview names English, the Portuguese one Portuguese', () => {
         for (const k of liveCases.CASES) {
-            const got = askAnswerLanguage({ turns: k.history, typed: k.userPrompt, sttLanguage: k.sttLanguage || liveCases.STT_LANGUAGE, listening: true });
+            const got = askAnswerLanguage({ sttLanguage: k.sttLanguage || liveCases.STT_LANGUAGE });
             assert.equal(got.language, k.lang || 'en', k.id);
         }
     });

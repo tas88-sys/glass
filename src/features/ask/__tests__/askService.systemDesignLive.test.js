@@ -43,7 +43,6 @@ const world = {
     holdCall: null,     // streamChat waits for it before it returns
     holdStream: null,   // the stream stays open until it resolves
     visible: true,
-    listening: false,   // a Listen session runs (listenService.isSessionActive)
     sttLanguage: 'pt-BR',
     screen: false,      // desktopCapturer gives a screen, so the Ask carries a screenshot
     failImage: false,   // the next call with an image fails as a model without vision would
@@ -73,7 +72,6 @@ stub('../../common/services/modelStateService', {
 });
 stub('../../listen/listenService', {
     getConversationHistory: () => { world.transcriptReads++; return world.transcript; },
-    isSessionActive: () => world.listening,
 });
 stub('../../common/ai/factory', {
     createStreamingLLM: () => ({
@@ -141,7 +139,6 @@ beforeEach(() => {
     world.holdCall = null;
     world.holdStream = null;
     world.visible = true;
-    world.listening = false;
     world.sttLanguage = 'pt-BR';
     world.screen = false;
     world.failImage = false;
@@ -423,22 +420,27 @@ describe('18.11 rules 3 and 4: keys, races and the kit being written', () => {
 });
 
 describe('18.11: language and Live Answer off', () => {
-    it('names the interview\'s language from the interviewer\'s turns, also for a fixed word', async () => {
-        world.transcript = ['them: Vamos projetar um encurtador de URL.', 'me: Quantos links por dia?', 'them: Cerca de 100 milhões, no Brasil.'];
+    it('names the STT language, also for a fixed word', async () => {
+        world.sttLanguage = 'pt-BR';
         const call = await ask('design', DESIGN);
-        assert.match(userOf(call), /^User Request: design\n\nThe interview is in Portuguese: write the whole answer in Portuguese/);
+        assert.match(userOf(call), /^User Request: design\n\nThe interview is in Portuguese: write the whole answer in Portuguese, .*the kit headings exactly as given\.$/);
     });
 
-    it('turns too short to tell: the STT language decides while Listen runs, and nothing without it', async () => {
-        world.transcript = ['them: Vamos desenhar o Twitter.'];
-        world.listening = true;
+    it('the STT language decides, over the interviewer\'s turns and the typed text, Listen on or off', async () => {
+        // The practice of 2026-11-04: `twitter` typed, Listen off, the setting in Portuguese, an English kit.
+        world.transcript = [];
         world.sttLanguage = 'pt-BR';
-        let call = await ask('opening', OPENING);
-        assert.match(userOf(call), /^User Request: opening\n\nThe interview is in Portuguese: .*the kit headings exactly as given\.$/);
-        world.listening = false;
+        let call = await ask('twitter', OPENING);
+        assert.match(userOf(call), /^User Request: opening: twitter\n\nThe interview is in Portuguese: /);
+        world.transcript = ['them: How would you design the home timeline?', 'them: What is the bottleneck here?'];
+        world.sttLanguage = 'en-US';
         askService.liveDesign = createLiveDesign();
         call = await ask('opening', OPENING);
-        assert.equal(userOf(call), 'User Request: opening');
+        assert.match(userOf(call), /^User Request: opening\n\nThe interview is in English: /);
+        world.transcript = ['them: Vamos projetar um encurtador de URL.', 'them: Cerca de 100 milhões, no Brasil.'];
+        askService.liveDesign = createLiveDesign();
+        call = await ask('opening', OPENING);
+        assert.match(userOf(call), /^User Request: opening\n\nThe interview is in English: /, 'the setting, not the turns');
     });
 
     it('with Live Answer off, a kit request shows the warning and still runs', async () => {
@@ -451,58 +453,42 @@ describe('18.11: language and Live Answer off', () => {
 
 describe('askService in the other modes', () => {
     for (const mode of ['default', 'code', 'debug', 'system_design']) {
-        it(`${mode}: without Listen, no transcript, no previous answer, the same prompt as before, the kit kept`, async () => {
+        it(`${mode}: no transcript, no previous answer, the same system prompt as before, the STT language named, the kit kept`, async () => {
             askService.liveDesign.storeKit({ sessionId: 'session-1', kind: 'opening', question: 'opening', answer: OPENING });
             setMode(mode);
             const call = await ask('Design a URL shortener.', '## 1. Clarifying Questions\n- ?');
             assert.equal(world.transcriptReads, 0, 'Listen was read');
-            const expected = buildAskMessages({ askMode: mode, userPrompt: 'Design a URL shortener.', conversationHistory: formatConversationForAsk([]), preferredCodeLanguage: 'go', screenshotBase64: null });
+            const expected = buildAskMessages({ askMode: mode, userPrompt: 'Design a URL shortener.', conversationHistory: formatConversationForAsk([]), preferredCodeLanguage: 'go', screenshotBase64: null, answerLanguage: 'pt' });
             assert.deepEqual(call, expected.messages);
+            assert.match(systemOf(call), /No conversation history available\./);
+            assert.match(userOf(call), /^User Request: Design a URL shortener\.\n\nThe interview is in Portuguese: .* Code, with its names and comments, stays in English\.$/);
             assert.equal(askService.liveDesign.getKit('session-1').answer, OPENING, `${mode} replaced the System Design · Live kit`);
             assert.equal(askService.state.notice, '');
         });
 
-        it(`${mode}: while Listen runs, the transcript names the language only; the prompt keeps no transcript`, async () => {
-            world.listening = true;
+        it(`${mode}: the STT language in English names English, whatever the typed text`, async () => {
             world.sttLanguage = 'en-US';
-            world.transcript = ['them: Vamos projetar um encurtador de URL.', 'me: Quantos links por dia?', 'them: Cerca de 100 milhões, no Brasil.'];
             setMode(mode);
-            const call = await ask('', 'Uma resposta.');
-            assert.equal(world.transcriptReads, 1);
-            const expected = buildAskMessages({ askMode: mode, userPrompt: '', conversationHistory: formatConversationForAsk([]), preferredCodeLanguage: 'go', screenshotBase64: null, answerLanguage: 'pt' });
-            assert.deepEqual(call, expected.messages);
-            assert.match(systemOf(call), /No conversation history available\./);
-            assert.doesNotMatch(systemOf(call), /encurtador/);
-            assert.match(userOf(call), /^User Request: \n\nThe interview is in Portuguese: .* Code, with its names and comments, stays in English\.$/);
-        });
-
-        it(`${mode}: while Listen runs with turns too short to tell, the STT language names it`, async () => {
-            world.listening = true;
-            world.sttLanguage = 'en-US';
-            world.transcript = ['them: ok'];
-            setMode(mode);
-            const call = await ask('', 'An answer.');
-            assert.match(userOf(call), /^User Request: \n\nThe interview is in English: write the whole answer in English/);
+            const call = await ask('Resolva esse problema, por favor.', 'An answer.');
+            assert.match(userOf(call), /^User Request: Resolva esse problema, por favor\.\n\nThe interview is in English: write the whole answer in English/);
         });
 
         it(`${mode}: the text-only retry keeps the language`, async () => {
-            world.listening = true;
             world.screen = true;
             world.failImage = true;
             setMode(mode);
             const call = await ask('', 'Uma resposta.');
             assert.equal(world.calls.length, 2);
             assert.ok(Array.isArray(world.calls[0][1].content), 'the first call carried the screenshot');
-            // The default transcript is too short to tell; the STT language (pt-BR) names it.
             assert.match(call[1].content, /^User Request: \n\nThe interview is in Portuguese: /);
         });
 
-        it(`${mode}: the second Ctrl+Enter sends an empty request, as before`, async () => {
+        it(`${mode}: the second Ctrl+Enter sends an empty request, with the language`, async () => {
             setMode(mode);
             world.reply = 'An answer.';
             await askService.toggleAskButton(true);
             assert.equal(world.calls.length, 1);
-            assert.equal(userOf(lastCall()), 'User Request: ');
+            assert.match(userOf(lastCall()), /^User Request: \n\nThe interview is in Portuguese: /);
             assert.ok(!sent.some(s => s.channel === 'ask:sendFromBox'));
         });
 

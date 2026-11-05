@@ -14,9 +14,9 @@
 // DEFAULT_SCREEN, a plain desktop, as the app would (2026-11-04: phase H had
 // tested the design kit on gpt-oss only, and missed Qwen's diagrams with no arrows).
 const DEFAULT_SCREEN = 'desktop.svg';
-// The interview is in English, heard by Listen in English: the STT language a
-// case with no sttLanguage of its own decides with, when its turns and typed
-// text do not tell (askLanguage.askAnswerLanguage, 18.11 rule 11).
+// The interview is in English, heard by Listen in English: the STT language,
+// which names the answer's language (askLanguage.askAnswerLanguage, 18.11
+// rule 11), of a case with no sttLanguage of its own.
 const STT_LANGUAGE = 'en-US';
 
 const TRANSCRIPT_CONFIRMED = [

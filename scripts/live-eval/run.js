@@ -27,10 +27,10 @@
 //      screenshot as in the app (a desktop when the case names none), and the
 //      design kit needs a diagram with arrows that fits the Ask window
 //   L  the interview's language in every Ask mode (fixtures/ask-language-cases.js):
-//      one Ask per case, the language named as askService names it (the
-//      interviewer's turns, the typed text, the STT language); Portuguese
-//      interviews with nothing or English typed, English ones with Portuguese
-//      typed; the headings and the code stay in English
+//      one Ask per case, the language named as askService names it (the STT
+//      language); Portuguese interviews with nothing or English typed, English
+//      ones with Portuguese typed, `twitter` alone with no transcript; the
+//      headings and the code stay in English
 //   F  stress: a burst of questions (abort and replace), a long session (the
 //      30-turn prompt cap, the Insights lane), and Answer turned off
 //   G  each model: every model of the list alone (the other phases only reach
@@ -677,9 +677,9 @@ async function phaseH(ctx) {
         const kitKind = earlier && earlier.text ? liveDesign.classifyKitAnswer(earlier.text, earlier.kitRequest) : null;
         const resolved = liveDesign.resolveLiveRequest(c.userPrompt, kitKind);
         if (resolved.hint) throw new Error(`phase H case ${c.id} resolves to a hint, not a request`);
-        // The language as askService names it while Listen runs (rule 11): the
-        // turns, the typed text, then the STT language of the interview.
-        const { language: answerLanguage } = askLanguage.askAnswerLanguage({ turns: c.history, typed: c.userPrompt, sttLanguage: c.sttLanguage || liveDesignCases.STT_LANGUAGE, listening: true });
+        // The language as askService names it (rule 11): the STT language of
+        // the interview.
+        const { language: answerLanguage } = askLanguage.askAnswerLanguage({ sttLanguage: c.sttLanguage || liveDesignCases.STT_LANGUAGE });
         const r = await runAsk({ tag: `H:${c.id}`, mode: 'system_design_live', userPrompt: resolved.send, history: c.history, image, llmInfo: ctx.models.llmInfo, previousAnswer, answerLanguage });
         const item = askItem('H', c.id, `system-design-live-${c.expect}`, r, c.userPrompt);
         item.metrics.sent = resolved.send;
@@ -782,10 +782,9 @@ async function phaseL(ctx) {
     for (const c of cases) {
         const image = await renderScreenshot(path.join(FIX, c.image), path.join(ctx.outDir, c.image.replace(/\.svg$/, '.jpg')));
         const sdLive = c.mode === 'system_design_live';
-        // As askService decides it while Listen runs: the turns, the typed
-        // text, then the STT language. Only System Design · Live gets the
-        // turns in its prompt; the other modes get no transcript, as in the app.
-        const { language, source } = askLanguage.askAnswerLanguage({ turns: c.history, typed: c.userPrompt, sttLanguage: c.sttLanguage || 'pt-BR', listening: true });
+        // As askService decides it: the STT language. Only System Design · Live
+        // gets the turns in its prompt; the other modes get no transcript, as in the app.
+        const { language, source } = askLanguage.askAnswerLanguage({ sttLanguage: c.sttLanguage });
         const send = sdLive ? liveDesign.resolveLiveRequest(c.userPrompt, null).send : c.userPrompt;
         const r = await runAsk({ tag: `L:${c.id}`, mode: c.mode, userPrompt: send, history: sdLive ? c.history : [], preferredCodeLanguage: c.code ? c.code.language : undefined, image, llmInfo: ctx.models.llmInfo, answerLanguage: language });
         const item = askItem('L', c.id, `language-${c.mode}`, r, c.userPrompt || '(nothing typed)');

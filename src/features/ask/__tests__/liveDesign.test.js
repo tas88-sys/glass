@@ -3,7 +3,8 @@
  *
  * The fixed rules of System Design · Live v1 (future-work item 18.11): what a
  * send asks for (rules 1 and 2), the stored kit's type (rule 5), the probe's
- * kit excerpt (rule 7), the interview's language (rule 11) and the state.
+ * kit excerpt (rule 7) and the state. The interview's language (rule 11):
+ * askLanguage.test.js.
  * Invented text only.
  *
  * Run: node --test src/features/ask/__tests__/liveDesign.test.js
@@ -19,7 +20,6 @@ const {
     resolveLiveRequest,
     classifyKitAnswer,
     kitExcerpt,
-    interviewLanguage,
     wordCount,
     KIT_MIN_WORDS,
     EXCERPT_MAX_CHARS,
@@ -166,22 +166,6 @@ describe('kitExcerpt (18.11 rule 7)', () => {
     });
 });
 
-describe('interviewLanguage (18.11 rule 11)', () => {
-    it('reads the last interviewer turns', () => {
-        assert.equal(interviewLanguage(['them: Como você projetaria o feed?', 'me: ok', 'them: Qual seria o gargalo aqui?'], 'design'), 'pt');
-        assert.equal(interviewLanguage(['them: How would you design the feed?', 'them: What is the bottleneck here?'], 'design'), 'en');
-    });
-    it('only the last 6 interviewer turns decide', () => {
-        const pt = Array.from({ length: 10 }, () => 'them: Como você lida com isso no seu time?');
-        const en = Array.from({ length: 6 }, () => 'them: How would you scale the write path?');
-        assert.equal(interviewLanguage([...pt, ...en], ''), 'en');
-    });
-    it('falls back to the typed text, then null', () => {
-        assert.equal(interviewLanguage([], 'como você projetaria o twitter'), 'pt');
-        assert.equal(interviewLanguage(['me: Como você está?'], 'design'), null, 'the candidate\'s turns do not count');
-        assert.equal(interviewLanguage(undefined, undefined), null);
-    });
-});
 
 describe('the state (createLiveDesign)', () => {
     it('keeps the Ask mode, coerced like settings', () => {

@@ -1332,15 +1332,16 @@ This replaces the recommended order above. On 2026-11-02 the user chose 18.11 as
   - Step 11 of the script asked to read the line under the diagram, which step 10 had cleared from Ask. The candidate now says the design from memory.
   - **Ask modes other than System Design · Live had no language rule** (found 2026-11-04 when the user asked that every Ask mode follow the interview's language, as Live Answer does).
     - `buildAskMessages` named the language in System Design · Live only, and the other modes get no transcript. With nothing typed and an English problem on screen, a Portuguese interview got English answers.
-    - Rule 11 now covers every mode, with the STT language as its last source while Listen runs (see rule 11). New phase L of the live eval measures it, one Ask per mode (`fixtures/ask-language-cases.js`).
+    - Rule 11 now covers every mode, and the STT language names the language (see rule 11). New phase L of the live eval measures it, one Ask per mode (`fixtures/ask-language-cases.js`).
+    - In the app the same day, `twitter` typed in System Design · Live with Listen off and the setting in Portuguese got an English kit (`glass.log`: `answer language: not named`). The language then came from the turns and the typed text first, and the STT language only while Listen ran. Now the STT language decides alone. Phase L's case 7 is that Ask.
   - **Measured live on 2026-11-04, phase L** (`%LOCALAPPDATA%\glass-live-eval\language-2026-11-04\`):
 
     | | Before (1 run) | After |
     |---|---|---|
-    | gemini-3.5-flash-lite | 5 of the 6 Asks of the other modes in the wrong language. Portuguese interview: Default, Code, Debug and System Design in English. English interview with Portuguese typed: Default in Portuguese, Code in English | 3 runs, 21 Asks: all 21 in the interview's language, read one by one. The check flagged one terse English Default answer (159 characters) as unknown. Every heading in English and in order; the code comments in English; the Default answer's facts from the image 3/3; the debug fix of the loop bound 3/3 |
-    | qwen/qwen3.8-27b | not measured | 7 cases, one per run: Default and Debug in a Portuguese interview answered, both in Portuguese, with the headings in English. Groq refused the other 5 on the model's daily token limit (200,000), spent by the day's runs |
+    | gemini-3.5-flash-lite | 5 of the 6 Asks of the other modes in the wrong language. Portuguese interview: Default, Code, Debug and System Design in English. English interview with Portuguese typed: Default in Portuguese, Code in English. `twitter` with Listen off: English, in the app | 3 runs of the 6 other-mode cases and 3 of `twitter`, 21 Asks: all 21 in the interview's language, read one by one. The check flagged one terse English Default answer (159 characters) as unknown. Every heading in English and in order; the code comments in English; the Default answer's facts from the image 3/3; the debug fix of the loop bound 3/3. The 6 other-mode cases ran with the first version of the rule; they send the same messages under the final one, since each names the same language and their prompt gets no turns |
+    | qwen/qwen3.8-27b | not measured | The first 7 cases (case 7 then a turn too short to tell, then `opening`), one per run: Default and Debug in a Portuguese interview answered, both in Portuguese, with the headings in English. Groq refused the other 5 on the model's daily token limit (200,000), spent by the day's runs |
 
-    - Phase H after the change (Gemini, 4 runs): the English kit in English 4/4, the Portuguese kit in Portuguese 4/4. H1, H2 and H6 now carry the English sentence, named by the STT language, and kept their route and headings 4/4.
+    - Phase H after the change (Gemini, 4 runs; same messages under the final rule): the English kit in English 4/4, the Portuguese kit in Portuguese 4/4. H1, H2 and H6 now carry the English sentence, named by the STT language (`en-US` in phase H), and kept their route and headings 4/4.
     - Not from this change:
       - The code's hidden tests failed in 2 of 6 code answers: one used LeetCode's `MinPriorityQueue`, which does not exist in JavaScript, as both code answers did before the change; one timed out on the 220×220 grid.
       - The probe case (H5) went the deep-dive route in 2 of 4 runs (1 of 15 earlier on 2026-11-04). Its request was the same before and after the change, since the interviewer's English turns already named the language.
@@ -1472,20 +1473,13 @@ A deep dive the candidate wants in full is still typed into Ask ("deep dive cach
     - **Ask reads the same copy once per request,** so its checks and its prompt never see two different modes.
     - **A change into or out of System Design · Live drops the turns waiting for an answer:** the debounce, a pending Jev decision and the held set-ups. An answer already streaming finishes.
 11. **The interview's language.**
-    - Kits and probes answer in the language of the interviewer's turns, which the code reads with `questionLanguage` (`questionLanguage.js:27`), as Live Answer already does for a question.
-      - For a kit, the code reads the last 6 interviewer turns, so a behavioral part in another language doesn't decide.
-      - The language sentence goes in the request, so the text-only retry, which rebuilds the request (`askService.js:549`), keeps it.
-      - The prompt's rule (`promptTemplates.js:926`) puts the language a request names first.
+    - **Every Ask mode** (System Design · Live, Default, Code, Debug and System Design) answers in the speech-to-text language, `sttLanguage` (pt-BR or en-US, pt-BR by default): the language the candidate sets for the interview so Listen transcribes it. `askAnswerLanguage` (`askLanguage.js:28`) reads it, Listen on or off, whatever the interviewer's turns or the typed text say.
+    - The language sentence goes in the request ("The interview is in Portuguese: write the whole answer in Portuguese, …", `askUserText`, `askPrompt.js:81`), so the text-only retry, which rebuilds the request (`askService.js:526`), keeps it.
     - The fixed words carry no language. Without this rule the prompt answers "in the language of the typed text" (`promptTemplates.js:926`), so `design` typed in a Portuguese interview could give an English kit.
-    - When the turns are unclear, the typed text's language decides. When that is unclear too, the prompt's rule stays.
-    - **Since 2026-11-04 the rule covers every Ask mode** (Default, Code, Debug and System Design too), decided in one place, `askAnswerLanguage` (`askLanguage.js:51`), in this order:
-      1. the interviewer's last 6 turns;
-      2. the typed text, when its language is clear;
-      3. while a Listen session runs, the speech-to-text language (`sttLanguage`, the language Listen hears the interview in). It covers a first turn too short to tell ("Vamos desenhar o Twitter." has one word of the Portuguese list) followed by `opening`;
-      4. else no language is named, and each mode answers as before. With no Listen session there is no interview.
-    - The other modes read the Listen transcript only for its language and only while Listen runs. Their prompt still has no transcript ("No conversation history available.").
-    - In every mode the headings stay in English, since the kit and the eval find the sections by them, and so does code, with its names and comments (the user's choice). The sentence is in `askUserText` (`askPrompt.js:81`); System Design · Live keeps its own wording.
-    - Each Ask logs the language and what named it: `[AskService] answer language: pt (turns)`.
+    - In every mode the headings stay in English, since the kit and the eval find the sections by them, and so does code, with its names and comments (the user's choice). System Design · Live keeps its own wording of the sentence.
+    - The other modes still get no transcript ("No conversation history available.").
+    - Each Ask logs the language: `[AskService] answer language: pt (stt)`.
+    - **History.** The first version read the last 6 interviewer turns, then the typed text. On 2026-11-04 it was widened to every mode, with the STT language as a last source while Listen ran. The same day, `twitter` typed in System Design · Live with Listen off and the setting in Portuguese got an English kit: no turns, and a typed text with no language. The user then chose the STT language as the only source.
 
 **Leaving the stage.** In v1 the candidate leaves by switching back to Default, and the badge is the reminder. Stop also ends it: the stored kit belongs to that Listen session (`askService.js:288`), so a new session starts with no kit. A second design problem starts in one of two ways, and rule 1's order starts again from either:
 - typing `opening: <problem>` into Ask (rule 2), which stores a new opening kit;
@@ -1553,7 +1547,7 @@ A deep dive the candidate wants in full is still typed into Ask ("deep dive cach
 
 | Case | Today | v1 |
 |---|---|---|
-| A Portuguese interview, `design` typed | The prompt answers in the language of the typed text (`promptTemplates.js:898`) | The interviewer's language (rule 11) |
+| A Portuguese interview, `design` typed | The prompt answers in the language of the typed text (`promptTemplates.js:898`) | The STT language, set for the interview (rule 11) |
 
 **Still uncertain in v1, and what limits it:**
 - STT mishears the question, or the model answers badly. Same as today. The answer is visible, and the next question replaces it.
@@ -1587,8 +1581,8 @@ A deep dive the candidate wants in full is still typed into Ask ("deep dive cach
   - rule 10: a mode change drops a waiting turn, also one waiting for Jev; after System Design · Live and back, the career state is as before;
   - rule 6: no LLM call and no IPC with no design kit;
   - rule 7: PROBE with a design kit, no career context, the excerpt and its fallback;
-  - rule 8: Default again → today's messages, byte for byte; the other modes unchanged;
-  - rule 11: the language comes from the interviewer's turns;
+  - rule 8: Default again → today's messages, byte for byte; the other modes unchanged. Since 2026-11-04 the user turn of every mode adds rule 11's language sentence; the system prompts stay byte for byte;
+  - rule 11: the language is the STT language, in every Ask mode;
   - one test per edge-case row that can run without Electron;
   - a snapshot taken before any change (`src/features/common/prompts/__tests__/golden/`): every profile's system prompt, the Ask messages of the other modes and the lane's messages for a fixed sequence of turns, compared byte for byte (rule 8). The System Design · Live prompt differs only by route 0, its language line and, since 2026-11-04, the box legend one per line.
 - [ ] In the app, by hand:
@@ -1614,7 +1608,7 @@ A deep dive the candidate wants in full is still typed into Ask ("deep dive cach
   - the probe shape, at most 90 words;
   - it names the store from the kit's Decisions line;
   - no answer on the script's "Assume about 10 million…" line;
-  - kits in the interviewer's language;
+  - kits in the STT language, the interview's;
   - the first token within 6 s;
   - exactly one call per interviewer turn;
   - tokens per call no higher than today's Live Answer, measured in the same run.

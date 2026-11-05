@@ -13,15 +13,12 @@
  * - resolveLiveRequest: what an Ask send asks for (rules 1 and 2).
  * - classifyKitAnswer: the type a finished answer is stored as (rule 5).
  * - kitExcerpt: the part of a design kit a probe gets (rule 7).
- * - interviewLanguage: the interview's language (rule 11), from askLanguage.js.
+ * The interview's language (rule 11) is askLanguage.js, for every Ask mode.
  */
 
 'use strict';
 
 const { normalizeAskMode, cutAtLine } = require('./askPrompt');
-// The interview's language (rule 11) lives in askLanguage.js since every Ask
-// mode uses it; re-exported here for the callers that read it from this file.
-const { interviewLanguage, LANGUAGE_TURNS } = require('./askLanguage');
 
 const SD_LIVE = 'system_design_live';
 
@@ -172,10 +169,8 @@ module.exports.parseFixedWord = parseFixedWord;
 module.exports.resolveLiveRequest = resolveLiveRequest;
 module.exports.classifyKitAnswer = classifyKitAnswer;
 module.exports.kitExcerpt = kitExcerpt;
-module.exports.interviewLanguage = interviewLanguage;
 module.exports.wordCount = wordCount;
 module.exports.SD_LIVE = SD_LIVE;
 module.exports.KIT_MIN_WORDS = KIT_MIN_WORDS;
 module.exports.EXCERPT_MAX_CHARS = EXCERPT_MAX_CHARS;
-module.exports.LANGUAGE_TURNS = LANGUAGE_TURNS;
 module.exports.HINT_DESIGN_DONE = HINT_DESIGN_DONE;
