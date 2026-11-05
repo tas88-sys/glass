@@ -110,6 +110,8 @@ function installLlmTap() {
                 const hasImage = messages.some(m => Array.isArray(m.content) && m.content.some(p => p.type === 'image_url'));
                 const system = messages.find(m => m.role === 'system');
                 const call = {
+                    // the prompt's size in characters (text parts), to compare lanes in one run
+                    promptChars: messages.reduce((n, m) => n + (typeof m.content === 'string' ? m.content.length : Array.isArray(m.content) ? m.content.reduce((k, p) => k + (typeof p.text === 'string' ? p.text.length : 0), 0) : 0), 0),
                     // transcript lines the prompt carries (summaryService keeps the last 30)
                     promptTurns: typeof system?.content === 'string' ? (system.content.match(/^(?:me|them): /gm) || []).length : null,
                     lane: ctx.lane || (opts?.maxTokens === 900 ? 'answer' : 'ask'),

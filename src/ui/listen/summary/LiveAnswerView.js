@@ -130,6 +130,15 @@ export class LiveAnswerView extends LitElement {
             color: #f1fa8c;
         }
 
+        .sd-live-badge {
+            margin-left: 6px;
+            padding: 1px 6px;
+            border-radius: 4px;
+            background: rgba(120, 170, 255, 0.25);
+            color: rgba(255, 255, 255, 0.9);
+            letter-spacing: 0.04em;
+        }
+
         .lane-eyebrow {
             font-size: 10px;
             font-weight: 600;
@@ -234,6 +243,8 @@ export class LiveAnswerView extends LitElement {
         laneStatus: { type: Object },
         /** Reactive: show "Waiting for a question..." while empty; set by ListenView when Insights is off. */
         showEmptyState: { type: Boolean },
+        /** Reactive: the Ask mode is System Design · Live; the "SD Live" badge (future-work 18.11, rule 9). */
+        sdLive: { type: Boolean },
     };
 
     constructor() {
@@ -242,6 +253,7 @@ export class LiveAnswerView extends LitElement {
         this.isVisible = true;
         this.laneStatus = null;
         this.showEmptyState = false;
+        this.sdLive = false;
 
         // Markdown/sanitizer library handles (mirroring SummaryView pattern)
         this.marked = null;
@@ -430,19 +442,29 @@ export class LiveAnswerView extends LitElement {
         return html`<div class="lane-status">${status.model ? `Trying ${status.model}…` : 'Trying another model…'}</div>`;
     }
 
+    /** The pane's label, with the "SD Live" badge in System Design · Live (18.11 rule 9). */
+    renderEyebrow() {
+        return html`<div class="lane-eyebrow">Live Answer${this.sdLive ? html`<span class="sd-live-badge">SD Live</span>` : ''}</div>`;
+    }
+
     render() {
         if (this.isVisible && this.showEmptyState && this.answers.length === 0 && !this.laneStatus) {
             return html`
                 <div class="live-answer-container">
+                    ${this.sdLive ? this.renderEyebrow() : ''}
                     <div class="empty-state">Waiting for a question...</div>
                 </div>
             `;
+        }
+        // 18.11 rule 9: in System Design · Live the badge shows before the first answer too.
+        if (this.isVisible && this.sdLive && this.answers.length === 0 && !this.laneStatus) {
+            return html`<div class="live-answer-container">${this.renderEyebrow()}</div>`;
         }
         if (!this.isVisible || (this.answers.length === 0 && !this.laneStatus)) return html``;
 
         return html`
             <div class="live-answer-container">
-                <div class="lane-eyebrow">Live Answer</div>
+                ${this.renderEyebrow()}
                 ${this.renderLaneStatus()}
                 ${this.answers.map(
                     (a, i) => html`

@@ -4,6 +4,20 @@
 // One interview in five Asks: each case names the route the answer must take.
 // `previous` names an earlier case whose answer goes back in as the previous
 // answer, as askService does within one session. Generic content only.
+// Each userPrompt is what the candidate types; phase H sends it the way
+// askService does since item 18.11 (liveDesign.resolveLiveRequest): with no kit,
+// text that is not a fixed word asks for its opening kit ("twitter" →
+// "opening: twitter"), so a request for the design kit types `design`.
+// Every Ask in the app carries a screenshot (askService.js), and an image puts
+// the models that see images first (Groq order=vision-first): the kits come from
+// Qwen or Gemini, never gpt-oss. So a case with no image of its own sends
+// DEFAULT_SCREEN, a plain desktop, as the app would (2026-11-04: phase H had
+// tested the design kit on gpt-oss only, and missed Qwen's diagrams with no arrows).
+const DEFAULT_SCREEN = 'desktop.svg';
+// The interview is in English, heard by Listen in English: the STT language,
+// which names the answer's language (askLanguage.askAnswerLanguage, 18.11
+// rule 11), of a case with no sttLanguage of its own.
+const STT_LANGUAGE = 'en-US';
 
 const TRANSCRIPT_CONFIRMED = [
     'them: Design a Twitter-like home timeline.',
@@ -17,9 +31,11 @@ const TRANSCRIPT_CONFIRMED = [
 
 const CASES = [
     {
+        // The problem and its scale only on screen. Since 18.11 "Design this."
+        // with no kit would ask for the opening kit; the design kit is `design`.
         id: 'H1-screenshot',
         expect: 'design',
-        userPrompt: 'Design this.',
+        userPrompt: 'design',
         image: 'system-design.svg',
         problemOnScreen: true,
         history: [],
@@ -35,6 +51,7 @@ const CASES = [
         expect: 'design',
         userPrompt: 'design',
         history: TRANSCRIPT_CONFIRMED,
+        lang: 'en',
         mentionsScale: ['/10\\s?m(?:illion)?\\b/', '10,000,000'],
     },
     {
@@ -61,6 +78,25 @@ const CASES = [
         image: 'desktop.svg',
         history: [],
     },
+    {
+        // 18.11 rule 11: `design` carries no language; the kit follows the
+        // interviewer's Portuguese, with its headings as given.
+        id: 'H7-design-pt',
+        expect: 'design',
+        userPrompt: 'design',
+        history: [
+            'them: Vamos projetar a timeline inicial de uma rede social parecida com o Twitter.',
+            'me: Antes de começar, quantos usuários ativos por dia, e é uma região só?',
+            'them: Digamos 10 milhões de usuários ativos por dia, todos no Brasil.',
+            'me: Quais funcionalidades entram? Postar, seguir, a timeline?',
+            'them: Só postar, seguir e a timeline. Busca e notificações ficam de fora.',
+            'me: A timeline pode atrasar alguns segundos?',
+            'them: Pode, alguns segundos tudo bem. Mas um post aceito nunca pode ser perdido.',
+        ],
+        lang: 'pt',
+        sttLanguage: 'pt-BR',
+        mentionsScale: ['/10\\s?m(?:i(?:lh[õo]es|llion))?\\b/', '10.000.000', '10,000,000'],
+    },
 ];
 
-module.exports = { CASES, TRANSCRIPT_CONFIRMED };
+module.exports = { CASES, TRANSCRIPT_CONFIRMED, DEFAULT_SCREEN, STT_LANGUAGE };

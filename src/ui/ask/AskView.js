@@ -18,6 +18,7 @@ export class AskView extends LitElement {
         responseHadFallback: { type: Boolean },
         retryingWith: { type: String },
         errorMessage: { type: String },
+        notice: { type: String },
     };
 
     static styles = css`
@@ -128,6 +129,13 @@ export class AskView extends LitElement {
             white-space: pre !important;
             word-wrap: normal !important;
             word-break: normal !important;
+        }
+
+        /* highlight.js wraps tokens in <span>s inside <code>. Without this they take
+           the sans-serif font of the "*" rule above, so "-", ">" and "|" change width
+           and the columns of an ASCII diagram drift (found 2026-11-04). */
+        .response-container code * {
+            font-family: 'Monaco', 'Menlo', 'Consolas', monospace !important;
         }
 
         .response-container pre code {
@@ -410,6 +418,14 @@ export class AskView extends LitElement {
 
         .response-container::-webkit-scrollbar-thumb:hover {
             background: rgba(255, 255, 255, 0.3);
+        }
+
+        .ask-notice {
+            font-size: 12px;
+            padding: 6px 12px;
+            color: rgba(255, 255, 255, 0.85);
+            background: rgba(255, 255, 255, 0.08);
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
         }
 
         .response-footer {
@@ -759,6 +775,7 @@ export class AskView extends LitElement {
         this.responseHadFallback = false;
         this.retryingWith = '';
         this.errorMessage = '';
+        this.notice = '';
 
         this.marked = null;
         this.hljs = null;
@@ -824,6 +841,14 @@ export class AskView extends LitElement {
 
             window.api.askView.onScrollResponseUp(() => this.handleScroll('up'));
             window.api.askView.onScrollResponseDown(() => this.handleScroll('down'));
+            // System Design · Live (18.11 rule 3).
+            this.handleSendFromBox = () => this.handleSendText();
+            this.handleClearInput = () => {
+                const textInput = this.shadowRoot?.getElementById('textInput');
+                if (textInput) textInput.value = '';
+            };
+            window.api.askView.onSendFromBox(this.handleSendFromBox);
+            window.api.askView.onClearInput(this.handleClearInput);
             window.api.askView.onAskStateUpdate((event, newState) => {
                 this.currentResponse = newState.currentResponse;
                 this.currentQuestion = newState.currentQuestion;
@@ -833,6 +858,7 @@ export class AskView extends LitElement {
                 this.responseHadFallback = newState.responseHadFallback || false;
                 this.retryingWith    = newState.retryingWith || '';
                 this.errorMessage    = newState.errorMessage || '';
+                this.notice          = newState.notice || '';
 
                 const wasHidden = !this.showTextInput;
                 this.showTextInput = newState.showTextInput;
@@ -876,6 +902,8 @@ export class AskView extends LitElement {
             window.api.askView.removeOnShowTextInput(this.handleShowTextInput);
             window.api.askView.removeOnScrollResponseUp(this.handleScroll);
             window.api.askView.removeOnScrollResponseDown(this.handleScroll);
+            if (this.handleSendFromBox) window.api.askView.removeOnSendFromBox(this.handleSendFromBox);
+            if (this.handleClearInput) window.api.askView.removeOnClearInput(this.handleClearInput);
             console.log('✅ AskView: IPC 이벤트 리스너 제거 필요');
         }
     }
@@ -1334,12 +1362,17 @@ export class AskView extends LitElement {
         const text = (overridingText || textInput?.value || '').trim();
         // if (!text) return;
 
-        textInput.value = '';
+        if (textInput) textInput.value = '';
 
         if (window.api) {
-            window.api.askView.sendMessage(text).catch(error => {
+            try {
+                const result = await window.api.askView.sendMessage(text);
+                // System Design · Live (18.11 rule 4): a request refused while a kit
+                // is written keeps its text in the box.
+                if (result && result.refused && text && textInput && !textInput.value) textInput.value = text;
+            } catch (error) {
                 console.error('Error sending text:', error);
-            });
+            }
         }
     }
 
@@ -1366,7 +1399,7 @@ export class AskView extends LitElement {
             this.renderContent();
         }
 
-        if (changedProperties.has('showTextInput') || changedProperties.has('isLoading') || changedProperties.has('currentResponse') || changedProperties.has('errorMessage')) {
+        if (changedProperties.has('showTextInput') || changedProperties.has('isLoading') || changedProperties.has('currentResponse') || changedProperties.has('errorMessage') || changedProperties.has('notice')) {
             this.adjustWindowHeightThrottled();
         }
     
@@ -1448,6 +1481,9 @@ export class AskView extends LitElement {
                         answered by: ${this.responseModel}${this.responseHadFallback ? ' (fallback)' : ''}
                     </div>
                 ` : ''}
+
+                <!-- System Design · Live (18.11): a hint, a refusal or a warning -->
+                ${this.notice ? html`<div class="ask-notice">${this.notice}</div>` : ''}
 
                 <!-- Text Input Container -->
                 <div class="text-input-container ${!hasResponse ? 'no-response' : ''} ${!this.showTextInput ? 'hidden' : ''}">

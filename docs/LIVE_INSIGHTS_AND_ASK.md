@@ -713,7 +713,9 @@ TTS (Gemini, cached) → 100 ms PCM chunks → SttService (Deepgram/Gemini live)
 | C | Ask, default mode, on an ops screen | order id, latency and error code read from the image; the screenshot was sent; a model that sees images answered |
 | D | Ask, code mode, on a hard grid problem; once in JavaScript and once in the saved language | five sections in order; a code block; **the JavaScript runs against 22 hidden tests**, one of them a 220×220 grid that a quadratic solution cannot finish (a function under another name than the screen's fails, and the detail says how it does under its own name); the Go answer compiles, when Go is installed |
 | E | Ask, system design mode, three Asks with no transcript, as in the app (`fixtures/system-design-cases.js`): the global rate limiter screenshot; `twitter, 10M DAU, home timeline only, US only`; `deep dive on the cache` | no "see prior turn" placeholder. For the full answers: sections 0–11 in order, section 0 first, ≥ 3 (given)/(assumed) marks in the requirements. The screenshot's ≥ 8 numbers with units and ≥ 5 of 7 requirements; the typed scale. The deep dive opens with `## Deep dive:`, has no section 0, and names TTL. A Phase 3 over 3 bullets with one region given, a deep dive over 600 words or without stampede handling only warn |
-| H | Ask, System Design · Live, one interview in five Asks (`fixtures/system-design-live-cases.js`): the rate limiter screenshot; a bare problem; `design` after a transcript where the interviewer gives scale and scope; a deep dive and an interviewer question, both on the previous answer; a bare `twitter` with only a desktop on screen (`fixtures/desktop.svg`) | each takes its route (design, opening, design, deep dive, probe, opening); the kit's headings in order; ≥ 3 questions and an out-of-scope list in the opening kit; a write path and a read path in the design kit; the screenshot's numbers and requirements; the scale the interviewer gave; a key term in the deep dive. Over the word budget (450 / 750 / 300 / 90), a multi-region section with one region confirmed, or a probe without a trade-off line only warn |
+| H | Ask, System Design · Live, one interview in seven Asks (`fixtures/system-design-live-cases.js`), each sent as askService sends it (`liveDesign.resolveLiveRequest`, item 18.11): `design` with the rate limiter screenshot; a bare problem; `design` after a transcript where the interviewer gives scale and scope; a deep dive and an interviewer question, both on the previous answer; a bare `twitter` with only a desktop on screen (`fixtures/desktop.svg`); `design` after a Portuguese transcript. Every Ask carries a screenshot, as in the app: a case that names none sends the desktop. The image puts the models that see images first, so the kits come from the models that answer them in the app (Qwen, then Gemini), not gpt-oss. The language is named as askService names it, by the STT language (`askAnswerLanguage`): `en-US` for the English interview and `pt-BR` for the Portuguese case | each takes its route (design, opening, design, deep dive, probe, opening, design); the kit's headings in order; ≥ 3 questions and an out-of-scope list in the opening kit; a write path and a read path in the design kit; a diagram under Design with ≥ 3 arrows and none of the prompt's `<names>` left (`checks.designDiagram`); the screenshot's numbers and requirements; the scale the interviewer gave; a key term in the deep dive; the English transcript's kit in English and the Portuguese kit in Portuguese. Over the word budget (450 / 750 / 300 / 90), a diagram wider than the Ask window (84 columns), a multi-region section with one region confirmed, or a probe without a trade-off line only warn. Qwen answers one kit per run (after it, Groq refuses the next for the key's output limit), so measure it one case per run, a minute apart (`--cases H3`) |
+| I | Live Answer in System Design · Live (`fixtures/system-design-live-probes.js`), in English and Portuguese, through the real SummaryService: the problem and a clarifying line before any kit, then a fixed design kit and 2–3 interviewer questions, then one Default question for comparison | no LLM call and nothing shown before the design kit; one call per question; an answer that names the kit's choice (Redis, Cassandra, pull/hybrid); no error. Over 90 words, not in the PROBE shape, another language, a first token over 6 s, or a probe's prompt larger than the Default answer's prompt only warn |
+| L | The interview's language in every Ask mode (`fixtures/ask-language-cases.js`, item 18.11 rule 11): one Ask per case with a screenshot, the language named as askService names it, by each case's STT language (`askAnswerLanguage`); only System Design · Live gets the turns in its prompt. Portuguese interviews: Default with an English question; Code, Debug (`fixtures/debug-code.svg`, an off-by-one loop bound and its failing test) and System Design with nothing typed. English interviews: Code and Default with a Portuguese request. System Design · Live: `twitter` alone with no transcript, with STT `pt-BR` | the answer in the interview's language (`checks.detectLang`); the headings in English, in order (code, debug, system design sections 0–11, the opening kit); the image's facts (Default, Portuguese); the JavaScript passes the 22 hidden tests (as in D); the debug answer fixes the loop bound. Code comments in Portuguese only warn (`checks.codeComments`) |
 | F | `--stress`: a burst of 5 questions 1 s apart; 32 filler turns then a question with both lanes on; Answer off | last question answered and no late update from a replaced answer; prompt holds the last 30 turns; Insights every 5 turns; no answer call with Answer off |
 | G | Each model of the list alone, plus `--endpoint-models`: one Live Answer turn, one Ask in text, the screenshot Ask when the catalog says the model sees images, and `--kb-per-model` career questions per route (default 1) with the notes, the router and the in-memory vectors, as in phase B. A tokens-per-minute limit makes it wait what the provider asks and try again, twice. The other phases only reach the first model that answers, so this is the only phase that tries the fallbacks | an answer with a key term and no error, per model; for a model that sees images, the facts from the screenshot. **A provider out of reach (rate limit, spent quota, 503, OmniRoute cooling down) only warns:** the model is out of reach, the app is not broken. `eachModel` in the aggregates has one line per model |
 
@@ -796,6 +798,28 @@ and numbers only.
 
 `--help` lists all of them. The exit code is 1 when any check that fails the run did not pass.
 
+### 4.10 System Design · Live: probes from the design kit (future-work item 18.11)
+
+While the Ask mode is System Design · Live, the lane follows the design round instead of the
+career notes (`summaryService.triggerProbeIfNeeded`):
+
+- **No design kit in this Listen session** (none yet, or only an opening kit): no LLM call and
+  nothing sent to the window, whatever the interviewer says. "Assume about 10 million daily
+  users" passes the question gate but gets no answer.
+- **With a design kit:** each interviewer turn the gate accepts (same gate, debounce,
+  abort-and-replace, PASSIVE, history and failover) gets one PROBE answer: the probe profile
+  `pickle_glass_system_design_probe`, the transcript and the kit's excerpt (Requirements used,
+  the Decisions line, the Storage table, the deep dives' Pick lines). The kit is read when the
+  debounce fires, so a kit replaced meanwhile by an opening kit means no call.
+- **No career step:** no company detection, Jev, prefetch or notes. A design problem naming a
+  company never becomes the interviewer's company; a probe clears the career follow-up state.
+- **Mode changes** into or out of the mode drop the turns waiting for an answer (the debounce,
+  a pending Jev decision, held set-ups); an answer already streaming finishes. The mode is kept
+  in memory (`liveDesign.js`), loaded at start, after each saved change, at each Listen session
+  and on a user change, so the lane reads no settings per turn.
+- Back in Default, the lane answers exactly as before (`golden.test.js` compares byte for byte).
+- The history row of a probe has the route `sd-probe`.
+
 ---
 
 ## 5. Ask — and why it does not hear the interviewer
@@ -814,7 +838,16 @@ So when you press Ask, the model receives exactly: **the system prompt + your ty
 fresh screenshot** (`buildAskMessages`, `askPrompt.js:49-85`, called at `askService.js:268`). It does **not** see what the interviewer just
 said unless that text is on the screen or you typed/pasted it yourself. This is wiring, not a
 model limitation — see [`../ARCHITECTURE.md` §16](../ARCHITECTURE.md) ("Listen → Ask context is
-not wired").
+not wired"). System Design · Live is the exception: it reads the Listen transcript itself (§4.10).
+
+**Every mode answers in the interview's language** (future-work 18.11, rule 11, since
+2026-11-04): the speech-to-text language setting (`sttLanguage`, Settings), read by
+`askAnswerLanguage` (`src/features/ask/askLanguage.js`) on each Ask, Listen on or off, whatever
+the typed text says. With the setting in Portuguese, nothing typed and an English problem on screen
+give a Portuguese answer. The language goes in the user turn ("The interview is in Portuguese:
+write the whole answer in Portuguese, …"). The headings and the code, with its names and comments,
+stay in English. Each Ask logs `[AskService] answer language: pt (stt)`. Set the STT language to
+the interview's before it starts: it decides both the transcription and the Ask answers.
 
 **Two ways to actually submit an Ask:**
 
@@ -888,29 +921,61 @@ Pick based on what kind of question it is:
    [`../ARCHITECTURE.md` §13](../ARCHITECTURE.md)).
 
    **System Design · Live** is the only mode that also reads the Listen transcript (what the
-   interviewer said counts as confirmed) and its own last kit answer in the session. What you
-   type picks the answer:
+   interviewer said counts as confirmed) and the kit stored for the session. Since v1
+   ([`future-work.md` item 18.11](future-work.md)) fixed rules in the code, not the model, decide
+   what each send asks for, from the kit stored for this Listen session:
 
-   | You type | You get |
+   | You send | You get |
    |---|---|
-   | the problem only ("Design a URL shortener") | **opening kit**: restatement and agenda, scope, 3–5 questions, assumptions to propose, estimates, check-in line (≤ 450 words) |
-   | `design` (or `next`) once the interviewer has answered, or the problem with its numbers, or a screenshot that lists them | **design kit**: requirements used, API, diagram with write and read paths, storage, 2 deep dives, check against the requirements, next questions (≤ 750 words) |
-   | a part to expand ("deep dive cache", "estimates") | **deep dive** on that part only (≤ 300 words) |
-   | the interviewer's question ("what if Redis goes down?") | **probe**: a one-line answer to say, 2–3 reasons, the trade-off (≤ 90 words) |
+   | nothing (Ctrl+Enter twice, or Enter on the empty box), no kit yet | **opening kit**, the problem read from the transcript or the screen: restatement and agenda, scope, 3–5 questions, assumptions to propose, estimates, check-in line (≤ 450 words) |
+   | nothing, after an opening kit | **design kit**: requirements used, API, a flow diagram with arrows (write and read paths, at most 70 columns), storage, 2 deep dives, check against the requirements, next questions (≤ 750 words) |
+   | nothing, after a design kit | no request: the hint "Design kit done. Type `design` to update it after a change." |
+   | the problem, no kit yet ("twitter", "twitter, 10M DAU, US only") | the **opening kit** for exactly that problem (sent as `opening: twitter`) |
+   | `design` or `next` (or `design: <problem and requirements>`) | a **design kit**, also to update it after the interviewer changes a requirement |
+   | `opening: <problem>` | a new **opening kit**: a second problem in the same session |
    | `full` | both kits, for practice |
+   | other text, with a kit ("deep dive cache", "what if Redis goes down?") | sent as typed: a **deep dive** (≤ 300 words) or a **probe** (≤ 90 words) |
 
-   The previous answer is kept in memory while the app runs; deep dives and probes don't replace
-   it, so they keep building on the last design.
+   A fixed word counts as the whole text, or followed by a colon; case and a final period don't
+   matter. The kit is stored by its headings (or, under other headings, by the kit asked for); a
+   deep dive or a probe never replaces it. The kit's language is the interviewer's.
+
+   **The keys in this mode:** the second Ctrl+Enter sends what is in the box; closing Ask (Esc,
+   the close button, or the header's Ask button hiding it) clears the box; a key during Ask's
+   closing fade does nothing; two empty sends within 300 ms count as one. While a kit is being
+   written, a new request is refused ("A kit is still being written. Close Ask to cancel it.")
+   and its text stays in the box; closing Ask cancels the kit.
+
+   **Live Answer in this mode** stays silent until a design kit exists in the Listen session,
+   then answers each interviewer question in the probe shape, with the design kit's context, in
+   the Listen window (§4.10). The Live Answer pane shows an **SD Live** badge while the mode is
+   on; switch back to Default when the design round ends.
 
    **Practice run (Windows):** `npm run practice:sd-live` plays a mock interviewer
    (`scripts/windows/sd-live-interviewer.ps1`). The computer reads the interviewer's lines aloud
    through the speakers or headphones, so Listen hears them as *Them*, while you answer into the
-   mic as *Me*. At each step the script shows what to say and what to type into Ask. It clears
-   itself before the Ask so it stays out of the screenshot, then lists what to check. The nine
-   steps cover the opening kit, the design kit with the confirmed scale, a deep dive, a probe, a
-   changed requirement, a probe on the new design, `full`, and Stop wiping the memory. Wear
-   headphones: on speakers the mic also picks up the voice. Add `-- -Step 4` to start at step 4,
-   or `-- -Rate -2` to slow the voice.
+   mic as *Me*. At each step the script shows what to say and what to type or press. It clears
+   itself before the interviewer speaks so it stays out of the screenshot, then lists what to
+   check. The eighteen steps follow the v1 interview (item 18.11) and its in-app checks:
+   - two behavioral questions in Default, the switch to System Design · Live, and a restart with
+     the mode saved;
+   - keys pressed out of order, the opening kit typed (and a request refused while it is
+     written), and the silent clarifying stage;
+   - the design kit by Ctrl+Enter twice with the VM window focused;
+   - a stray Ctrl+Enter pair and a held Ctrl+Enter (the hint), Esc and Ctrl+\ during a kit, and
+     closing Ask to cancel one;
+   - probes answered by themselves, a deep dive, a changed requirement and `design`, and
+     `opening: uber` after the design kit (Live Answer silent again);
+   - the switch back to Default, and a new session where typed text is cleared on entering the
+     mode and a held Ctrl+Enter asks for one opening kit.
+
+   Each step checks itself from the Glass log: the app writes an `[SD Live]` line for each mode
+   change, key, send, refusal, hint, stored or cancelled kit, silent turn and probe. The script
+   marks each expected count PASS or FAIL, asks you for what only the screen shows, and writes a
+   report to `%LOCALAPPDATA%\glass-practice\`. Start Glass from the desktop shortcut or
+   `scripts/windows/start-glass.ps1` so the log exists; with `npm start` in a terminal the
+   automatic checks are skipped. Wear headphones: on speakers the mic also picks up the voice.
+   Add `-- -Step 4` to start at step 4, or `-- -Rate -2` to slow the voice.
 
    **System Design** answers in one go: the twelve sections for the problem, or, for a part
    ("deep dive on the cache"), only that part. Type the constraints with the problem
@@ -933,9 +998,11 @@ Pick based on what kind of question it is:
   question into Ask** (flow 3) or **click the matching suggested question** (flow 2).
 - **For a coding / system-design prompt on screen:** put Ask in `code` / `system_design` mode
   and use **screenshot-only Ask** (flow 4).
-- **For a live system design round:** keep Listen on and use `system_design_live`: the problem
-  first, `design` after the clarifying questions, then a topic or the interviewer's question
-  (flow 3).
+- **For a live system design round:** keep Listen on with Live panels *Answer only*; switch to
+  `system_design_live` when the round starts; type the problem (or press Ctrl+Enter twice) for
+  the opening kit, press Ctrl+Enter twice after the clarifying questions for the design kit, and
+  read the probes Live Answer gives by itself; type `design` after a changed requirement; switch
+  back to Default when the round ends (flow 3).
 - Keep Ask in **`default` mode** if you want the panel's clickable suggestions to work
   (flow 2) — they're blocked in the other modes.
 
@@ -979,6 +1046,9 @@ Pick based on what kind of question it is:
 | Career retrieval for one question | `scripts/ask-career-kb.js` |
 | Live eval (simulated interview, real audio and models, §4.9) | `scripts/live-eval/` (`npm run eval:live`; unit tests `scripts/live-eval/__tests__/`) |
 | Ask prompt and messages (shared by the app and the live eval) | `src/features/ask/askPrompt.js` (tests `src/features/ask/__tests__/askPrompt.test.js`) |
+| System Design · Live state and fixed rules (the mode in memory, the stored kit, what a send asks for, the probe's kit excerpt; item 18.11) | `src/features/ask/liveDesign.js` (tests `src/features/ask/__tests__/liveDesign.test.js`, `askService.systemDesignLive.test.js`) |
+| Live Answer probes in System Design · Live | `src/features/listen/summary/liveProbePrompt.js` (tests `src/features/listen/summary/__tests__/liveAnswerSdLive.test.js`) |
+| What is sent outside System Design · Live, byte for byte (snapshot) | `src/features/common/prompts/__tests__/golden.test.js`, `golden/` |
 | Listen window / insights-vs-transcript toggle | `src/ui/listen/ListenView.js` |
 | Ask answer engine | `src/features/ask/askService.js` |
 | Ask UI | `src/ui/ask/AskView.js` |

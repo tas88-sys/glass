@@ -168,6 +168,64 @@ describe('System Design · Live routes (phase H)', () => {
     });
 });
 
+describe('designDiagram (phase H, the design kit diagram)', () => {
+    const kit = diagram => `## API\n- POST /tweets\n## Design\n\`\`\`\n${diagram}\n\`\`\`\n(1) API gateway: auth\n- **Write path:** 1) sync\n## Deep dives\n\`\`\`\nx --> y\n\`\`\``;
+    // Transcribed from the practice run of 2026-11-04 (qwen/qwen3.8-27b): two lists, one flow.
+    const list1 = '(1) API GW\n(2) Tweet svc   (3) Social svc\n(4) SQL (tweets, follows)\n(5) Fan-out worker\n(6) Redis (timelines)\n(7) Feed svc\n(8) Object storage (images)';
+    const list2 = '(1) API GW\n(2) Tweet svc   (3) Social svc   (4) Image svc\n(5) SQL (tweets, follows)\n(6) Fan-out worker\n(7) Redis (timelines)\n(8) Feed svc\n(9) Object storage (images) + CDN';
+    const flow = [
+        '       (1) API Gateway',
+        '          auth, rate-limit, routing',
+        '               |',
+        '               ▼',
+        '       (2) App Servers',
+        '               |',
+        '  POST tweet || GET feed',
+        '               ▼▼',
+        ' (3) Tweet Service      (4) Feed Service',
+        '               |                  |',
+        '               | async            |',
+        '               ▼                  ▼',
+        '       (5) Kafka          (6) Redis (feed lists)',
+        '               |                  ▲',
+        '               ▼                  |',
+        '       (7) SQL DB         (8) Fan-out Worker',
+    ].join('\n');
+
+    it('finds no arrow in a column of boxes', () => {
+        for (const d of [list1, list2]) {
+            const r = c.designDiagram(kit(d));
+            assert.equal(r.found, true);
+            assert.equal(r.arrows, 0);
+            assert.ok(r.boxes >= 8);
+        }
+    });
+    it('counts the arrows of a flow, and its widest line', () => {
+        const r = c.designDiagram(kit(flow));
+        assert.equal(r.boxes, 8);
+        assert.equal(r.arrows, 7);   // ▼, ▼▼, ▼ ▼, ▲, ▼
+        assert.equal(r.widest, 48);
+        assert.deepEqual(r.placeholders, []);
+    });
+    it('reads ASCII arrows and a "v" or "^" arrowhead next to a "|"', () => {
+        assert.equal(c.designDiagram(kit('(1) A --> (2) B -> (3) C\n  |\n  v\n(4) D <-- (5) E ==> (6) F\n  ^   |')).arrows, 6);
+        assert.equal(c.designDiagram(kit('(1) Service v2')).arrows, 0);
+        // Gemini draws the shaft with box-drawing dashes (live eval, 2026-11-04).
+        assert.equal(c.designDiagram(kit('(1) API ──> (2) Post svc ──(3) DB\n    └──> (4) Queue <── (5) Worker')).arrows, 3);
+    });
+    it('reports the skeleton names left in the diagram', () => {
+        assert.deepEqual(c.designDiagram(kit('(1) <entry> ──▶ (2) <write service>')).placeholders, ['<entry>', '<write service>']);
+        assert.deepEqual(c.designDiagram(kit('(1) API GW ─→ (2) B ─→ (3) C\n(4) D')).placeholders, ['(2) B', '(3) C', '(4) D']);
+        // Real names that start with a letter from A to G are not the skeleton's.
+        assert.deepEqual(c.designDiagram(kit('(1) API GW ─→ (2) Feed svc ─→ (3) DB ─→ (4) Cache (Redis)\n(5) G2 store')).placeholders, []);
+    });
+    it('reads only the block under "## Design"', () => {
+        assert.equal(c.designDiagram('## Design\n- no diagram here\n## Deep dives\n```\nx --> y\n```').found, false);
+        assert.equal(c.designDiagram('```\nx --> y\n```').found, false);
+        assert.equal(c.designDiagram('').found, false);
+    });
+});
+
 describe('codeBlocks and runJsSolution', () => {
     const tests = codeProblem.tests();
     it('extracts fenced blocks with their language', () => {

@@ -19,7 +19,7 @@ One step at a time, each with its own plan, a fresh session per step. When a ste
 | [x] 7 | 13. A question about the candidate's own setup routes general | After 9, since the 2026-10-29 turn had no question and should then get no answer; what is left are real questions about the setup. Uses item 5's held-out sets, so it can share a plan with item 5. |
 | [x] 8 | 15. STT terms heard as other words | Independent, lowest severity, costliest to measure (audio eval before and after). Can move into any gap. Merged with its measurement pending; **measured on 2026-11-01**. The new terms did not raise the count heard right (7 of 12 before and after), and "Claude Code" is still heard as "Cloud Code" (item 15, acceptance box 1, still open). |
 
-Items 16 (System Design · Live, 2026-10-31) and 17 (System Design fixes, 2026-11-01) came in outside this order.
+Items 16 (System Design · Live, 2026-10-31) and 17 (System Design fixes, 2026-11-01) came in outside this order. Item 18 (System Design · Live without typing, 2026-11-01) is a list of proposals; its v1, 18.11, was built on 2026-11-02 (branch `2026-11-02-system-design-live-no-typing`), with the checks in the app still to do. 18.12 (changes in red when `design` is typed again after a change, 2026-11-04) is planned and not built.
 
 Notes for the plans:
 
@@ -1076,6 +1076,642 @@ Fix the content, and keep the flow: one Ask, the twelve sections, Rule B for a d
 ### Open
 
 - A deep dive with no problem in the request makes up its own scale (e.g. 50M DAU), marked as assumed. Typing the problem along with the target ("deep dive on the cache for twitter, 10M DAU") gives it the right numbers.
+
+---
+
+## 18. System Design · Live — answer without typing, like Live Answer
+
+**Status:** Proposal, 2026-11-01. Not planned yet: each proposal below would get its own plan and branch. Outside the work order at the top. **The v1 chosen on 2026-11-02 is 18.11**: the user's scenario, with every stage decision made by hand. It was built the same day (see its **Status**).
+**Severity:** MEDIUM (enhancement)
+**Code it would touch:**
+- the answer lane in `src/features/listen/summary/summaryService.js`, and `questionGate.js`;
+- `src/features/ask/askService.js` (`lastLiveDesign`) and `askPrompt.js`;
+- the profile `pickle_glass_system_design_live`, and a new probe-only profile (`promptTemplates.js`);
+- `src/features/shortcuts/shortcutsService.js`;
+- `LiveAnswerView.js`, `ListenView.js`, `windowManager.js`;
+- live eval phase H.
+
+### Summary
+
+System Design · Live (item 16) answers only what is typed into Ask. Live Answer answers the interviewer's questions by itself. In a system design round, the candidate keeps going back and forth between the interview and the Ask box:
+- **Six typed Asks per round.** The item-16 practice script (`npm run practice:sd-live`, before v1 rewrote it) typed in steps 1, 3, 4, 5, 6 and 7.
+  - Steps 5 and 7 retyped the question the interviewer had just asked ("what if the timeline cache cluster goes down?", "why not just use a single SQL database for the tweets?"), which the transcript already had.
+  - Steps 3 and 6 were the word `design`.
+- **Two answers to one question.** The answer lane runs in every Ask mode (`summaryService.js` never reads `askMode`), and `design` is one of its interview cues (`questionGate.js:36`).
+  - The interviewer's "Design a Twitter feed" already gets a generic ~60-word answer from `pickle_glass_analysis`.
+  - "What if Redis goes down?" gets one that doesn't know the design: the last kit lives only in `askService.lastLiveDesign` (`askService.js:157`, `:461`).
+  - Every interviewer line of the practice script passes the gate, not only the questions: step 2 on `assume`, step 3 ("Go ahead with the high-level design") on `design`, step 6 on `suppose` (`questionGate.js:36-38`).
+- **Token cost.**
+  - The System Design · Live prompt is ~3,100 tokens in, ~4,700 with the previous answer (item 16). A design kit adds ~1–1.5k out, plus gpt-oss's reasoning.
+  - Groq's free tier allows 8,000 tokens per minute **per model**, and cached tokens don't count (`ARCHITECTURE.md:1018`). One kit nearly uses up a model's minute, so the next call falls to the next model of the list, a weaker one or Gemini.
+  - Every Ask also sends a screenshot, which moves the models that see images first (item 16).
+  - Today a probe costs both an Ask and a generic Live Answer (~3.5k, `ARCHITECTURE.md:1020`).
+- **The Ask window may take focus.** It opens with `win.show()` (`windowManager.js:435`) and is focusable (Electron's default; `:546` sets nothing else). An Ask opened without a key press, while the candidate types in a shared code pad, could take the keyboard. Whether Windows lets it take focus from a browser is not verified. Live Answer doesn't have this problem: it only sends IPC to the Listen window, already open.
+
+### Proposals, best first
+
+Each one with its impact on the round and its feasibility. Effort is an estimate, in sessions (one plan and one branch each).
+
+#### 18.1 Answer the interviewer's questions with the design in mind (probes in the Live Answer lane)
+
+- In `system_design_live`, the answer lane swaps `pickle_glass_analysis` for a short probe-only profile (~1,000 tokens): the design rules, the trade-off and failure cheat sheets, the PROBE format and the PASSIVE rule.
+- It keeps the lane's gates, the 800 ms debounce, abort-and-replace, PASSIVE, the history and the failover.
+- `lastLiveDesign` moves out of `askService` into a small module that both services read.
+- Only the kit's "Requirements used" and its Decisions line go into the prompt, not the 6,000 characters.
+- **Impact: high.** It removes the most frequent action of the round's second half (retyping the question), and the generic answer that can contradict the design. Same latency as Live Answer.
+- **Feasibility: high.** It reuses the lane. 1–2 sessions. The risk is the per-minute limit: the short prompt keeps a call near 2k tokens instead of 4.7k. Eval: H5-like cases driven by the transcript instead of typed text.
+
+#### 18.2 One "next step" key that works out the request
+
+- A global shortcut next to `nextStep` (`shortcutsService.js`), and chips in the panel.
+- A pure function, `inferLiveDesignStep(transcript, lastKit)`, picks the request:
+  - no kit yet and a problem in the transcript: the opening kit, with the problem taken from the transcript;
+  - an opening kit, and the interviewer answered since: `design`;
+  - a design kit, and the interviewer's last turn is a question: a probe on it;
+  - two chips for the deep dives the kit itself listed (the titles under `## Deep dives`).
+- **Impact: high.** No typing, and the candidate still picks the moment: a kit costs ~4k tokens and covers the screen.
+- **Feasibility: very high.** About 1 session, and the function is testable without Electron. It is the state machine of 18.3 with a human trigger: each key press records when a stage really changed, which is the labeled data 18.3 needs.
+
+#### 18.3 Kits that follow the interview's stages by themselves
+
+- A state machine in `summaryService`, run on each `them` turn:
+  - **Idle → Problem:** the turn asks to design something. The opening kit starts by itself. This needs a new detector. `SETUP_TASK_RE` is not exported (`questionGate.js:459`) and matches any design, build or scale word, and so does the `design` cue: "how does that scale?" or "Go ahead with the high-level design" would read as a new problem.
+  - **Clarifying:** counts the interviewer's answers that carry numbers, scope or regions.
+  - **Designed:** the design kit starts when the interviewer agrees after the check-in ("sounds good", "pode seguir") or moves on ("let's start with the high level"). From then on, questions go to 18.1.
+- **Impact: very high.** The whole round hands-free.
+- **Feasibility: medium.** 2–4 sessions. The risks:
+  - A problem said in pieces, with pauses ("Let's design Twitter… focus on the feed… 10M users"). Item 1 (the answer fires before the interviewer finishes) bites harder here: an opening kit on half the problem. This trigger needs a longer wait (~3 s) and continuation grace.
+  - A design kit fired by mistake costs ~4.7k tokens and covers the screen.
+  - "Go ahead and design" is a fuzzy signal in both languages. The Jev router can't simply be reused: its labels are fixed (personal, company or general, plus `asks` and `invites`, `jevRouter.js:9-16`), and a stage label means changing its schema. Only its `asks` score helps, to drop turns that ask nothing.
+- The kit can't open the Ask window by itself (focus): use `showInactive()`, or render it in the listen window.
+- Start safe: the machine only lights the 18.2 chip ("Design kit ready?"), and fires by itself once the eval has measured its precision.
+
+#### 18.4 A changed requirement updates only what changed
+
+- After the design kit, a them turn that changes a constraint ("make it global", "agora 100M de usuários") starts a short DELTA route (≤ 200 words): what changed, the updated Decisions line, and the deep dive it affects.
+- The stored kit is patched, so later probes follow the new design.
+- **Impact: medium-high.** Today this is step 6 of the practice script: type `design`, then read a new 750-word kit to find what changed.
+- **Feasibility: medium.** About 2 sessions, after 18.1 and 18.2. The hard part is "what if it were global?" (a hypothetical, so a probe) vs "make it global" (a change). Default to a probe with an "apply to the design" chip; fire by itself only on statements or imperatives with numbers.
+
+#### 18.5 A structured design memory
+
+- Replace "the last kit cut to 6,000 characters" with fields:
+  - confirmed facts (daily users, regions, in and out of scope, latency targets), each with its source turn;
+  - assumptions;
+  - decisions;
+  - the estimate numbers.
+- **Impact: medium, indirect.** Smaller prompts for 18.1, 18.3 and 18.4 (the per-minute limit), a consistent design (push vs pull decided twice is a known issue), and a pinned card for 18.6.
+- **Feasibility: medium-low.** Extraction on every turn costs a call per turn, and the fields can drift from the transcript. The parse-only part (read the kits' fixed headings, with no LLM call) is cheap and fits inside 18.1.
+
+#### 18.6 One System Design · Live panel
+
+- In the listen window: a pinned card on top (Requirements used, Decisions and the diagram, collapsible), probes streaming below, and the deep-dive chips. Ask stays for typing by choice.
+- **Impact: medium.** One place to look, no switching windows, no focus lost.
+- **Feasibility: medium.** About 2 sessions of UI in `LiveAnswerView` and `ListenView`. The ASCII diagram needs a wider window. Content protection is already on there. Worth most after 18.3.
+
+#### 18.7 Answers ready before the question
+
+- (a) The design kit already has three Q/A under `## Next questions`. When the interviewer asks one of them (fuzzy match, or the career module's embeddings), its answer shows at once with no tokens spent, and the LLM probe confirms or replaces it.
+- (b) Generate the design kit in the background while the interviewer is still answering.
+- **Impact: low-medium.** Groq is already fast, and (a) rarely matches.
+- **Feasibility:** (a) high. (b) medium, and it spends the per-minute limit on kits thrown away.
+
+#### 18.8 Watch the screen continuously
+
+- Periodic screenshots compared with each other, to notice the problem statement or the candidate's diagram.
+- **Impact: low-medium.**
+- **Feasibility: low.** Image tokens at every interval, and screenshots go first to the models that see images, which are the limited ones (Qwen on Groq, Gemini). Last.
+
+### Summary table
+
+| # | Proposal | Impact | Feasibility | Effort |
+|---|---|---|---|---|
+| 18.1 | Probes in the Live Answer lane, with the design | High | High | 1–2 sessions |
+| 18.2 | "Next step" key | High | Very high | 1 session |
+| 18.3 | Kits by interview stage | Very high | Medium | 2–4 sessions |
+| 18.4 | Changed requirement → delta | Medium-high | Medium | 2 sessions |
+| 18.5 | Structured design memory | Medium (indirect) | Medium-low | part of 18.1 |
+| 18.6 | One panel | Medium | Medium | 2 sessions |
+| 18.7 | Answers ready before the question | Low-medium | High (a) / medium (b) | 1 session |
+| 18.8 | Watch the screen | Low-medium | Low | — |
+
+### Recommended order
+
+1. 18.1, with the parse-only part of 18.5.
+2. 18.2: it also records when each stage changes.
+3. 18.3: first only suggesting, then by itself once its precision is measured.
+4. 18.4 and 18.6.
+
+With 18.1 and 18.2, five of the practice script's six typed Asks become no key or one key. The one left is choosing a deep dive, which becomes a click.
+
+### Second opinion (2026-11-01)
+
+An independent agent read item 18 against the code. The Summary and 18.3 above are already corrected where it found errors: the token limit is per model, the Ask window is focusable by default rather than by an explicit option, and `SETUP_TASK_RE` and Jev can't be reused for stage detection.
+
+**Ratings it changed:**
+- **18.1** stays first, and is worth more than rated.
+  - One call of ~2.5k replaces today's Ask (~4.7k plus a screenshot) and generic Live Answer (~3.5k).
+  - The answer starts in ~3.3–4.5 s (2 s STT, 800 ms debounce, ≤ 250 ms Jev, first token), instead of the time it takes to type the question (estimated at 10–15 s).
+  - Effort is 2 sessions. It must:
+    - replace `LENGTH_RULE` (`summaryService.js:67`), which fights the PROBE shape;
+    - keep the career personal and company routes on the old profile;
+    - reply PASSIVE while the interviewer answers the candidate's questions;
+    - use the probe profile only when a kit exists in this Listen session (Ask's session is the active Listen session, `sqlite.repository.js:83-104`), so a mode left on during a behavioral round changes nothing;
+    - also take the kit's Storage table and the deep dives' Pick lines, not only Requirements used and Decisions (the headings are fixed, so parsing is safe).
+- **18.2:** feasibility even higher, impact medium.
+  - Ctrl+Enter already sends an empty Ask (`askService.js:172-175`), and with empty text the prompt already picks opening or design from the transcript (`promptTemplates.js:767-769`).
+  - What's missing: empty text with a kit and an interviewer question should give a PROBE, not a new 750-word kit as today. Also, the first press only opens the hidden Ask.
+  - After 18.1 the probe part is redundant, which leaves ~2 presses per round.
+  - A press marks when the candidate wanted a kit, not when the stage changed, so it is weak labeled data for 18.3.
+  - The deep-dive chips need a fixed title format under `## Deep dives`, which the prompt doesn't set.
+- **18.3:** medium impact, since it saves 2–3 presses over 18.1 + 18.2 at the highest misfire cost. Medium-low feasibility: no System Design session to label, and no detector to reuse.
+- **18.4:** medium. The probe already answers the hypothetical, and the prompt already says the interviewer's changes override Decisions (`promptTemplates.js:850`). Its value is against a stale design.
+- **18.5:** its parse-only part goes up, because of the 30-turn window (18.9).
+- **18.7b** is underrated when its trigger is precise (18.10): the design kit is the longest stream, and it comes at the moment the candidate starts drawing.
+
+**What the first analysis missed:**
+- **The 30-turn window:** 18.9.
+- **Two lanes, one turn.** Nothing decides which lane takes a turn. "Go ahead with the high-level design" triggers Live Answer, and it would also be 18.3's design cue. Policy:
+  - one call per turn, and the System Design lane wins;
+  - slow or pause Insights during System Design · Live (it runs every 5 turns, ~2.5k tokens each, `summaryService.js:1124`);
+  - no screenshot on calls driven by the transcript.
+- **Item 1 hits 18.1 too.** Probes come in pieces ("Okay. And what if…"), and abort-and-replace ignores a bare continuation.
+- **The candidate's own lines as cues:** 18.10.
+- **Portuguese and STT errors** hurt the regex parts (chips, stage cues): item 15 measured 7 of 12 terms heard right. The LLM probe tolerates them. Portuguese cues must be written out: `HANDOVER_RE` matches "pode seguir" or "go ahead" only as a whole clause (`questionGate.js:201`).
+- **Evaluation.**
+  - The career replay (`replay-career-session.js`) can run a labeled System Design session with `--no-llm`. That measures trigger precision and recall at no cost, in English, in Portuguese and with misheard variants. There is no real System Design session yet: record the practice runs.
+  - Phase H drives only Ask. 18.1 needs cases fed as transcript through the harness (`--text`).
+- **Failure modes:**
+  - an opening kit on half a problem;
+  - a design kit before the clarifying questions;
+  - a kit from an earlier round in the same Listen session;
+  - a restart forgets the kit, though the DB still has the answer (`askService.js:476`).
+
+#### 18.9 Keep the confirmed facts past the 30-turn window (from the review)
+
+- Both lanes cut the transcript to the last 30 turns (`askPrompt.js:76`, `summaryService.js:278`). A 2 s pause ends a turn, so that is roughly the last 5–10 minutes.
+- The design kit keeps what was confirmed before it, since its Requirements used goes back as the previous answer. What falls out:
+  - a change the interviewer made after the kit, with no new kit after it;
+  - clarifying answers, when the clarifying stage runs long.
+- Fix with no LLM: pin the interviewer turns that carry numbers, regions or scope, and send them with the transcript.
+- **Impact: medium-high. Feasibility: high.**
+
+#### 18.10 The candidate's check-in line starts the design kit (from the review)
+
+- The opening kit scripts "Is that right?" and "Anything you'd change before I design?" (`promptTemplates.js:777`, `:798`). A `me` turn that matches the check-in is a precise signal, and the candidate controls it.
+- Start the design kit then, in the background (18.7b), and show it after the interviewer replies.
+- Risks: the candidate paraphrases the line; without headphones the mic also hears the interviewer, so a `me` turn is not always the candidate.
+- **Impact: high. Feasibility: medium.**
+
+### Revised order (after the review)
+
+This replaces the recommended order above. On 2026-11-02 the user chose 18.11 as v1: it is 18.1 plus the fixed Ctrl+Enter order of 18.2, with every stage decision made by hand. The order below holds for what comes after v1.
+
+1. 18.1 with the review's guards:
+   - only when a kit exists in this Listen session;
+   - the career routes kept on the old profile;
+   - the PROBE shape instead of `LENGTH_RULE`;
+   - PASSIVE while the interviewer answers;
+   - one call per turn;
+   - the richer kit excerpt.
+
+   Then continuation grace for probes (item 1).
+2. 18.9, with the parse-only part of 18.5.
+3. 18.2 as Ctrl+Enter with empty text, plus the probe route when a kit exists.
+4. 18.10 with 18.7b.
+5. 18.4, then 18.6.
+6. 18.3, only suggesting at first.
+7. 18.7a, then 18.8.
+
+**First step:** change only `makeLiveAnswer`. When the mode is `system_design_live`, a kit exists for `currentSessionId`, and the career route is not personal or company:
+- use the probe profile with the kit excerpt;
+- use the PROBE shape instead of `LENGTH_RULE`;
+- reply PASSIVE when the interviewer is answering the candidate.
+
+**How to know it worked:**
+- Unit tests: a table of which profile is used for each mode × kit × route.
+- Live, through the harness (`--text`), in English and Portuguese:
+  - the probe shape, at most 90 words;
+  - it names the store from the kit's Decisions line;
+  - PASSIVE on step 2's line;
+  - the first token within 6 s;
+  - exactly one call per interviewer turn;
+  - tokens per call no higher than today's Live Answer.
+- Practice script: steps 5 and 7 need no typing.
+
+#### 18.11 v1: one interview, behavioral then System Design, with no automatic stage decision (chosen 2026-11-02)
+
+**Status:** Built on 2026-11-02, branch `2026-11-02-system-design-live-no-typing`.
+- Done: the unit tests, the live harness (phases H and I) and the practice script; see **Acceptance**.
+- Found in the first practice run (2026-11-04) and fixed:
+  - In Ask, an underscore inside a word (`tweet_id`, `next_cursor`) opened italics that ran to the end of the line. In the Storage table, that row lost its cells and the next row began a new table. Ask renders the stream with `src/ui/assets/smd.js`, which opened emphasis on any `_` before a letter. It now follows CommonMark: an underscore between letters or digits is text (`smd.test.js`). This predates item 18; Live Answer renders with `marked`, which never had it.
+  - **The design kit's diagram was a column of numbered boxes with no arrows** in 2 of the 3 design kits seen on screen, all three from `qwen/qwen3.8-27b`. The legend under it came on one line.
+    - Why the kits come from Qwen and Gemini: every Ask carries a screenshot, so Groq puts the models that see images first (`order=vision-first`).
+    - The prompt only said "ONE ASCII diagram … Number every box".
+    - Phase H had never tested this: its transcript cases sent no image, so their kits came from gpt-oss, which never writes a kit in the app. No check looked at the diagram.
+  - **What changed:**
+    - **The prompt** (the third edit `golden.test.js` allows):
+      - a flow, not a list: arrows from box to box, the write and the read paths, async hops labelled;
+      - short box names (at most 3 words);
+      - at most 70 columns;
+      - a ```` ```text ```` block, so highlight.js leaves it uncoloured;
+      - a shape drawn with the letters A to G;
+      - the legend one per line.
+    - **Phase H:**
+      - every case sends a screenshot, as the app does;
+      - `checks.designDiagram` fails a design kit with fewer than 3 arrows or with the skeleton's letters left in it, and warns when the diagram is wider than the Ask window;
+      - `--cases` runs single cases. Qwen answers one kit per run, then Groq refuses it for the key's output limit.
+    - **Ask** (`AskView.js`): highlighted tokens inside a code block took the sans-serif font of the `*` rule, so `-`, `>` and `|` changed width and the diagram's columns drifted. They are monospace now: every glyph measured is 6.05 px except `▶`, which the prompt does not use. The window shows 84 columns.
+  - **Measured live on 2026-11-04** (`%LOCALAPPDATA%\glass-live-eval\diagram-2026-11-04\`):
+
+    | | Before | After |
+    |---|---|---|
+    | gemini-3.5-flash-lite | 9 design kits: all with arrows; 3 wider than the window (91–97 columns); 2 without box numbers | 15 design kits: all a flow with 4–8 arrows, numbered, in a `text` block; 14 within the window (one at 96) |
+    | qwen/qwen3.8-27b | 8 answered: 6 with ≥ 3 arrows; on the Twitter cases (H3/H7), 2 of 4 had 1 or 2 | 13 of 13 answered across the last four wordings of the rule had 5–12 arrows; 2 of 2 on the final wording; all within the window |
+
+    - Groq refused 23 of the 36 Qwen requests after the change for the key's limits (output per minute, tokens per minute).
+    - Two flagged kits came from Gemini's content, not from its diagram: on the final wording, one rate limiter kit with two write paths and no read path (1 of 15); after the change, one opening kit sent back for `design` (1 of 54 design requests; 0 of 9 before).
+  - Step 11 of the script asked to read the line under the diagram, which step 10 had cleared from Ask. The candidate now says the design from memory.
+  - **Ask modes other than System Design · Live had no language rule** (found 2026-11-04 when the user asked that every Ask mode follow the interview's language, as Live Answer does).
+    - `buildAskMessages` named the language in System Design · Live only, and the other modes get no transcript. With nothing typed and an English problem on screen, a Portuguese interview got English answers.
+    - Rule 11 now covers every mode, and the STT language names the language (see rule 11). New phase L of the live eval measures it, one Ask per mode (`fixtures/ask-language-cases.js`).
+    - In the app the same day, `twitter` typed in System Design · Live with Listen off and the setting in Portuguese got an English kit (`glass.log`: `answer language: not named`). The language then came from the turns and the typed text first, and the STT language only while Listen ran. Now the STT language decides alone. Phase L's case 7 is that Ask.
+  - **Measured live on 2026-11-04, phase L** (`%LOCALAPPDATA%\glass-live-eval\language-2026-11-04\`):
+
+    | | Before (1 run) | After |
+    |---|---|---|
+    | gemini-3.5-flash-lite | 5 of the 6 Asks of the other modes in the wrong language. Portuguese interview: Default, Code, Debug and System Design in English. English interview with Portuguese typed: Default in Portuguese, Code in English. `twitter` with Listen off: English, in the app | 3 runs of the 6 other-mode cases and 3 of `twitter`, 21 Asks: all 21 in the interview's language, read one by one. The check flagged one terse English Default answer (159 characters) as unknown. Every heading in English and in order; the code comments in English; the Default answer's facts from the image 3/3; the debug fix of the loop bound 3/3. The 6 other-mode cases ran with the first version of the rule; they send the same messages under the final one, since each names the same language and their prompt gets no turns |
+    | qwen/qwen3.8-27b | not measured | The first 7 cases (case 7 then a turn too short to tell, then `opening`), one per run: Default and Debug in a Portuguese interview answered, both in Portuguese, with the headings in English. Groq refused the other 5 on the model's daily token limit (200,000), spent by the day's runs |
+
+    - Phase H after the change (Gemini, 4 runs; same messages under the final rule): the English kit in English 4/4, the Portuguese kit in Portuguese 4/4. H1, H2 and H6 now carry the English sentence, named by the STT language (`en-US` in phase H), and kept their route and headings 4/4.
+    - Not from this change:
+      - The code's hidden tests failed in 2 of 6 code answers: one used LeetCode's `MinPriorityQueue`, which does not exist in JavaScript, as both code answers did before the change; one timed out on the 220×220 grid.
+      - The probe case (H5) went the deep-dive route in 2 of 4 runs (1 of 15 earlier on 2026-11-04). Its request was the same before and after the change, since the interviewer's English turns already named the language.
+- Still to do: the checks in the app by hand, first among them Ctrl+Enter with the VM's window focused, and a full run of the script before a real interview.
+
+**The scenario the user wants:**
+1. Live Answer is on.
+2. The first part of the interview is behavioral, answered from the career KB, as today.
+3. The conversation moves to a system design exercise. Live Answer is still on.
+4. Glass switches to System Design · Live, then gives the opening kit and the design kit.
+5. From then on, Live Answer answers the interviewer's probes with the context of the kits.
+
+None of 18.1–18.10 covered it whole. They all assumed the candidate picks System Design · Live before the round. 18.3 detects stages inside a round, not the move from the behavioral part to a design round. 18.1 answers only in the PROBE shape.
+
+**The user's requirement:** the fewest points of failure, and a flow that works the first time, also when keys are pressed out of order or by mistake. Doing a step by hand is fine when it removes a risk.
+
+**What can and can't be guaranteed.** A flow built on STT and an LLM can't be guaranteed 100%:
+- STT mishears words (item 15: 7 of 12 terms heard right);
+- a provider can fail over to a weaker model;
+- a model can give a poor answer.
+
+Live Answer has the same limits today. What v1 guarantees:
+- **No stage decision is automatic.** Each one is made by the candidate, or by a fixed rule in the code that unit tests cover.
+- **Every key, in any order, has one defined result** (the edge-case tables below).
+
+What is left uncertain is the quality of each answer, as today, and every failure is visible and can be recovered.
+
+**Decisions taken with the user (2026-11-02):**
+- **The kits show in the Ask window.** The interview runs inside a VM and Glass runs outside it, so Ask taking focus is not a risk here. The Ask window is 600 px wide (`windowManager.js:546`), and the listen window is 400 px (`:513`), too small for a kit. The listen window keeps the short probe answers.
+- **No detector for the move to System Design.** A false positive would put an opening kit in the middle of a behavioral answer, and send the next behavioral questions to the System Design profile. The candidate switches the mode by hand.
+- **No automatic opening kit.** A problem said in pieces would give a kit on half the problem (item 1). The candidate types the problem, or presses Ctrl+Enter, once the interviewer has finished.
+- **No automatic design kit.** When the clarifying stage ends is a fuzzy signal, and a kit at the wrong moment costs ~6k tokens and covers the screen. The candidate presses Ctrl+Enter.
+- **No career router inside the stage.** "How would you handle this in your design?" could route personal. That is one more automatic decision, so in v1 every question in System Design · Live goes to PROBE.
+- **Live Insights is off** during these interviews (Live panels: Answer only), so its calls don't compete with the kits for the per-minute limit.
+- **A design kit is replaced only on purpose.** After a design kit, an empty Ctrl+Enter only shows a hint, and the candidate types `design` to update the kit after a change. Otherwise a stray press would replace the design being presented with a new one that may not match it. This came from the edge cases below.
+
+**The v1 flow:**
+
+| Moment | Who decides | What happens |
+|---|---|---|
+| Behavioral part | Nothing changes | Live Answer answers from the career KB, as today |
+| The design round starts | **The candidate:** one click in the mode picker, "Ask · SD Live" | The pane shows the "SD Live" badge. Live Answer is **silent** until a design kit exists in this Listen session |
+| The interviewer has finished stating the problem | **The candidate:** types the problem into Ask ("twitter") and presses Enter (recommended), or presses Ctrl+Enter twice with nothing typed | Opening kit, in Ask. Its first line restates the problem, so a wrong one shows at once |
+| The clarifying stage is over | **The candidate:** Ctrl+Enter twice with nothing typed, or types `design` | Design kit, in Ask |
+| The interviewer asks something | **Automatic** | Live Answer answers in the PROBE shape, with the kit's context, in the listen window |
+| The interviewer changes a requirement | **The candidate:** types `design` and presses Enter | A new design kit, used by the next probes |
+| The design round ends | **The candidate:** one click, back to Default | The badge goes away. Live Answer goes back to the career KB |
+
+A deep dive the candidate wants in full is still typed into Ask ("deep dive cache"), as today. In v1, a "let's go deeper into X" from the interviewer gets a PROBE answer.
+
+**Fixed rules (code, not the model):**
+
+1. **What an empty send asks for.** An empty send is Ctrl+Enter with nothing in the box, or Enter on an empty box. In System Design · Live, the code picks the request from the kit stored for this Listen session:
+   - no kit: `opening`;
+   - an opening kit: `design`;
+   - a design kit: nothing is sent, and Ask shows "Design kit done. Type `design` to update it after a change."
+
+   Today an empty Ask leaves the choice between opening and design to the prompt's routing (`promptTemplates.js:767-769`), and a model can pick wrong. `design` exists (routing rule 4). `opening` is new, and gives the OPENING KIT. With nothing typed, the model takes the problem from the transcript or the screenshot. That is the one judgment left in this path, which is why typing the problem is the recommended way.
+2. **What a typed text asks for.**
+   - **Fixed words** are sent as fixed requests, kit or no kit: `opening`, `opening: <problem>`, `design`, `next` (the same as `design`, as in routing rule 4), `design: <problem and requirements>`, `full`. The word goes in lower case, as `word` or `word: <text>`: `Design.` is sent as `design`.
+     - A fixed word is the whole text, or the word followed by a colon. Case is ignored, and so are a final period, spaces at either end and a space before the colon. `design:` with nothing after it is `design`. `design?` is not a fixed word.
+     - "design twitter feed" is not a fixed word: it is a problem.
+     - **The fixed words get a route of their own**, first in the prompt's routing:
+       - `opening` or `opening: X` → the OPENING KIT for X, or the "No problem yet" line when neither X, the screenshot nor the transcript names a system;
+       - `design`, `next` or `design: X` → the DESIGN KIT, with the numbers nobody stated marked (assumed);
+       - `full` → FULL.
+
+       Today's routing has no `opening` route, and DESIGN comes before OPENING (`promptTemplates.js:767-768`). `opening: twitter, 10M DAU` would then route DESIGN on its typed constraints. `design: twitter`, with nothing confirmed in the transcript, would route OPENING, like "Design a URL shortener.".
+   - **Any other text, with no kit,** is sent as `opening: <text>`: the opening kit for exactly what was typed, even when the transcript names something else.
+     - Constraints typed with it ("twitter, 10M DAU, US only") are marked (confirmed), as routing rule 4 does for the design kit.
+     - Today a typed `twitter` already gives the opening kit, through the prompt's routing (item 16, case H6). v1 makes it a code rule.
+   - **Any other text, with a kit,** goes as typed, and the prompt routes it as today: "deep dive cache", a probe typed by hand.
+     - The code can't tell a new problem ("uber") from a topic ("cache") without judgment, so a new problem is typed with the fixed word: `opening: uber`.
+3. **Keys.**
+   - **Rules 3 and 4 hold in System Design · Live only**, so the other modes keep today's keys (rule 8).
+   - **Ctrl+Enter** is the only shortcut that opens Ask: the default key of `nextStep` (`shortcutsService.js:68`), which the candidate can rebind in the shortcut settings (`handleSaveShortcuts`, `:42-44`).
+     - Its first press opens Ask with the text box (`askService.js:187-195`), or shows the box over an answer already on screen (`:180-182`). Its second press sends. A send by Ctrl+Enter always takes two presses, so one stray press never sends.
+     - **In v1 the second press sends what is in the box:** the main process asks the Ask window to send its box, as Enter does. Today it sends an empty request whatever the box holds (`askService.js:172-175`). The box's own Ctrl+Enter handler (`AskView.js:1353`) probably never sees the key, because Ctrl+Enter is a global shortcut (`shortcutsService.js:213-214`, registered at `:270`); to confirm in the app. With today's code, "twitter" in the box plus Ctrl+Enter would send an empty request, which v1's rule 1 would read as "opening from the transcript".
+     - **A press while Ask is closing doesn't send.** Ask hides only at the end of a fade (`windowManager.js:448`), and `closeAskWindow` shows the box again at once (`askService.js:213`). Today a Ctrl+Enter within the fade after Esc takes the send branch (`:172`). In v1 the main process keeps whether Ask is shown, set at once when Ask is closed, hidden or shown, and the second press sends only while it is.
+     - **Two empty sends within 300 ms count as one:** a held key, or the box's handler and the shortcut both firing.
+   - **Enter** in the box sends the box (`AskView.js:1352-1357`), also when it is empty, since the empty check is commented out (`:1335`). An empty box goes to rule 1.
+   - **The header's Ask button** never sends: it opens or hides Ask, or shows or hides the box over an answer (`featureBridge.js:187`, `toggleAskButton()` with no argument, `askService.js:180-195`).
+   - **Esc** closes Ask only when there is no answer and nothing loading (`AskView.js:949-959`), and only while Ask has the keyboard focus (the listener is in the Ask window, `:793`). It never cancels or deletes a kit.
+   - **Closing Ask clears the box**, so a later Ctrl+Enter never sends text left from before. Today nothing clears it on close: `closeAskWindow` resets only the service's state (`askService.js:205-214`), the box is only hidden (`AskView.js:1453`), and only a send clears it (`:1337`).
+     - Closing is the close button, Esc, or the header's Ask button when it hides Ask (`askService.js:184-186`).
+     - Ctrl+\ keeps the box: it hides every window and shows them back as they were (`windowManager.js:257-262`).
+     - Entering System Design · Live also clears the box, so text typed in another mode is never sent as a kit request.
+4. **A kit being written is never replaced by accident.**
+   - While an `opening`, `design`, `next` or `full` request is streaming, a new Ask request, empty or typed, is not sent.
+   - Ask shows "A kit is still being written. Close Ask to cancel it." Typed text stays in the box.
+   - Today a new request cancels the one in progress (`askService.js:254-256`).
+   - **The check comes first in the request, before any wait.** Today the mode and the session are read only after four waits (`askService.js:266-280`), so two presses in the same moment would both start. A refused request, and rule 1's hint, write nothing to the DB and leave the answer on screen.
+   - Closing Ask still cancels the kit (`askService.js:199-203`). A canceled kit is not stored, and the next empty send asks for the same step.
+   - Requests that are not kits (a deep dive or a probe typed by hand) are replaced by a new request, as today.
+5. **The stored kit and its type.**
+   - **A kit request** from rule 1 or a fixed word is stored when it ends with text, without error or cancel. Its type:
+     - the headings decide when they are recognized: `## Requirements used` → a design kit; otherwise `## Frame` → an opening kit. A `design` request answered with an opening kit is stored as an opening kit, and the next empty send asks for `design` again;
+     - with no heading recognized, the type the request asked for, when the answer has at least 120 words: `opening` → an opening kit; `design`, `next`, `design: …` and `full` → a design kit.
+
+     The second case covers a fallback model that changed the headings. Today a kit is recognized by its headings only (`isLiveDesignKit`, `askPrompt.js:47`). A model that writes "**Frame**" instead of "## Frame" leaves nothing stored, and rule 1 would then ask for the same step forever.
+   - **The "No problem yet" line** (routing rule 6) is never stored: it has no kit heading and about 25 words in any language, under the 120-word floor. A kit is about 450 words (opening) or 750 (design).
+   - **Other typed text** is stored only when its headings show a kit, as today, and its type comes from them: a `## Requirements used` heading means a design kit.
+   - **One kit per Listen session,** the latest.
+6. **Silence before the design kit is a code gate.** In System Design · Live with no design kit in this Listen session, the answer lane makes no LLM call and sends nothing to the window. It doesn't rely on the model replying PASSIVE. During the clarifying stage, "Assume about 10 million daily active users" passes today's gate on `assume` (`questionGate.js:38`).
+   - The check comes before the lane's career steps, which can call a model:
+     - company detection (`summaryService.js:513-523`);
+     - the Jev gate (`:552-555`, an LLM call);
+     - the prefetch (`:648-652`);
+     - the career context (`:681-691`, `:716`).
+7. **With a design kit, every turn the gate accepts goes to PROBE.** That is 18.1's profile, with:
+   - the kit excerpt: Requirements used, the Decisions line, the Storage table and the deep dives' Pick lines. When the stored kit lacks those headings (rule 5), the excerpt is the kit cut at a line break, as the previous answer is cut today (`askPrompt.js:33-38`);
+   - the PROBE shape instead of `LENGTH_RULE`;
+   - no career context;
+   - one LLM call per turn.
+
+   The lane's gate, debounce, abort-and-replace, PASSIVE, history and failover are unchanged. Also:
+   - **The career state is left alone.** A design problem that names a company ("design Uber") doesn't become the interviewer's company for the behavioral turns after it.
+     - Each probe clears the follow-up state (`careerPrev`), as a general answer does today (`summaryService.js:725-727`).
+     - The interviewer's last segment is still kept (`:528-532`).
+   - **The probe reads the design kit when its debounce fires.** With no design kit for this Listen session by then, for example after `opening: uber`, it makes no call.
+8. **Everything outside System Design · Live is unchanged.** Back in Default, the next turn is answered exactly as today, career context included, byte for byte. The other Ask modes are unchanged too.
+9. **A badge.** While the mode is System Design · Live, the Live Answer pane shows "SD Live". A candidate who forgot to switch back sees it before answering the next behavioral question.
+10. **The answer lane reads the mode without waiting.** `summaryService` doesn't read `askMode` today. A mode change is saved in `featureBridge.js:94`. The lane is told at the same point, and reads the mode from memory at each turn, with no settings read on the hot path.
+    - **The copy in memory is loaded:**
+      - when the app starts, since the saved mode survives a restart (`settingsService.js:219`);
+      - after a mode change is saved;
+      - at the start of each Listen session;
+      - when the signed-in user changes, since the settings are per user (`settingsService.js:229`).
+    - **Ask reads the same copy once per request,** so its checks and its prompt never see two different modes.
+    - **A change into or out of System Design · Live drops the turns waiting for an answer:** the debounce, a pending Jev decision and the held set-ups. An answer already streaming finishes.
+11. **The interview's language.**
+    - **Every Ask mode** (System Design · Live, Default, Code, Debug and System Design) answers in the speech-to-text language, `sttLanguage` (pt-BR or en-US, pt-BR by default): the language the candidate sets for the interview so Listen transcribes it. `askAnswerLanguage` (`askLanguage.js:28`) reads it, Listen on or off, whatever the interviewer's turns or the typed text say.
+    - The language sentence goes in the request ("The interview is in Portuguese: write the whole answer in Portuguese, …", `askUserText`, `askPrompt.js:81`), so the text-only retry, which rebuilds the request (`askService.js:526`), keeps it.
+    - The fixed words carry no language. Without this rule the prompt answers "in the language of the typed text" (`promptTemplates.js:926`), so `design` typed in a Portuguese interview could give an English kit.
+    - In every mode the headings stay in English, since the kit and the eval find the sections by them, and so does code, with its names and comments (the user's choice). System Design · Live keeps its own wording of the sentence.
+    - The other modes still get no transcript ("No conversation history available.").
+    - Each Ask logs the language: `[AskService] answer language: pt (stt)`.
+    - **History.** The first version read the last 6 interviewer turns, then the typed text. On 2026-11-04 it was widened to every mode, with the STT language as a last source while Listen ran. The same day, `twitter` typed in System Design · Live with Listen off and the setting in Portuguese got an English kit: no turns, and a typed text with no language. The user then chose the STT language as the only source.
+
+**Leaving the stage.** In v1 the candidate leaves by switching back to Default, and the badge is the reminder. Stop also ends it: the stored kit belongs to that Listen session (`askService.js:288`), so a new session starts with no kit. A second design problem starts in one of two ways, and rule 1's order starts again from either:
+- typing `opening: <problem>` into Ask (rule 2), which stores a new opening kit;
+- Stop and a new Listen session, which starts with no kit.
+
+**Edge cases (2026-11-02).** Each row gives today's behavior, read in the code, and v1's. "Not checked in the app" marks what the code alone can't settle; those rows are among the checks in the app under Acceptance.
+
+*Keys and the Ask window*
+
+| Case | Today | v1 |
+|---|---|---|
+| Ctrl+Enter, Esc, Ctrl+Enter, Esc… before anything is sent | Ask opens and closes. No request | Same |
+| Esc with a kit on screen or being written | Nothing happens (`AskView.js:949-959`) | Same |
+| Ctrl+Enter pressed many times in a row, or held down | 1st press opens, 2nd sends, 3rd shows the box over the answer, 4th sends again and cancels the kit being written | One kit request: the 4th is refused while the kit is written (rule 4) |
+| "twitter" typed, then Ctrl+Enter instead of Enter | An empty request is sent and "twitter" stays in the box (not checked in the app) | "twitter" is sent (rule 3) |
+| Only spaces typed | Read as empty (`AskView.js:1334`) | Same; goes to rule 1 |
+| Enter while an IME is composing | Ignored (`AskView.js:1348`) | Same |
+| Close button while a kit is written | The kit is canceled and not stored (`askService.js:199-203`, `:461`) | Same; the next empty send asks for the same step |
+| Close button after the kit is done | The stored kit stays (`askService.js:205-214`) | Same |
+| Ctrl+\ hides every window while a kit is written | Windows are only hidden (`windowManager.js:257-262`); the kit keeps streaming and is stored | Same |
+| Text left in the box, Ask closed and opened again | The text stays: the box is only hidden, never rebuilt (`AskView.js:1453`), and only a send clears it (`:1337`). A later Enter sends it | The box is cleared on close (rule 3) |
+| Typed text sent while a kit is written | The kit is canceled | Refused, text kept (rule 4) |
+| A fixed word typed with no kit (`design`, `full`) | Routed by the prompt | Sent as the fixed request (rule 2) |
+| Empty send after a design kit | Routed by the prompt, usually a new design kit | A hint, no request (rule 1) |
+| Esc, then Ctrl+Enter during the closing fade | Takes the send branch: Ask still reads as visible (`windowManager.js:448`, `askService.js:172`) | No request: Ask counts as closed from the press of Esc (rule 3) |
+| Ctrl+Enter while Ctrl+\ has hidden every window | Shows Ask alone, with no header (`askService.js:187-195`); no request | Same |
+| Text in the box, then Ctrl+\ twice | The text stays | Same: Ctrl+\ is not a close (rule 3) |
+| Text typed in another mode, then System Design · Live | The text stays in the box | The box is cleared on entering the mode (rule 3) |
+| Two empty sends in the same moment (held key, or the box and the shortcut both firing) | Both are sent; the second cancels the first | One request (rule 3), and the check of rule 4 comes before any wait |
+| Enter on the empty, focused box after an opening kit | n/a | The design kit, in one press: rule 1 counts Enter on an empty box as an empty send. A residual risk; Ctrl+Enter keeps its two presses |
+| `nextStep` rebound to another key | Ctrl+Enter in the box sends it, as Enter (`AskView.js:1353`) | Same: a one-press send of what is typed |
+
+*Mode and the two lanes*
+
+| Case | Today | v1 |
+|---|---|---|
+| The candidate switches into SD Live after the interviewer stated the problem | That turn was already answered by today's lane (the `design` cue, `questionGate.js:36`) | Same. Harmless: the kit doesn't use that answer |
+| Mode switched while a kit is written | The request keeps the mode it started with (`askService.js:328`) and is stored when done | Same. The lane follows the new mode from the next turn |
+| Out of SD Live and back, same Listen session | The stored kit stays (a mode change doesn't clear it) | Same; probes resume |
+| Mode switched while a probe streams | n/a (new in v1) | The probe finishes as it started |
+| Live Answer off (Live panels: Insights only) | n/a | Kits work; no probes, and the pane with the badge is hidden. v1 needs Live Answer on; each kit request with it off shows a hint in Ask |
+| Mode switched during the 800 ms debounce, or while Jev decides on a turn | n/a | The waiting turn is dropped (rule 10); the next turn follows the new mode |
+| Switch to Default while a kit is written, then an Ask in Default | n/a | The Default request cancels the kit, as today in Default (`askService.js:254-256`). Nothing is stored, and the next empty send in SD Live asks for the same step |
+| A behavioral question while SD Live is on | n/a | A PROBE answer with the design's context; the badge is the reminder |
+| The requirement-change line ("Now suppose we launch in Europe…") | n/a | It passes the gate (`suppose`) and gets a probe from the old design. The new kit comes when the candidate types `design` |
+| A question while a new design kit is written | n/a | The probe uses the stored, previous design kit |
+| The candidate's own speech | Never triggers an answer (`questionGate.js:446`) | Same |
+
+*Sessions and failures*
+
+| Case | Today | v1 |
+|---|---|---|
+| A kit made before pressing Listen | Stored with the Ask session. Listen then takes over that session (`listenService.js:145`, `sqlite.repository.js:96-99`) | Same: the kit stays valid |
+| Stop while a kit is written | Stored for the ended session, never used by the next one (`askService.js:288`) | Same |
+| App restart mid-interview | The kit and the transcript the prompts read live in memory (`askService.js:157`, the lane's `conversationHistory`) and are lost | Same loss. Recovery: type `design: <problem and requirements>` for a design kit at once, and probes resume. Restoring from the DB, which keeps the answer (`askService.js:476`), is v2 |
+| Every provider fails, or the answer is empty | Not stored (`askService.js:461`, `:469-470`); an error line | Same; the next empty send asks for the same step |
+| A fallback model changes the kit's headings | Not stored | Stored by request (rule 5); the probe excerpt falls back to the cut kit (rule 7) |
+| Nothing names a problem | The "No problem yet" line | Same, and not stored: type the problem |
+| The opening kit read the wrong problem from the transcript | n/a | Seen in its first line; type `opening: <problem>` |
+| `opening: uber` typed after a design kit | n/a | An opening kit is stored, and Live Answer is silent until the new design kit (rule 6) |
+| A design request answered with an opening kit | Stored as the previous answer | Stored as an opening kit (rule 5); the next empty send asks for `design` again |
+| Two requests within a moment of each other | The first one doesn't check the cancel before calling the model: its stream runs to the end out of sight, and its text is saved to the DB (`askService.js:254-328`, `:474-476`) | The cancel is checked before the model call |
+
+*Language*
+
+| Case | Today | v1 |
+|---|---|---|
+| A Portuguese interview, `design` typed | The prompt answers in the language of the typed text (`promptTemplates.js:898`) | The STT language, set for the interview (rule 11) |
+
+**Still uncertain in v1, and what limits it:**
+- STT mishears the question, or the model answers badly. Same as today. The answer is visible, and the next question replaces it.
+- A probe said in pieces is answered on its first half (item 1). Same as today: a continuation that reads as a question replaces the answer.
+- A confirmed fact falls out of the 30-turn window (18.9). The design kit keeps what was confirmed before it, and typing `design` after a change makes a new kit.
+- A provider fails over (`retrying` status) or every provider fails (an error line). Same as today.
+- Whether the global Ctrl+Enter hides the key from the box is checked in the app at the start of the plan. Rule 3 works either way.
+- Whether the global Ctrl+Enter reaches Glass while the VM's window has the keyboard. A VM can capture the keys before Windows' hotkeys see them. This is the first check in the app. If the VM takes the key, the typed path still works: click the Ask box and press Enter.
+- Enter on the empty box, with the box focused, after an opening kit asks for the design kit in one press (rule 1). Ctrl+Enter keeps its two presses.
+
+**Out of scope for v1 (possible v2, once measured):**
+- detecting the move to System Design (keyword filter, then a cheap LLM check);
+- the opening kit by itself;
+- the design kit by itself, or on the candidate's check-in line (18.10);
+- the DEEP DIVE route inside the answer lane;
+- the career router inside the stage;
+- restoring the kit from the DB after a restart.
+
+**Acceptance:**
+- [x] Unit tests (2026-11-02: `liveDesign.test.js`, `askService.systemDesignLive.test.js`, `liveAnswerSdLive.test.js`, `golden.test.js`; the whole suite, 1786 tests, passes):
+  - rule 1: an empty send with no kit → `opening`; with an opening kit → `design`; with a design kit → the hint and no request;
+  - rule 2:
+    - each fixed word, in any case and with a final period, is sent as the fixed request, with and without a kit;
+    - "design twitter feed" with no kit → `opening: design twitter feed`;
+    - other text with no kit → `opening: <text>`, even when the transcript names another system or carries numbers;
+    - other text with a kit → as typed;
+  - rule 3: the second Ctrl+Enter sends the box's text; an empty box goes to rule 1; closing Ask clears the box;
+  - rule 4: while a kit streams, an empty or typed request is refused and the text kept; closing Ask cancels the kit and stores nothing;
+  - rule 5: the headings decide the type when recognized; with none, a kit request of at least 120 words is stored as the type it asked for; failed, canceled, empty and "No problem yet" answers are not stored;
+  - rules 3 and 4, races: two sends in the same moment start one request; Esc then Ctrl+Enter within the fade sends nothing; the in-flight flag clears on every way out (done, error, cancel, close, no window);
+  - rule 10: a mode change drops a waiting turn, also one waiting for Jev; after System Design · Live and back, the career state is as before;
+  - rule 6: no LLM call and no IPC with no design kit;
+  - rule 7: PROBE with a design kit, no career context, the excerpt and its fallback;
+  - rule 8: Default again → today's messages, byte for byte; the other modes unchanged. Since 2026-11-04 the user turn of every mode adds rule 11's language sentence; the system prompts stay byte for byte;
+  - rule 11: the language is the STT language, in every Ask mode;
+  - one test per edge-case row that can run without Electron;
+  - a snapshot taken before any change (`src/features/common/prompts/__tests__/golden/`): every profile's system prompt, the Ask messages of the other modes and the lane's messages for a fixed sequence of turns, compared byte for byte (rule 8). The System Design · Live prompt differs only by route 0, its language line and, since 2026-11-04, the box legend one per line.
+- [ ] In the app, by hand:
+  - first: Ctrl+Enter with the VM's window focused reaches Glass; and whether the box sees Ctrl+Enter;
+  - Ctrl+Enter with "twitter" in the box sends "twitter";
+  - Ctrl+Enter then Esc, ten times in a row, also within the closing fade: no request (no LLM call in the log);
+  - a restart with System Design · Live saved: the badge shows, and Live Answer is silent until a design kit;
+  - Ctrl+Enter held down for 2 s: one kit;
+  - Esc and Ctrl+\ while a kit is written: the kit finishes and is stored;
+  - a stray Ctrl+Enter pair after the design kit: the hint, no request.
+- [x] Live, through the harness (`--text`), in English and Portuguese. Measured on 2026-11-02 (`npm run eval:live -- --only I --text --fast`, then `--only H`):
+  - **Phase I (the lane): 11 of 11 pass.**
+    - No call on the problem or on "Assume about 10 million…", in either language.
+    - One call per probe, 5 probes, all on gpt-oss-120b. First token 1.2–1.4 s, 48–64 words, PROBE shape.
+    - Each probe names the kit's choice: Redis and rebuild, Cassandra, pull.
+    - A probe's prompt is about 6,300 characters, against about 10,900 for today's Live Answer in the same run.
+  - **Phase H (the kits):** every case takes its route, the Portuguese `design` (H7) included, which came out in Portuguese with the headings as given.
+    - H1 (`design` with the rate limiter screenshot) fails one check in both runs, "a write path and a read path". It always goes to Gemini 3.5 Flash-Lite, since the screenshot skips the models of the list that read no images. That model named the path "Write / Check path".
+    - On 2026-11-01, before this change, the same case on the same model failed 3 runs out of 6, the route included.
+    - The other cases only warn: on fallbacks, on word counts, and once, H5 on a fallback model, on a direct answer of 31 words (the limit is 25).
+
+  The checks:
+  - the probe shape, at most 90 words;
+  - it names the store from the kit's Decisions line;
+  - no answer on the script's "Assume about 10 million…" line;
+  - kits in the STT language, the interview's;
+  - the first token within 6 s;
+  - exactly one call per interviewer turn;
+  - tokens per call no higher than today's Live Answer, measured in the same run.
+- [x] `npm run practice:sd-live` gains (2026-11-02, 18 steps after the setup; not yet run in the app):
+  - a behavioral prologue: 2 behavioral questions before the design round, answered from the KB;
+  - misuse steps: Ctrl+Enter and Esc in a row before anything, the header Ask button, typing while a kit is written, a stray Ctrl+Enter pair and a held Ctrl+Enter after the design kit;
+  - the in-app checks of the acceptance list: Ctrl+Enter with the VM window focused (step 7), a restart with System Design · Live saved (step 3), Esc and Ctrl+\ while a kit is written (step 9), closing Ask during a kit (step 10), `opening: uber` after the design kit (step 15), text typed in Default cleared on entering the mode, and a held Ctrl+Enter that asks once (step 17).
+
+  Each step checks itself from the Glass log. The app writes one `[SD Live]` line per load or change of the mode, per key in the mode, per send, refusal, hint, dropped repeat, stored kit, cancelled kit, silent turn and probe (`askService.js`, `summaryService.js`). The script reads the lines a step added and marks each expected count PASS or FAIL. It then asks for the checks only the eye can make, and writes a report with every result and the step's log lines to `%LOCALAPPDATA%\glass-practice\`. The log exists when Glass is started from the desktop shortcut or `start-glass.ps1`; with `npm start` in a terminal the automatic checks are skipped.
+
+  The script types only the problem, `design` (steps 9, 10 and 13), the deep dive (step 11), `opening: uber` (step 15) and a word to be cleared (step 17):
+  - the mode switches are clicks: into the mode, back to Default, and again in the new session;
+  - the opening kit by typing `twitter` (step 5), and by a held Ctrl+Enter in a new session (step 17);
+  - the design kit by Ctrl+Enter twice, with the VM focused (step 7);
+  - probes answered on their own in steps 11 to 14. Step 13's line gets one from the old design, before `design` is typed.
+- [ ] Before a real interview: one full run of the script with the same provider list and keys, checked against the list the script shows.
+
+**Effort:** about 3 sessions:
+1. 18.1 with rules 6, 7, 10 and 11;
+2. the Ask side: rules 1 to 5 and the edge cases;
+3. the badge, and the simulator's prologue and misuse step.
+
+#### 18.12 Changes in red when `design` is typed again after a change
+
+**Status:** Open. Planned on 2026-11-04 and not built; the owner chose to register it and build it later.
+**Related:** 18.4. Item 18.4 proposes a short DELTA route that patches the stored kit. This item is the lighter option: the kit is still rewritten in full, and what changed shows in red.
+
+**Summary.** After the design kit, the interviewer changes a requirement ("now a tweet can carry images"). The candidate types `design` and gets a new 750-word kit, with nothing to show what changed.
+
+What happens today, read in the code on 2026-11-04:
+- **The request:**
+  - `design` with a design kit stored resolves to a design kit request (`resolveLiveRequest`, `liveDesign.js:62`).
+  - `_send` passes the stored kit as the Previous answer (`askService.js:462`).
+  - The prompt says to keep its decisions and numbers "unless the interviewer changed them" (`promptTemplates.js:803`). It never asks the model to say which ones changed.
+- **The display:**
+  - Ask draws the stream with `src/ui/assets/smd.js` (`renderStreamingMarkdown`, `AskView.js:1117`).
+  - smd.js has no colour and adds text as text nodes, so HTML in an answer shows as text.
+  - The fallback renderer (`renderFallbackContent`, `AskView.js:1165`) allows no `mark` tag.
+- **The stored kit:**
+  - The new kit replaces the stored one (`askService.js:635-636`).
+  - The next `design` reads it, and so do the Live Answer probes, through its excerpt (`kitExcerpt`, `liveDesign.js:104`).
+
+**The owner's choices (2026-11-04):**
+- **The model marks what changed, and the app only colours it.** The model knows that "images" is the change. A diff in the app would also colour sentences that were only reworded.
+- **Only a design kit rewritten after a design kit** is marked. The opening kit, deep dives and probes stay as they are.
+
+**Proposed:**
+1. **The request** (`askPrompt.js`):
+   - `askUserText` (`:81`) and `buildAskMessages` (`:114`) take `markChanges`, false by default. When it is true, the user turn adds one sentence after the language sentence. A draft, to tune against the eval:
+
+     > Mark the changes: the Previous answer is your design kit before the interviewer's latest change. In this kit, wrap each part that differs in substance from it (a new or changed requirement, number, component, step, table row or decision) in ==…==. Do not mark rewording, a heading, or anything inside the diagram's fenced block; mark a new box in the list under the diagram. If nothing changed, mark nothing.
+   - The system prompts don't change. Without `markChanges` the messages are today's, so the golden test (`golden/capture.js` calls `buildAskMessages` without it) does not change.
+2. **When** (`askService._send`): `markChanges` is System Design · Live, with `kitRequest === 'design'` (`design`, `next`, `design: X`, `full`) and a stored kit of kind `design`. The text-only retry (`askService.js:526`) sends the same sentence. Log `[SD Live] ask: design update — changes marked`.
+3. **The stored kit has no marks** (`liveDesign.js`):
+   - A pure `stripChangeMarks` turns `==x==` into `x`. It leaves fenced blocks and inline code alone, so a `==>` arrow in the diagram is kept, and an unpaired `==` too.
+   - `storeKit` (`:153`) stores the stripped text. Its excerpt comes from it.
+   - So the next `design` compares against a clean kit, and the probes get no `==`.
+4. **The colour** (`smd.js`, a second local change, listed in the file header like the underscore one):
+   - A `MARK` token drawn as `<mark>`, next to `STRIKE` in `default_add_token` (`:1589`, `:1611`).
+   - **It opens on `==`** followed by a character that is not a space, `=`, `>` or `<`, and preceded by the start of the line, a space or punctuation, never a letter or digit. So `a == b`, `x==y`, `==>` and `===` stay text.
+   - **It closes on `==`.** An unclosed mark ends with its block, like the other inline tokens.
+   - **It never opens** in code, links or images.
+5. **Ask** (`AskView.js`):
+   - **The colour:** `mark` with a transparent background and red text, also inside `strong` and inline `code` (about `#ff6b6b` on the dark overlay). Check that `body.has-glass` doesn't override it.
+   - **Copy:** the copy button (`handleCopy`, `:1292`) and the per-line copy drop the `==`.
+   - **The fallback renderer** drops them before `marked`.
+6. **Unit tests:**
+   - `askPrompt` and `askService.systemDesignLive`:
+     - the sentence only on a design kit request with a design kit stored;
+     - none after an opening kit, on a deep dive or a probe, or outside the mode;
+     - the stored kit has no marks.
+   - `liveDesign`: `stripChangeMarks`.
+   - `smd.test.js`:
+     - a mark in a paragraph, a table cell, a list item, and around bold;
+     - `a == b`, `x==y`, `==>`, `===` and `==` in code stay text;
+     - an unclosed mark;
+     - each case parsed in one chunk and one character at a time.
+7. **Live eval, phase H:**
+   - **New cases:**
+     - **H8**: `previous: 'H3-design'`, the confirmed transcript plus "them: One change: a tweet can now carry up to 4 images.", then `design`;
+     - **H9**: the same change in Portuguese on H7;
+     - **H10**: `design` again with no change.
+   - `run.js` sets `markChanges` the way the app does.
+   - **Checks:** a `checks.changeMarks` lists the marked spans, those in a heading or a fenced block, and the share of marked words. The kit checks read the stripped text.
+
+**Acceptance (when implemented):**
+- [ ] `npm test` passes; `golden.test.js` and the existing `smd.test.js` cases pass unchanged.
+- [ ] In the app (run-glass driver), a response streamed in pieces shows the marked parts in red. The diagram with a `==>` arrow stays intact, and the same holds with `body.has-glass`.
+- [ ] Gemini, 3 runs of phase H:
+  - [ ] H8 and H9 mark the image change in 3 of 3, never in a heading or the diagram, and keep today's design kit checks (headings, paths, diagram, language).
+  - [ ] Over 35% of words marked only warns.
+  - [ ] H10 has at most 2 marked spans.
+  - [ ] H1 to H7 have no marks and keep today's results.
+- [ ] Qwen, one case per run a minute apart (`--cases H8`, `--cases H9`): each answered case marks the change.
+
+**Risks:**
+- **smd.js draws every Ask mode.** The opener rules and the one-character-at-a-time tests guard the code and comparison cases.
+- **A model that marks nothing** gives today's kit.
+- **A model that marks too much** gives a kit with more red than needed. H10 measures it.
+
+**Effort:** about 1 session, plus the eval runs.
 
 ---
 

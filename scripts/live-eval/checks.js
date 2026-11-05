@@ -142,6 +142,7 @@ function sectionsInOrder(text, names) {
 }
 
 const CODE_SECTIONS = ['Clarifying Questions', 'Reasoning / Think-Out-Loud', 'Solution', 'Time Complexity', 'Space Complexity'];
+const DEBUG_SECTIONS = ['Issues Identified', 'Specific Improvements and Corrections', 'Optimizations', 'Explanation of Changes Needed', 'Key Points'];
 
 /** System design: "## 0." … "## 11." present and in order. */
 function systemDesignSections(text) {
@@ -217,6 +218,49 @@ function sectionLines(text, name) {
     return out;
 }
 
+/**
+ * System Design · Live: the ASCII diagram of the design kit, the first fenced
+ * block under "## Design" (up to the next heading outside a fence).
+ * arrows counts the connectors: arrow glyphs, "->", "-->", "──>", "<-", "==>", and a
+ * "v" or "^" alone on a line of "|" (an arrowhead drawn with letters). A column of
+ * numbered boxes has none: that is what the practice run of 2026-11-04 got
+ * from Qwen. placeholders: what is left of the prompt's skeleton (its A to G
+ * letters, or names in "<...>").
+ * @returns {{ found: boolean, boxes: number, arrows: number, widest: number, placeholders: string[] }}
+ */
+function designDiagram(text) {
+    const none = { found: false, boxes: 0, arrows: 0, widest: 0, placeholders: [] };
+    const lines = String(text || '').split(/\r?\n/);
+    const start = lines.findIndex(l => /^#{1,4}\s*Design\s*$/i.test(l));
+    if (start < 0) return none;
+    const body = [];
+    let inFence = false;
+    for (let i = start + 1; i < lines.length; i++) {
+        if (/^\s*```/.test(lines[i])) inFence = !inFence;
+        else if (!inFence && /^#{1,4}\s/.test(lines[i])) break;
+        body.push(lines[i]);
+    }
+    const block = codeBlocks(body.join('\n'))[0];
+    if (!block) return none;
+    const code = block.code.replace(/\s+$/, '');
+    const codeLines = code.split('\n');
+    const glyphs = (code.match(/[→←↑↓↗↘↙↖▲▼▶◀►◄⟶⟵]/g) || []).length;
+    const ascii = (code.match(/[-─━]+>|<[-─━]+|=+>/g) || []).length;
+    const letterHeads = codeLines.filter(l => /^[\s|│]*[vV^][\s|│vV^]*$/.test(l)).reduce((n, l) => n + (l.match(/[vV^]/g) || []).length, 0);
+    return {
+        found: true,
+        boxes: new Set(code.match(/\(\d{1,2}\)/g) || []).size,
+        arrows: glyphs + ascii + letterHeads,
+        widest: Math.max(0, ...codeLines.map(l => [...l].length)),
+        // A box still named by the skeleton's letter ("(2) B"), or a name kept in
+        // angle brackets ("<local cache>", which Gemini copied from an earlier skeleton).
+        placeholders: [...new Set([
+            ...(code.match(/\(\d{1,2}\)\s*[A-G](?![\w(])/g) || []),
+            ...(code.match(/<[a-z][^<>\n]{0,40}>/gi) || []),
+        ])],
+    };
+}
+
 /** Concrete numbers with units (QPS, ms, GB, replicas, ...). */
 function concreteNumbers(text) {
     const re = /\b\d[\d.,]*\s*(?:k|m|b|million|billion|mil|milh(?:oes|ões)|bilh(?:oes|ões))?\s*(?:qps|rps|req(?:uests)?\/s|ms|s\b|gb|tb|mb|kb|%|dau|mau|replicas?|nodes?|shards?|regions?|keys?|rpm)/gi;
@@ -230,6 +274,38 @@ function codeBlocks(text) {
     let m;
     while ((m = re.exec(String(text || '')))) out.push({ lang: (m[1] || '').toLowerCase(), code: m[2] });
     return out;
+}
+
+/**
+ * The comments inside an answer's fenced code blocks, one per line: `//` and
+ * `#` line comments and the lines of block comments. Phase L asks whether
+ * they stayed in English when the interview is in Portuguese.
+ * @param {string} text
+ * @returns {string}
+ */
+function codeComments(text) {
+    const out = [];
+    for (const { code } of codeBlocks(text)) {
+        let inBlock = false;
+        for (const line of code.split('\n')) {
+            if (inBlock) {
+                const end = line.indexOf('*/');
+                out.push(line.slice(0, end < 0 ? undefined : end).replace(/^\s*\*\s?/, ''));
+                if (end >= 0) inBlock = false;
+                continue;
+            }
+            const open = line.indexOf('/*');
+            if (open >= 0) {
+                const end = line.indexOf('*/', open + 2);
+                out.push(line.slice(open + 2, end < 0 ? undefined : end).replace(/^\*+\s?/, ''));
+                if (end < 0) inBlock = true;
+                continue;
+            }
+            const m = /(?:^|[\s;{}()])(?:\/\/|#)\s?(.*)$/.exec(line);
+            if (m) out.push(m[1]);
+        }
+    }
+    return out.map(l => l.trim()).filter(Boolean).join('\n');
 }
 
 /**
@@ -319,11 +395,14 @@ module.exports = {
     bulletsUnder,
     liveDesignRoute,
     sectionLines,
+    designDiagram,
     concreteNumbers,
     codeBlocks,
+    codeComments,
     runJsSolution,
     quantile,
     CODE_SECTIONS,
+    DEBUG_SECTIONS,
     LIVE_OPENING_SECTIONS,
     LIVE_DESIGN_SECTIONS,
 };

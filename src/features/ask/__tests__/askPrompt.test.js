@@ -14,7 +14,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const { getSystemPrompt } = require('../../common/prompts/promptBuilder');
-const { buildAskMessages, formatConversationForAsk, normalizeAskMode } = require('../askPrompt');
+const { buildAskMessages, formatConversationForAsk, normalizeAskMode, askUserText } = require('../askPrompt');
 
 // askService.sendMessage before askPrompt.js, with currentSettings.askMode as
 // rawMode and currentSettings.preferredCodeLanguage as preferred.
@@ -88,6 +88,38 @@ describe('buildAskMessages', () => {
     it('an unknown mode reads as default', () => {
         assert.equal(normalizeAskMode('system-design'), 'default');
         assert.equal(normalizeAskMode('system_design'), 'system_design');
+    });
+});
+
+describe('the interview\'s language in the user turn (18.11 rule 11, every mode)', () => {
+    const SECTION_SENTENCE = 'The interview is in Portuguese: write the whole answer in Portuguese, whatever the language of the request, keeping technical terms as they are commonly said and the section headings exactly as given. Code, with its names and comments, stays in English.';
+
+    for (const mode of ['default', 'code', 'debug', 'system_design']) {
+        it(`${mode}: names the language after the request; the system prompt and the image are unchanged`, () => {
+            const got = buildAskMessages({ askMode: mode, userPrompt: '', conversationHistory: formatConversationForAsk([]), preferredCodeLanguage: 'go', screenshotBase64: IMAGE, answerLanguage: 'pt' });
+            const today = TODAY(mode, 'go', '', formatConversationForAsk([]), IMAGE);
+            assert.equal(got.systemPrompt, today.systemPrompt);
+            assert.equal(got.messages[1].content[0].text, `User Request: \n\n${SECTION_SENTENCE}`);
+            assert.deepEqual(got.messages[1].content[1], today.messages[1].content[1]);
+        });
+
+        it(`${mode}: with no language, the messages of today`, () => {
+            const got = buildAskMessages({ askMode: mode, userPrompt: 'x', conversationHistory: HISTORY, screenshotBase64: IMAGE, answerLanguage: null });
+            assert.deepEqual(got, TODAY(mode, undefined, 'x', HISTORY, IMAGE));
+        });
+    }
+
+    it('English names English', () => {
+        assert.equal(askUserText('Resolva esse problema.', 'en', 'code'), 'User Request: Resolva esse problema.\n\nThe interview is in English: write the whole answer in English, whatever the language of the request, keeping technical terms as they are commonly said and the section headings exactly as given. Code, with its names and comments, stays in English.');
+    });
+
+    it('System Design · Live keeps its own sentence, byte for byte', () => {
+        assert.equal(askUserText('design', 'pt', 'system_design_live'), 'User Request: design\n\nThe interview is in Portuguese: write the whole answer in Portuguese, whatever the language of the request, keeping technical terms as they are commonly said and the kit headings exactly as given.');
+    });
+
+    it('an unknown language adds nothing', () => {
+        assert.equal(askUserText(' x ', 'fr', 'default'), 'User Request: x');
+        assert.equal(askUserText('x'), 'User Request: x');
     });
 });
 

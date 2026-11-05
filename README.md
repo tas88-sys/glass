@@ -70,7 +70,9 @@ npm run practice:sd-live
 
 Plays a mock interviewer for the Ask mode System Design · Live. The interviewer's lines are read
 aloud, so Listen hears them as *Them*, and the script tells you what to say and type at each
-step and what the answer should show. Wear headphones. See
+step and what the answer should show. Each step also checks itself in the Glass log and marks
+PASS or FAIL, so start Glass from the desktop shortcut (the log is written there). Wear
+headphones. See
 [`docs/LIVE_INSIGHTS_AND_ASK.md`](docs/LIVE_INSIGHTS_AND_ASK.md) §6.2, flow 3.
 
 ## Highlights

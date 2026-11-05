@@ -7,6 +7,10 @@ const { liveAnswerRepository } = require('./repositories/liveAnswers');
 const modelStateService = require('../../common/services/modelStateService');
 const careerContext = require('../../common/career');
 const { DEFAULT_LIVE_FEATURES, normalizeLiveFeatures, answerEnabled, insightsEnabled } = require('../liveFeatures');
+// System Design · Live (future-work 18.11): the mode and the design kit, shared
+// with Ask, and the probe's messages.
+const liveDesignState = require('../../ask/liveDesign');
+const { buildLiveProbeMessages } = require('./liveProbePrompt');
 
 // Verbose live-answer trace logging — gated behind LIVE_ANSWER_DEBUG=1 so it
 // stays out of normal runs but can be re-enabled for diagnosis. NEVER logs the
@@ -213,6 +217,31 @@ class SummaryService {
         // Where each answer is kept for later review (spec 2026-10-13-live-answer-history):
         // the app DB, resolved on first use; replaceable in tests.
         this.liveAnswers = null;
+
+        // System Design · Live (future-work 18.11): the Ask mode and the stored
+        // kit, shared with askService; replaceable in tests and the live eval.
+        this.liveDesign = liveDesignState;
+    }
+
+    /**
+     * 18.11 rule 10: the Ask mode, kept in memory for the lane. A change into or
+     * out of System Design · Live drops the turns waiting for an answer (the
+     * debounce, a pending Jev decision, held set-ups); an answer already
+     * streaming finishes.
+     */
+    setAskMode(mode) {
+        const wasSdLive = this.liveDesign.isSdLive();
+        this.liveDesign.setAskMode(mode);
+        // A fixed line per load or change, read by npm run practice:sd-live.
+        console.log(`[SD Live] mode: ${this.liveDesign.getAskMode()} (SD Live ${this.liveDesign.isSdLive() ? 'on' : 'off'})`);
+        if (wasSdLive === this.liveDesign.isSdLive()) return;
+        if (this.answerDebounceTimer) {
+            clearTimeout(this.answerDebounceTimer);
+            this.answerDebounceTimer = null;
+        }
+        this.heldSetup = [];
+        this.answerEpoch++;
+        laDebug(`[live-answer] ask mode → ${this.liveDesign.getAskMode()}: waiting turns dropped`);
     }
 
     setCallbacks({ onAnalysisComplete, onStatusUpdate }) {
@@ -272,38 +301,47 @@ class SummaryService {
         // no block (feature off, general route, nothing found) the messages are
         // byte-identical to today's (career SC-005). Its note titles ride on
         // this answer's payloads as `sources` (career FR-015).
-        const career = meta.career && meta.career.block ? meta.career : null;
+        // System Design · Live with a design kit (18.11 rule 7): the probe's
+        // messages, with no career context. Every other answer is built below,
+        // exactly as before.
+        const probe = meta.probe || null;
+        const career = !probe && meta.career && meta.career.block ? meta.career : null;
         const extra = career && Array.isArray(career.sources) && career.sources.length ? { sources: career.sources } : {};
 
         const recent = this.formatConversationForPrompt(conversationTexts, 30);
-        const basePrompt = getSystemPrompt('pickle_glass_analysis', career?.block || '', false);
-        const systemPrompt = basePrompt.replace('{{CONVERSATION_HISTORY}}', recent);
 
         // The turn that asked, quoted: with several unanswered questions in the
         // transcript and more in the notes' titles, models sometimes answered an
         // earlier one (live eval q038, q084).
         const asked = String((rec && rec.turn) || question || '').trim();
-        // Not on the candidate's own work: "então você liderou a migração, certo?" asks.
-        const route = meta.career && meta.career.route;
-        const check = endsWithConfirmationCheck(asked) && route !== 'personal' && route !== 'ambiguous';
-        if (check) laDebug('[live-answer] turn ends with a confirmation check — one-line rule added');
-        const reported = hasReportedFrame(asked);
-        if (reported) laDebug('[live-answer] turn quotes questions someone else will ask — reported rule added');
-        const messages = [
-            { role: 'system', content: systemPrompt },
-            {
-                role: 'user',
-                content:
-                    (asked ? `The interviewer's most recent question, their last turn in the transcript: "${asked}"` + '\n\n' : '') +
-                    LENGTH_RULE +
-                    answerLanguageRule(asked) +
-                    'keeping technical terms as they are commonly said. ' +
-                    'If there is no clear question or nothing useful to answer, reply EXACTLY: PASSIVE' +
-                    (check ? `\n\n${confirmationCheckRule(asked)}` : '') +
-                    (reported ? `\n\n${REPORTED_RULE}` : '') +
-                    (career && career.addendum ? `\n\n${career.addendum}` : ''),
-            },
-        ];
+        let messages;
+        if (probe) {
+            messages = buildLiveProbeMessages({ recent, asked, excerpt: probe.excerpt });
+        } else {
+            const basePrompt = getSystemPrompt('pickle_glass_analysis', career?.block || '', false);
+            const systemPrompt = basePrompt.replace('{{CONVERSATION_HISTORY}}', recent);
+            // Not on the candidate's own work: "então você liderou a migração, certo?" asks.
+            const route = meta.career && meta.career.route;
+            const check = endsWithConfirmationCheck(asked) && route !== 'personal' && route !== 'ambiguous';
+            if (check) laDebug('[live-answer] turn ends with a confirmation check — one-line rule added');
+            const reported = hasReportedFrame(asked);
+            if (reported) laDebug('[live-answer] turn quotes questions someone else will ask — reported rule added');
+            messages = [
+                { role: 'system', content: systemPrompt },
+                {
+                    role: 'user',
+                    content:
+                        (asked ? `The interviewer's most recent question, their last turn in the transcript: "${asked}"` + '\n\n' : '') +
+                        LENGTH_RULE +
+                        answerLanguageRule(asked) +
+                        'keeping technical terms as they are commonly said. ' +
+                        'If there is no clear question or nothing useful to answer, reply EXACTLY: PASSIVE' +
+                        (check ? `\n\n${confirmationCheckRule(asked)}` : '') +
+                        (reported ? `\n\n${REPORTED_RULE}` : '') +
+                        (career && career.addendum ? `\n\n${career.addendum}` : ''),
+                },
+            ];
+        }
 
         // Model resolution (C1/FR-008)
         const modelInfo = await modelStateService.getCurrentModelInfo('llm');
@@ -507,6 +545,11 @@ class SummaryService {
     triggerAnswerIfNeeded(speaker, text) {
         // Live features FR-007: Answer off → no company detection, prefetch or call.
         if (!answerEnabled(this.liveFeatures)) return;
+        // System Design · Live (18.11): its own gate, before any career step.
+        if (this.liveDesign.isSdLive()) {
+            this.triggerProbeIfNeeded(speaker, text);
+            return;
+        }
         const fromThem = typeof speaker === 'string' && speaker.toLowerCase() === 'them';
         // Career FR-011: the interviewer's company is the first one named in a
         // them turn (CAREER_KB_COMPANY, when set, wins inside the module).
@@ -559,6 +602,37 @@ class SummaryService {
         laDebug(`[live-answer] trigger gate: speaker=${speaker} likelyQuestion=${isLikelyQuestion(text)} inFlight=${this.inFlight} → willTrigger=${willTrigger}`);
         if (!willTrigger) return;
         this.armAnswer(text, before);
+    }
+
+    /**
+     * The gate in System Design · Live (18.11 rules 6 and 7). With no design
+     * kit in this Listen session, no LLM call and nothing sent to the window.
+     * With one, the lane's own gate and debounce, then a PROBE answer. No
+     * career step runs (no company detection, Jev, prefetch or context), so a
+     * design problem naming a company never becomes the interviewer's company.
+     */
+    triggerProbeIfNeeded(speaker, text) {
+        const fromThem = typeof speaker === 'string' && speaker.toLowerCase() === 'them';
+        let before = null;
+        if (fromThem) {
+            before = this.lastThemTurn;
+            if (!isBackchannel(text)) this.lastThemTurn = { text, ts: Date.now() };
+        }
+        const kit = this.liveDesign.getKit(this.currentSessionId);
+        if (!kit || kit.kind !== 'design') {
+            console.log(`[SD Live] lane: ${speaker} turn, no design kit in this session — silent`);
+            return;
+        }
+        if (fromThem && isBackchannel(text)) return;
+        if (fromThem && isSetupOnly(text)) {
+            this.heldSetup = this.heldSetup.concat({ text, ts: Date.now() }).slice(-HELD_SETUP_MAX);
+            laDebug('[live-answer] SD Live: scenario set-up only → held for the next question');
+            return;
+        }
+        const willTrigger = shouldTriggerAnswer(speaker, text, this.lastAnsweredTail, this.inFlight, () => false);
+        laDebug(`[live-answer] SD Live gate: speaker=${speaker} likelyQuestion=${isLikelyQuestion(text)} inFlight=${this.inFlight} → willTrigger=${willTrigger}`);
+        if (!willTrigger) return;
+        this.armAnswer(text, before, { probe: true });
     }
 
     /**
@@ -638,17 +712,24 @@ class SummaryService {
             });
     }
 
-    /** Prefetch and (re)arm the 800 ms debounce for an accepted turn (FR-003). */
-    armAnswer(text, before = null) {
+    /**
+     * Prefetch and (re)arm the 800 ms debounce for an accepted turn (FR-003).
+     * With opts.probe (System Design · Live, 18.11 rule 7): no career step, and
+     * a PROBE answer from the design kit stored when the debounce fires.
+     */
+    armAnswer(text, before = null, opts = {}) {
         this.answerEpoch++;
         const epoch = this.answerEpoch;
+        const probe = !!(opts && opts.probe);
 
         // Career FR-009: start the route call and the query embedding now so
         // they are ready when the debounce fires (no-ops while the module is disabled).
-        try {
-            this.career.prefetch(text, this.careerSession(before));
-        } catch {
-            /* the career module is optional */
+        if (!probe) {
+            try {
+                this.career.prefetch(text, this.careerSession(before));
+            } catch {
+                /* the career module is optional */
+            }
         }
 
         // (Re)set debounce timer — coalesces multi-segment questions
@@ -678,7 +759,18 @@ class SummaryService {
             // question) is dropped here, before it costs an LLM call or
             // replaces the answer on screen. The wait is the route call the
             // context reuses, at most the resolve budget.
-            if (this.careerGateUsesJev()) {
+            // 18.11 rule 7: the design kit stored now. With none for this
+            // session (e.g. `opening: uber` was just stored), no call.
+            let probeKit = null;
+            if (probe) {
+                probeKit = this.liveDesign.isSdLive() ? this.liveDesign.getKit(this.currentSessionId) : null;
+                if (!probeKit || probeKit.kind !== 'design') {
+                    console.log('[SD Live] lane: no design kit when the debounce fired — dropped');
+                    return;
+                }
+            }
+
+            if (!probe && this.careerGateUsesJev()) {
                 const wanted = await this.careerWantsAnswer(text, before);
                 if (epoch !== this.answerEpoch) {
                     laDebug('[live-answer] debounce: superseded while Jev answered — dropped');
@@ -711,6 +803,15 @@ class SummaryService {
             const record = { sessionId: this.currentSessionId, askedAt: Date.now(), turn: this.takeHeldSetup(text), question, status: null };
 
             try {
+                if (probe) {
+                    // No career context; a probe ends any career follow-up, as a
+                    // general answer does below.
+                    record.route = 'sd-probe';
+                    this.careerPrev = null;
+                    console.log(`[SD Live] lane: probe #${answerId} from the design kit`);
+                    await this.makeLiveAnswer(this.conversationHistory, signal, { id: answerId, question, record, probe: { excerpt: probeKit.excerpt } });
+                    return;
+                }
                 // Career context is resolved after the controller exists, so a newer
                 // question or a session reset can cancel this answer meanwhile (career E22).
                 const career = await this.resolveCareerContext(text, question, before);

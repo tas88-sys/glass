@@ -462,6 +462,8 @@ export class ListenView extends LitElement {
         hasCompletedRecording: { type: Boolean },
         /** Which lanes run: 'both' | 'answer' | 'insights' (live features FR-011). */
         liveFeatures: { type: String },
+        /** The Ask mode is System Design · Live: the "SD Live" badge (future-work 18.11, rule 9). */
+        sdLive: { type: Boolean },
     };
 
     constructor() {
@@ -471,6 +473,8 @@ export class ListenView extends LitElement {
         this.viewMode = 'insights';
         this.liveFeatures = DEFAULT_LIVE_FEATURES;
         this.handleLiveFeaturesChanged = this.handleLiveFeaturesChanged.bind(this);
+        this.sdLive = false;
+        this.handleAskModeChanged = this.handleAskModeChanged.bind(this);
         this.isHovering = false;
         this.isAnimating = false;
         this.elapsedTime = '00:00';
@@ -495,11 +499,17 @@ export class ListenView extends LitElement {
             // (the signed-in user may have changed) and on every change.
             this.loadLiveFeatures();
             window.api.listenView.onLiveFeaturesChanged(this.handleLiveFeaturesChanged);
+            // 18.11 rule 9: the same for the Ask mode.
+            this.loadAskMode();
+            window.api.listenView.onAskModeChanged(this.handleAskModeChanged);
 
             window.api.listenView.onSessionStateChanged((event, { isActive }) => {
                 const wasActive = this.isSessionActive;
                 this.isSessionActive = isActive;
-                if (isActive) this.loadLiveFeatures();
+                if (isActive) {
+                    this.loadLiveFeatures();
+                    this.loadAskMode();
+                }
 
                 if (!wasActive && isActive) {
                     this.hasCompletedRecording = false;
@@ -537,7 +547,22 @@ export class ListenView extends LitElement {
         }
         if (window.api) {
             window.api.listenView.removeOnLiveFeaturesChanged(this.handleLiveFeaturesChanged);
+            window.api.listenView.removeOnAskModeChanged(this.handleAskModeChanged);
         }
+    }
+
+    /** 18.11 rule 9: reads the saved Ask mode; on failure keeps the badge as it is. */
+    async loadAskMode() {
+        try {
+            const mode = await window.api.listenView.getAskMode();
+            this.sdLive = mode === 'system_design_live';
+        } catch (err) {
+            console.error('[Live] could not read the Ask mode:', err && err.message);
+        }
+    }
+
+    handleAskModeChanged(event, state) {
+        if (state) this.sdLive = !!state.sdLive;
     }
 
     /** Reads the saved mode; on failure keeps the current one ('both' until a read succeeds). */
@@ -771,6 +796,7 @@ export class ListenView extends LitElement {
                     <live-answer-view
                         .isVisible=${this.viewMode === 'insights' && answerEnabled(this.liveFeatures)}
                         .showEmptyState=${!insightsEnabled(this.liveFeatures)}
+                        .sdLive=${this.sdLive}
                         @live-answer-updated=${this.handleSttMessagesUpdated}
                     ></live-answer-view>
 
