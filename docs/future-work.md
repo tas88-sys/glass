@@ -437,6 +437,8 @@ Neither was marked: the live check (FR-021) passes a number when it appears **an
 - "Have you implemented rate limiting?" → the first employer matches the notes; a "leaky bucket + circuit breaker" at a second employer is not in them.
 - An answer (to a reported question, item 9) said the candidate **chose a message broker that the notes list explicitly under "not used"**, with a "50% lower latency". Only "50" was marked; the technology was not, since the check knows employer and company names only.
 
+Seen again on 2026-11-05, on the main model with the card in the block. Asked about the architecture of a past project, the answer gave it the stack of two later employers (language, orchestrator, message bus, database). The card names another language and cloud for that employer, and the candidate had just named a third set. Two more answers put a technique on the wrong employer or took it from a study note on system design, and one contradicted what the candidate had said a minute before.
+
 ### Proposed
 
 1. **Prompt rule on the personal and ambiguous routes** (in the career addendum): state a metric only with the result and the employer the notes give it; never attach a technology to an employer unless the notes link them; when no metric fits the question, give none.
@@ -708,9 +710,11 @@ The first real session since the budget shipped: an English screening, 11 minute
 | 2026-10-29, English (before) | 17 | 72 | 182 | 10 | 3 | 3 | 1 PASSIVE |
 | 2026-11-02, English | 19 | 52 | 105 | 5 | 0 | 0 | 0 |
 | 2026-11-03, Portuguese | 43 | 45 | 115 | 11 | 0 | 0 | 1 PASSIVE (right) |
+| 2026-11-05, Portuguese | 39 | 57 | 71 | 16 | 0 | 0 | 1 PASSIVE (right) |
 
 - 7 of the 19 answers came from fallback models (item 22). Split by model: gpt-oss-120b 12 answers, median 53, longest 83; the fallbacks 7, median 43, longest 105.
 - On 2026-11-03 (a culture-fit interview, 32 minutes), 17 of the 43 answers came from fallback models. Split by model: gpt-oss-120b 25 answers, median 57, longest 115; the fallbacks 17, median 39, longest 59. Without the fallbacks the median is still under 60.
+- On 2026-11-05 (the behavioral half of a technical interview, 35 minutes), 7 of the 38 answers came from fallback models. gpt-oss-120b on the personal route: 25 answers, median 62, longest 71, none over 80 (7 of 17 over 80 on 2026-11-03). The System Design · Live half that followed is not in the table: its probe answers have their own limit (90 words) and shape. 30 answers, median 60, longest 89, none over 90. All 30 end in the Trade-off line, which `endsWithClosingParagraph` counts as a closing paragraph.
 - The longest answer (105 words) is the one item 19 records: a fallback model confirming a restatement.
 - **Limit:** a screening with no technical questions, so it does not compare one to one with the 2026-10-28 and 2026-10-29 sessions, which had them.
 
@@ -1348,6 +1352,7 @@ This replaces the recommended order above. On 2026-11-02 the user chose 18.11 as
       - The code's hidden tests failed in 2 of 6 code answers: one used LeetCode's `MinPriorityQueue`, which does not exist in JavaScript, as both code answers did before the change; one timed out on the 220×220 grid.
       - The probe case (H5) went the deep-dive route in 2 of 4 runs (1 of 15 earlier on 2026-11-04). Its request was the same before and after the change, since the interviewer's English turns already named the language.
 - Still to do: the checks in the app by hand, first among them Ctrl+Enter with the VM's window focused, and a full run of the script before a real interview.
+- First real interview on 2026-11-05 (behavioral half, then System Design · Live with `opening` and `design` typed): items 32 to 35.
 
 **The scenario the user wants:**
 1. Live Answer is on.
@@ -1758,6 +1763,8 @@ The interviewer restated what the candidate had just said ("So basically you are
 
 The extra answers also spend the per-minute quota (see item 22).
 
+Seen again on 2026-11-05: four turns with no question got answers. A filler remark and "go ahead" (the interviewer giving the floor back) went general and got invented examples. A cut fragment and the interviewer's own introduction got a pitch of the candidate.
+
 ### Proposed
 
 1. **Gate:** a short turn that mostly repeats the candidate's last turn (word overlap above a threshold, a few words, no question word) is a restatement: answer it with one line, as item 12 does, or not at all.
@@ -1808,6 +1815,8 @@ A follow-up chain also carried unrelated notes into a later answer (#10).
 
 Seen again on 2026-11-03, larger: 17 of 43 answers came from fallback models (11 gpt-oss-20b, 4 qwen, 2 gemini). Four of them had only one other answer in the minute before, so it is not bursts alone. The answer that came from gemini took 5 seconds to its first token.
 
+Seen again on 2026-11-05, smaller: 7 of 38 (6 gpt-oss-20b, 1 qwen) in a behavioral half, and 0 of 30 in the System Design · Live half that followed.
+
 ### Proposed
 
 1. **Record the reason:** save the fallback's cause in `live_answers` (rate limit per minute or per day, error, timeout) and show it in `export-live-answers.js`.
@@ -1838,11 +1847,13 @@ Seen again on 2026-11-03, wider than "CLAUDE.md":
 
 The other way, the entity names worked: two names that another recorder of the same call got wrong (an API vendor's and a team's) came out right here.
 
+Seen again on 2026-11-05: one of the company's values, named by the interviewer, was heard as another word, and the answer defined that word with confidence. The value is in the company's research note. Domain words were misheard too ("batch", "payload", "ECS", "Lambda", "event sourcing"). One misheard question got PASSIVE (item 35).
+
 ### Proposed
 
 1. Check whether "CLAUDE.md" is worth its slot: compare the audio eval with and without it.
 2. If the contract terms come up in interviews, try adding them ("CLT", "PJ") and measure as item 15 did.
-3. Send the STT only the names that can come up: the employers, the entities and the active company, not every company folder of the notes. Drop a fixed term whose pull costs more than it fixes ("Django" first), measured on the audio eval.
+3. Send the STT only the names that can come up: the employers, the entities and the active company, not every company folder of the notes. Drop a fixed term whose pull costs more than it fixes ("Django" first), measured on the audio eval. The active company's own terms (its values and products, from its research note) are worth a slot too.
 
 ### Acceptance (when implemented)
 
@@ -2014,6 +2025,8 @@ Four marked answers were right. The card writes some numbers in words ("about si
 
 Among the other marked answers, two real marks: an invented duration and an invented benefit value.
 
+Seen again on 2026-11-05: 2 of the 3 marked answers were the same false marks ("6" years against a card that writes it in words, "13" next to "13+"). The third marked "24" hours against a card line that says "up to a day": a unit the check cannot convert, though the answer also turned "up to" into "over".
+
 ### Proposed
 
 1. Read number words in the note lines as numbers: English and Portuguese, up to twenty, the tens, "half", "and a half", "a dozen".
@@ -2045,3 +2058,125 @@ Right after a career answer, the interviewer's audio dropped: "did it freeze?", 
 
 - [ ] A replay of these turns shows no career content.
 - [ ] Item 9's and item 12's cases still pass.
+
+---
+
+## Items 32 to 35: from the real sessions of 2026-11-05
+
+Found reviewing a real Portuguese technical interview on 2026-11-05, recorded as two Glass sessions:
+- a behavioral half, 35 minutes, with the Live Answer lane as usual: 38 answers and one PASSIVE (right);
+- a System Design · Live half, 58 minutes: an opening kit, then `design` typed after about ten minutes of requirements, then 30 probe answers and 4 PASSIVE.
+
+Cross-checked against a second transcript of the same call, from another recorder. The first real use of item 18.11's v1. Not in the work order at the top; each gets its own plan.
+
+Lengths are in item 11. The session also brought back:
+- item 1: two questions split over turns got three answers each;
+- items 10, 20, 22, 23 and 30, updated there.
+
+## 32. System Design · Live — after the design, the probe lane answers the candidate's question time as probes
+
+**Status:** Open, found on 2026-11-05 (five answers).
+**Severity:** HIGH (one answer told the candidate to say they had no questions)
+**Code:** the probe path in `summaryService.js` (`record.route = 'sd-probe'`; the gate passes `() => false` for career cues, and no router runs); `buildLiveProbeMessages` and `PROBE_RULE` (`src/features/listen/summary/liveProbePrompt.js`); the career module's invitation handling (`INVITE_MIN`, `src/features/common/career/index.js`).
+
+### Summary
+
+Once the design was done, the interviewer opened the floor: "do you have questions for me?". With a design kit stored, every armed turn takes the probe path, and the probe prompt knows only the design. The invitation got "No, thanks, everything is clear", in the PROBE shape with a trade-off line.
+
+The interviewer then described the team's work (regulation, a migration, legacy stability, AI tools). Four of those turns got designs: a payments hub, a service "with push fan-out and a timeline cache" for an unrelated product, an AI centre of excellence. Four other turns got PASSIVE, rightly.
+
+During the design, a tool remark ("draw outside the text box") also got an answer with a trade-off line.
+
+### Proposed
+
+1. **Before the probe path:** an invitation to ask questions leaves it and goes to the career lane, which has the notes for it (item 24). The cue has to work without Jev, which the probe path does not call.
+2. **Probe prompt:** a turn that does not ask about the design (the interviewer describing the company, a process or tool remark) gets PASSIVE.
+3. Measure on these turns and on phase H's probe cases.
+
+### Acceptance (when implemented)
+
+- [ ] A replay of the invitation gets the career lane's answer; the four description turns get no probe answer.
+- [ ] Phase H's probe cases keep their route and shape.
+
+---
+
+## 33. System Design · Live — the probe sees 445 characters of a 419-word design kit
+
+**Status:** Open, found on 2026-11-05.
+**Severity:** MEDIUM to HIGH
+**Code:** `kitExcerpt` and `EXCERPT_MAX_CHARS` (`src/features/ask/liveDesign.js`); the design kit's format in `promptTemplates.js` (Storage: "a table with the columns Entity | Store | Key | Why").
+
+### Summary
+
+The excerpt keeps Requirements used, the Decisions line, the Storage table and the Pick lines. The real kit wrote Storage as bullets with `|` inside each one, not as a table, and the excerpt dropped it. The Pick line came without its Options ("Pick: A, because…"). Run offline on the stored kit, `kitExcerpt` returns 445 characters: no storage, no diagram, no write and read paths, no Next questions.
+
+What followed in the probe answers:
+- storage against the kit: posts in a relational database (the kit: NoSQL), followers in a Redis set (the kit: SQL);
+- the image upload answered three ways in four answers within a minute;
+- the kit's own answer to "the timelines do not fit in memory" (keep only the last N post IDs per timeline, in Next questions) never reached a probe.
+
+The prompt asks for a table. The model that wrote the kit did not follow it (Ask runs vision-first, see 18.11), and `kitExcerpt` reads only that shape.
+
+### Proposed
+
+1. `kitExcerpt` reads the Storage block in either shape (table rows, or bullets with `|`) and keeps the Options with the Pick.
+2. Keep the write and read paths and the Next questions while under `EXCERPT_MAX_CHARS` (2,500).
+3. A unit case in this kit's shape (invented content), and a phase H check that the excerpt holds a storage line.
+
+### Acceptance (when implemented)
+
+- [ ] The stored kit's excerpt holds the storage choices, the paths and the Next questions.
+- [ ] A replay of the storage and upload probes agrees with the kit.
+
+---
+
+## 34. System Design · Live — the design kit leaves out requirements the interviewer gave
+
+**Status:** Open, found on 2026-11-05.
+**Severity:** MEDIUM to HIGH
+**Code:** the Ask transcript cut (`formatConversationForAsk`, `src/features/ask/askPrompt.js`: the last 30 turns; item 18.9); the DESIGN KIT format and its estimate rules (`promptTemplates.js`).
+
+### Summary
+
+`design` was typed after about ten minutes of requirements. The kit kept the daily users and the request rate, marked (confirmed). It also:
+- left out the posts per user per day, the average and the maximum follower count, and the text size;
+- marked a read-latency target (confirmed) stricter than the range the interviewer gave. The probes repeated it in about ten answers, and one added an invented figure in milliseconds;
+- did not multiply posts per second by followers per user: the fan-out write rate, the number that leads to the push-or-pull and cache decisions. The candidate's own review of the interview names it as the missed step;
+- chose as its deep dive "users above N followers", where N was the maximum the interviewer had set: a case the requirements rule out.
+
+In the export, the turns with the latency targets, the posts per day and the follower counts came 42 to 56 turns before the key. The Ask sends the last 30 (item 18.9's case). Where the kit's two "confirmed" targets came from is not known: the app does not keep the Ask's prompt.
+
+### Proposed
+
+1. Item 18.9's fix: pin the interviewer's turns that carry numbers or scope, and send them with the transcript.
+2. **Prompt:** in Estimates, when the requirements give a fan-out (followers, subscribers, members), multiply the write rate by it. A deep dive must not pick a case the requirements rule out.
+3. Replay this kit's request with the pinned turns and count what it keeps.
+
+### Acceptance (when implemented)
+
+- [ ] On a replay, the kit lists every number the interviewer gave before the key, marks only those (confirmed), and has the fan-out rate in Estimates.
+- [ ] Phase H's kits keep their headings and limits.
+
+---
+
+## 35. System Design · Live — an objection without a question mark gets no probe
+
+**Status:** Open, found on 2026-11-05.
+**Severity:** MEDIUM
+**Code:** the probe path's gate (`shouldTriggerAnswer` in `questionGate.js`, called from `summaryService.js` with no career cue); `isLikelyQuestion`.
+
+### Summary
+
+The interviewer pushed back twice with statements, not questions: the upload server holding a megabyte per post in memory, and an hour of timelines that would not fit in one Redis. Neither got an answer; the kit had one for the second (item 33). One real question was misheard ("what is the payload?" came out as a garbled name) and got PASSIVE.
+
+The other way, one challenge asked five ways in 61 seconds ("what is this table for?") got five answers. They agreed with each other and were right, while the candidate said the table might not be needed.
+
+### Proposed
+
+1. On the probe path, a Them turn that pushes back on the design ("mas", "só que", "lembra que", "o problema", "but", "the problem is", a number set against the kit) arms an answer. Count the false fires on this session's turns.
+2. Within a few seconds of a probe answer on the same point, a rephrasing keeps that answer (item 20's idea on the probe path).
+
+### Acceptance (when implemented)
+
+- [ ] A replay arms both objections and still gives PASSIVE to the four turns item 32 lists as rightly passive.
+- [ ] The five-way challenge gets at most two answers.
