@@ -19,7 +19,7 @@ One step at a time, each with its own plan, a fresh session per step. When a ste
 | [x] 7 | 13. A question about the candidate's own setup routes general | After 9, since the 2026-10-29 turn had no question and should then get no answer; what is left are real questions about the setup. Uses item 5's held-out sets, so it can share a plan with item 5. |
 | [x] 8 | 15. STT terms heard as other words | Independent, lowest severity, costliest to measure (audio eval before and after). Can move into any gap. Merged with its measurement pending; **measured on 2026-11-01**. The new terms did not raise the count heard right (7 of 12 before and after), and "Claude Code" is still heard as "Cloud Code" (item 15, acceptance box 1, still open). |
 
-Items 16 (System Design · Live, 2026-10-31) and 17 (System Design fixes, 2026-11-01) came in outside this order. Item 18 (System Design · Live without typing, 2026-11-01) is a list of proposals; its v1, 18.11, was built on 2026-11-02 (branch `2026-11-02-system-design-live-no-typing`), with the checks in the app still to do.
+Items 16 (System Design · Live, 2026-10-31) and 17 (System Design fixes, 2026-11-01) came in outside this order. Item 18 (System Design · Live without typing, 2026-11-01) is a list of proposals; its v1, 18.11, was built on 2026-11-02 (branch `2026-11-02-system-design-live-no-typing`), with the checks in the app still to do. 18.12 (changes in red when `design` is typed again after a change, 2026-11-04) is planned and not built.
 
 Notes for the plans:
 
@@ -1630,6 +1630,86 @@ A deep dive the candidate wants in full is still typed into Ask ("deep dive cach
 1. 18.1 with rules 6, 7, 10 and 11;
 2. the Ask side: rules 1 to 5 and the edge cases;
 3. the badge, and the simulator's prologue and misuse step.
+
+#### 18.12 Changes in red when `design` is typed again after a change
+
+**Status:** Open. Planned on 2026-11-04 and not built; the owner chose to register it and build it later.
+**Related:** 18.4. Item 18.4 proposes a short DELTA route that patches the stored kit. This item is the lighter option: the kit is still rewritten in full, and what changed shows in red.
+
+**Summary.** After the design kit, the interviewer changes a requirement ("now a tweet can carry images"). The candidate types `design` and gets a new 750-word kit, with nothing to show what changed.
+
+What happens today, read in the code on 2026-11-04:
+- **The request:**
+  - `design` with a design kit stored resolves to a design kit request (`resolveLiveRequest`, `liveDesign.js:62`).
+  - `_send` passes the stored kit as the Previous answer (`askService.js:462`).
+  - The prompt says to keep its decisions and numbers "unless the interviewer changed them" (`promptTemplates.js:803`). It never asks the model to say which ones changed.
+- **The display:**
+  - Ask draws the stream with `src/ui/assets/smd.js` (`renderStreamingMarkdown`, `AskView.js:1117`).
+  - smd.js has no colour and adds text as text nodes, so HTML in an answer shows as text.
+  - The fallback renderer (`renderFallbackContent`, `AskView.js:1165`) allows no `mark` tag.
+- **The stored kit:**
+  - The new kit replaces the stored one (`askService.js:635-636`).
+  - The next `design` reads it, and so do the Live Answer probes, through its excerpt (`kitExcerpt`, `liveDesign.js:104`).
+
+**The owner's choices (2026-11-04):**
+- **The model marks what changed, and the app only colours it.** The model knows that "images" is the change. A diff in the app would also colour sentences that were only reworded.
+- **Only a design kit rewritten after a design kit** is marked. The opening kit, deep dives and probes stay as they are.
+
+**Proposed:**
+1. **The request** (`askPrompt.js`):
+   - `askUserText` (`:81`) and `buildAskMessages` (`:114`) take `markChanges`, false by default. When it is true, the user turn adds one sentence after the language sentence. A draft, to tune against the eval:
+
+     > Mark the changes: the Previous answer is your design kit before the interviewer's latest change. In this kit, wrap each part that differs in substance from it (a new or changed requirement, number, component, step, table row or decision) in ==…==. Do not mark rewording, a heading, or anything inside the diagram's fenced block; mark a new box in the list under the diagram. If nothing changed, mark nothing.
+   - The system prompts don't change. Without `markChanges` the messages are today's, so the golden test (`golden/capture.js` calls `buildAskMessages` without it) does not change.
+2. **When** (`askService._send`): `markChanges` is System Design · Live, with `kitRequest === 'design'` (`design`, `next`, `design: X`, `full`) and a stored kit of kind `design`. The text-only retry (`askService.js:526`) sends the same sentence. Log `[SD Live] ask: design update — changes marked`.
+3. **The stored kit has no marks** (`liveDesign.js`):
+   - A pure `stripChangeMarks` turns `==x==` into `x`. It leaves fenced blocks and inline code alone, so a `==>` arrow in the diagram is kept, and an unpaired `==` too.
+   - `storeKit` (`:153`) stores the stripped text. Its excerpt comes from it.
+   - So the next `design` compares against a clean kit, and the probes get no `==`.
+4. **The colour** (`smd.js`, a second local change, listed in the file header like the underscore one):
+   - A `MARK` token drawn as `<mark>`, next to `STRIKE` in `default_add_token` (`:1589`, `:1611`).
+   - **It opens on `==`** followed by a character that is not a space, `=`, `>` or `<`, and preceded by the start of the line, a space or punctuation, never a letter or digit. So `a == b`, `x==y`, `==>` and `===` stay text.
+   - **It closes on `==`.** An unclosed mark ends with its block, like the other inline tokens.
+   - **It never opens** in code, links or images.
+5. **Ask** (`AskView.js`):
+   - **The colour:** `mark` with a transparent background and red text, also inside `strong` and inline `code` (about `#ff6b6b` on the dark overlay). Check that `body.has-glass` doesn't override it.
+   - **Copy:** the copy button (`handleCopy`, `:1292`) and the per-line copy drop the `==`.
+   - **The fallback renderer** drops them before `marked`.
+6. **Unit tests:**
+   - `askPrompt` and `askService.systemDesignLive`:
+     - the sentence only on a design kit request with a design kit stored;
+     - none after an opening kit, on a deep dive or a probe, or outside the mode;
+     - the stored kit has no marks.
+   - `liveDesign`: `stripChangeMarks`.
+   - `smd.test.js`:
+     - a mark in a paragraph, a table cell, a list item, and around bold;
+     - `a == b`, `x==y`, `==>`, `===` and `==` in code stay text;
+     - an unclosed mark;
+     - each case parsed in one chunk and one character at a time.
+7. **Live eval, phase H:**
+   - **New cases:**
+     - **H8**: `previous: 'H3-design'`, the confirmed transcript plus "them: One change: a tweet can now carry up to 4 images.", then `design`;
+     - **H9**: the same change in Portuguese on H7;
+     - **H10**: `design` again with no change.
+   - `run.js` sets `markChanges` the way the app does.
+   - **Checks:** a `checks.changeMarks` lists the marked spans, those in a heading or a fenced block, and the share of marked words. The kit checks read the stripped text.
+
+**Acceptance (when implemented):**
+- [ ] `npm test` passes; `golden.test.js` and the existing `smd.test.js` cases pass unchanged.
+- [ ] In the app (run-glass driver), a response streamed in pieces shows the marked parts in red. The diagram with a `==>` arrow stays intact, and the same holds with `body.has-glass`.
+- [ ] Gemini, 3 runs of phase H:
+  - [ ] H8 and H9 mark the image change in 3 of 3, never in a heading or the diagram, and keep today's design kit checks (headings, paths, diagram, language).
+  - [ ] Over 35% of words marked only warns.
+  - [ ] H10 has at most 2 marked spans.
+  - [ ] H1 to H7 have no marks and keep today's results.
+- [ ] Qwen, one case per run a minute apart (`--cases H8`, `--cases H9`): each answered case marks the change.
+
+**Risks:**
+- **smd.js draws every Ask mode.** The opener rules and the one-character-at-a-time tests guard the code and comparison cases.
+- **A model that marks nothing** gives today's kit.
+- **A model that marks too much** gives a kit with more red than needed. H10 measures it.
+
+**Effort:** about 1 session, plus the eval runs.
 
 ---
 
